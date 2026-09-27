@@ -47,7 +47,12 @@ vi.mock('@sentry/nextjs', () => ({
   flush: vi.fn(async () => true),
 }));
 
+import * as Sentry from '@sentry/nextjs';
 import { runBackgroundWorkerProcess } from '../background-worker-runtime';
+import {
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+} from '../../lib/observability/sentry-scrub';
 import { WORKER_HEARTBEAT_MAX_INTERVAL_MS } from '../../lib/background-jobs/heartbeat-policy';
 
 type SignalHandler = () => void;
@@ -71,6 +76,9 @@ beforeEach(() => {
   initialExitCode = process.exitCode;
   process.exitCode = undefined;
   vi.stubEnv('BACKGROUND_JOB_QUEUE', 'LIGHT');
+  vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test_worker');
+  vi.stubEnv('DATABASE_POOL_MAX', '5');
+  vi.stubEnv('LIGHT_WORKER_CONCURRENCY', '2');
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('NOTIFICATION_MOCK_MODE', 'false');
   vi.stubEnv('WECOM_SMART_BOT_ID', 'bot-id-placeholder');
@@ -170,5 +178,33 @@ describe('LIGHT worker smart-bot isolation', () => {
     expect(stopHeartbeatMock).toHaveBeenCalledOnce();
     expect(stopSmartBotMock).toHaveBeenCalledOnce();
     expect(process.exitCode).toBeUndefined();
+  });
+});
+
+it('refuses lane concurrency that would exhaust independent heartbeat connections', async () => {
+  vi.stubEnv('LIGHT_WORKER_CONCURRENCY', '3');
+  await runBackgroundWorkerProcess();
+  expect(process.exitCode).toBe(1);
+  expect(runBackgroundWorkerMock).not.toHaveBeenCalled();
+  expect(startWorkerHeartbeatMock).not.toHaveBeenCalled();
+});
+
+describe('worker Sentry scrubbing', () => {
+  it('installs the shared event, transaction and breadcrumb scrubbers', async () => {
+    vi.stubEnv('SENTRY_DSN', 'https://public@sentry.example/1');
+    vi.mocked(Sentry.init).mockClear();
+
+    await runBackgroundWorkerProcess();
+
+    expect(Sentry.init).toHaveBeenCalledOnce();
+    expect(Sentry.init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dsn: 'https://public@sentry.example/1',
+        sendDefaultPii: false,
+        beforeSend: scrubSentryEvent,
+        beforeSendTransaction: scrubSentryEvent,
+        beforeBreadcrumb: scrubSentryBreadcrumb,
+      }),
+    );
   });
 });

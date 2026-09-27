@@ -49,6 +49,34 @@ describe('backgroundJobOperatorAction', () => {
     ).toBe('RETRY');
   });
 
+  it.each(['CRON_HOURLY_PAYROLL', 'CRON_CS_SETTLE', 'CRON_CS_PERIOD_ENDING'])(
+    'does not offer retry for a dead job of the retired type %s (no handler left)',
+    (type) => {
+      expect(
+        backgroundJobOperatorAction({ type, status: BackgroundJobStatus.DEAD }),
+      ).toBe('NONE');
+    },
+  );
+
+  it('does not offer retry for a dead notification of a retired event', () => {
+    expect(
+      backgroundJobOperatorAction({
+        type: 'NOTIFICATION',
+        status: BackgroundJobStatus.DEAD,
+        lastErrorCode: 'NotificationDeliveryFailedError',
+        notificationEvent: 'CS_PERIOD_SETTLED',
+      }),
+    ).toBe('NONE');
+    expect(
+      backgroundJobOperatorAction({
+        type: 'NOTIFICATION',
+        status: BackgroundJobStatus.DEAD,
+        lastErrorCode: 'NotificationDeliveryFailedError',
+        notificationEvent: 'ORDER_SUBMITTED',
+      }),
+    ).toBe('RETRY');
+  });
+
   it.each([
     [BackgroundJobStatus.DEAD, 'NOTIFICATION', 'RETRY'],
     [BackgroundJobStatus.PENDING, 'ORDER_EXPORT', 'CANCEL'],

@@ -143,7 +143,6 @@ export async function recordBillPaymentAction(
       newPaidAmount: r.newPaidAmount,
       totalAmount: r.totalAmount,
       billStatus: r.status,
-      csAccumulated: r.csAccumulated,
     };
   } catch (err) {
     const mapped = mapBillError(err);

@@ -6,6 +6,7 @@ import type { CreateOrderInput } from '@/lib/auth/schemas';
 import type { OrderItemPricingRoute } from '@/generated/prisma/enums';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import type { PricingCraftIdentity } from '@/lib/order/pricing-route';
+import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
 import { WorkbenchCalculator } from '@/components/business/workbench/WorkbenchCalculator';
 import { EMPTY_SAMPLE_FORM, type SampleOrderFormState } from './SampleOrderForm';
 
@@ -32,7 +33,7 @@ export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: st
   return { samplePurpose, chooseSamplePurpose };
 }
 
-export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees }: {
+export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees, externalSalesAccounts, onExternalSalesChange }: {
   editorSnapshot?: SampleOrderEditorSnapshot;
   onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void;
   lifecycle?: OrderCreationLifecycle;
@@ -46,6 +47,8 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
   initialItem: CreateOrderInput['items'][number];
   choosePurpose: (purpose: SamplePurpose | null) => void;
   onRouteChange: (index: number, route: OrderItemPricingRoute) => void;
+  externalSalesAccounts?: readonly ExternalSalesAccountOption[];
+  onExternalSalesChange?: (externalSalesUserId: string | null) => void;
 }) {
   const values = form.getValues();
   const sampleForm: SampleOrderFormState = {
@@ -59,10 +62,11 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
     <h1 className="text-xl font-semibold">新建工单</h1>
     <WorkbenchCalculator options={options} crafts={crafts}
       draftScope={`order-create:${draftScope}`}
-      createEntry={{ editorSnapshot, onEditorSnapshot, lifecycle, canEditFees, purpose, form: sampleForm,
+      externalSalesAccounts={externalSalesAccounts}
+      createEntry={{ onExternalSalesChange, editorSnapshot, onEditorSnapshot, lifecycle, canEditFees, purpose, form: sampleForm,
         item: values.items[itemIndex] ?? initialItem,
         context: { customName: values.customName, packageRequirement: values.packageRequirement, externalSalesUserId: values.externalSalesUserId,
-          customerRef: values.customerRef, promisedDate: values.promisedDate,
+          promisedDate: values.promisedDate,
           isUrgent: values.isUrgent, expressCode: values.expressCode },
         onPurposeChange: choosePurpose,
         onComplete: () => choosePurpose(null),
@@ -95,7 +99,7 @@ export function prepareSampleOrderEntry(current: CreateOrderInput, itemIndex: nu
         collect: current.isSfCollect ?? false, remark: current.remark ?? '' },
       draft: null,
       context: { customName: current.customName, packageRequirement: current.packageRequirement, externalSalesUserId: current.externalSalesUserId,
-        customerRef: current.customerRef, promisedDate: current.promisedDate,
+        promisedDate: current.promisedDate,
         isUrgent: current.isUrgent, expressCode: current.expressCode },
     }));
   } catch { /* Initial props cover browsers without storage. */ }

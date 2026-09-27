@@ -4,19 +4,11 @@ import { EditorTabs } from '@/components/ui/editor-tabs';
 import { orderDesignGroups } from '@/lib/order/design-groups';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderPurposePicker } from '../OrderPurposePicker';
-import {
-  isMixedPackaging,
-  packagingType,
-  packagingBoxType,
-  packagingModeFor,
-  packagingCapacity,
-  PACKAGING_BOXES,
-  type PackagingType,
-  type PackagingBoxType,
-} from '@/lib/order/packaging-mode';
+import type { PackagingBoxType, PackagingType } from '@/lib/order/packaging-mode';
+import { OrderPackagingSection, type OrderPackagingView } from './OrderPackagingSection';
 
-import { Group, FieldLabel, FieldError, RequiredMark, PillPicker } from './OrderFieldPrimitives';
-import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemSpecificationFields, OrderItemQuantityField, ROUTE_OPTIONS } from './OrderItemFields';
+import { Group, FieldLabel, FieldError, RequiredMark } from './OrderFieldPrimitives';
+import { OrderItemCraftFields, OrderItemMaterialFields, OrderItemSpecificationFields, OrderItemQuantityField, ROUTE_OPTIONS, type OrderPaperOption } from './OrderItemFields';
 
 import { OrderReceiverContactFields } from '../OrderReceiverContactFields';
 import { ReceiverAddressPasteField } from '../ReceiverAddressPasteField';
@@ -41,7 +33,6 @@ import {
   OrderFoilTechnique,
   OrderItemPricingRoute,
   OrderLamination,
-  OrderPackagingMode,
 } from '@/generated/prisma/enums';
 import type { CreateOrderInput } from '@/lib/auth/schemas';
 import { cn } from '@/lib/utils';
@@ -52,9 +43,6 @@ import { prepareDesignFile } from '../design-upload-client';
 import {
   type OrderFoilSwatchOption,
 } from './OrderFoilSwatchPicker';
-import {
-  type OrderPaperSwatchOption,
-} from './OrderPaperSwatchPicker';
 
 const FOIL_OPTIONS: readonly OrderFoilSwatchOption[] = [
   { value: '亚金', label: '亚金', tone: 'matte-gold' },
@@ -114,7 +102,6 @@ export type OrderFormBErrors = {
   receiverName?: string;
   receiverPhone?: string;
   receiverAddress?: string;
-  packaging?: string;
   items?: readonly (
     | {
         route?: string;
@@ -127,6 +114,8 @@ export type OrderFormBErrors = {
       }
     | undefined
   )[];
+  /** 设计款级问题（如设计款名称），按设计款首行下标登记，只用于设计款标签的“待完善”。 */
+  designs?: Readonly<Record<number, string>>;
 };
 
 export type OrderFormBProps = {
@@ -147,7 +136,9 @@ export type OrderFormBProps = {
   materialExtras?: ReactNode;
   pricingExtras?: ReactNode;
   shippingExtras?: ReactNode;
+  /** 管理员包装组单价，渲染在整单包装区。 */
   packagingExtras?: ReactNode;
+  /** 包装补充说明，渲染在整单包装区。 */
   orderPackagingExtras?: ReactNode;
   afterShipping?: ReactNode;
   footerExtras?: ReactNode;
@@ -157,14 +148,8 @@ export type OrderFormBProps = {
   itemFields: readonly { id: string }[];
   activeIndex: number;
   pendingDesigns: Readonly<Record<string, PendingDesignImage[]>>;
-  packaging: {
-    mode: OrderPackagingMode;
-    unitsPerBag: number;
-    bagCount: number | null;
-    error?: string | null;
-    scopeLabel?: string;
-  };
-  paperOptions: readonly OrderPaperSwatchOption[];
+  packaging: OrderPackagingView;
+  paperOptions: readonly OrderPaperOption[];
   paperKey: string | null;
   weightOptions: readonly {
     value: number;
@@ -201,8 +186,10 @@ export type OrderFormBProps = {
   onPrintFoilModeChange: (value: 'NONE' | 'PARTIAL' | 'FULL') => void;
   onLaminationChange: (value: OrderLamination) => void;
   onQuantityChange: (value: number) => void;
-  onPackagingModeChange: (value: OrderPackagingMode) => void;
-  onUnitsPerBagChange: (value: number) => void;
+  /** itemIndex 缺省表示整单统一设置。 */
+  onPackagingTypeChange: (type: PackagingType, box: PackagingBoxType, itemIndex?: number) => void;
+  onPackagingMixingChange: (mixed: boolean) => void;
+  onUnitsPerBagChange: (itemIndex: number, value: number) => void;
   onPendingDesignsChange: (images: PendingDesignImage[]) => void;
   onReceiverAddressChange: (value: string) => void;
   onReceiverAddressPaste?: ClipboardEventHandler<HTMLTextAreaElement>;
@@ -239,6 +226,7 @@ function DesignFileBox({
   onFile,
   onFiles,
   onRemove,
+  files,
 }: {
   itemNumber: number;
   fileType: DesignFileType;
@@ -249,6 +237,8 @@ function DesignFileBox({
   onFiles?: (files: File[]) => void;
   onFile: (file: File) => void;
   onRemove: () => void;
+  /** 已选文件列表（CDR 多文件），紧跟上传框、排在错误提示之前。 */
+  files?: ReactNode;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const image = fileType === DesignFileType.IMAGE;
@@ -271,7 +261,7 @@ function DesignFileBox({
       {entry ? (
         <div
           data-slot="design-file-marker"
-          className="flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-xs font-bold text-muted-foreground"
+          className="flex h-12 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-xs font-bold text-muted-foreground"
         >
           {image ? (
             <LocalDesignImagePreview
@@ -341,7 +331,7 @@ function DesignFileBox({
         <div
           data-invalid={Boolean(error)}
           className={cn(
-            'flex min-h-[5.375rem] w-full items-center gap-3 rounded-xl border bg-card p-3.5 text-left',
+            'flex w-full items-center gap-3 rounded-xl border bg-card p-3 text-left',
             error && 'border-destructive bg-destructive/5',
             disabled && 'opacity-50',
           )}
@@ -351,7 +341,7 @@ function DesignFileBox({
           onDrop={handleDrop}
         >
           {uploadContent}
-          <div className="flex shrink-0 flex-col gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             <Button
               type="button"
               size="xs"
@@ -397,7 +387,7 @@ function DesignFileBox({
               : `拖放或选择${fileLabel}`
           }
           className={cn(
-            'flex h-auto data-[slot=button]:min-h-44 w-full cursor-pointer flex-col items-start justify-between gap-4 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-4 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+            'flex h-auto data-[slot=button]:min-h-20 w-full cursor-pointer items-center justify-between gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-3.5 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
             error && 'border-destructive bg-destructive/5',
           )}
           onClick={openFilePicker}
@@ -421,7 +411,8 @@ function DesignFileBox({
           </span>
         </Button>
       )}
-      <FieldError id={errorId} reservedLines={2}>{error}</FieldError>
+      {files}
+      <FieldError id={errorId} reservedLines={1}>{error}</FieldError>
     </div>
   );
 }
@@ -470,31 +461,33 @@ function OrderDesignFilesSection({ itemNumber, queue, disabled, required, groupe
               )
             }
           />
-          <div className="min-w-0 space-y-2">
-            <DesignFileBox
-              itemNumber={itemNumber}
-              fileType={DesignFileType.CDR}
-              disabled={disabled}
-              error={cdrError}
-              onFiles={onCdrFiles}
-              onFile={(file) => onCdrFiles([file])}
-              onRemove={() => {}}
-            />
-            {cdrEntries.map((entry) => (
-              <div key={entry.id} className="flex min-w-0 items-center gap-2 rounded-xl border bg-card p-3">
-                <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
-                <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
-                  {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
-                </p>
-                <Button
-                  type="button" variant="outline" disabled={disabled}
-                  className="min-h-11 min-w-11 shrink-0"
-                  aria-label={`移除第 ${itemNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
-                  onClick={() => onChange(queue.filter((file) => file.id !== entry.id))}
-                >移除</Button>
-              </div>
-            ))}
-          </div>
+          <DesignFileBox
+            itemNumber={itemNumber}
+            fileType={DesignFileType.CDR}
+            disabled={disabled}
+            error={cdrError}
+            onFiles={onCdrFiles}
+            onFile={(file) => onCdrFiles([file])}
+            onRemove={() => {}}
+            files={cdrEntries.length > 0 ? (
+              <ul className="mt-1.5 space-y-1.5">
+                {cdrEntries.map((entry) => (
+                  <li key={entry.id} className="flex min-w-0 items-center gap-2 rounded-lg border bg-card py-1 pr-1 pl-3">
+                    <span data-slot="design-file-marker" className="shrink-0 text-xs font-bold text-muted-foreground"><span>CDR</span></span>
+                    <p className="min-w-0 flex-1 truncate text-sm" title={entry.prepared.file.name}>
+                      {entry.prepared.file.name} · {formatDesignFileSize(entry.prepared.file.size)}
+                    </p>
+                    <Button
+                      type="button" variant="outline" disabled={disabled}
+                      className="min-h-11 min-w-11 shrink-0"
+                      aria-label={`移除第 ${itemNumber} 款 CDR 文件 ${entry.prepared.file.name}`}
+                      onClick={() => onChange(queue.filter((file) => file.id !== entry.id))}
+                    >移除</Button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          />
         </div>
       </fieldset>
     </Group>
@@ -553,7 +546,8 @@ export function OrderFormB({
   onPrintFoilModeChange,
   onLaminationChange,
   onQuantityChange,
-  onPackagingModeChange,
+  onPackagingTypeChange,
+  onPackagingMixingChange,
   onUnitsPerBagChange,
   onPendingDesignsChange,
   onReceiverAddressChange,
@@ -595,14 +589,17 @@ export function OrderFormB({
   const focusIssue = useCallback((message: string) => {
     cancelIssueFocus();
     const explicitTarget = fieldErrors?.targets?.[message];
-    if (explicitTarget?.itemIndex !== undefined) onActiveIndexChange(explicitTarget.itemIndex);
     const itemNumber = Number(message.match(/第\s*(\d+)\s*款/)?.[1]);
-    if (explicitTarget?.itemIndex === undefined && Number.isSafeInteger(itemNumber) && itemNumber > 0) {
-      const index = items.findIndex(
-        (entry, index) => (entry.fig ?? index + 1) === itemNumber,
-      );
-      if (index >= 0) onActiveIndexChange(index);
-    }
+    const numberedIndex = Number.isSafeInteger(itemNumber) && itemNumber > 0
+      ? items.findIndex((entry, index) => (entry.fig ?? index + 1) === itemNumber)
+      : -1;
+    if (explicitTarget?.itemIndex !== undefined) onActiveIndexChange(explicitTarget.itemIndex);
+    else if (numberedIndex >= 0) onActiveIndexChange(numberedIndex);
+    // Packaging rows live outside the design tabs, one per specification.
+    const packagingItemIndex = explicitTarget?.itemIndex ?? numberedIndex;
+    const packagingSelector = /每包数量|每盒数量/.test(message)
+      ? packagingItemIndex >= 0 ? `[id$="-${packagingItemIndex}-units-per-bag"]` : '[id$="-units-per-bag"]'
+      : null;
     issueFocusTimerRef.current = window.setTimeout(() => {
       issueFocusTimerRef.current = null;
       const root = rootRef.current;
@@ -611,10 +608,8 @@ export function OrderFormB({
       const extraContact = addressNumber >= 2 && (message.includes('收件人') || message.includes('电话'))
         ? `[name="additionalShipments.${addressNumber - 2}.${message.includes('收件人') ? 'receiverName' : 'receiverPhone'}"]`
         : null;
-      const directSelector = (explicitTarget ? `[id="${CSS.escape(explicitTarget.fieldId)}"]` : null) ?? extraContact ?? (message.includes('承诺交期')
+      const directSelector = (explicitTarget ? `[id="${CSS.escape(explicitTarget.fieldId)}"]` : null) ?? extraContact ?? packagingSelector ?? (message.includes('承诺交期')
         ? '#promisedDate'
-        : message.includes('产品客户')
-        ? '#customerRef'
         : message.includes('工单备注')
         ? '#remark'
         : message.includes('工单名称')
@@ -888,7 +883,7 @@ export function OrderFormB({
             <div className="flex flex-wrap items-start gap-2">
               <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" variant="folder" disabled={disabled}
                 tabs={groups.map((group, index) => ({ value: itemFields[group.indexes[0]].id,
-                  label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) ? ' · 待完善' : ''}` }))}
+                  label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) || fieldErrors?.designs?.[group.indexes[0]] ? ' · 待完善' : ''}` }))}
                 value={itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}
                 onChange={(value) => { cancelIssueFocus(); onActiveIndexChange(itemFields.findIndex((entry) => entry.id === value)); }} />
               <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加设计款</Button>
@@ -952,53 +947,7 @@ export function OrderFormB({
               specificationOptions={specificationOptions} allowCustomSize={allowCustomSize}
               onSpecificationChange={onSpecificationChange} onCustomSizeChange={onCustomSizeChange}
             /> : null}
-          <Group title="数量与包装" appearance={onAddSpecification ? 'plain' : 'divided'}>
-            <div className="mb-5">
-              <PillPicker
-                id={`${uid}-packaging-type`}
-                label="包装类型"
-                value={packagingType(packaging.mode)}
-                options={[
-                  { value: 'BAG', label: '入袋' },
-                  { value: 'UNPACKED', label: '不包装' },
-                  { value: 'BOX', label: '装盒' },
-                ]}
-                disabled={disabled}
-                onChange={(type) =>
-                  onPackagingModeChange(
-                    packagingModeFor(
-                      type as PackagingType,
-                      isMixedPackaging(packaging.mode),
-                      packagingBoxType(packaging.mode) ?? 'RED_CARD',
-                    ),
-                  )
-                }
-              />
-              {packagingType(packaging.mode) === 'BOX' ? (
-                <div className="mt-4">
-                  <PillPicker
-                    id={`${uid}-box-type`}
-                    label="盒子"
-                    value={packagingBoxType(packaging.mode) ?? 'RED_CARD'}
-                    options={Object.entries(PACKAGING_BOXES).map(([value, box]) => ({
-                      value,
-                      label: `${box.label} · 最多 ${box.capacity} 个/盒`,
-                    }))}
-                    disabled={disabled}
-                    onChange={(box) =>
-                      onPackagingModeChange(
-                        packagingModeFor(
-                          'BOX',
-                          isMixedPackaging(packaging.mode),
-                          box as PackagingBoxType,
-                        ),
-                      )
-                    }
-                  />
-                </div>
-              ) : null}
-            </div>
-            {packaging.scopeLabel ? <p className="mb-3 text-xs text-muted-foreground">{packaging.scopeLabel}</p> : null}
+          <Group title="数量" appearance={onAddSpecification ? 'plain' : 'divided'}>
             <div className="grid grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
               <OrderItemQuantityField
                 uid={uid}
@@ -1007,78 +956,7 @@ export function OrderFormB({
                 itemErrors={itemErrors}
                 onQuantityChange={onQuantityChange}
               />
-              {packagingType(packaging.mode) !== 'UNPACKED' ? (
-                <div>
-                  <FieldLabel htmlFor={`${uid}-units-per-bag`} required>
-                    {packagingType(packaging.mode) === 'BOX' ? '每盒数量' : '每包数量'}
-                  </FieldLabel>
-                  <Input
-                    id={`${uid}-units-per-bag`}
-                    type="number"
-                    min={1}
-                    max={packagingCapacity(packaging.mode) ?? undefined}
-                    step={1}
-                    required
-                    aria-required="true"
-                    aria-invalid={Boolean(packaging.error || fieldErrors?.packaging)}
-                    aria-describedby={`${uid}-packaging-message`}
-                    disabled={disabled}
-                    value={packaging.unitsPerBag || ''}
-                    className="h-10"
-                    onChange={(event) => onUnitsPerBagChange(Number(event.target.value) || 0)}
-                  />
-                  <FieldError
-                    id={`${uid}-packaging-message`}
-                    reservedLines={2}
-                    hint={
-                      packaging.bagCount !== null
-                        ? `共 ${packaging.bagCount.toLocaleString('zh-CN')} ${packagingType(packaging.mode) === 'BOX' ? '盒' : '包'}`
-                        : undefined
-                    }
-                  >
-                    {packaging.error ?? fieldErrors?.packaging}
-                  </FieldError>
-                </div>
-              ) : (
-                <div className="flex items-center text-sm text-muted-foreground">
-                  包装费 ¥0.00
-                </div>
-              )}
             </div>
-            {packagingType(packaging.mode) !== 'UNPACKED' ? (
-              <div className="mt-5">
-                <PillPicker
-                  id={`${uid}-packaging-mode`}
-                  label="包装方式"
-                  value={isMixedPackaging(packaging.mode) ? 'MIXED_STYLE' : 'SINGLE_STYLE'}
-                  options={[
-                    {
-                      value: OrderPackagingMode.SINGLE_STYLE,
-                      label: '常规装',
-                    },
-                    {
-                      value: OrderPackagingMode.MIXED_STYLE,
-                      label: '混装',
-                      disabled: itemFields.length < 2,
-                    },
-                  ]}
-                  disabled={disabled}
-                  onChange={(mode) =>
-                    onPackagingModeChange(
-                      packagingModeFor(
-                        packagingType(packaging.mode),
-                        mode === 'MIXED_STYLE',
-                        packagingBoxType(packaging.mode) ?? 'RED_CARD',
-                      ),
-                    )
-                  }
-                />
-                {onAddSpecification && itemFields.length > 1 && !isMixedPackaging(packaging.mode) ? <p className="mt-2 text-xs text-muted-foreground">混装范围：本工单全部规格</p> : null}
-                {itemFields.length < 2 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">{onAddSpecification ? '混装需至少 2 个规格明细' : '混装需至少 2 款'}</p>
-                ) : null}
-              </div>
-            ) : null}
           </Group>
 
           </div>
@@ -1092,14 +970,26 @@ export function OrderFormB({
             onCdrFiles={appendCdrFiles} onChange={onPendingDesignsChange}
           />
 
-          {packagingExtras || pricingExtras ? <Group title="收费与其他要求" appearance={onAddSpecification ? 'plain' : 'divided'}>
+          {pricingExtras ? <Group title="收费与其他要求" appearance={onAddSpecification ? 'plain' : 'divided'}>
             {onAddSpecification ? <p className="mb-4 text-sm text-muted-foreground">当前规格：{item.specification || '待选规格'} · {item.quantity} 个</p> : null}
             <div className="space-y-5">
-              {packagingExtras}
               {pricingExtras}
             </div>
           </Group> : null}
           </div>
+          </div>
+          <div data-slot="order-packaging-section" className={onAddSpecification ? 'min-w-0 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
+            <OrderPackagingSection
+              uid={uid}
+              packaging={packaging}
+              grouped={Boolean(onAddSpecification)}
+              disabled={disabled}
+              priceEditors={packagingExtras}
+              notes={orderPackagingExtras}
+              onTypeChange={onPackagingTypeChange}
+              onMixingChange={onPackagingMixingChange}
+              onUnitsPerBagChange={onUnitsPerBagChange}
+            />
           </div>
           <div className={onAddSpecification ? 'space-y-6 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
           <Group title="收货" appearance={onAddSpecification ? 'plain' : 'divided'}>
@@ -1155,7 +1045,6 @@ export function OrderFormB({
               顺丰到付（本单不计快递费）
             </label>
           </Group>
-          {orderPackagingExtras}
           {footerExtras}
           </div>
 

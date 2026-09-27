@@ -7,11 +7,7 @@ import {
   generateBillsForPeriod,
   type BillGenerationResult,
 } from '../bill';
-import { formatMoneyPlain } from '../dashboard/format';
-import {
-  getEndingPeriods,
-  getOverdueOutsourcing,
-} from '../dashboard/owner-watchlist';
+import { getOverdueOutsourcing } from '../dashboard/owner-watchlist';
 import { formatDateShanghai } from '../format/dates';
 import { dispatchNotification } from '../notification/dispatch';
 import {
@@ -26,23 +22,13 @@ import {
   scanOverdueOrders,
 } from '../order/overdue-scan';
 import {
-  CsBatchUnexpectedError,
-  settleReadyCsPeriods,
-  type BatchSettleResult,
-} from '../salary/cs';
-import {
   getPieceworkSettlementDay,
   lockPieceworkSettlementsForDate,
   type PieceworkSettlementBatchResult,
 } from '../salary/piecework-settlement';
-import {
-  computeHourlyForAllInMonth,
-  HourlyBatchUnexpectedError,
-  type BatchHourlyResult,
-} from '../salary/hourly-aggregate';
 
 function logPartialBatchProgress(
-  task: 'daily-salary' | 'hourly-payroll' | 'generate-bills',
+  task: 'daily-salary' | 'generate-bills',
   committedCount: number,
   businessErrorCount: number,
 ): void {
@@ -97,6 +83,7 @@ export async function runDailySalaryTask(
     date,
     workerCount: day.settlements.length,
     errorCount: 0,
+    failed: 0,
   };
 }
 
@@ -108,53 +95,6 @@ export class DailySalaryBatchIncompleteError extends Error {
     this.name = 'DailySalaryBatchIncompleteError';
     this.partialResult = partialResult;
   }
-}
-
-export async function runHourlyPayrollTask(month: string, fence?: ExecutionFence) {
-  let unexpected: HourlyBatchUnexpectedError | null = null;
-  let result: BatchHourlyResult;
-  try {
-    result = await computeHourlyForAllInMonth(month, undefined, fence);
-  } catch (error) {
-    if (!(error instanceof HourlyBatchUnexpectedError)) throw error;
-    unexpected = error;
-    result = error.partialResult;
-  }
-  const { settled, errors } = result;
-  if (unexpected) {
-    logPartialBatchProgress('hourly-payroll', settled.length, errors.length);
-    throw unexpected;
-  }
-  return {
-    status: 'ok' as const,
-    month,
-    workerCount: settled.length,
-    errorCount: errors.length,
-  };
-}
-
-export async function runCsSettleTask(fence?: ExecutionFence) {
-  let unexpected: CsBatchUnexpectedError | null = null;
-  let result: BatchSettleResult;
-  try {
-    result = await settleReadyCsPeriods(undefined, undefined, fence);
-  } catch (error) {
-    if (!(error instanceof CsBatchUnexpectedError)) throw error;
-    unexpected = error;
-    result = error.partialResult;
-  }
-  const { settled, errors } = result;
-  // settleReadyCsPeriods performs each inline fallback immediately after that
-  // period commits; durable mode already owns a transactionally inserted
-  // notification job. Do not dispatch the returned rows again here.
-  // Rethrow so Sentry and the durable cron job retry the unprocessed tail
-  // rather than silently marking a partial run OK.
-  if (unexpected) throw unexpected;
-  return {
-    status: 'ok' as const,
-    settledCount: settled.length,
-    errorCount: errors.length,
-  };
 }
 
 export async function runGenerateBillsTask(
@@ -186,6 +126,8 @@ export async function runGenerateBillsTask(
     period: result.period,
     generatedCount: result.generated.length,
     errorCount: result.errors.length,
+    failed: result.errors.length,
+    errorCodes: result.errors.length > 0 ? ['BillGenerationIncomplete'] : [],
   };
 }
 
@@ -215,29 +157,6 @@ export async function runOutsourceOverdueTask(
   }
   return { status: 'ok' as const, overdueCount: rows.length };
 }
-export async function runCsPeriodEndingTask(
-  runDate: string,
-  fence?: ExecutionFence,
-) {
-  const rows = await getEndingPeriods();
-  for (const [index, row] of rows.entries()) {
-    await assertExecutionFence(fence);
-    await dispatchNotification(
-      'CS_PERIOD_ENDING',
-      {
-        periodId: row.id,
-        csName: row.csDisplayName,
-        daysLeft: row.daysUntilEnd,
-        totalSales: formatMoneyPlain(row.salesForTier),
-      },
-      {
-        dedupeKey: `notification:CS_PERIOD_ENDING:${runDate}:${row.id}`,
-        spreadIndex: index,
-      },
-    );
-  }
-  return { status: 'ok' as const, endingCount: rows.length };
-}
 
 export async function runOrderOverdueTask(
   runDate: string,
@@ -263,6 +182,7 @@ export async function runOrderOverdueTask(
       {
         orderId: row.id,
         orderNo: row.orderNo,
+        externalSalesName: row.externalSalesName ?? '未填',
         customerRef: row.customerRef ?? '未填',
         promisedDate: formatDateShanghai(row.promisedDate),
         daysOverdue: row.daysOverdue,

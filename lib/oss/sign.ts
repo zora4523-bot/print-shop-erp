@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import OSS from 'ali-oss';
 import { readOssConfig, type OssConfig } from './config';
 import { createOssClient } from './client';
+import { designFileNameIssue } from './design-file-name';
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_MIME,
@@ -27,12 +28,6 @@ function buildObjectKey(params: SignUploadParams): string {
   // orderId / orderItemId are whitelisted to SAFE_ID_RE (see validate),
   // so there's no way to escape the design/ prefix via `..` or `/`.
   return `design/${params.orderId}/${params.orderItemId}/${params.fileType.toLowerCase()}-${id}.${ext}`;
-}
-
-function extractExtension(fileName: string): string | null {
-  const idx = fileName.lastIndexOf('.');
-  if (idx < 0 || idx === fileName.length - 1) return null;
-  return fileName.slice(idx + 1).toLowerCase();
 }
 
 function validate(params: SignUploadParams): Record<string, string[]> | null {
@@ -64,17 +59,12 @@ function validate(params: SignUploadParams): Record<string, string[]> | null {
 
   // Extension must match the declared fileType. Defends against the
   // `application/octet-stream` CDR loophole — a caller can't rename a
-  // JPEG to .cdr and pass it off with octet-stream.
-  if (!params.fileName || params.fileName.trim() === '') {
-    (errors.fileName ??= []).push('文件名不能为空');
-  } else {
-    const ext = extractExtension(params.fileName);
-    const allowedExts = ALLOWED_EXTENSIONS[params.fileType];
-    if (!ext || !allowedExts.includes(ext)) {
-      (errors.fileName ??= []).push(
-        `文件扩展名与类型不匹配（${params.fileType} 期望：${allowedExts.join(', ')}）`,
-      );
-    }
+  // JPEG to .cdr and pass it off with octet-stream. The same single-segment
+  // rule is re-checked when the upload is recorded (the name later becomes
+  // a ZIP entry name in CDR bundles).
+  const fileNameIssue = designFileNameIssue(params.fileName ?? '', params.fileType);
+  if (fileNameIssue) {
+    (errors.fileName ??= []).push(fileNameIssue);
   }
 
   return Object.keys(errors).length > 0 ? errors : null;

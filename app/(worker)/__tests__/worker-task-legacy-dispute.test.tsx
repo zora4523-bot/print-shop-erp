@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Role, WorkerType, TaskStatus, ProductionTaskDisputeStatus } from '@/generated/prisma/enums';
 const { legacy, disputes, session } = vi.hoisted(() => ({ legacy: vi.fn(), disputes: vi.fn(), session: vi.fn() }));
+vi.mock('@/lib/db', () => ({ db: {} }));
 vi.mock('@/lib/production/operation-reporting', () => ({ OperationReportingError: class extends Error {} }));
 vi.mock('@/lib/auth/session', () => ({ requireSession: session }));
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NOT_FOUND'); } }));
@@ -25,7 +26,7 @@ beforeEach(() => {
   disputes.mockResolvedValue([]);
 });
 it('renders the dispute form on a legacy salary task link with the current actor', async () => {
-  const html = renderToStaticMarkup(await Page({ params: Promise.resolve({ id: 'legacy-1' }) }));
+  const html = renderToStaticMarkup(await Page({ searchParams: Promise.resolve({}), params: Promise.resolve({ id: 'legacy-1' }) }));
   expect(legacy).toHaveBeenCalledWith('legacy-1', { id: 'worker-1', role: Role.WORKER });
   expect(disputes).toHaveBeenCalledWith('legacy-1', { id: 'worker-1', role: Role.WORKER });
   expect(html).toContain('任务 / 计件异议');
@@ -35,16 +36,16 @@ it('renders the dispute form on a legacy salary task link with the current actor
 it('renders existing pending disputes and suppresses duplicate submission', async () => {
   disputes.mockResolvedValue([{ id: 'd1', productionTaskId: 'legacy-1', status: ProductionTaskDisputeStatus.PENDING,
     reason: '合格数量需要复核', resolution: null, resolvedAt: null, resolvedBy: null, createdAt: new Date('2026-09-01'), updatedAt: new Date('2026-09-01') }]);
-  const html = renderToStaticMarkup(await Page({ params: Promise.resolve({ id: 'legacy-1' }) }));
+  const html = renderToStaticMarkup(await Page({ searchParams: Promise.resolve({}), params: Promise.resolve({ id: 'legacy-1' }) }));
   expect(html).toContain('合格数量需要复核');
   expect(html).not.toContain('name="reason"');
 });
 it('does not query disputes when the scoped legacy task does not exist', async () => {
   legacy.mockResolvedValue(null);
-  await expect(Page({ params: Promise.resolve({ id: 'other-task' }) })).rejects.toThrow('NOT_FOUND');
+  await expect(Page({ searchParams: Promise.resolve({}), params: Promise.resolve({ id: 'other-task' }) })).rejects.toThrow('NOT_FOUND');
   expect(disputes).not.toHaveBeenCalled();
 });
 it('propagates the dispute ownership rejection instead of rendering a form', async () => {
   disputes.mockRejectedValue(new Error('任务不存在或不属于当前师傅'));
-  await expect(Page({ params: Promise.resolve({ id: 'legacy-1' }) })).rejects.toThrow('不属于当前师傅');
+  await expect(Page({ searchParams: Promise.resolve({}), params: Promise.resolve({ id: 'legacy-1' }) })).rejects.toThrow('不属于当前师傅');
 });

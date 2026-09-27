@@ -4,7 +4,7 @@ import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 export function batchOrder(overrides: Partial<AdminOrderWorkspaceRow> = {}): AdminOrderWorkspaceRow {
   return {
     id: 'order-1', orderNo: 'GD-260907-001', revision: 4, workOrderVersion: 2,
-    customName: '中秋红包', customer: { id: null, name: '客户甲', filterValue: '客户甲' },
+    customName: '中秋红包',
     submitter: { id: 'sales-1', name: '业务员甲' }, status: OrderStatus.CONFIRMED,
     statusSummary: null, isUrgent: false, isStarred: false,
     createdAt: '2026-09-07T00:00:00Z', submittedAt: null, promisedDate: null, dueAlert: null,

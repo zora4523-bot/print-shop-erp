@@ -337,13 +337,9 @@ async function withTransaction(db, operation) {
 
 function createLoginAccounts(seedRunId) {
   const accounts = [];
-  for (let index = 1; index <= 10; index += 1) {
+  // 业主 2026-09-24：客服角色已删除，20 个下单账号全部是外部销售。
+  for (let index = 1; index <= 20; index += 1) {
     accounts.push(account(seedRunId, 'sales', index, 'SALES', `压测销售${index}`));
-  }
-  for (let index = 1; index <= 10; index += 1) {
-    accounts.push(
-      account(seedRunId, 'cs', index, 'CUSTOMER_SERVICE', `压测客服${index}`),
-    );
   }
   for (let index = 1; index <= 3; index += 1) {
     accounts.push(account(seedRunId, 'admin', index, 'ADMIN', `压测主管${index}`));
@@ -458,7 +454,7 @@ async function readSeedUsers(db, login, salaryOnly) {
     if (!row) throw new Error(`Seed user missing after upsert: ${entry.username}`);
     return row;
   };
-  const submitters = login.filter((entry) => ['SALES', 'CUSTOMER_SERVICE'].includes(entry.role)).map(required);
+  const submitters = login.filter((entry) => entry.role === 'SALES').map(required);
   const admins = login.filter((entry) => entry.role === 'ADMIN').map(required);
   const loadWorkers = login.filter((entry) => entry.role === 'WORKER').map(required);
   const allSalaryWorkers = [...loadWorkers, ...salaryOnly.map(required)];
@@ -511,11 +507,7 @@ async function upsertOrders(db, input) {
        $5,
        (CASE n % 20 WHEN 0 THEN 'DRAFT' WHEN 1 THEN 'SUBMITTED' WHEN 2 THEN 'SCHEDULING' WHEN 3 THEN 'IN_PRODUCTION' WHEN 4 THEN 'COMPLETED' WHEN 5 THEN 'SHIPPED' WHEN 6 THEN 'CANCELLED' ELSE 'FINISHED' END)::"OrderStatus",
        'NORMAL'::"OrderKind", 'CHARGE'::"OrderBillingMode",
-       (CASE
-          WHEN ($4::text[])[((n - 1) % cardinality($4::text[])) + 1] = 'SALES'
-            THEN 'EXTERNAL_SALES'
-          ELSE 'INTERNAL_SALES'
-        END)::"OrderSettlementType",
+       'EXTERNAL_SALES'::"OrderSettlementType",
        n % 17 = 0, '代表性压测工单 ' || n, '压测客户 ' || ((n - 1) % 200 + 1),
        '测试收件人' || ((n - 1) % 300 + 1), '1380000' || lpad((n % 10000)::text, 4, '0'),
        '浙江省杭州市压测隔离地址 ' || ((n - 1) % 500 + 1) || ' 号',
@@ -814,13 +806,13 @@ async function verifyFixture(db, expected) {
 }
 
 function assertVerification(actual, expected) {
-  const salesCs = (actual.roles.SALES ?? 0) + (actual.roles.CUSTOMER_SERVICE ?? 0);
+  const salesCs = actual.roles.SALES ?? 0;
   const requiredSalaryRows = expected.salaryWorkerCount * expected.salaryDayCount;
   const failures = [
     [actual.orders >= expected.orderCount, `orders ${actual.orders}/${expected.orderCount}`],
     [actual.pdfOrders >= expected.pdfOrderCount, `pdfOrders ${actual.pdfOrders}/${expected.pdfOrderCount}`],
     [actual.averagePdfItems >= 3, `averagePdfItems ${actual.averagePdfItems}/3`],
-    [salesCs === 20, `sales/customer-service users ${salesCs}/20`],
+    [salesCs === 20, `sales users ${salesCs}/20`],
     [actual.roles.ADMIN === 3, `admin users ${actual.roles.ADMIN ?? 0}/3`],
     [actual.roles.WORKER === 5, `worker users ${actual.roles.WORKER ?? 0}/5`],
     [actual.salaryWorkers >= expected.salaryWorkerCount, `salaryWorkers ${actual.salaryWorkers}/${expected.salaryWorkerCount}`],

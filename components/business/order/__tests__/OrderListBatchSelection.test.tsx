@@ -7,7 +7,6 @@ import {
   OrderListBatchFeedback,
   reduceOrderListSelection,
 } from '../OrderListBatchSelection';
-import { orderRowSecondaryActions } from '../OrderRowActions';
 
 describe('order-list page selection contract', () => {
   it('can omit the copy control and feedback while preserving batch actions', () => {
@@ -98,52 +97,5 @@ describe('order-list page selection contract', () => {
     expect(html).toContain(feedback.message);
     expect(html).toContain('truncate');
     expect(html).not.toContain('sr-only');
-  });
-});
-
-describe('order row secondary action contract', () => {
-  it('keeps row actions read-only in every role and order state', () => {
-    const allowed = orderRowSecondaryActions({
-      orderId: 'order-1',
-      status: OrderStatus.SUBMITTED,
-      canSchedule: true,
-    });
-    const roleDenied = orderRowSecondaryActions({
-      orderId: 'order-1',
-      status: OrderStatus.SUBMITTED,
-      canSchedule: false,
-    });
-    const terminal = orderRowSecondaryActions({
-      orderId: 'order-1',
-      status: OrderStatus.FINISHED,
-      canSchedule: true,
-    });
-
-    expect(allowed.map((action) => action.id)).toEqual(['print', 'pdf']);
-    expect(roleDenied.map((action) => action.id)).toEqual(['print', 'pdf']);
-    expect(terminal.map((action) => action.id)).toEqual(['print', 'pdf']);
-    expect(allowed.some((action) => action.href.includes('scheduling'))).toBe(false);
-  });
-
-  it('uses the existing scoped print and PDF destinations', () => {
-    const actions = orderRowSecondaryActions({
-      orderId: 'order-1',
-      status: OrderStatus.CANCELLED,
-      canSchedule: false,
-    });
-
-    expect(actions).toEqual([
-      {
-        id: 'print',
-        label: '打印工单',
-        href: '/api/orders/order-1/pdf?view=inline',
-        newTab: true,
-      },
-      {
-        id: 'pdf',
-        label: '下载 PDF',
-        href: '/api/orders/order-1/pdf',
-      },
-    ]);
   });
 });

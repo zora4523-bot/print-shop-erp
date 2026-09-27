@@ -1,11 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  OrderFoilTechnique,
-  OrderItemPricingRoute,
-  OrderLamination,
   OrderProductStructure,
-  OrderSettlementType,
   ProductCategory,
 } from '@/generated/prisma/enums';
 
@@ -18,7 +14,6 @@ vi.mock('@/actions/order', () => ({
 }));
 vi.mock('@/actions/create-order-quote', () => ({
   quoteExternalCreateOrderAction: vi.fn(),
-  quoteInternalCreateOrderAction: vi.fn(),
   quoteSampleOrderAction: vi.fn(),
 }));
 vi.mock('@/actions/workbench', () => ({ quoteWorkbenchItemAction: vi.fn() }));
@@ -30,7 +25,6 @@ vi.mock('../design-upload-client', () => ({
 import {
   OrderForm,
   parsePastedReceiverAddress,
-  resolveInternalOrderCraftIds,
   type CraftOption,
 } from '../OrderForm';
 
@@ -92,45 +86,6 @@ const crafts: CraftOption[] = [
     isLowFrequency: true,
   },
 ];
-
-function internalItem(
-  overrides: Partial<Parameters<typeof resolveInternalOrderCraftIds>[0]> = {},
-): Parameters<typeof resolveInternalOrderCraftIds>[0] {
-  return {
-    fig: 1,
-    name: '测试款式',
-    productId: null,
-    pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
-    productStructure: OrderProductStructure.UNSPECIFIED,
-    artworkVersion: null,
-    plateGroupId: null,
-    pricingGroup: null,
-    manualQuoteReason: null,
-    specification: '大号封90×165',
-    actualWidthMm: 90,
-    actualHeightMm: 165,
-    paperType: '160g珠光纸艳闪',
-    paperWeightGsm: 160,
-    quantity: 1000,
-    pack: 10,
-    crafts: ['craft-local-foil'],
-    frontFoilColors: ['品牌金'],
-    backFoilColors: [],
-    foilColors: ['品牌金'],
-    foilTechnique: OrderFoilTechnique.FLAT,
-    hasLocalFoil: true,
-    printColors: [],
-    lamination: OrderLamination.NONE,
-    isDoubleSided: false,
-    isDoubleColor: false,
-    unitPrice: null,
-    fixedFee: null,
-    suggestedSubtotal: null,
-    priceOverrideReason: null,
-    remark: null,
-    ...overrides,
-  };
-}
 
 const externalCreateOrderOptions = {
   products: [],
@@ -196,8 +151,6 @@ describe('OrderForm pricing routes', () => {
         draftScope="pricing-route-test"
         crafts={crafts}
         products={[]}
-        settlementLabel="外部销售"
-        settlementType={OrderSettlementType.EXTERNAL_SALES}
         externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
@@ -211,75 +164,12 @@ describe('OrderForm pricing routes', () => {
     expect(html).not.toContain('value="MANUAL_QUOTE"');
   });
 
-  it('does not repeat route-owned production facts in the internal order form', () => {
-    const html = renderToStaticMarkup(
-      <OrderForm
-        draftScope="internal-additional-crafts-test"
-        crafts={crafts}
-        products={[]}
-        settlementLabel="工厂直接业务"
-        settlementType={OrderSettlementType.FACTORY_DIRECT}
-      />,
-    );
-
-    expect(html).toContain('工艺类型');
-    expect(html).not.toContain('生产工艺');
-    expect(html).not.toContain('计价必需');
-    expect(html).toContain('附加工艺（选填）');
-    expect(html).toContain('粘封');
-    expect(html).toContain('UV · 外协 · 低频');
-    expect(html).not.toContain('专版单色平烫');
-    expect(html).not.toContain('打包 / 入袋');
-  });
-
-  it('replaces stale route crafts while preserving genuine additional steps', () => {
-    expect(
-      resolveInternalOrderCraftIds(
-        internalItem({
-          pricingRoute: OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL,
-          frontFoilColors: ['品牌金', '透明色'],
-          foilColors: ['品牌金', '透明色'],
-          hasLocalFoil: false,
-          crafts: [
-            'craft-local-foil',
-            'craft-full-single',
-            'craft-gluing',
-            'craft-packing',
-          ],
-        }),
-        crafts,
-      ),
-    ).toEqual(['craft-full-double', 'craft-gluing']);
-
-    expect(
-      resolveInternalOrderCraftIds(
-        internalItem({
-          pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
-          frontFoilColors: [],
-          foilColors: [],
-          foilTechnique: OrderFoilTechnique.NONE,
-          hasLocalFoil: false,
-          printColors: ['彩印'],
-          crafts: [
-            'craft-full-double',
-            'craft-gluing',
-            'craft-packing',
-            'unknown-stale-craft',
-          ],
-        }),
-        crafts,
-      ),
-    ).toEqual(['craft-print', 'craft-gluing']);
-  });
-
   it('renders the B address paste field and hides parsed facts until an address exists', () => {
     const html = renderToStaticMarkup(
       <OrderForm
         draftScope="receiver-fields-test"
         crafts={crafts}
         products={[]}
-        settlementLabel="外部销售"
-        settlementType={OrderSettlementType.EXTERNAL_SALES}
         externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
@@ -298,8 +188,6 @@ describe('OrderForm pricing routes', () => {
         draftScope="pricing-craft-test"
         crafts={crafts}
         products={[]}
-        settlementLabel="外部销售"
-        settlementType={OrderSettlementType.EXTERNAL_SALES}
         externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
@@ -315,8 +203,6 @@ describe('OrderForm pricing routes', () => {
         draftScope="configured-foil-catalog-test"
         crafts={crafts}
         products={[]}
-        settlementLabel="外部销售"
-        settlementType={OrderSettlementType.EXTERNAL_SALES}
         externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
@@ -365,8 +251,6 @@ describe('OrderForm pricing routes', () => {
             paperType: '160g珠光纸艳闪',
           },
         ]}
-        settlementLabel="外部销售"
-        settlementType={OrderSettlementType.EXTERNAL_SALES}
         externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );
@@ -406,8 +290,6 @@ describe('OrderForm pricing routes', () => {
         draftScope="mixed-paper-availability-test"
         crafts={crafts}
         products={mixedProducts}
-        settlementLabel="外部销售"
-        settlementType={OrderSettlementType.EXTERNAL_SALES}
         externalCreateOrderOptions={{
           products: mixedProducts,
           papers: [
@@ -494,8 +376,6 @@ describe('OrderForm pricing routes', () => {
             paperType: '200g触感纸',
           },
         ]}
-        settlementLabel="外部销售"
-        settlementType={OrderSettlementType.EXTERNAL_SALES}
         externalCreateOrderOptions={externalCreateOrderOptions}
       />,
     );

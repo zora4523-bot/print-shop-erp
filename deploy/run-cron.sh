@@ -4,7 +4,7 @@ set -eu
 
 endpoint=${1:-}
 case "$endpoint" in
-  daily-salary|cs-settle|cs-period-ending|outsource-overdue|order-overdue|pending-factory-backlog|production-alerts|order-export-cleanup|hourly-payroll|generate-bills)
+  daily-salary|outsource-overdue|order-overdue|pending-factory-backlog|production-alerts|order-export-cleanup|generate-bills)
     ;;
   *)
     echo "unsupported cron endpoint: $endpoint" >&2
@@ -114,4 +114,14 @@ if [ "$status" != "202" ]; then
   exit 1
 fi
 
-logger -t print-shop-erp-cron -- "$endpoint queued successfully"
+if ! enqueue_result=$(node -e '
+  try {
+    const body = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    if (typeof body.created !== "boolean" || typeof body.requeued !== "boolean") process.exit(1);
+    process.stdout.write(body.created || body.requeued ? "queued successfully" : "skipped (duplicate scope)");
+  } catch { process.exit(1); }
+' "$body_file"); then
+  logger -t print-shop-erp-cron -- "$endpoint invalid enqueue response"
+  exit 1
+fi
+logger -t print-shop-erp-cron -- "$endpoint $enqueue_result"

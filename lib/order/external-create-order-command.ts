@@ -225,8 +225,7 @@ function toCanonicalFacts(data: CreateOrderInput): unknown {
   return {
     clientSubmissionId: data.clientSubmissionId,
     customName: data.customName,
-    customerPartyId: data.customerPartyId,
-    customerRef: data.customerRef,
+    // 客户名称/简称已退役（业主 2026-09-27）：兼容 key 不再进入规范事实。
     receiverName: data.receiverName,
     receiverPhone: data.receiverPhone,
     receiverAddress: data.receiverAddress,

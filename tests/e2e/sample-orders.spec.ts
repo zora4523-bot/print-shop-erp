@@ -239,6 +239,11 @@ for (const purpose of ['寄样品', '打样'] as const) {
   test(`管理员新建页保存并提交${purpose}，类型与费用正确`, async ({ page }) => {
     test.setTimeout(120_000);
     await login(page, 'e2e-sample-admin', '/orders/new');
+    // 业主 2026-09-24：管理员建单必须归属一个外部销售。
+    const lookup = await database();
+    const sales = (await lookup.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
+    await lookup.end();
+    await page.getByLabel('关联外部销售（必填）', { exact: true }).selectOption(sales);
     await page.getByLabel('工单名称', { exact: false }).fill('管理员样品工单名称');
     await page.getByRole('button', { name: purpose, exact: true }).click();
     await contact(page);
@@ -264,7 +269,7 @@ for (const purpose of ['寄样品', '打样'] as const) {
     try {
       const { rows: [order] } = await db.query('SELECT purpose, "pricingMode", "confirmedFee", "createdById", "submitterRole", "customName" FROM "Order" WHERE id=$1', [id]);
       expect(order.purpose).toBe(purpose === '寄样品' ? 'SAMPLE_SHIPMENT' : 'PROOF');
-      expect(order.submitterRole).toBe('ADMIN');
+      expect(order.submitterRole).toBe('SALES');
       if (purpose === '打样') {
         expect(order.customName).toBe('管理员样品工单名称');
         expect(order.pricingMode).toBe('MANUAL_TOTAL');
@@ -302,7 +307,7 @@ test('管理员关联销售后切换寄样、刷新仍保留工单归属', async
   const db = await database();
   try {
     const sales = (await db.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
-    await page.getByLabel('关联外部销售（选填）', { exact: true }).selectOption(sales);
+    await page.getByLabel('关联外部销售（必填）', { exact: true }).selectOption(sales);
     await page.getByRole('button', { name: '寄样品', exact: true }).click();
     await page.getByLabel('样品名称').fill('归属保留验收');
     await contact(page);
@@ -321,3 +326,52 @@ test('管理员关联销售后切换寄样、刷新仍保留工单归属', async
     expect(order.settlementType).toBe('EXTERNAL_SALES');
   } finally { await db.end(); }
 });
+
+// 业主 2026-09-24：管理员建单必须归属外部销售。直接进入样品流程（工作台选用途，
+// 或新建页未先选销售就切到样品）时，样品表单自身必须提供同一个必填选择。
+for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄样品', '打样'] as const) {
+  test(`${entry} 管理员直接进入${purpose}，在样品表单选择外部销售后保存`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await login(page, 'e2e-sample-admin', entry);
+    await page.evaluate(() => sessionStorage.clear());
+    await page.reload();
+    await page.getByRole('button', { name: purpose, exact: true }).click();
+    const sales = page.getByLabel('关联外部销售（必填）', { exact: true });
+    await expect(sales).toBeVisible();
+    await expect(sales).toHaveValue('');
+    if (purpose === '寄样品') {
+      await page.getByLabel('样品名称').fill(`管理员直入寄样 ${Date.now()}`);
+      await page.getByLabel('样品数量').fill('2');
+    } else {
+      await page.getByRole('spinbutton', { name: '数量', exact: true }).fill('3');
+    }
+    await contact(page);
+    await page.getByRole('button', { name: '核对费用', exact: true }).click();
+    const save = page.getByRole('button', { name: '保存工单', exact: true });
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(page.getByText('请选择关联外部销售', { exact: true })).toBeVisible();
+    await expect(sales).toBeFocused();
+    const db = await database();
+    try {
+      const salesId = (await db.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
+      await sales.selectOption(salesId);
+      await expect(page.getByText('请选择关联外部销售', { exact: true })).toHaveCount(0);
+      await page.getByRole('button', { name: '核对费用', exact: true }).click();
+      await expect(save).toBeEnabled();
+      await save.click();
+      await page.getByRole('button', { name: '查看已保存工单', exact: true }).click();
+      await page.waitForURL(/\/orders\/(?!new$)[a-z0-9]+$/);
+      const id = page.url().split('/').pop()!;
+      const order = (await db.query('SELECT purpose, "submitterId", "createdById", "settlementType", "submitterRole" FROM "Order" WHERE id=$1', [id])).rows[0];
+      expect(order.purpose).toBe(purpose === '寄样品' ? 'SAMPLE_SHIPMENT' : 'PROOF');
+      expect(order.submitterId).toBe(salesId);
+      expect(order.createdById).not.toBe(salesId);
+      expect(order.settlementType).toBe('EXTERNAL_SALES');
+      expect(order.submitterRole).toBe('SALES');
+      expect(errors).toEqual([]);
+    } finally { await db.end(); }
+  });
+}

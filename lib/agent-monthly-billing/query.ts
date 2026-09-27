@@ -91,6 +91,8 @@ export async function getAgentMonthlyBillDetail(id: string) {
       items: {
         orderBy: [{ settledAtSnapshot: 'asc' }, { id: 'asc' }],
         include: {
+          // 明细“工单名称”列：只取名称这一展示标签，金额与状态仍读成员冻结快照。
+          order: { select: { customName: true } },
           credits: {
             orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
             include: {

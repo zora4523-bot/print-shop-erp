@@ -21,10 +21,10 @@ export type LocalOrderFormDraft = {
   values: JsonObject;
 };
 
+// 客户名称/简称与关联客户已退役（业主 2026-09-27）：customerRef / customerPartyId
+// 不再写入本机草稿；旧草稿里残留的这两个 key 在恢复时同样被丢弃。
 const ROOT_FACT_KEYS = [
   'customName',
-  'customerPartyId',
-  'customerRef',
   'receiverName',
   'receiverPhone',
   'receiverAddress',

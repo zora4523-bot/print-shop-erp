@@ -70,7 +70,18 @@ describe('workbench controlled pricing guidance', () => {
   });
   it('explains the ice-white administrator pricing policy', () => {
     expect(workbenchPricingReasons([{ code: 'FULL_ICE_WHITE_ADMIN_PRICING' }])).toEqual([
-      '冰白纸专版烫金由管理员手动核价，请提交工单后等待核价',
+      '冰白珠光纸专版烫金由管理员手动核价，请提交工单后等待核价',
+    ]);
+  });
+  it('explains color-print relief, raised and back-side foil as administrator pricing', () => {
+    expect(
+      workbenchPricingReasons([
+        { code: 'PRINT_NON_FLAT_FOIL' },
+        { code: 'PRINT_BACK_SIDE_FOIL' },
+      ]),
+    ).toEqual([
+      '彩印浮雕、激凸需要管理员核价',
+      '彩印反面烫金需要管理员核价',
     ]);
   });
   it('uses a safe fallback for an empty or newly introduced engine reason', () => {

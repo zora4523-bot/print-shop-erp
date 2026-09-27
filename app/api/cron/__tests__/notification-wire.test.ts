@@ -4,32 +4,20 @@ const {
   databaseClockNowMock,
   lockPieceworkMock,
   readPieceworkDayMock,
-  settleReadyCsMock,
   getOverdueOutsourcingMock,
   scanOverdueOrdersMock,
-  getEndingPeriodsMock,
   dbMock,
   dispatchMock,
-  MockCsBatchUnexpectedError,
 } = vi.hoisted(() => ({
   databaseClockNowMock: vi.fn(),
   lockPieceworkMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   readPieceworkDayMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-  settleReadyCsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   getOverdueOutsourcingMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   scanOverdueOrdersMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
-  getEndingPeriodsMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
   dbMock: {
     user: { findMany: vi.fn() },
   },
   dispatchMock: vi.fn<(...args: unknown[]) => void>(),
-  MockCsBatchUnexpectedError: class extends Error {
-    partialResult: unknown;
-    constructor(partialResult: unknown) {
-      super('unexpected batch failure');
-      this.partialResult = partialResult;
-    }
-  },
 }));
 vi.mock('@/lib/background-jobs/clock', () => ({
   databaseClockNow: databaseClockNowMock,
@@ -38,13 +26,8 @@ vi.mock('@/lib/salary/piecework-settlement', () => ({
   lockPieceworkSettlementsForDate: lockPieceworkMock,
   getPieceworkSettlementDay: readPieceworkDayMock,
 }));
-vi.mock('@/lib/salary/cs', () => ({
-  settleReadyCsPeriods: settleReadyCsMock,
-  CsBatchUnexpectedError: MockCsBatchUnexpectedError,
-}));
 vi.mock('@/lib/dashboard/owner-watchlist', () => ({
   getOverdueOutsourcing: getOverdueOutsourcingMock,
-  getEndingPeriods: getEndingPeriodsMock,
 }));
 vi.mock('@/lib/order/overdue-scan', () => ({
   ORDER_OVERDUE_NOTIFY_CAP: 200,
@@ -56,10 +39,8 @@ vi.mock('@/lib/notification/dispatch', () => ({
 }));
 
 import { POST as dailySalaryPost } from '../daily-salary/route';
-import { POST as csSettlePost } from '../cs-settle/route';
 import { POST as outsourceOverduePost } from '../outsource-overdue/route';
 import { POST as orderOverduePost } from '../order-overdue/route';
-import { POST as csPeriodEndingPost } from '../cs-period-ending/route';
 
 const SECRET = 'test-cron-secret-12345';
 
@@ -75,10 +56,8 @@ beforeEach(() => {
     settlements: [],
     candidates: [],
   });
-  settleReadyCsMock.mockReset();
   getOverdueOutsourcingMock.mockReset();
   scanOverdueOrdersMock.mockReset();
-  getEndingPeriodsMock.mockReset();
   dbMock.user.findMany.mockReset();
   dispatchMock.mockReset();
   process.env.CRON_SECRET = SECRET;
@@ -125,6 +104,7 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
       date: '2026-04-27',
       workerCount: 2,
       errorCount: 0,
+      failed: 0,
     });
     expect(dispatchMock).toHaveBeenCalledWith(
       'DAILY_WORKER_SALARY',
@@ -147,143 +127,6 @@ describe('POST /api/cron/daily-salary → DAILY_WORKER_SALARY', () => {
 
     expect(res.status).toBe(401);
     expect(lockPieceworkMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('POST /api/cron/cs-settle → settlement service owns CS_PERIOD_SETTLED', () => {
-  it('返回结算数量，不在 cron 层重复派发已由结算事务处理的通知', async () => {
-    settleReadyCsMock.mockResolvedValue({
-      settled: [
-        {
-          commissionId: 'c1',
-          periodId: 'p1',
-          csUserId: 'u1',
-          totalSales: '300000.00',
-          tierRate: '0.03',
-          commissionAmount: '9000.00',
-          monthlyBaseTotal: '20000.00',
-          totalIncome: '29000.00',
-          nextPeriodId: 'p1-next',
-        },
-        {
-          commissionId: 'c2',
-          periodId: 'p2',
-          csUserId: 'u2',
-          totalSales: '50000.00',
-          tierRate: '0.005',
-          commissionAmount: '250.00',
-          monthlyBaseTotal: '20000.00',
-          totalIncome: '20250.00',
-          nextPeriodId: null,
-        },
-      ],
-      errors: [],
-    });
-    dbMock.user.findMany.mockResolvedValue([
-      { id: 'u1', displayName: 'CS 张' },
-      { id: 'u2', displayName: 'CS 李' },
-    ]);
-
-    const res = await csSettlePost(authedReq('http://x/api/cron/cs-settle'));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      status: 'ok',
-      settledCount: 2,
-      errorCount: 0,
-    });
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(dbMock.user.findMany).not.toHaveBeenCalled();
-  });
-
-  it('settled empty → 不触发推送 + 不查 user', async () => {
-    settleReadyCsMock.mockResolvedValue({ settled: [], errors: [] });
-    const res = await csSettlePost(authedReq('http://x/api/cron/cs-settle'));
-    expect(res.status).toBe(200);
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(dbMock.user.findMany).not.toHaveBeenCalled();
-  });
-
-  it('不在 cron 层重做客服名查询或 fallback，避免绕过结算服务的唯一投递边界', async () => {
-    settleReadyCsMock.mockResolvedValue({
-      settled: [
-        {
-          commissionId: 'c1',
-          periodId: 'p1',
-          csUserId: 'ghost-user',
-          totalSales: '100.00',
-          tierRate: '0.005',
-          commissionAmount: '0.50',
-          monthlyBaseTotal: '0.00',
-          totalIncome: '0.50',
-          nextPeriodId: null,
-        },
-      ],
-      errors: [],
-    });
-    dbMock.user.findMany.mockResolvedValue([]);
-    const response = await csSettlePost(
-      authedReq('http://x/api/cron/cs-settle'),
-    );
-    expect(response.status).toBe(200);
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(dbMock.user.findMany).not.toHaveBeenCalled();
-  });
-
-  it('部分失败时保留 500 语义，不对已提交周期二次派发', async () => {
-    const settled = [
-      {
-        commissionId: 'c1',
-        periodId: 'p1',
-        csUserId: 'u1',
-        totalSales: '300000.00',
-        tierRate: '0.03',
-        commissionAmount: '9000.00',
-        monthlyBaseTotal: '20000.00',
-        totalIncome: '29000.00',
-        nextPeriodId: 'p1-next',
-      },
-    ];
-    settleReadyCsMock.mockRejectedValue(
-      new MockCsBatchUnexpectedError({ settled, errors: [] }),
-    );
-    dbMock.user.findMany.mockResolvedValue([
-      { id: 'u1', displayName: 'CS 张' },
-    ]);
-
-    const response = await csSettlePost(
-      authedReq('http://x/api/cron/cs-settle'),
-    );
-
-    expect(response.status).toBe(500);
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(dbMock.user.findMany).not.toHaveBeenCalled();
-  });
-
-  it('部分失败不会在 cron 层额外查人或用 user id 再发一次', async () => {
-    const settled = [
-      {
-        commissionId: 'c1',
-        periodId: 'p1',
-        csUserId: 'u1',
-        totalSales: '300000.00',
-        tierRate: '0.03',
-        commissionAmount: '9000.00',
-        monthlyBaseTotal: '20000.00',
-        totalIncome: '29000.00',
-        nextPeriodId: 'p1-next',
-      },
-    ];
-    settleReadyCsMock.mockRejectedValue(
-      new MockCsBatchUnexpectedError({ settled, errors: [] }),
-    );
-    dbMock.user.findMany.mockRejectedValue(new Error('database unavailable'));
-    const response = await csSettlePost(
-      authedReq('http://x/api/cron/cs-settle'),
-    );
-
-    expect(response.status).toBe(500);
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(dbMock.user.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -356,74 +199,6 @@ describe('POST /api/cron/outsource-overdue → OUTSOURCE_OVERDUE', () => {
     const body = (await res.json()) as { status: string; message: string };
     expect(body.status).toBe('error');
     expect(body.message).not.toContain('connection lost');
-  });
-});
-
-// ─── /api/cron/cs-period-ending (NEW) ───
-
-describe('POST /api/cron/cs-period-ending → CS_PERIOD_ENDING', () => {
-  it('rows[N] → N 条 CS_PERIOD_ENDING notify（用 salesForTier 不是 totalSales）', async () => {
-    getEndingPeriodsMock.mockResolvedValue([
-      {
-        id: 'p1',
-        csUserId: 'u1',
-        csDisplayName: 'CS 张',
-        periodStart: new Date('2026-01-01T00:00:00Z'),
-        periodEnd: new Date('2026-04-30T00:00:00Z'),
-        durationMonths: 4,
-        // 关键：totalSales=200k 但 initialSales=100k → salesForTier=300k
-        // 命中最高档；只发 totalSales 会让消息&ldquo;业绩 200k&rdquo;但实际命中
-        // 300k 档位的提成（Codex round 112 medium）。
-        totalSales: '200000.00',
-        initialSales: '100000.00',
-        salesForTier: '300000.00',
-        monthlyBase: '5000.00',
-        daysUntilEnd: 3,
-        predictedCommission: '9000.00',
-        predictedTotalIncome: '29000.00',
-        predictedBelowAllTiers: false,
-      },
-    ]);
-    const res = await csPeriodEndingPost(
-      authedReq('http://x/api/cron/cs-period-ending'),
-    );
-    expect(res.status).toBe(200);
-    expect(dispatchMock).toHaveBeenCalledTimes(1);
-    expect(dispatchMock).toHaveBeenCalledWith(
-      'CS_PERIOD_ENDING',
-      {
-        periodId: 'p1',
-        csName: 'CS 张',
-        daysLeft: 3,
-        // **salesForTier 千分位**，不是 totalSales 千分位
-        totalSales: '300,000.00',
-      },
-      {
-        dedupeKey: expect.stringMatching(
-          /^notification:CS_PERIOD_ENDING:\d{4}-\d{2}-\d{2}:p1$/,
-        ),
-        // 批量扇出按循环下标摊开 availableAt，压在企业微信 20 条/分钟
-        // 之下（lib/background-jobs/notification.ts FANOUT_SPACING_MS）。
-        // 第一条是 0，不会被推迟。
-        spreadIndex: 0,
-      },
-    );
-  });
-
-  it('rows empty → 不触发', async () => {
-    getEndingPeriodsMock.mockResolvedValue([]);
-    await csPeriodEndingPost(
-      authedReq('http://x/api/cron/cs-period-ending'),
-    );
-    expect(dispatchMock).not.toHaveBeenCalled();
-  });
-
-  it('401 路径', async () => {
-    expect(
-      (await csPeriodEndingPost(unauthedReq('http://x/api/cron/cs-period-ending')))
-        .status,
-    ).toBe(401);
-    expect(dispatchMock).not.toHaveBeenCalled();
   });
 });
 

@@ -43,6 +43,7 @@ vi.mock('@/generated/prisma/client', async () => ({
 }));
 vi.mock('@/lib/db', () => ({ db: {} }));
 vi.mock('next/link', () => ({
+  useLinkStatus: () => ({ pending: false }),
   __esModule: true,
   default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => {
     void prefetch;
@@ -207,7 +208,6 @@ function referenceRows(): AdminOrderWorkspaceRow[] {
     id: 'reference-ready',
     orderNo: 'GD-20260828-3121',
     customName: '新春平安封 四款',
-    customer: { id: 'customer-1', name: '福明盛业', filterValue: '福明盛业' },
     submitter: { id: 'sales-1', name: '代理·邱南京' },
     status: OrderStatus.PENDING_FACTORY,
     statusSummary: '预检通过，可确认',
@@ -276,7 +276,6 @@ function row(): AdminOrderWorkspaceRow {
     revision: 4,
     workOrderVersion: 2,
     customName: '端午定制',
-    customer: { id: 'party-1', name: '客户甲', filterValue: '客户甲' },
     submitter: { id: 'sales-1', name: '业务员甲' },
     status: OrderStatus.CONFIRMED,
     statusSummary: null,

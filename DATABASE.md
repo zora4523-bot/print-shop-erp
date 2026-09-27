@@ -47,10 +47,12 @@ Schema 中的模型按以下业务域组织；字段、关系、索引和约束�
 | 生产与外协 | `ProductionTask`、`OutsourceOrder`、`OutsourceOrderItemSnapshot`、`OutsourcePayment` |
 | 定价 | `PriceTier`、`PriceAdjustment`、`CustomerPriceBook`、`CustomerPriceRule`、`OrderCustomerCharge` |
 | BOM、库存与采购 | `BillOfMaterial`、`Material`、`Warehouse`、`MaterialLocationStock`、`MaterialTransaction`、`InventoryCount`、`PurchaseOrder`、`PurchaseReceipt` |
-| 薪资与考勤 | `SalaryRule`、`WorkerMachineSalaryRule`、`DailyWorkerSalary`、`SalaryPeriod`、`CustomerServiceCommission`、`HourlyWorkerPayroll`、`Attendance` |
+| 薪资与考勤 | `SalaryRule`、`WorkerMachineSalaryRule`、`DailyWorkerSalary`、`HourlyWorkerPayroll`（只读打包历史存档）、`Attendance` |
 | 账单与成本 | `Bill`、`BillPayment`、`BillItem`、`OrderCostEntry` |
 | 通知与任务 | `NotificationChannel`、`NotificationRule`、`NotificationLog`、`BackgroundJob`、`BackgroundJobAttempt`、`BackgroundWorkerHeartbeat` |
 | 系统配置 | `Setting`、业务编号序列模型 |
+
+`DesignBundle.accessTokenHash` 只保存 CDR 外部下载 token 的 SHA-256；`zipObjectKey` 保存服务端生成的 bundles 对象键，公开路由只在 token 校验后签发短期下载地址。
 
 ## 数据类型与历史正确性
 
@@ -93,11 +95,11 @@ Seed 不是通用发布后修复脚本。生产首次部署后的变更走 migra
 任一款计价不完整或金额/分货不守恒会整批回滚。它不修改已有价格历史、账号、已完成工单或正式 seed，
 已补齐工单也不会再次覆盖。备份用于核对原始资料；已有不可变报价不能通过删除快照回退，应保留测试审计记录。
 
-- [`seedDashboardSnapshot`](./tests/e2e/_helpers.ts) 每次运行生成独立的 `e2e-dash-<runId>` 命名空间，只追加本轮测试所需的数据。销售与客服 fixture 从角色匹配的 `e2e-*` 来源账号创建独立、停用的用户；不能借此克隆真实账号或产生可登录的新账号。
+- [`seedDashboardSnapshot`](./tests/e2e/_helpers.ts) 每次运行生成独立的 `e2e-dash-<runId>` 命名空间，只追加本轮测试所需的数据。销售 fixture 从角色匹配的 `e2e-*` 来源账号创建独立、停用的用户；不能借此克隆真实账号或产生可登录的新账号。
 - 工作台 fixture 的用户、工单、账单、外协、周期和可选图表数据在同一事务中写入；任一步失败则整体回滚。重试创建新的命名空间，不删除或重写既有工单、账本、工资支付、价格快照或共享账号的历史记录。
 - 测试应在完整关注列表中按本轮返回的记录 ID 查找，必要时翻页；不能为了使待办总数或第一屏顺序固定而清空历史数据。追加的数据随专用、可丢弃测试数据库的生命周期管理，不把该 helper 当作共享开发库的数据清理工具。
-- [`worker-ui-fixture.ts`](./tests/visual/worker-ui-fixture.ts) 为每个视口命名空间创建独立、停用的客服用户，避免争用同一客服只能有一个进行中周期的约束。客服展示周期使用 `2098-01-01` 至 `2098-04-30`，工单展示交期使用 `2099-12-31`，使展示 fixture 不进入当前临近结算、过期结算或交期提醒窗口。
-- 响应式 fixture 的工资日期也放在 2098 年。客服展示业绩使用期初金额，不伪造业绩事件账本；重建时只按该命名空间的明确 ID 清理自有数据，不按共享用户或全表删除。若自有记录出现新的账本引用，应检查引用与测试生命周期，不绕过外键约束。
+- [`worker-ui-fixture.ts`](./tests/visual/worker-ui-fixture.ts) 的工单展示交期使用 `2099-12-31`，使展示 fixture 不进入当前交期提醒窗口。
+- 响应式 fixture 的工资日期也放在 2098 年。重建时只按该命名空间的明确 ID 清理自有数据，不按共享用户或全表删除。若自有记录出现新的账本引用，应检查引用与测试生命周期，不绕过外键约束。
 
 工作台追加隔离与事务失败回滚由
 [`dashboard-fixture-isolation.test.ts`](./tests/regression/dashboard-fixture-isolation.test.ts)
@@ -171,6 +173,11 @@ pnpm test:migrations:fresh
 
 ## 安全检查
 
+`DesignBundle.accessTokenHash` 只保存 256 位随机下载令牌的 SHA-256 摘要；
+`downloadUrlCiphertext` 使用 `AUTH_SECRET` 加密管理员历史页需要展示的原始链接，
+`zipObjectKey` 保存受控对象键而不是长期 OSS 签名 URL。`revokedAt` 用于令牌失效
+校验；下载接口始终在令牌校验通过后重新签发短时对象存储 URL。
+
 - `.env` 不进 Git；输出或截图中隐藏连接串和密码。
 - 开发、E2E、fresh DB 和生产使用不同数据库身份与连接串。
 - 运行迁移、seed、Studio 或测试前先确认 `DATABASE_URL` 的 host、database 和 user。
@@ -216,7 +223,7 @@ pnpm db:studio
 
 手工表单携带服务端生成的请求键，仅在成功响应后换新键；网络失败重试沿用原键。服务在事务内先锁请求、核对操作者与规范化业务内容的摘要，再锁定物料和库位更新库存、写流水及通知 outbox。同键同内容返回首次流水，不再更新余额或发送预警；同键不同内容拒绝。上线前必须先应用前向迁移，不能只部署新的 Prisma Client。
 
-已发时薪再次提交同一“已发”状态时保留原 `paidAt` 和 `updatedAt`，不能把重试时间写成首次发放时间。验证与候选状态见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
+（2026-09-11 当时的行为，2026-09-24 起时薪月结不再生成、重算或标记发放，打包历史月结只读：）已发时薪再次提交同一“已发”状态时保留原 `paidAt` 和 `updatedAt`，不能把重试时间写成首次发放时间。验证与候选状态见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
 
 ## 2026-09-15 样品用途与整单价
 
@@ -292,3 +299,34 @@ pnpm db:studio
 
 
 2026-09-21 审查补充：上述两条迁移已在本机日常库应用，不修改其 SQL 或校验和。升级入口先检查全部存量 STOCK_BASE 身份重复、旧语义零价与产品文本漂移，再持有价目排他 advisory lock 执行这两条迁移；详见[部署指南](./docs/部署指南.md#空白封按单价管理的升级前置2026-09-20)。此保护不能追溯修复已失败的迁移，也不代表正式库数据已通过。用料估算遇纸张身份冲突或默认分类异常时逐款返回“未估算”及原因，正常款式照常计算，汇总明确仅含已估算款式；不猜测物料或把异常算作零用量。
+
+## 报工代次插入保护（2026-09-21）
+
+增量迁移 `20260921100000_production_report_generation_guard` 对 ProductionReport 的新 REPORT 与全部 ProductionProgressReport 新增 BEFORE INSERT 闸口：从父工序/步骤读取工单，在 order-cascade advisory lock 下比较父代次与工单当前版本。触发器排序在既有工序行锁之前。报工表本身没有 orderId/workOrderVersion，不能直接套用父表触发函数。历史 REVERSAL/ADJUSTMENT 继续走已有锚点、管理员与结算保护，不把工资纠错当作旧代追加生产。迁移可重复执行，不更新历史行、不修改既有迁移。
+
+## 删除客服 / 清废厨师与脱敏策略清理（2026-09-24）
+
+业主 2026-09-24 决定（DECISIONS 同日、SPEC §L）由三条前向迁移落地，迁移链共 165 条：
+
+- `20260924100000_remove_cleaner_cook_cleaning`：`WorkerType` 只剩 `MACHINE | PACKER`；删除
+  `SalaryRuleType.COOK_SALARY`、`CLEANING` 工艺及其能力行、规则 `CLEANER_HOURLY` / `COOK_SPARE_HOURLY` /
+  `OT_MULTIPLIER`，删除列 `Attendance.spareHours`、`HourlyWorkerPayroll.totalSpareHours` / `spareSalary`
+  并重建 `HourlyWorkerPayroll_component_total_reconciles`（`totalSalary = baseSalary + otSalary`）；
+  排队中的 `CRON_HOURLY_PAYROLL` 任务标记 `CANCELLED`（`lastErrorCode = JOB_TYPE_REMOVED`）。
+- `20260924110000_remove_customer_service_role`：`Role` 只剩 `ADMIN | SALES | WORKER`；
+  `OrderSettlementType` 只剩 `EXTERNAL_SALES | NO_CHARGE`；删除 `SalaryRuleType.CS_COMMISSION` 及其规则行、
+  `SalaryPeriod` / `CsSalesEntry` / `CustomerServiceCommission` / `CsPayrollPayment` 四张表与
+  `SalaryPeriodStatus` / `CsSalesEntryType` 枚举、`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED` 通知规则；
+  排队中的客服 cron 与客服通知任务标记 `CANCELLED`；重建 `Order_protect_billed_settlement` 触发器与相关
+  CHECK 约束，`Order_settlement_role_consistent` 收紧为收费单必须 `SALES + EXTERNAL_SALES`。
+- `20260924150000_prune_removed_sensitive_column_policies`：删除 `app_ops.sensitive_column_policy` 中指向
+  上述已删列 / 表的 10 条策略（`HourlyWorkerPayroll.spareSalary`、`SalaryPeriod` 3 列、
+  `CustomerServiceCommission` 6 列），且只在对应列确已不存在时删除，可重复执行。否则
+  `app_ops.security_extension_readiness` 会持续报 `sensitive_policy_references_missing_columns`。
+
+前两条迁移是 fail closed：任何业务数据（账号、工单身份与结算快照、价格修订快照、价目簿、考勤快照、
+审计日志、四张客服表中的数据、工艺 / 派工 / 日工资明细 / 待审改单 / 进度步骤对 `CLEANING` 的引用、
+运行中的相关任务）仍引用被删除的值时 `RAISE` 中止并整体回滚，不静默改写历史。已结束的历史任务与
+通知日志保留为运行记录，应用层不再允许重试 / 重发（见 API.md「已删除功能的历史任务与通知」）。
+生产执行前的只读预查 SQL 见 [部署指南](./docs/部署指南.md#删除客服--清废厨师的三条迁移2026-09-24)。
+以后删除列或表时，同一迁移或紧随的前向迁移必须清理对应脱敏策略。

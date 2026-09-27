@@ -5,11 +5,8 @@ import { spawn } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const EXPECTED_ENDPOINTS = [
-  'cs-period-ending',
-  'cs-settle',
   'daily-salary',
   'generate-bills',
-  'hourly-payroll',
   'order-export-cleanup',
   'order-overdue',
   'outsource-overdue',
@@ -164,3 +161,56 @@ function runCronWithUrl(
     child.once('close', (code: number | null) => resolveRun({ code, stderr }));
   });
 }
+
+it('runs every cron line on Shanghai time', async () => {
+  const cron = await readFile(resolve('deploy/crontab.example'), 'utf8');
+  expect(cron).toMatch(/^CRON_TZ=Asia\/Shanghai$/m);
+  expect(cron).not.toMatch(/cs-settle|cs-period-ending/);
+});
+
+it('keeps the deployment guide crontab template in sync with deploy/crontab.example', async () => {
+  const [cron, guide] = await Promise.all([
+    readFile(resolve('deploy/crontab.example'), 'utf8'),
+    readFile(resolve('docs/部署指南.md'), 'utf8'),
+  ]);
+  const scheduleLines = (text: string) =>
+    Array.from(
+      text.matchAll(/^(\S+ \S+ \S+ \S+ \S+) \/usr\/local\/sbin\/print-shop-erp-cron ([a-z-]+)$/gm),
+      (match) => `${match[1]} ${match[2]}`,
+    ).sort();
+  expect(scheduleLines(guide)).toEqual(scheduleLines(cron));
+  expect(scheduleLines(cron)).toHaveLength(EXPECTED_ENDPOINTS.length);
+});
+
+it('runs bill generation after the Shanghai month boundary and no hourly payroll', async () => {
+  const cron = await readFile(resolve('deploy/crontab.example'), 'utf8');
+  expect(cron).not.toMatch(/hourly-payroll/);
+  expect(cron).toMatch(/^40 0 1 \* \* .* generate-bills$/m);
+});
+
+it.each([
+  [{ created: false, requeued: false }, 'skipped (duplicate scope)', 0],
+  [{ created: true, requeued: false }, 'queued successfully', 0],
+  [{ created: false, requeued: true }, 'queued successfully', 0],
+  [{ status: 'queued' }, 'invalid enqueue response', 1],
+])('classifies cron enqueue response %j', async (body, message, code) => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'cron-response-'));
+  try {
+    const runner = await readFile(resolve('deploy/run-cron.sh'), 'utf8');
+    const bodyFile = resolve(directory, 'body.json');
+    await writeFile(bodyFile, JSON.stringify(body));
+    // Execute the real response-handling shell; stub only syslog, with no HTTP/secret access.
+    const script = 'logger() { printf "%s\\n" "$*"; }\nendpoint=test\nstatus=202\nbody_file="$1"\n' + runner.slice(runner.indexOf('if [ "$status" != "202" ]'));
+    const scriptFile = resolve(directory, 'response.sh');
+    await writeFile(scriptFile, script);
+    const result = await new Promise<{ code: number | null; output: string }>((done, reject) => {
+      const child = spawn('sh', [scriptFile, bodyFile]);
+      let output = '';
+      child.stdout.on('data', chunk => { output += chunk; });
+      child.once('error', reject);
+      child.once('close', code => done({ code, output }));
+    });
+    expect(result.code).toBe(code);
+    expect(result.output).toContain(message);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

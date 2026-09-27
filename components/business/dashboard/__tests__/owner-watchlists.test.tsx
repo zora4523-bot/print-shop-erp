@@ -4,17 +4,16 @@ import { describe, expect, it } from 'vitest';
 import { OrderStatus, OutsourceStatus } from '@/generated/prisma/enums';
 import type {
   DueOrderRow,
-  EndingPeriodRow,
   OverdueOutsourceRow,
   OverReportRow,
   PendingShipmentRow,
 } from '@/lib/dashboard/owner-watchlist';
 import {
   DueOrdersWatchlist,
-  EndingPeriodsWatchlist,
   OverdueOutsourcingWatchlist,
   OverReportsWatchlist,
   PendingShipmentsWatchlist,
+  dueOrderColumns,
   overReportColumns,
   pendingShipmentColumns,
 } from '../OwnerWatchlists';
@@ -26,11 +25,11 @@ function pendingRow(index: number): PendingShipmentRow {
   return {
     id: `shipment-${index}`,
     orderNo: `待发编号-${index}`,
-    customerRef: `待发客户-${index}`,
+    customName: `待发名称-${index}`,
     isUrgent: index === 1,
     completedAt: new Date('2026-09-07T15:59:00Z'),
     promisedDate: new Date('2026-09-08T00:00:00Z'),
-    submitterDisplayName: '提交人小王',
+    externalSalesName: '外部销售小王',
   };
 }
 
@@ -38,7 +37,8 @@ function dueRow(index: number): DueOrderRow {
   return {
     id: `due-${index}`,
     orderNo: `交期编号-${index}`,
-    customerRef: `交期客户-${index}`,
+    customName: `交期名称-${index}`,
+    externalSalesName: '外部销售小李',
     status: OrderStatus.FOILING,
     isUrgent: false,
     promisedDate: new Date('2026-09-07T00:00:00Z'),
@@ -69,25 +69,6 @@ function overReportRow(index: number): OverReportRow {
   };
 }
 
-function endingRow(index: number): EndingPeriodRow {
-  return {
-    id: `period-${index}`,
-    csUserId: `cs-${index}`,
-    csDisplayName: `结算客服-${index}`,
-    periodStart: new Date('2026-06-08T00:00:00Z'),
-    periodEnd: new Date('2026-09-08T00:00:00Z'),
-    durationMonths: 3,
-    totalSales: '1234.56',
-    initialSales: '100.00',
-    salesForTier: '1334.56',
-    monthlyBase: '2000.00',
-    daysUntilEnd: 0,
-    predictedCommission: '123.45',
-    predictedTotalIncome: '6123.45',
-    predictedBelowAllTiers: false,
-  };
-}
-
 const indices = [1, 2, 3, 4, 5];
 const scenarios: Array<{
   kind: string;
@@ -97,7 +78,7 @@ const scenarios: Array<{
   render: (empty: boolean) => Promise<ReactNode>;
 }> = [
   {
-    kind: 'shipments', label: '待发客户', count: 12, emptyText: '暂无待发货工单',
+    kind: 'shipments', label: '待发名称', count: 12, emptyText: '暂无待发货工单',
     render: (empty) => PendingShipmentsWatchlist({
       now: NOW,
       resultPromise: Promise.resolve({
@@ -107,7 +88,7 @@ const scenarios: Array<{
     }),
   },
   {
-    kind: 'due', label: '交期客户', count: 12, emptyText: '暂无交期风险工单',
+    kind: 'due', label: '交期名称', count: 12, emptyText: '暂无交期风险工单',
     render: (empty) => DueOrdersWatchlist({
       resultPromise: Promise.resolve({
         ...pagination, rows: empty ? [] : indices.map(dueRow),
@@ -128,12 +109,6 @@ const scenarios: Array<{
         ...pagination, rows: empty ? [] : indices.map(overReportRow),
         total: empty ? 0 : 12, sinceYmd: '2026-09-02',
       }),
-    }),
-  },
-  {
-    kind: 'settlements', label: '结算客服', count: 5, emptyText: '未来 7 天无客服周期到期',
-    render: (empty) => EndingPeriodsWatchlist({
-      resultPromise: Promise.resolve(empty ? [] : indices.map(endingRow)),
     }),
   },
 ];
@@ -157,18 +132,39 @@ describe('工作台关注列表预览', () => {
     expect(html).not.toContain('查看全部');
   });
 
-  it('待发货突出上海跨日等待、客户与承诺交期，提交人保留在完整列表', async () => {
+  it('待发货突出上海跨日等待、工单名称与承诺交期，外部销售保留在完整列表', async () => {
     const html = renderToStaticMarkup(await scenarios[0].render(false));
     expect(html).toContain('完工后待发 1 天');
     expect(html).toContain('今日到期');
     expect(html).toContain('2026/09/08');
     expect(html).toContain('href="/orders/shipment-1"');
-    expect(html).toContain('待发客户-1');
+    expect(html).toContain('待发名称-1');
     expect(html).toContain('待发编号-1');
-    expect(html).not.toContain('提交人小王');
+    expect(html).not.toContain('外部销售小王');
     const columns = pendingShipmentColumns(NOW);
-    expect(columns.map(column => column.header)).toContain('提交人');
-    expect(columns.map(column => column.header)).not.toContain('跟进人');
+    expect(columns.map(column => column.header)).toEqual(['工单', '承诺交期', '待发时长', '外部销售']);
+    const salesCell = columns.find(column => column.header === '外部销售');
+    if (!salesCell) throw new Error('完整列表缺少外部销售列');
+    expect(renderToStaticMarkup(<>{salesCell.cell(pendingRow(1))}</>)).toBe('外部销售小王');
+    expect(renderToStaticMarkup(<>{salesCell.cell({ ...pendingRow(1), externalSalesName: null })}</>)).toBe('未填');
+  });
+
+  it('交期完整列表同样按工单名称指认，并列出外部销售', () => {
+    expect(dueOrderColumns.map(column => column.header)).toEqual(['工单', '当前阶段', '承诺交期', '外部销售']);
+    const salesCell = dueOrderColumns.find(column => column.header === '外部销售');
+    if (!salesCell) throw new Error('完整列表缺少外部销售列');
+    expect(renderToStaticMarkup(<>{salesCell.cell(dueRow(1))}</>)).toBe('外部销售小李');
+    const identity = renderToStaticMarkup(<>{dueOrderColumns[0].cell(dueRow(1))}</>);
+    expect(identity).toContain('交期名称-1');
+    expect(identity).toContain('交期编号-1');
+  });
+
+  it('未填工单名称时只显示一次工单号，不留空的次行', () => {
+    const identity = pendingShipmentColumns(NOW)[0];
+    const html = renderToStaticMarkup(<>{identity.cell({ ...pendingRow(1), customName: '  ' })}</>);
+    expect(html.match(/待发编号-1/g)).toHaveLength(1);
+    expect(html).not.toContain('待发名称');
+    expect(html).not.toContain('text-muted-foreground');
   });
 
   it('未设置交期明确展示缺失，不生成日期', async () => {
@@ -179,16 +175,6 @@ describe('工作台关注列表预览', () => {
     }));
     expect(html).toContain('未设交期');
     expect(html).not.toContain('今日到期');
-  });
-
-  it('结算预览保留客服、到期与详情入口，预测金额留在周期详情', async () => {
-    const html = renderToStaticMarkup(await scenarios[4].render(false));
-    expect(html).toContain('href="/owner/salary/cs/period-1"');
-    expect(html).toContain('截至 2026/09/08');
-    expect(html).toContain('今日到期');
-    expect(html).not.toContain('1234.56');
-    expect(html).not.toContain('123.45');
-    expect(html).not.toContain('6123.45');
   });
 
   it('读取失败继续抛给区域错误边界，不能伪装成空态', async () => {

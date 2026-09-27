@@ -108,3 +108,14 @@ describe('nginx.conf.example 登录限流契约', () => {
     }
   });
 });
+
+describe('nginx.conf.example CDR 下载 token 不落访问日志', () => {
+  it('HTTPS server 的 access_log 使用遮蔽 CDR token 的 erp_redacted 格式', () => {
+    // /api/cdr/bundles/<token> 的路径即凭证；默认 combined 格式会把它写进 access.log。
+    expect(conf).toMatch(/~\^\/api\/cdr\/bundles\/\s+\/api\/cdr\/bundles\/\[token\];/);
+    expect(conf).toMatch(/log_format\s+erp_redacted[^;]*\$erp_log_uri[^;]*;/);
+    expect(conf).not.toMatch(/log_format\s+erp_redacted[^;]*\$request_uri/);
+    expect(conf).not.toMatch(/log_format\s+erp_redacted[^;]*"\$request"/);
+    expect(httpsServer).toMatch(/access_log\s+\S+\s+erp_redacted;/);
+  });
+});

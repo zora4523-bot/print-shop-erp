@@ -2,7 +2,7 @@
 export function canEditAllOrderFees(order: {
   status: string; settlementType: unknown; settledFee?: unknown; settledAt?: unknown;
 }): boolean {
-  return typeof order.settlementType === 'string' && ['EXTERNAL_SALES', 'INTERNAL_SALES', 'FACTORY_DIRECT'].includes(order.settlementType) && order.settledFee == null && order.settledAt == null &&
+  return order.settlementType === 'EXTERNAL_SALES' && order.settledFee == null && order.settledAt == null &&
     ['PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED', 'ON_HOLD', 'RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION', 'COMPLETED', 'SHIPPED'].includes(order.status);
 }
 

@@ -14,7 +14,7 @@ import {
 // 然后访问 downloadUrl，断言 mock-mode 下以通用运维文案返回 503，
 // 不向用户泄露具体的存储供应商或配置细节。
 //
-// CRON_SECRET 用了同一份 .env；CDR 路由不需要 secret（24h cuid token
+// CRON_SECRET 用了同一份 .env；CDR 路由不需要登录态（256-bit 随机 token
 // + Proxy 排除 api/cdr）。
 
 test.describe('CDR 汇总下载 — golden path', () => {
@@ -62,13 +62,13 @@ test.describe('CDR 汇总下载 — golden path', () => {
       .first();
     await expect(downloadLink).toBeVisible();
     const downloadHref = await downloadLink.getAttribute('href');
-    expect(downloadHref).toMatch(/^https?:\/\/.+\/api\/cdr\/bundles\/[a-z0-9]+$/);
+    expect(downloadHref).toMatch(/^https?:\/\/.+\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
     const linkText = await downloadLink.textContent();
     expect(linkText).toBe(downloadHref);
     // 提取 path 部分用于真访问
     const url = new URL(downloadHref!);
     const relativePath = url.pathname;
-    expect(relativePath).toMatch(/^\/api\/cdr\/bundles\/[a-z0-9]+$/);
+    expect(relativePath).toMatch(/^\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
 
     // 真去访问 downloadUrl —— mock-mode zipFileUrl 形如 mock://...，
     // 路由识别后返 503（不是 404，不是 redirect 到 mock://）。
@@ -77,9 +77,9 @@ test.describe('CDR 汇总下载 — golden path', () => {
     const body = await res.json();
     expect(body.error).toBe('CDR 下载暂不可用，请联系管理员');
 
-    // 不存在的 bundle id → 404（与&ldquo;过期&rdquo;不区分文案；round 119 medium）
+    // 不存在的 token → 404（与“过期”不区分文案）。
     const fake = await request.get(
-      '/api/cdr/bundles/cknotrealid000000000000000',
+      `/api/cdr/bundles/${'B'.repeat(43)}`,
     );
     expect(fake.status()).toBe(404);
     const fakeBody = await fake.json();

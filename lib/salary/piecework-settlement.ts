@@ -10,6 +10,7 @@ import { parseStrictYmd } from '../auth/schemas';
 import { todayShanghai } from '../dashboard/shanghai-clock';
 import { db } from '../db';
 import { shanghaiDayRange } from './daily-common';
+import { reportUsesTieredFoilWage } from './tiered-foil-report';
 import {
   pieceworkReportingDayGateLockKey,
   pieceworkSettlementLockKey,
@@ -205,12 +206,15 @@ export async function getPieceworkSettlementDay(input: {
 
 export async function getPieceworkSettlementDetail(
   settlementId: string,
-  reporterId?: string,
+  actor: { id: string; role: Role },
 ) {
+  if (!actor?.id || (actor.role !== Role.ADMIN && actor.role !== Role.WORKER)) {
+    throw new Error('无权查看计件结算');
+  }
   return db.pieceworkSettlement.findFirst({
     where: {
       id: settlementId,
-      ...(reporterId ? { reporterId } : {}),
+      ...(actor.role === Role.ADMIN ? {} : { reporterId: actor.id }),
     },
     select: {
       id: true,
@@ -488,10 +492,8 @@ export async function lockPieceworkSettlement(input: {
     // Fixed fees can still need redistribution while another worker may report.
     // Published rules, rather than optional JSON metadata, identify tiered wages.
     const unfinished = reports.some((report) =>
-      report.operation.operationType !== 'PACKING' &&
       report.operation.status !== 'COMPLETED' && report.operation.status !== 'CANCELLED' &&
-      report.priceBook.rules.some((rule) => rule.operationType === report.operation.operationType &&
-        rule.unit === report.unit && rule.smallOrderAmount !== null),
+      reportUsesTieredFoilWage(report.operation.operationType, report),
     );
     if (unfinished) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '分档烫金工序尚未结束，请待工序完成或取消并核定提成后结算');
     const aggregate = aggregatePieceworkSettlementReports(reports);

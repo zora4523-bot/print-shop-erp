@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type MouseEvent, type ReactNode } from 'react';
-import Link from 'next/link';
+import { useEffect, useRef } from 'react';
 
 function replaceListState(values: {
   selectedOrderId?: string;
@@ -80,9 +79,8 @@ export function OrderListScrollState({
   useEffect(() => {
     let frame = 0;
     const persistNow = () => {
-      // A detail link updates `selected` synchronously immediately before
-      // navigation. Read the live history entry here so `pagehide` cannot
-      // overwrite that newer selection with this component's older prop.
+      // Read the live history entry here so `pagehide` cannot overwrite a
+      // newer `selected` value with this component's older prop.
       const liveSelected =
         new URL(window.location.href).searchParams.get('selected') ??
         selectedOrderId;
@@ -105,46 +103,4 @@ export function OrderListScrollState({
   }, [selectedOrderId]);
 
   return null;
-}
-
-export function OrderListDetailLink({
-  orderId,
-  href,
-  className,
-  children,
-}: {
-  orderId: string;
-  href: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  function rememberSelection(event: MouseEvent<HTMLAnchorElement>) {
-    if (
-      event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    ) {
-      return;
-    }
-    replaceListState({ selectedOrderId: orderId, scrollY: window.scrollY });
-    // Browser back may restore the list from the back/forward cache instead of
-    // asking the Server Component to render again. Persist the visual state in
-    // that DOM snapshot as well as in the URL so the operator returns to an
-    // immediately highlighted row in both navigation paths.
-    markSelectedOrderRow(orderId);
-  }
-
-  return (
-    <Link
-      href={href}
-      prefetch={false}
-      className={className}
-      onClick={rememberSelection}
-    >
-      {children}
-    </Link>
-  );
 }

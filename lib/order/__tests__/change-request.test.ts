@@ -69,8 +69,6 @@ const mocks = vi.hoisted(() => {
       findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), findMany: vi.fn(),
     },
     orderLog: { create: vi.fn() },
-    csSalesEntry: { aggregate: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
-    salaryPeriod: { findFirst: vi.fn(), update: vi.fn() },
   };
   return {
     db,
@@ -976,8 +974,6 @@ function expectNoApprovalMutation(): void {
     mocks.db.productionProgressStep.updateMany,
     mocks.db.orderChangeRequest.update,
     mocks.db.orderLog.create,
-    mocks.db.csSalesEntry.create,
-    mocks.db.salaryPeriod.update,
     mocks.db.backgroundJob.updateMany,
     mocks.db.notificationLog.updateMany,
     mocks.appendRevision,
@@ -1394,7 +1390,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
     mocks.db.product.findMany.mockResolvedValue([
@@ -1446,7 +1442,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
     mocks.db.product.findMany.mockResolvedValue(products);
@@ -1481,7 +1477,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 3,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
 
@@ -1500,7 +1496,7 @@ describe('createOrderChangeRequest', () => {
     mocks.db.order.findUnique.mockResolvedValue({
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
-      items: [item()], changeRequests: [], packagingGroups: [],
+      items: [item()], changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [],
     });
 
@@ -1518,7 +1514,7 @@ describe('createOrderChangeRequest', () => {
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
       items: [item()],
-      changeRequests: [], packagingGroups: [], productionOperations: [],
+      changeRequests: [], shipments: [], packagingGroups: [], productionOperations: [],
     });
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-1' });
 
@@ -1551,7 +1547,7 @@ describe('createOrderChangeRequest', () => {
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.SUBMITTED, revision: 2, workOrderVersion: 1,
       items: [item()],
-      changeRequests: [], packagingGroups: [], productionOperations: [],
+      changeRequests: [], shipments: [], packagingGroups: [], productionOperations: [],
     });
     mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'request-off' });
 
@@ -1569,7 +1565,7 @@ describe('createOrderChangeRequest', () => {
       id: 'order-1', orderNo: 'GD-1', submitterId: 'sales-1',
       status: OrderStatus.IN_PRODUCTION, revision: 2, workOrderVersion: 1,
       items: [item()],
-      changeRequests: [], packagingGroups: [],
+      changeRequests: [], shipments: [], packagingGroups: [],
       productionOperations: [{ id: 'op-1', reports: [{ id: 'report-1' }] }],
     };
     mocks.db.order.findUnique.mockResolvedValue(order);
@@ -1596,7 +1592,7 @@ describe('createOrderChangeRequest', () => {
       revision: 4,
       workOrderVersion: 4,
       items: [item()],
-      changeRequests: [],
+      changeRequests: [], shipments: [],
       packagingGroups: [],
       productionOperations: [
         { id: 'op-v1', reports: [{ id: 'report-v1' }] },
@@ -1630,6 +1626,57 @@ describe('createOrderChangeRequest', () => {
         }),
       }),
     );
+  });
+
+  describe('已有地址发货的待发货工单', () => {
+    const partlyShipped = () => [
+      { id: 'shipment-1', sequence: 1, destinationProvince: '广东', weightKg: new Decimal('2.000'), status: 'SHIPPED' },
+      { id: 'shipment-2', sequence: 2, destinationProvince: '湖南', weightKg: null, status: 'PLANNED' },
+    ];
+    const packingOrder = () => createRequestOrder({
+      status: OrderStatus.PACKING,
+      promisedDate: new Date('2026-09-10T00:00:00Z'),
+      shipments: partlyShipped(),
+    });
+
+    it('拒绝取消申请，不写申请记录', async () => {
+      mocks.db.order.findUnique.mockResolvedValue(packingOrder());
+      mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'cancel-1' });
+      await expect(createOrderChangeRequest({
+        orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+        type: 'CANCEL', reason: '客户不要剩余的货', items: [],
+      }, sales)).rejects.toThrow('工单已有地址发货，不能申请取消');
+      expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+      expect(mocks.db.orderLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: '改数量', items: [{ operation: 'UPDATE' as const, itemId: 'item-1', quantity: 1_200 }] },
+      { label: '改名称', items: [{ operation: 'UPDATE' as const, itemId: 'item-1', name: '改名红包' }] },
+    ])('$label申请被拒，已发货地址的分货不能被改写', async ({ items }) => {
+      mocks.db.order.findUnique.mockResolvedValue(packingOrder());
+      mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'modify-1' });
+      await expect(createOrderChangeRequest({
+        orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+        type: 'MODIFY', modifyKind: 'OTHER', reason: '客户加量', items,
+      }, sales)).rejects.toThrow('工单已有地址发货，只能申请修改交期');
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.create).not.toHaveBeenCalled();
+    });
+
+    it('只改交期仍可提交，并按发货状态读取地址', async () => {
+      mocks.db.order.findUnique.mockResolvedValue(packingOrder());
+      mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'due-date-request' });
+      await expect(createOrderChangeRequest(createOrderChangeRequestSchema.parse({
+        orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+        type: 'MODIFY', modifyKind: 'DUE_DATE', reason: '剩余地址延期', items: [], promisedDate: '2026-09-12',
+      }), sales)).resolves.toEqual({ id: 'due-date-request' });
+      expect(mocks.db.order.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+        select: expect.objectContaining({
+          shipments: expect.objectContaining({ select: expect.objectContaining({ status: true }) }),
+        }),
+      }));
+    });
   });
 });
 
@@ -2008,38 +2055,6 @@ describe('previewOrderChangeRequestPricing', () => {
         newTotal: '1308.00',
         delta: '200.00',
         totalExcludesPendingPlateFee: true,
-      });
-  });
-
-  it('内部非生产态预览与批准一致：旧制版 aggregate 归入重算而不保留', async () => {
-    const value = request({
-      order: {
-        ...request().order,
-        settlementType: OrderSettlementType.INTERNAL_SALES,
-        billingMode: OrderBillingMode.CHARGE,
-        status: OrderStatus.DRAFT,
-        processingAmount: new Decimal('1000.00'),
-        totalAmount: new Decimal('1100.00'),
-        customerCharges: [
-          {
-            id: 'plate-old',
-            shipmentId: null,
-            businessKey: PENDING_PLATE_BUSINESS_KEY,
-            priceBookId: null,
-            amount: new Decimal('100.00'),
-            overrideReason: '历史人工核价',
-            category: { code: 'PLATE_MAKING_FEE' },
-          },
-        ],
-      },
-    });
-    locate(value);
-
-    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves
-      .toMatchObject({
-        oldTotal: '1100.00',
-        newTotal: '1200.00',
-        delta: '100.00',
       });
   });
 
@@ -3671,12 +3686,40 @@ describe('cancellation settlement reference', () => {
     ).rejects.toThrow(/调整参考结算金额必须填写原因/);
     expect(mocks.db.order.update).not.toHaveBeenCalled();
   });
+
+  it('已有地址发货的待发货工单不能预览或批准取消，仍可驳回', async () => {
+    const value = request({ type: OrderChangeRequestType.CANCEL, proposedChanges: { items: [] }, order: {
+      ...request().order, status: OrderStatus.PACKING, workOrderVersion: 2, settledFee: null,
+      productionWorkOrderProgress: [], productionProgressSteps: [], outsourceOrders: [],
+      shipments: [
+        { id: 'shipment-1', sequence: 1, destinationProvince: '广东', weightKg: new Decimal('2.000'), status: 'SHIPPED' },
+        { id: 'shipment-2', sequence: 2, destinationProvince: '湖南', weightKg: null, status: 'PLANNED' },
+      ],
+    } });
+    locateCancellation(value);
+    // 已有地址发货即正常收费：连取消结算参考价都不给出。
+    await expect(previewOrderCancellationSettlement({ requestId: value.id, producedQty: 0 }, admin))
+      .rejects.toThrow('工单已有地址发货，不能批准取消，请驳回该申请');
+    locateCancellation(value);
+    await expect(reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      producedQty: 0, settleFee: '0.00', expectedPriceRevision: value.order.priceRevision, expectedQuoteToken: 'stale-token',
+    }, admin)).rejects.toThrow('工单已有地址发货，不能批准取消，请驳回该申请');
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+    expect(mocks.db.productionOperation.updateMany).not.toHaveBeenCalled();
+    expect(mocks.db.orderChangeRequest.update).not.toHaveBeenCalled();
+
+    locateCancellation(value);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'DENY', reviewRemark: '已有地址发货' }, admin);
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: OrderChangeRequestStatus.DENIED }),
+    }));
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('reviewOrderChangeRequest', () => {
   it.each([
     OrderSettlementType.EXTERNAL_SALES,
-    OrderSettlementType.INTERNAL_SALES,
   ])('%s 纯交期批准保留历史金额，不从不完整明细重建费用或业绩', async (settlementType) => {
     const value = request({
       proposedChanges: { items: [], promisedDate: '2026-09-20' },
@@ -3706,7 +3749,6 @@ describe('reviewOrderChangeRequest', () => {
     locate(value);
     mocks.db.orderItem.findMany.mockResolvedValue([]);
     mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: null } });
-    mocks.db.csSalesEntry.aggregate.mockResolvedValue({ _sum: { amount: new Decimal('3000.00') } });
 
     await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
 
@@ -3716,7 +3758,6 @@ describe('reviewOrderChangeRequest', () => {
     });
     expect(mocks.db.orderItem.findMany).not.toHaveBeenCalled();
     expect(mocks.db.orderCustomerCharge.aggregate).not.toHaveBeenCalled();
-    expect(mocks.db.csSalesEntry.create).not.toHaveBeenCalled();
     expect(mocks.calculate).not.toHaveBeenCalled();
     expect(mocks.appendRevision).not.toHaveBeenCalled();
     expect(mocks.db.orderLog.create).toHaveBeenCalledWith({
@@ -3759,6 +3800,27 @@ describe('reviewOrderChangeRequest', () => {
     expect(mocks.completion).toHaveBeenCalledTimes(paused ? 0 : 1);
   });
 
+  it.each([false, true])('待下发工单批准改单升版但不提前写下发时间 scheduledAt；暂停=%s', async (paused) => {
+    const value = request({ baseWorkOrderVersion: 2, proposedChanges: { items: [], promisedDate: '2026-09-20' },
+      order: { ...request().order, status: paused ? OrderStatus.ON_HOLD : OrderStatus.CONFIRMED, workOrderVersion: 2, promisedDate: null, scheduledAt: null } });
+    locate(value);
+    mocks.db.orderWorkflowDecision.findFirst.mockResolvedValue({ fromStatus: OrderStatus.CONFIRMED });
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+    expect(mocks.db.order.update).toHaveBeenCalledWith({
+      where: { id: 'order-1' },
+      data: expect.objectContaining({ workOrderVersion: 3, completedAt: null }),
+    });
+    // 下发（CONFIRMED → RELEASED）才是当前代次的停滞计时起点。
+    expect(mocks.db.order.update.mock.calls.some(([call]) => call.data !== undefined && 'scheduledAt' in call.data)).toBe(false);
+    expect(mocks.activateProduction).not.toHaveBeenCalled();
+    const approvedLog = mocks.db.orderLog.create.mock.calls
+      .map(([call]) => call.data)
+      .find((data) => data.action === 'CHANGE_REQUEST_APPROVED');
+    expect(approvedLog?.changedFields).toMatchObject({ workOrderVersion: { before: 2, after: 3 } });
+    expect(approvedLog?.changedFields).not.toHaveProperty('scheduledAt');
+  });
+
   it('persists DENIED with a mandatory reason and writes the rejection audit', async () => {
     const value = request();
     locate(value);
@@ -3795,6 +3857,75 @@ describe('reviewOrderChangeRequest', () => {
       }),
     });
     expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+
+  describe('已有地址发货的待发货工单', () => {
+    const partlyShipped = () => [
+      { id: 'shipment-1', sequence: 1, destinationProvince: '广东', weightKg: new Decimal('2.000'), status: 'SHIPPED' },
+      { id: 'shipment-2', sequence: 2, destinationProvince: '湖南', weightKg: null, status: 'PLANNED' },
+    ];
+
+    it('批准改数量失败关闭，不改写已发货地址的分货和物流', async () => {
+      const base = request().order;
+      const value = request({ order: {
+        ...base, status: OrderStatus.PACKING, shipments: partlyShipped(),
+        items: [plainPrintItem({ shipmentLines: [
+          { quantity: 600, shipment: { id: 'shipment-1', sequence: 1 } },
+          { quantity: 400, shipment: { id: 'shipment-2', sequence: 2 } },
+        ] })],
+        customerCharges: [...base.customerCharges, ...base.customerCharges.map((charge) => ({
+          ...charge, id: `${charge.id}-2`, shipmentId: 'shipment-2',
+          businessKey: charge.businessKey.replace('SHIPMENT:1:', 'SHIPMENT:2:'),
+        }))],
+      } });
+      locate(value);
+      mocks.calculate.mockImplementationOnce(
+        async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+      );
+      await expect(reviewOrderChangeRequest({
+        requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+        expectedPriceRevision: 5, expectedQuoteToken: quoteToken,
+      }, admin)).rejects.toThrow('工单已有地址发货，不能批准款式或数量修改，请驳回该申请');
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      expectNoApprovalMutation();
+    });
+
+    it('改款式数量的计价预览同样拒绝，不给出新报价', async () => {
+      const value = request({ order: { ...request().order, status: OrderStatus.PACKING, shipments: partlyShipped() } });
+      locate(value);
+      await expect(previewOrderChangeRequestPricing(value.id, admin))
+        .rejects.toThrow('工单已有地址发货，不能批准款式或数量修改，请驳回该申请');
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.findUnique).toHaveBeenLastCalledWith(expect.objectContaining({
+        include: expect.objectContaining({ order: expect.objectContaining({ include: expect.objectContaining({
+          shipments: expect.objectContaining({ select: expect.objectContaining({ status: true }) }),
+        }) }) }),
+      }));
+    });
+
+    it('只改交期的计价预览仍然放行', async () => {
+      const value = request({ proposedChanges: { items: [], promisedDate: '2026-09-20' },
+        order: { ...request().order, status: OrderStatus.PACKING, promisedDate: null, shipments: partlyShipped() } });
+      locate(value);
+      await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({ complete: true });
+    });
+
+    it('只改交期仍可批准，并按发货状态读取地址', async () => {
+      const value = request({ proposedChanges: { items: [], promisedDate: '2026-09-20' },
+        order: { ...request().order, status: OrderStatus.PACKING, promisedDate: null, shipments: partlyShipped() } });
+      locate(value);
+      mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+      await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', expectedPriceRevision: 5, reviewRemark: null }, admin);
+      expect(mocks.db.orderChangeRequest.findUnique).toHaveBeenLastCalledWith(expect.objectContaining({
+        include: expect.objectContaining({ order: expect.objectContaining({ include: expect.objectContaining({
+          shipments: expect.objectContaining({ select: expect.objectContaining({ status: true }) }),
+        }) }) }),
+      }));
+      expect(mocks.db.orderShipmentLine.upsert).not.toHaveBeenCalled();
+      expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: 'APPROVED' }),
+      }));
+    });
   });
 
   it.each([
@@ -4576,11 +4707,16 @@ describe('reviewOrderChangeRequest', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           workOrderVersion: 3,
-          scheduledAt: new Date('2026-09-02T02:00:00.000Z'),
           completedAt: null,
         }),
       }),
     );
+    // 尚未下发：审批不改写下发边界，保留原值，待真正下发时再定。
+    expect(
+      mocks.db.order.update.mock.calls.some(
+        ([call]) => call.data !== undefined && 'scheduledAt' in call.data,
+      ),
+    ).toBe(false);
     expect(mocks.db.order.update).toHaveBeenCalledWith({
       where: { id: 'order-1' },
       data: { confirmedFee: '1308.00', settledFee: null },
@@ -4813,6 +4949,7 @@ describe('reviewOrderChangeRequest', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           workOrderVersion: 5,
+          scheduledAt: new Date('2026-09-02T02:00:00.000Z'),
           completedAt: null,
         }),
       }),
@@ -5376,34 +5513,6 @@ describe('reviewOrderChangeRequest', () => {
     );
   });
 
-  it('待核制版费类目缺失时在任何 MODIFY 写入前失败关闭', async () => {
-    const value = request({
-      order: {
-        ...request().order,
-        settlementType: OrderSettlementType.INTERNAL_SALES,
-        billingMode: OrderBillingMode.CHARGE,
-        customerCharges: [],
-      },
-    });
-    locate(value);
-    mocks.db.customerChargeCategory.findUnique.mockResolvedValueOnce(null);
-
-    await expect(
-      reviewOrderChangeRequest(
-        {
-          requestId: value.id,
-          decision: 'APPROVE',
-          reviewRemark: null,
-          expectedPriceRevision: 5,
-          expectedQuoteToken: quoteToken,
-        },
-        admin,
-      ),
-    ).rejects.toThrow(/制版费收费类目不存在或已停用/u);
-
-    expectNoApprovalMutation();
-  });
-
   it('存量制版明细缺少关联收费时在任何 MODIFY 写入前失败关闭', async () => {
     const value = request();
     locate(value);
@@ -5600,45 +5709,6 @@ describe('reviewOrderChangeRequest', () => {
     ).rejects.toThrow(/与收货地址的业务键、类目或发货记录不一致/u);
 
     expectNoApprovalMutation();
-  });
-
-  it.each([
-    OrderSettlementType.INTERNAL_SALES,
-    OrderSettlementType.FACTORY_DIRECT,
-  ])('%s 改单关闭对客物流层，但同步制版 pending 与价格修订', async (settlementType) => {
-    const value = request({ order: {
-      ...request().order,
-      settlementType,
-      billingMode: OrderBillingMode.CHARGE,
-      status: OrderStatus.DRAFT,
-      totalAmount: new Decimal(1000), customerCharges: [],
-    } });
-    locate(value);
-    mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: null } });
-    await reviewOrderChangeRequest({
-      requestId: value.id,
-      decision: 'APPROVE',
-      reviewRemark: null,
-      expectedPriceRevision: 5,
-      expectedQuoteToken: quoteToken,
-    }, admin);
-    expect(mocks.calculate).toHaveBeenCalledWith(mocks.db, expect.objectContaining({
-      includeOrderCharges: false,
-    }));
-    expect(mocks.finalizeCharges).not.toHaveBeenCalled();
-    expect(mocks.db.customerChargeCategory.findUnique).toHaveBeenCalledTimes(1);
-    expect(mocks.db.orderCustomerCharge.upsert).toHaveBeenCalledTimes(1);
-    expect(mocks.appendRevision).toHaveBeenCalledWith(
-      mocks.db,
-      expect.objectContaining({
-        status: 'PENDING_ADMIN_CONFIRMATION',
-        source: 'CHANGE_REQUEST_APPLIED_PENDING',
-      }),
-    );
-    expect(mocks.appendRevision.mock.calls[0]?.[1]).not.toHaveProperty(
-      'orderFeeSnapshot',
-    );
-    expect(mocks.db.orderPriceVersionLock.createMany).toHaveBeenCalledTimes(1);
   });
 
   it('外部销售纯彩印无烫金改单不查制版类目，并自动确认完整报价', async () => {
@@ -6040,5 +6110,91 @@ describe('new blank business cannot inherit historical sale permission', () => {
           expectedPriceRevision: 5, expectedQuoteToken: quoteToken }, admin);
     await expect(result).rejects.toThrow('未启用');
     expect(mocks.db.orderItem.create).not.toHaveBeenCalled();
+  });
+});
+
+// 外部销售工单的快递 / 耗材收费明细在提交时才由 finalizeExternalOrderQuoteInTx
+// 权威生成；尚未提交的草稿没有这些行。草稿改数量 / 规格不能因此被拒绝，
+// 已提交工单缺行时仍必须失败关闭。
+describe('unsubmitted external-sales draft modification', () => {
+  type Requester = { id: string; displayName: string; role: Role };
+  const salesRequester: Requester = { id: 'sales-1', displayName: '销售', role: Role.SALES };
+  const adminRequester: Requester = { id: 'admin-1', displayName: '管理员', role: Role.ADMIN };
+  function draftRequest(requester: Requester, overrides: Record<string, unknown> = {}) {
+    return request({
+      requesterId: requester.id,
+      requester,
+      order: {
+        ...request().order,
+        status: OrderStatus.DRAFT,
+        pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+        quotedFee: null, confirmedFee: null, settledFee: null,
+        processingAmount: new Decimal(0), packagingAmount: new Decimal(0), totalAmount: new Decimal(0),
+        items: [plainPrintItem()],
+        customerCharges: [],
+        ...overrides,
+      },
+    });
+  }
+
+  it.each([
+    ['外部销售本人草稿', salesRequester],
+    ['管理员代外部销售建的草稿', adminRequester],
+  ])('%s：预览只重算加工费，快递 / 耗材留到提交时权威生成', async (_label, requester) => {
+    const value = draftRequest(requester);
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    const result = await previewOrderChangeRequestPricing(value.id, admin);
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(false);
+    expect(result).toMatchObject({ oldTotal: '0.00', newTotal: '1200.00', complete: true, pendingCharges: [] });
+    expect(mocks.db.order.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['外部销售本人草稿', salesRequester],
+    ['管理员代外部销售建的草稿', adminRequester],
+  ])('%s：批准改数量不要求物流收费行，也不凭空生成物流行', async (_label, requester) => {
+    const value = draftRequest(requester);
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValue({ _sum: { amount: null } });
+    await reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null, expectedPriceRevision: 5, expectedQuoteToken: quoteToken },
+      admin,
+    );
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(false);
+    expect(mocks.finalizeCharges).not.toHaveBeenCalled();
+    expect(mocks.db.orderCustomerCharge.upsert).not.toHaveBeenCalled();
+    expect(mocks.db.order.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ processingAmount: '1200.00', totalAmount: '1200.00' }),
+    }));
+  });
+
+  it('已提交外部销售工单缺少快递 / 耗材收费明细时仍在首写入前拒绝批准', async () => {
+    const value = draftRequest(salesRequester, { status: OrderStatus.SUBMITTED });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    await expect(reviewOrderChangeRequest(
+      { requestId: value.id, decision: 'APPROVE', reviewRemark: null, expectedPriceRevision: 5, expectedQuoteToken: quoteToken },
+      admin,
+    )).rejects.toThrow('外部销售工单的快递/耗材收费明细不完整');
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(true);
+    expectNoApprovalMutation();
+  });
+
+  it('草稿已有物流收费行时仍按外部销售口径一并重算', async () => {
+    const value = draftRequest(salesRequester, { customerCharges: request().order.customerCharges, totalAmount: new Decimal(8) });
+    locate(value);
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pureResult(args, { plateApplies: false }),
+    );
+    await previewOrderChangeRequestPricing(value.id, admin);
+    expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(true);
   });
 });

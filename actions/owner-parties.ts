@@ -13,10 +13,8 @@ import {
 } from '@/lib/admin/action-helpers';
 import { requirePermission } from '@/lib/auth/permissions';
 import { createPartySchema, updatePartySchema } from '@/lib/auth/schemas';
-import { writeAuditLog } from '@/lib/audit-log';
 import {
   createParty,
-  getPartySummary,
   PartyInvariantError,
   setPartyActive,
   updateParty,
@@ -100,20 +98,7 @@ export async function updatePartyAction(
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 
   try {
-    const before = await getPartySummary(id);
-    const after = await updateParty(id, parsed.data);
-    await writeAuditLog({
-      actor,
-      action: 'UPDATE',
-      entityType: 'Party',
-      entityId: id,
-      before,
-      after,
-      requestMetadata: {
-        source: 'owner-parties.updatePartyAction',
-        route: `/owner/parties/${id}`,
-      },
-    });
+    await updateParty(id, parsed.data, actor);
   } catch (err) {
     const unique = mapUniqueViolation(err);
     if (unique) return unique;

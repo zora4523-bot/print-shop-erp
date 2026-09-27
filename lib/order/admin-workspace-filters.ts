@@ -11,6 +11,7 @@ import { shanghaiDayBoundary, todayShanghai } from '../dashboard/shanghai-clock'
 import { buildOrderWhere } from './list-query';
 import { overdueCutoff } from './promised-date';
 import { FACTORY_CONFIRMATION_PENDING_STATUSES } from './factory-confirmation-preflight';
+import { ORDER_PRINTABLE_STATUSES } from './print-eligibility';
 import type { AdminOrderQueue, AdminOrderSignal, AdminOrderWorkspaceQuery } from './admin-workspace-query';
 
 export type AdminOrdersActor = { id: string; role: Role };
@@ -39,11 +40,7 @@ export const PRODUCTION_STATUSES = [
   OrderStatus.COMPLETED,
 ] as const;
 
-export const PRINTABLE_STATUSES = [
-  OrderStatus.RELEASED,
-  OrderStatus.FOILING,
-  OrderStatus.PACKING,
-] as const;
+export const PRINTABLE_STATUSES = ORDER_PRINTABLE_STATUSES;
 
 export const DONE_STATUSES = [
   OrderStatus.SETTLED,

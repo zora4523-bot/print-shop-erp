@@ -41,7 +41,6 @@ describe('admin order workspace query', () => {
       starred: 'yes',
       unbilled: 'yes',
       q: '福明',
-      customerRef: '客户甲',
       submitterId: 'sales-1',
       craftId: ['craft-1', 'craft-2'],
       page: '3',
@@ -62,7 +61,6 @@ describe('admin order workspace query', () => {
         starred: 'yes',
         unbilled: 'yes',
         q: '福明',
-        customerRef: '客户甲',
         submitterId: 'sales-1',
         craftId: 'craft-1,craft-2',
         page: 3,
@@ -70,31 +68,29 @@ describe('admin order workspace query', () => {
     );
   });
 
-  it('round-trips additive exact-customer filters through workspace and export URLs', () => {
-    const party = parseAdminOrderWorkspaceQuery({
+  it('drops retired customer params from old bookmarks without issues, links or export receipts', () => {
+    const bookmarked = parseAdminOrderWorkspaceQuery({
       queue: 'all',
+      submitterId: 'sales-1',
+      customerRef: '客户甲',
       customerPartyId: 'party-1',
+      customerRefExact: '__MISSING_CUSTOMER__',
     });
-    const legacy = parseAdminOrderWorkspaceQuery({
+    const current = parseAdminOrderWorkspaceQuery({
       queue: 'all',
-      customerRefExact: '旧客户',
+      submitterId: 'sales-1',
     });
 
-    expect(party.issues).toEqual([]);
-    expect(legacy.issues).toEqual([]);
-    expect(serializeAdminOrderWorkspaceQuery(party.query)).toEqual(
-      expect.objectContaining({
-        customerPartyId: 'party-1',
-        customerRefExact: undefined,
-        customerRef: undefined,
-      }),
+    expect(bookmarked.issues).toEqual([]);
+    expect(bookmarked.query).toEqual(current.query);
+    expect(serializeAdminOrderWorkspaceQuery(bookmarked.query)).toEqual(
+      serializeAdminOrderWorkspaceQuery(current.query),
     );
-    expect(adminOrderExportParamsFromQuery(legacy.query)).toEqual(
-      expect.objectContaining({
-        customerRefExact: '旧客户',
-        adminWorkspace: 'v1',
-      }),
-    );
+    expect(adminOrderExportParamsFromQuery(bookmarked.query)).toEqual({
+      queue: 'all',
+      submitterId: 'sales-1',
+      adminWorkspace: 'v1',
+    });
   });
 
   it('preserves pending-release in the todo queue and its durable-export receipt', () => {

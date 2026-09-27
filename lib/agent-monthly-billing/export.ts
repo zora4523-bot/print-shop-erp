@@ -82,7 +82,11 @@ type ExportSnapshotPayload = {
   };
   items: Array<{
     orderNoSnapshot: string;
-    customerRefSnapshot: string | null;
+    // 请求时的工单名称，2026-09-27 起写入；更早入队的快照没有此键，表格留空。
+    orderNameSnapshot?: string | null;
+    // 已停用的客户名称/简称，只存在于 2026-09-27 前写入的快照。不再写入、不再输出，
+    // 但键仍留在 strict schema 里，停用前入队、尚未生成的导出才能照常解析。
+    customerRefSnapshot?: string | null;
     orderStatusSnapshot: string;
     workOrderVersionSnapshot: number;
     settledFeeSnapshot: string;
@@ -111,6 +115,8 @@ type ExportSnapshotPayload = {
 
 const SNAPSHOT_MONEY = z.string().regex(/^-?(?:0|[1-9]\d*)\.\d{2}$/);
 const SNAPSHOT_INSTANT = z.string().datetime({ offset: true });
+// 快照行不可变，且工作进程只处理 schemaVersion 相同的导出：演进只能新增可选键、
+// 不能删键或改为必填，否则部署前入队的导出会在生成时整单失败。
 const EXPORT_SNAPSHOT_PAYLOAD_SCHEMA = z
   .object({
     bill: z
@@ -132,7 +138,8 @@ const EXPORT_SNAPSHOT_PAYLOAD_SCHEMA = z
       z
         .object({
           orderNoSnapshot: z.string(),
-          customerRefSnapshot: z.string().nullable(),
+          orderNameSnapshot: z.string().nullable().optional(),
+          customerRefSnapshot: z.string().nullable().optional(),
           orderStatusSnapshot: z.string(),
           workOrderVersionSnapshot: z.number().int().positive(),
           settledFeeSnapshot: SNAPSHOT_MONEY,
@@ -185,11 +192,11 @@ const EXPORT_SNAPSHOT_SELECT = {
   items: {
     select: {
       orderNoSnapshot: true,
-      customerRefSnapshot: true,
       orderStatusSnapshot: true,
       workOrderVersionSnapshot: true,
       settledFeeSnapshot: true,
       settledAtSnapshot: true,
+      order: { select: { customName: true } },
     },
     orderBy: [{ settledAtSnapshot: 'asc' }, { id: 'asc' }],
   },
@@ -244,7 +251,7 @@ function exportSnapshotPayload(source: ExportSnapshotSource): ExportSnapshotPayl
     },
     items: source.items.map((item) => ({
       orderNoSnapshot: item.orderNoSnapshot,
-      customerRefSnapshot: item.customerRefSnapshot,
+      orderNameSnapshot: item.order.customName,
       orderStatusSnapshot: item.orderStatusSnapshot,
       workOrderVersionSnapshot: item.workOrderVersionSnapshot,
       settledFeeSnapshot: item.settledFeeSnapshot.toFixed(2),
@@ -757,7 +764,7 @@ async function* itemRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '账期', '代理商', '工单号', '客户快照', '工单状态', '纸单版本', '结算费', '结算时间',
+    '账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
@@ -772,7 +779,8 @@ async function* itemRows(
           snapshot.bill.period,
           snapshot.bill.agentDisplayNameSnapshot,
           item.orderNoSnapshot,
-          item.customerRefSnapshot,
+          // 与工单导出的“工单名称”列同口径：未命名留空，不重复工单号。
+          item.orderNameSnapshot?.trim() || null,
           item.orderStatusSnapshot,
           item.workOrderVersionSnapshot,
           moneyText(item.settledFeeSnapshot),

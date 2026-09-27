@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     order: { findMany: vi.fn() },
+    orderItemDesign: { findMany: vi.fn() },
     $transaction: vi.fn(),
     // 链接有效期现在从 Setting 读（cdr_link_expire_hours）
     setting: { findUnique: vi.fn() },
     designBundle: {
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -37,9 +39,12 @@ import {
   consumeBundle,
   createBundle,
   enqueueBundle,
+  processQueuedBundle,
   listEligibleOrders,
   listRecentBundles,
+  revokeBundleAccess,
 } from '../bundle';
+import { hashBundleAccessToken } from '../access-token';
 
 beforeEach(() => {
   Object.values(dbMock.order).forEach((fn) => fn.mockReset());
@@ -103,7 +108,10 @@ describe('listEligibleOrders', () => {
       {
         id: 'o1',
         orderNo: 'O-1',
-        customerRef: '苹果福',
+        customName: '中秋礼盒',
+        settlementType: 'EXTERNAL_SALES',
+        submitter: { displayName: '桂林' },
+        sourceOrder: null,
         submittedAt: new Date('2026-05-05T08:00:00Z'),
         items: [
           { designs: [{ id: 'd1' }, { id: 'd2' }] },
@@ -116,10 +124,50 @@ describe('listEligibleOrders', () => {
       {
         id: 'o1',
         orderNo: 'O-1',
-        customerRef: '苹果福',
+        customName: '中秋礼盒',
+        externalSalesName: '桂林',
         submittedAt: new Date('2026-05-05T08:00:00Z'),
         cdrCount: 3,
       },
+    ]);
+  });
+
+  it('按工单名称与外部销售指认候选工单，不再读取客户名称/简称', async () => {
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        id: 'rework-1',
+        orderNo: 'O-2',
+        customName: null,
+        // 管理员发起的免费重做：外部销售取原单的提交人，而不是管理员。
+        settlementType: 'NO_CHARGE',
+        submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '桂林' } },
+        submittedAt: new Date('2026-05-05T09:00:00Z'),
+        items: [{ designs: [{ id: 'd4' }] }],
+      },
+      {
+        id: 'free-1',
+        orderNo: 'O-3',
+        customName: '样品',
+        settlementType: 'NO_CHARGE',
+        submitter: { displayName: '管理员' },
+        sourceOrder: null,
+        submittedAt: new Date('2026-05-05T10:00:00Z'),
+        items: [{ designs: [{ id: 'd5' }] }],
+      },
+    ]);
+    const r = await listEligibleOrders({ from: '2026-05-05' });
+    const select = dbMock.order.findMany.mock.calls[0][0].select;
+    expect(select).toMatchObject({
+      customName: true,
+      settlementType: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: { select: { submitter: { select: { displayName: true } } } },
+    });
+    expect(select).not.toHaveProperty('customerRef');
+    expect(r.map(({ orderNo, customName, externalSalesName }) => ({ orderNo, customName, externalSalesName }))).toEqual([
+      { orderNo: 'O-2', customName: null, externalSalesName: '桂林' },
+      { orderNo: 'O-3', customName: '样品', externalSalesName: null },
     ]);
   });
 
@@ -254,8 +302,8 @@ describe('createBundle', () => {
     expect(r.isMock).toBe(true);
     // 绝对 URL（base 由调用方提供，通常 action 层从 request headers 推；
     // Codex round 119 high → round 121 medium）
-    expect(r.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/b1');
-    expect(r.relativePath).toBe('/api/cdr/bundles/b1');
+    expect(r.downloadUrl).toMatch(/^https:\/\/erp\.example\.com\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
+    expect(r.relativePath).toMatch(/^\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
 
     // create 第一次：占位 row（zipFileUrl/downloadUrl 空字符串）
     const createData = dbMock.designBundle.create.mock.calls[0][0].data;
@@ -278,9 +326,7 @@ describe('createBundle', () => {
     const updateCall = dbMock.designBundle.update.mock.calls[0][0];
     expect(updateCall.where).toEqual({ id: 'b1' });
     expect(updateCall.data.zipFileUrl).toBe('mock://bundle/b1.zip');
-    expect(updateCall.data.downloadUrl).toBe(
-      'https://erp.example.com/api/cdr/bundles/b1',
-    );
+    expect(updateCall.data.downloadUrl).toBe('');
     expect(updateCall.data.expiresAt).toEqual(new Date('2026-05-06T00:00:00Z'));
   });
 
@@ -306,7 +352,7 @@ describe('createBundle', () => {
       },
       { id: 'u1' },
     );
-    expect(r.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/b1');
+    expect(r.downloadUrl).toMatch(/^https:\/\/erp\.example\.com\/api\/cdr\/bundles\/[A-Za-z0-9_-]{43}$/);
   });
 
   it('uploadBundleZip 失败 → 删占位 + CdrBundleError 友好文案', async () => {
@@ -390,18 +436,17 @@ describe('enqueueBundle durable path', () => {
     );
     expect(dbMock.designBundle.update).toHaveBeenCalledWith({
       where: { id: 'b1' },
-      data: {
-        backgroundJobId: 'job-1',
-        downloadUrl: 'https://erp.example.com/api/cdr/bundles/b1',
-      },
+      data: { backgroundJobId: 'job-1' },
     });
   });
 });
 
 describe('consumeBundle', () => {
+  const token = 'A'.repeat(43);
+  const tokenHash = hashBundleAccessToken(token);
   it('id 不存在 → BundleNotFoundError', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue(null);
-    await expect(consumeBundle('ghost')).rejects.toBeInstanceOf(
+    await expect(consumeBundle('B'.repeat(43))).rejects.toBeInstanceOf(
       BundleNotFoundError,
     );
   });
@@ -409,25 +454,31 @@ describe('consumeBundle', () => {
   it('已过期 → BundleExpiredError', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      accessTokenHash: tokenHash,
+      revokedAt: null,
+      zipObjectKey: 'bundles/b1.zip',
       status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-04T00:00:00Z'), // 已过
       downloadCount: 0,
     });
     await expect(
-      consumeBundle('b1', new Date('2026-05-05T00:00:00Z')),
+      consumeBundle(token, new Date('2026-05-05T00:00:00Z')),
     ).rejects.toBeInstanceOf(BundleExpiredError);
   });
 
   it('未过期 → 返 row + 增 downloadCount（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      accessTokenHash: tokenHash,
+      revokedAt: null,
+      zipObjectKey: 'bundles/b1.zip',
       status: 'READY',
       zipFileUrl: 'mock://bundle/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
       downloadCount: 5,
     });
-    const r = await consumeBundle('b1', new Date('2026-05-05T00:00:00Z'));
+    const r = await consumeBundle(token, new Date('2026-05-05T00:00:00Z'));
     expect(r.id).toBe('b1');
     expect(dbMock.designBundle.update).toHaveBeenCalledWith({
       where: { id: 'b1' },
@@ -438,6 +489,9 @@ describe('consumeBundle', () => {
   it('downloadCount 自增写入失败不影响下载（best-effort）', async () => {
     dbMock.designBundle.findUnique.mockResolvedValue({
       id: 'b1',
+      accessTokenHash: tokenHash,
+      revokedAt: null,
+      zipObjectKey: 'bundles/b1.zip',
       status: 'READY',
       zipFileUrl: 'https://oss/b1.zip',
       expiresAt: new Date('2026-05-06T00:00:00Z'),
@@ -445,7 +499,7 @@ describe('consumeBundle', () => {
     });
     dbMock.designBundle.update.mockRejectedValue(new Error('connection lost'));
     await expect(
-      consumeBundle('b1', new Date('2026-05-05T00:00:00Z')),
+      consumeBundle(token, new Date('2026-05-05T00:00:00Z')),
     ).resolves.toBeDefined();
   });
 });
@@ -478,4 +532,68 @@ describe('listRecentBundles', () => {
     expect(args.orderBy).toEqual({ createdAt: 'desc' });
     expect(args.take).toBe(20);
   });
+});
+
+describe('listRecentBundles revoked links', () => {
+  it('surfaces revokedAt and never decrypts a revoked recipient URL', async () => {
+    const { encryptBundleDownloadUrl } = await import('../access-token');
+    const base = {
+      dateRangeFrom: new Date('2026-05-04T16:00:00Z'),
+      dateRangeTo: new Date('2026-05-05T16:00:00Z'),
+      orderIds: ['o1'],
+      designIds: ['d1'],
+      zipFileUrl: 'bundles/b.zip',
+      downloadUrl: '',
+      downloadUrlCiphertext: encryptBundleDownloadUrl('https://erp.example.com/api/cdr/bundles/tok'),
+      expiresAt: new Date('2026-05-06T00:00:00Z'),
+      downloadCount: 0,
+      createdById: 'u1',
+      createdAt: new Date('2026-05-05T10:00:00Z'),
+      createdBy: { displayName: '车间张主管' },
+    };
+    const revokedAt = new Date('2026-05-05T12:00:00Z');
+    dbMock.designBundle.findMany.mockResolvedValue([
+      { ...base, id: 'live', revokedAt: null },
+      { ...base, id: 'dead', revokedAt },
+    ]);
+    const [live, dead] = await listRecentBundles(20);
+    expect(dbMock.designBundle.findMany.mock.calls.at(-1)![0].select.revokedAt).toBe(true);
+    expect(live!.revokedAt).toBeNull();
+    expect(live!.downloadUrl).toBe('https://erp.example.com/api/cdr/bundles/tok');
+    expect(dead!.revokedAt).toEqual(revokedAt);
+    expect(dead!.downloadUrl).toBe('');
+  });
+});
+
+describe('revokeBundleAccess', () => {
+  it('marks an issued token revoked without deleting its audit row', async () => {
+    dbMock.designBundle.updateMany.mockResolvedValue({ count: 1 });
+    await revokeBundleAccess('b1');
+    expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'b1', accessTokenHash: { not: null }, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    }));
+  });
+
+  it('rejects a missing or already revoked token row', async () => {
+    dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
+    await expect(revokeBundleAccess('b1')).rejects.toThrow('不存在或已经撤销');
+  });
+});
+
+it('never retries a terminal FAILED bundle into READY', async () => {
+  dbMock.designBundle.findUnique.mockResolvedValue({ id: 'dead', designIds: ['d1'], status: 'FAILED' });
+  await expect(processQueuedBundle('dead')).rejects.toThrow('失败');
+  expect(uploadMock).not.toHaveBeenCalled();
+  expect(dbMock.designBundle.update).not.toHaveBeenCalled();
+});
+
+it('does not overwrite a terminal transition during CDR upload', async () => {
+  dbMock.designBundle.findUnique.mockResolvedValue({ id: 'bundle', status: 'PENDING', designIds: ['design'] });
+  dbMock.orderItemDesign.findMany.mockResolvedValue([{ id: 'design', fileName: 'a.cdr', fileUrl: 'mock://a', orderItem: { order: { orderNo: 'GD-1' } } }]);
+  uploadMock.mockResolvedValue({ zipFileUrl: 'mock://zip', expiresAt: new Date(), isMock: true });
+  dbMock.designBundle.updateMany.mockResolvedValue({ count: 0 });
+  await expect(processQueuedBundle('bundle')).rejects.toThrow('状态已变更');
+  expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'bundle', status: 'PENDING' } }));
+  expect(dbMock.designBundle.update).not.toHaveBeenCalled();
 });

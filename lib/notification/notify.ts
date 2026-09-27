@@ -10,15 +10,14 @@ import {
 import { databaseNow } from '../background-jobs/clock';
 import { assertExecutionFence } from '../execution-fence';
 import {
-  PRIVATE_EVENT_MAX_CHANNELS,
   NOTIFICATION_EVENTS,
   SUPERSEDED_BEFORE_SEND_ERROR,
-  isPrivatePerCsEvent,
   sanitizeNotificationPayload,
   type NotificationEvent,
   type NotificationPayloadFor,
 } from './events';
 import { renderTemplate } from './render';
+import { withLegacyExternalSalesName } from './legacy-external-sales';
 import {
   mockWebhookSender,
   prepareWebhookSend,
@@ -743,10 +742,8 @@ async function prepareNotificationRoute<E extends NotificationEvent>(
       isActive: true,
     },
   });
-  // **PG `IN (...)` 不保证返回顺序**——必须按配置 ID 顺
-  // 序重排。否则 CS_PERIOD_* runtime cap 的
-  // slice(0, 1) 会随机选 channel：legacy `['owner-group', 'sales-
-  // group']` 可能把客服金额发到 sales-group 而漏 owner-group。
+  // **PG `IN (...)` 不保证返回顺序**——按配置 ID 顺序重排，
+  // 保证投递顺序与后台配置一致。
   const byId = new Map(fetched.map((c) => [c.id, c]));
   const channels = uniqueConfiguredChannelIds
     .map((id) => byId.get(id))
@@ -795,25 +792,7 @@ async function prepareNotificationRoute<E extends NotificationEvent>(
     );
   }
 
-  // **Runtime privacy cap for CS_PERIOD_***：
-  // updateRuleWithGuard 是写时校验，对升级前已存在的多 channel 行
-  // 无效。这里 send-side cap 兜底——CS_PERIOD_* 含具体客服业绩 /
-  // 提成数据，绑多 channel 会让所有群看到所有客服金额。运行时 slice
-  // 到 PRIVATE_EVENT_MAX_CHANNELS 并 console.warn，让 ops 知道有
-  // legacy 配置该 owner 手动清理（schema 加 per-user 路由前的兜底）。
-  let effectiveChannels = channels;
-  if (
-    isPrivatePerCsEvent(event) &&
-    effectiveChannels.length > PRIVATE_EVENT_MAX_CHANNELS
-  ) {
-    console.warn(
-      `[notify] CS_PERIOD privacy cap event=${event} configured=${effectiveChannels.length} sending_to=${PRIVATE_EVENT_MAX_CHANNELS} (legacy config; owner please trim in /owner/notifications)`,
-    );
-    effectiveChannels = effectiveChannels.slice(
-      0,
-      PRIVATE_EVENT_MAX_CHANNELS,
-    );
-  }
+  const effectiveChannels = channels;
 
   return { content, effectiveChannels, managementRouteBlocked, managementRouteBlock };
 }
@@ -825,7 +804,10 @@ export async function notify<E extends NotificationEvent>(
 ): Promise<NotifyOutcome> {
   const outcome = emptyOutcome(event);
   try {
-    const safePayload = sanitizeNotificationPayload(event, payload);
+    const safePayload = await withLegacyExternalSalesName(
+      event,
+      sanitizeNotificationPayload(event, payload),
+    );
     const mock = opts.mockMode ?? isMockMode();
     const webhookSender: WebhookSender =
       opts.webhookSender ?? (mock ? mockWebhookSender : sendWebhook);
@@ -1325,7 +1307,7 @@ export async function replayDurableNotificationLogs(
 }
 
 // payload.orderId 提取 —— TS 类型已经约束 ORDER_* 事件必有 orderId，
-// 但 OUTSOURCE_OVERDUE / CS_PERIOD_* / DAILY_WORKER_SALARY 没有。
+// 但 OUTSOURCE_OVERDUE / DAILY_WORKER_SALARY 没有。
 // 用 unknown 类型保护读出。
 function extractOrderId(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) return null;

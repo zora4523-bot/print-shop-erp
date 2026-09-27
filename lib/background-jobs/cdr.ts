@@ -1,9 +1,7 @@
 import { Prisma } from '../../generated/prisma/client';
 import {
-  markQueuedBundleFailure,
   processQueuedBundle,
 } from '../cdr/bundle';
-import { backgroundJobErrorCode } from './policy';
 import type { ClaimedBackgroundJob } from './types';
 
 export async function handleCdrBundleJob(
@@ -15,20 +13,10 @@ export async function handleCdrBundleJob(
     throw new InvalidCdrBundleJobPayloadError();
   }
 
-  try {
-    return await processQueuedBundle(bundleId, {
-      ...(job.signal ? { signal: job.signal } : {}),
-      ...(job.assertLease ? { assertLease: job.assertLease } : {}),
-    });
-  } catch (error) {
-    if (job.signal?.aborted) throw error;
-    await markQueuedBundleFailure(
-      bundleId,
-      backgroundJobErrorCode(error),
-      job.attempts >= job.maxAttempts,
-    );
-    throw error;
-  }
+  return processQueuedBundle(bundleId, {
+    ...(job.signal ? { signal: job.signal } : {}),
+    ...(job.assertLease ? { assertLease: job.assertLease } : {}),
+  });
 }
 
 function asRecord(value: Prisma.JsonValue): Record<string, Prisma.JsonValue> {

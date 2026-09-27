@@ -45,6 +45,19 @@ map $request_method $erp_auth_limit_key {
     POST    $binary_remote_addr;
 }
 
+# CDR 外协下载链接 /api/cdr/bundles/<token> 的路径本身就是 bearer 凭证
+# （链接即凭证，24h 有效）。默认 combined 格式会把完整路径写进 access.log，
+# 能读日志的人就能下载设计稿，所以访问日志统一用遮蔽后的 URI。
+# 注意：error_log 里 upstream 报错的 request 行仍含原始路径，按敏感日志管理。
+map $request_uri $erp_log_uri {
+    default                    $request_uri;
+    ~^/api/cdr/bundles/        /api/cdr/bundles/[token];
+}
+
+log_format erp_redacted '$remote_addr - $remote_user [$time_local] '
+                        '"$request_method $erp_log_uri $server_protocol" '
+                        '$status $body_bytes_sent "$http_referer" "$http_user_agent"';
+
 limit_req_zone $erp_auth_limit_key zone=erp_auth:10m rate=10r/m;
 limit_req_zone $binary_remote_addr zone=erp_heavy:10m rate=10r/m;
 
@@ -80,6 +93,9 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
     client_max_body_size 20m;
+
+    # 遮蔽 CDR 下载 token（见文件顶部 erp_log_uri）。不要改回默认 combined。
+    access_log /var/log/nginx/access.log erp_redacted;
 
     # 登录限流的真实落点是 /login，不是下面那个 callback URL。
     #

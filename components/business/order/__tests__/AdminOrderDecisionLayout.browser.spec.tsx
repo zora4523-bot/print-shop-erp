@@ -200,7 +200,6 @@ function orderFixture(): AdminOrderWorkspaceRow {
     revision: 2,
     workOrderVersion: 1,
     customName: '新春平安封 两款',
-    customer: { id: 'customer-1', name: '福明盛业', filterValue: '福明盛业' },
     submitter: { id: 'sales-1', name: '业务员甲' },
     status: OrderStatus.CONFIRMED,
     statusSummary: '申请修改数量和规格',

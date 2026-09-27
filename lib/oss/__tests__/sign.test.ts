@@ -184,6 +184,28 @@ describe('signDesignUpload — validation (runs before STS signing)', () => {
     }
   });
 
+  it.each([
+    '..\\..\\Startup\\a.cdr',
+    '../../a.cdr',
+    'sub/a.cdr',
+    'a\u0007b.cdr',
+    'invoice\u202Eexe.cdr',
+    'a\u2067b.cdr',
+  ])('rejects CDR file names that are not a single safe segment (%j) before minting credentials', async (fileName) => {
+    const r = await signDesignUpload(
+      {
+        ...validParams,
+        fileType: DesignFileType.CDR,
+        fileName,
+        mimeType: 'application/octet-stream',
+      },
+      configuredEnv,
+    );
+    expect(r.status).toBe('invalid');
+    if (r.status === 'invalid') expect(r.fieldErrors.fileName).toBeDefined();
+    expect(assumeRoleMock).not.toHaveBeenCalled();
+  });
+
   it('accepts .jpg / .jpeg / .png / .webp for IMAGE, rejects other extensions', async () => {
     for (const good of ['a.jpg', 'b.JPEG', 'c.png', 'd.webp']) {
       await expect(

@@ -6,7 +6,6 @@ import {
 
 function input(overrides: Partial<OrderFormGapInput> = {}): OrderFormGapInput {
   return {
-    customerRef: '星河礼品',
     promisedDate: '2026-09-01',
     items: [
       {
@@ -107,7 +106,6 @@ describe('collectOrderFormGaps', () => {
   it('points missing catalog/quote facts at the configuration-outside note', () => {
     const gaps = collectOrderFormGaps(
       input({
-        customerRef: '',
         promisedDate: null,
         items: [
           {
@@ -123,12 +121,13 @@ describe('collectOrderFormGaps', () => {
       }),
     );
 
+    // 客户名称/简称已退役（业主 2026-09-27），不再作为建单缺口。
     expect(gaps.map((gap) => gap.id)).toEqual([
-      'customer-ref',
       'promised-date',
       'item-0-product',
       'item-0-quote',
     ]);
+    expect(gaps.map((gap) => gap.fieldId)).not.toContain('customerRef');
     expect(gaps.at(-1)?.fieldId).toBe('items.0.manualQuoteReason');
   });
 

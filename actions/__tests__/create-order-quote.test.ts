@@ -97,10 +97,10 @@ describe('quoteExternalCreateOrderAction', () => {
     expect(mocks.quoteExternalCreateOrder).not.toHaveBeenCalled();
   });
 
-  it('不允许客服切换为外部销售口径', async () => {
+  it('销售与管理员以外的角色不能使用外部销售报价', async () => {
     mocks.requirePermission.mockResolvedValueOnce({
-      id: 'cs-1',
-      role: Role.CUSTOMER_SERVICE,
+      id: 'worker-1',
+      role: Role.WORKER,
     });
 
     const result = await quoteExternalCreateOrderAction(validRaw);

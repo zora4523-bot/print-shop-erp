@@ -70,7 +70,6 @@ import {
   parseAdminOrderWorkspaceQuery,
 } from '../admin-workspace-query';
 import { OrderChangeRequestError } from '../change-request';
-import { MISSING_ORDER_CUSTOMER_FILTER_VALUE } from '../list-query';
 
 const actor = { id: 'admin-1', role: Role.ADMIN };
 
@@ -105,7 +104,6 @@ function adminOrderRecord(overrides: Record<string, unknown> = {}) {
     priceRevision: 1,
     updatedAt,
     customName: null,
-    customerRef: null,
     status: OrderStatus.SUBMITTED,
     isUrgent: false,
     totalAmount: new Prisma.Decimal('100.00'),
@@ -120,7 +118,6 @@ function adminOrderRecord(overrides: Record<string, unknown> = {}) {
     pricingStatus: OrderPricingStatus.LEGACY_CONFIRMED,
     trackingNo: null,
     submitter: { id: 'sales-1', displayName: '销售甲' },
-    customerParty: null,
     _count: { shipments: 1 },
     stars: [],
     items: [
@@ -244,7 +241,7 @@ describe('admin order workspace predicates', () => {
 
     const query = parseAdminOrderWorkspaceQuery({
       signal: 'pending-release',
-      customerPartyId: 'party-1',
+      submitterId: 'sales-1',
       starred: 'yes',
     }).query;
     const now = new Date('2026-09-07T00:00:00.000Z');
@@ -262,7 +259,7 @@ describe('admin order workspace predicates', () => {
         pendingRelease,
       ],
     });
-    expect(JSON.stringify(where)).toContain('party-1');
+    expect(JSON.stringify(where)).toContain('"submitterId":"sales-1"');
     // Exports must retain the same status, change-request and user filters.
     await expect(resolveAdminWorkspaceResultWhere(actor, query, now)).resolves.toEqual(
       where,
@@ -355,6 +352,31 @@ describe('admin order workspace predicates', () => {
       canCreatePrint: true,
       canMarkPrinted: false,
     });
+  });
+
+  it.each([
+    OrderStatus.CANCELLED,
+    OrderStatus.SHIPPED,
+    OrderStatus.SETTLED,
+    OrderStatus.CONFIRMED,
+  ])('%s 工单即使留有当前版待打印任务也不再提供确认已打印', (status) => {
+    expect(
+      resolveAdminPrintFacts({
+        status,
+        workOrderVersion: 2,
+        requests: [{ id: 'v2', workOrderVersion: 2, resolution: null }],
+      }),
+    ).toMatchObject({ printPending: false, canCreatePrint: false, canMarkPrinted: false });
+  });
+
+  it('暂停期间批准改单生成的补打任务仍可确认已打印', () => {
+    expect(
+      resolveAdminPrintFacts({
+        status: OrderStatus.ON_HOLD,
+        workOrderVersion: 3,
+        requests: [{ id: 'v3-reprint', workOrderVersion: 3, resolution: null }],
+      }),
+    ).toMatchObject({ pendingPrintJobId: 'v3-reprint', canMarkPrinted: true });
   });
 
   it('keeps pending changes out of the production queue', () => {
@@ -456,6 +478,30 @@ describe('admin order workspace predicates', () => {
     expect(capabilities.reject).toBe(true);
   });
 
+  // 审计 L-13：只有当前代次还有待开工/进行中的工序或进度步骤时，“下发后无人扫码”才算停滞。
+  it.each([
+    ['open current operation', {}, true],
+    ['sample shipment without operations', { purpose: 'SAMPLE_SHIPMENT', productionOperations: [] }, false],
+    ['new generation fully carried over', { workOrderVersion: 2, productionOperations: [
+      { workOrderVersion: 1, status: ProductionOperationStatus.IN_PROGRESS },
+      { workOrderVersion: 2, status: ProductionOperationStatus.COMPLETED },
+    ] }, false],
+    ['open current progress step only', { productionOperations: [
+      { workOrderVersion: 1, status: ProductionOperationStatus.COMPLETED },
+    ], productionProgressSteps: [{ workOrderVersion: 1, status: ProductionOperationStatus.PENDING }] }, true],
+  ])('flags production stagnation only when the current generation is claimable: %s', async (_name, overrides, expected) => {
+    const row = adminOrderRecord({
+      status: OrderStatus.PACKING,
+      scheduledAt: new Date('2026-09-01T00:00:00.000Z'),
+      confirmedFee: new Prisma.Decimal('100.00'),
+      productionOperations: [{ workOrderVersion: 1, status: ProductionOperationStatus.PENDING }],
+      ...overrides,
+    });
+    dbMock.order.findFirst.mockResolvedValue(row);
+    const detail = await getAdminOrderByOrderNo(actor, row.orderNo, new Date('2026-09-10T00:00:00.000Z'), 2);
+    expect(detail?.progress.stagnant).toBe(expected);
+  });
+
   it('keeps shipping disabled for an incomplete progress step when legacy tasks are the fallback', async () => {
     const row = adminOrderRecord({
       status: OrderStatus.COMPLETED,
@@ -500,6 +546,39 @@ describe('admin order workspace predicates', () => {
 
     expect(detail?.capabilities.ship).toBe(false);
     expect(detail?.shipDisabledReason).toBeNull();
+  });
+
+  it('已有地址发货时待审取消 / 改款式申请标记为只能驳回，只改交期仍可批准', async () => {
+    const shipments = [
+      { trackingNo: null, status: 'PLANNED' },
+      { trackingNo: 'SF100', status: 'SHIPPED' },
+    ];
+    const pending = (type: 'CANCEL' | 'MODIFY', proposedChanges: unknown) => adminOrderRecord({
+      status: OrderStatus.PACKING,
+      shipments,
+      changeRequests: [{ id: 'change-1', type, reason: '客户要求', proposedChanges, createdAt: new Date('2026-09-01T00:00:00.000Z') }],
+    });
+
+    dbMock.order.findFirst.mockResolvedValue(pending('CANCEL', { items: [] }));
+    let detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBe('工单已有地址发货，不能批准取消，请驳回该申请');
+    expect(detail?.trackingNo).toBe('SF100');
+
+    dbMock.order.findFirst.mockResolvedValue(pending('MODIFY', { items: [{ operation: 'UPDATE', itemId: 'item-1', quantity: 2000 }] }));
+    detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBe('工单已有地址发货，不能批准款式或数量修改，请驳回该申请');
+
+    dbMock.order.findFirst.mockResolvedValue(pending('MODIFY', { items: [], promisedDate: '2026-09-30' }));
+    detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBeNull();
+
+    dbMock.order.findFirst.mockResolvedValue(adminOrderRecord({
+      status: OrderStatus.PACKING,
+      shipments: [{ trackingNo: null, status: 'PLANNED' }],
+      changeRequests: [{ id: 'change-2', type: 'CANCEL', reason: '客户要求', proposedChanges: { items: [] }, createdAt: new Date('2026-09-01T00:00:00.000Z') }],
+    }));
+    detail = await getAdminOrderByOrderNo(actor, 'GD-260902-001');
+    expect(detail?.pendingChangeRequest?.approvalBlockedReason).toBeNull();
   });
 
   it('keeps missing-delivery guidance actionable in packing', async () => {
@@ -895,58 +974,18 @@ describe('admin order workspace predicates', () => {
     expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('does not confuse a real customer named like the empty-state label with the missing sentinel', async () => {
-    const realNamedCustomer = adminOrderRecord({
-      status: OrderStatus.DRAFT,
-      customerParty: {
-        id: 'party-1',
-        name: '未填客户',
-        shortName: null,
-      },
-    });
-    const missingCustomer = adminOrderRecord({
-      id: 'order-2',
-      orderNo: 'GD-260902-002',
-      status: OrderStatus.DRAFT,
-    });
-    const emptySnapshotCustomer = adminOrderRecord({
-      id: 'order-3',
-      orderNo: 'GD-260902-003',
-      status: OrderStatus.DRAFT,
-      customerRef: '',
-    });
-    dbMock.order.findFirst
-      .mockResolvedValueOnce(realNamedCustomer)
-      .mockResolvedValueOnce(missingCustomer)
-      .mockResolvedValueOnce(emptySnapshotCustomer);
+  it('never selects or exposes the retired order customer', async () => {
+    const row = adminOrderRecord({ status: OrderStatus.DRAFT });
+    dbMock.order.findFirst.mockResolvedValue(row);
 
-    const real = await getAdminOrderByOrderNo(
-      actor,
-      realNamedCustomer.orderNo,
-    );
-    const missing = await getAdminOrderByOrderNo(
-      actor,
-      missingCustomer.orderNo,
-    );
-    const emptySnapshot = await getAdminOrderByOrderNo(
-      actor,
-      emptySnapshotCustomer.orderNo,
-    );
+    const detail = await getAdminOrderByOrderNo(actor, row.orderNo);
 
-    expect(real?.customer).toEqual({
-      id: 'party-1',
-      name: '未填客户',
-      filterValue: '未填客户',
-    });
-    expect(missing?.customer).toEqual({
-      id: null,
-      name: '未填客户',
-      filterValue: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-    });
-    expect(emptySnapshot?.customer).toEqual({
-      id: null,
-      name: '未填客户',
-      filterValue: MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-    });
+    const select = dbMock.order.findFirst.mock.calls[0]![0].select;
+    expect(select).not.toHaveProperty('customerRef');
+    expect(select).not.toHaveProperty('customerParty');
+    expect(select).not.toHaveProperty('customerPartyId');
+    expect(detail).not.toBeNull();
+    expect(detail).not.toHaveProperty('customer');
+    expect(JSON.stringify(detail)).not.toContain('未填客户');
   });
 });

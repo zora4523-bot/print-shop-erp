@@ -45,8 +45,8 @@ test.describe('administrator workspace', () => {
   });
 
   test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
-    const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention') || route.path === `/owner/salary/cs/${fixture.csPeriodId}`);
-    expect(routes).toHaveLength(8);
+    const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention'));
+    expect(routes).toHaveLength(6);
     await checkRoutes(page, testInfo, routes, 'light');
     await checkRoutes(page, testInfo, routes, 'dark');
   });
@@ -212,6 +212,7 @@ test.describe('administrator workspace geometry', () => {
 
           return {
             checkbox: rect('[data-slot="checkbox"]'),
+            dateInput: rect('#promisedDate'),
             description: rect('[data-slot="urgent-order-description"]'),
             editor: rect('[data-slot="order-form-editor"]'),
             field: rect('[data-slot="urgent-order-field"]'),
@@ -230,6 +231,9 @@ test.describe('administrator workspace geometry', () => {
         expect(geometry.field.width).toBeGreaterThanOrEqual(240);
         expect(geometry.title.height).toBeLessThanOrEqual(24);
         expect(geometry.description.height).toBeLessThanOrEqual(40);
+        // 承诺交期固定窄列，急单勾选与日期输入框同一行对齐。
+        expect(geometry.dateInput.width).toBeLessThanOrEqual(180);
+        expect(Math.abs(geometry.checkbox.top - geometry.dateInput.top)).toBeLessThanOrEqual(1);
 
         if (viewport.stacked) {
           expect(geometry.railPosition).toBe('static');
@@ -602,18 +606,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       name: 'owner-analytics', path: '/owner/analytics', readyHeading: '经营概览',
       prepareGateState: prepareDashboardChartsState,
     },
-    ...(['due', 'shipments', 'outsource', 'over-reports', 'settlements'] as const).map(kind => ({
+    ...(['due', 'shipments', 'outsource', 'over-reports'] as const).map(kind => ({
       name: `owner-attention-${kind}`, path: `/owner/attention?kind=${kind}`, readyHeading: '关注事项',
       prepareGateState: async (page: Page) => {
         await expect(page.getByText(/共 \d+ 条 · 每页/).and(page.locator(':visible'))).toHaveCount(1);
       },
     })),
-    {
-      name: 'owner-cs-forecast', path: `/owner/salary/cs/${data.csPeriodId}`, readyHeading: '客服周期 · 响应式客服',
-      prepareGateState: async (page) => {
-        await expect(page.locator('[data-slot="cs-period-forecast"]:visible')).toHaveCount(1);
-      },
-    },
     {
       name: 'orders',
       path: '/orders',
@@ -622,9 +620,10 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     },
     {
       name: 'orders-filtered',
+      // 业主 2026-09-27：客户筛选已退役，长筛选值改由搜索框承载。
       path:
-        '/orders?status=SUBMITTED,IN_PRODUCTION&customerRef=' +
-        encodeURIComponent('超长客户名称用于验证筛选标签在小屏幕上能够自然换行而不会裁切') +
+        '/orders?status=SUBMITTED,IN_PRODUCTION&q=' +
+        encodeURIComponent('超长搜索词用于验证筛选输入在小屏幕上不会撑破布局或被裁切') +
         '&receiverAddress=' +
         encodeURIComponent('广东省深圳市南山区科技园长地址压力测试大厦A座12345678901234567890') +
         '&foilColor=' +
@@ -656,11 +655,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     // label / select-name 违规（筛选栏 <label> 没有 htmlFor），修完补进
     // 路由表，避免再次退化。
     {
-      name: 'salary-hourly', path: '/owner/salary/hourly', readyHeading: '时薪工月结',
+      // 历史存档页的师傅下拉只列当月有存档的人与当前筛选对象；用筛选把长姓名带进来。
+      name: 'salary-hourly', path: `/owner/salary/hourly?workerId=${data.hourlyWorkerId}`, readyHeading: '历史时薪档案',
       prepareGateState: async (page) => {
         const worker = page.getByRole('combobox', { name: '师傅', exact: true });
         await expect(worker.locator(`option[value="${data.hourlyWorkerId}"]`)).toHaveText(
-          `长姓名清废师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏（${data.hourlyWorkerId} · 已停用）`,
+          `长姓名打包师傅ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789用于验证筛选不会撑开小屏（${data.hourlyWorkerId} · 已停用）`,
         );
       },
     },
@@ -670,7 +670,6 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '历史开机师傅日薪档案',
     },
     { name: 'cdr', path: '/foreman/cdr', readyHeading: 'CDR 汇总下载' },
-    { name: 'cs-period-new', path: '/owner/salary/cs/new', readyHeading: '新建客服周期' },
     { name: 'accounts', path: '/owner/accounts', readyHeading: '账号管理' },
     { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
     {
@@ -736,7 +735,11 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '员工工资规则',
       prepareGateState: async (page) => {
         await expect(page.getByRole('combobox', { name: '工资规则', exact: true })).toBeVisible();
-        await expect(page.getByRole('textbox', { name: '每月固定工资（元）', exact: true })).toBeVisible();
+        // DECISIONS 2026-09-24：客服工资体系删除后，员工工资规则只剩标准工时。
+        // 开发服务器水合期间偶有一帧同时存在服务端与客户端两份输入框，等收敛到一份再断言。
+        const morningStart = page.getByLabel('上午上班', { exact: true });
+        await expect(morningStart).toHaveCount(1);
+        await expect(morningStart).toBeVisible();
       },
     },
     {
@@ -813,7 +816,8 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
     ).toBeVisible();
   }
   await expect(workspace.getByLabel('搜索工单')).toBeVisible();
-  await expect(workspace.getByLabel('按产品客户筛选')).toBeVisible();
+  // 业主 2026-09-27：工单列表不再按客户筛选。
+  await expect(workspace.getByLabel('按产品客户筛选')).toHaveCount(0);
   await expect(workspace.getByLabel('按业务员筛选')).toBeVisible();
   await expect(workspace.getByLabel('按工艺线筛选')).toBeVisible();
 
@@ -1263,7 +1267,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   }
   await expect(
     filters.getByRole('searchbox', {
-      name: '搜索工单名、客户或工单号',
+      name: '搜索工单名或工单号',
     }),
   ).toBeVisible();
 
@@ -1530,7 +1534,7 @@ async function prepareConfiguredLocalFoilStyle(page: Page) {
 
   const paperPicker = form.getByRole('group', { name: '纸张材质' });
   await paperPicker
-    .getByRole('button', { name: '珠光艳闪', exact: true })
+    .getByRole('button', { name: '艳红珠光纸', exact: true })
     .click();
   const specificationPicker = form.getByRole('group', { name: '规格' });
   await specificationPicker
@@ -1550,7 +1554,7 @@ async function prepareConfiguredLocalFoilStyle(page: Page) {
   ).toBeVisible();
   await expect(
     paperPicker.getByRole('button', {
-      name: '珠光艳闪',
+      name: '艳红珠光纸',
       exact: true,
       pressed: true,
     }),
@@ -1580,7 +1584,7 @@ async function prepareAdminOrderCreationState(page: Page) {
   const form = await prepareConfiguredLocalFoilStyle(page);
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
-    .fill('管理员内部建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+    .fill('管理员代建超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
   // DECISIONS 2026-09-13：管理员创建不再录入工单客户及简称，该输入框已从建单页移除。
   await expect(
     form.getByRole('textbox', { name: '客户名称/简称', exact: true }),
@@ -1588,12 +1592,10 @@ async function prepareAdminOrderCreationState(page: Page) {
   await form
     .getByRole('textbox', { name: '设计款名称', exact: true })
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
+  // DECISIONS 2026-09-24：管理员建单必须挂外部销售，内部建单的「需人工核价的要求」字段随之删除。
   await form
-    .getByRole('textbox', {
-      name: '需人工核价的要求（选填）',
-      exact: true,
-    })
-    .fill('客户要求追加配置外特殊工艺，请工厂确认环节人工核价并保留完整客需说明。');
+    .getByRole('combobox', { name: '关联外部销售（必填）', exact: true })
+    .selectOption({ label: 'E2E 销售 · e2e-sales' });
 
   await form
     .getByRole('button', { name: '添加地址 2', exact: true })
@@ -1612,13 +1614,14 @@ async function prepareAdminOrderCreationState(page: Page) {
 
 async function prepareSalesOrderCreationState(page: Page) {
   const form = await prepareConfiguredLocalFoilStyle(page);
-  // 销售端款式名由已选计价事实生成，不提供人工命名入口。
-  await expect(
-    form.getByRole('textbox', { name: '设计款名称', exact: true }),
-  ).toHaveCount(0);
+  const orderName = '外部销售建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   await form
     .getByRole('textbox', { name: '工单名称', exact: true })
-    .fill('外部销售建单超长工单名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+    .fill(orderName);
+  // 业主 2026-09-26：外部销售同样填写设计款名称，单款默认跟随工单名称。
+  await expect(
+    form.getByRole('textbox', { name: '设计款名称', exact: true }),
+  ).toHaveValue(orderName);
   await form
     .getByRole('spinbutton', { name: '数量', exact: true })
     .fill('1234567');

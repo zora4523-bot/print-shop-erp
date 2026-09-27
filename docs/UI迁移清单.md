@@ -5,6 +5,8 @@ spec: ui-规范.md
 inventory: UI现状盘点.md
 ---
 
+> 历史记录（按文内日期理解）。2026-09-24 起角色、结算与工种口径以 SPEC §L 与 DECISIONS 为准。
+
 # UI 迁移清单
 
 只列清单，不动手。每项：条款、文件清单、验收标准。完成一项须同时：删除 `scripts/ui-tokens/baseline.json` 对应条目（否则 lint 报 stale）、从 `docs/ui-规范.md` 附录 A 划掉、在本文打勾。

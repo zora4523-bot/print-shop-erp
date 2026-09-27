@@ -10,6 +10,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { ZipArchive } from 'archiver';
 import { xlsxColumnName } from './xlsx-column';
+import { escapeXmlText, stripInvalidXmlCharacters } from './xml-text';
 
 const EXCEL_MAX_ROWS = 1_048_576;
 const EXCEL_MAX_COLUMNS = 16_384;
@@ -222,7 +223,7 @@ function appendWorkbookParts(
   const workbookSheets = sheets
     .map(
       (sheet, index) =>
-        `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`,
+        `<sheet name="${escapeXmlText(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`,
     )
     .join('');
   archive.append(
@@ -328,7 +329,7 @@ function cellXml(
   }
   // Strings are always inlineStr, including values beginning with =, +, - or
   // @. Excel therefore treats user-controlled content as text, never formulae.
-  return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(text)}</t></is></c>`;
+  return `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${escapeXmlText(text)}</t></is></c>`;
 }
 
 function isXlsxDecimal(value: unknown): value is XlsxDecimal {
@@ -348,19 +349,6 @@ function validatePlainDecimal(value: string): void {
       `精确十进制值必须使用普通数字格式（不允许指数、公式或特殊值）：${value}`,
     );
   }
-}
-
-function stripInvalidXmlCharacters(value: string): string {
-  return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '');
-}
-
-function xmlEscape(value: string): string {
-  return stripInvalidXmlCharacters(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
 }
 
 function stylesXml(): string {

@@ -104,8 +104,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
     isUrgent: false,
     isSfCollect: false,
     promisedDate: new Date('2026-04-30T00:00:00+08:00'),
-    customerName: '福明实业',
-    customerRef: '福明',
+    externalSalesName: '外销甲',
     receiverName: '张三',
     receiverPhone: '13800000000',
     receiverAddress: '佛山市南海区某街道 1 号',
@@ -233,7 +232,9 @@ describe('buildPrintHtml', () => {
     expect(html).toContain('<article class="sheet dense"');
     expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
     expect(html).not.toContain('<td class="step">');
-    expect(html).toContain('暂无生产工序记录');
+    // 尚未下发生产、没有工序时不留“暂无生产工序记录”占位。
+    expect(html).not.toContain('暂无生产工序记录');
+    expect(html).not.toContain('class="flow');
     expect(html).not.toContain('class="task-qr"');
     expect(html).toContain('佛山市南海区某街道 1 号');
   });
@@ -340,18 +341,17 @@ describe('buildPrintHtml', () => {
     expect(html).toContain(`<div class="factory">${TEST_FACTORY_NAME}</div>`);
   });
 
-  it('客户名与工单名分开展示', async () => {
+  it('抬头显示外部销售，与工单名分开展示（原“客户”不再打印）', async () => {
     const html = await renderPrintHtml(
       fixtureOrder({
-        customerName: '福明实业',
-        customerRef: '福明别名',
+        externalSalesName: '外销甲',
         customName: '春节礼盒工单',
       }),
     );
 
-    expect(html).toContain('<div class="cust">福明实业</div>');
+    expect(html).toContain('<div class="cust">外销甲</div>');
     expect(html).toContain('工单 <b>春节礼盒工单</b>');
-    expect(html).not.toContain('福明别名');
+    expect(html).not.toContain('客户未填');
   });
 
   it('固定保留六个焦点格，缺失事实显示红色“未填”并进入审核告警', async () => {
@@ -492,7 +492,7 @@ describe('buildPrintHtml', () => {
       }),
     );
 
-    expect(visibleText(html)).toContain('暂无生产工序记录');
+    expect(visibleText(html)).not.toContain('暂无生产工序记录');
     expect(visibleText(html)).toContain('图 1 生产工艺待确认');
     expect(visibleText(html)).not.toContain('彩印颜色待确认');
   });
@@ -520,6 +520,84 @@ describe('buildPrintHtml', () => {
     expect(visibleText(html)).not.toContain('2026-raw-upload-secret.png');
     expect(html).toContain('<span class="txt">鸿运当头</span>');
     expect(html.match(/鸿运当头/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('混用纸张或克重时款名下逐行印纸张与克重，图稿标题与工序行仍只用款名', async () => {
+    const html = await renderPrintHtml(fixtureOrder({
+      items: [
+        fixtureItem({
+          name: '福字款',
+          pricingRoute: 'STOCK_BLANK',
+          paperType: '珠光艳闪',
+          hasLocalFoil: true,
+        }),
+        fixtureItem({
+          id: 'item-2',
+          sequence: 2,
+          name: '招财款',
+          pricingRoute: 'COLOR_PRINT',
+          paperType: '160g杂色珠光',
+          designs: [fixtureDesign({ id: 'design-2' })],
+        }),
+      ],
+      packagingGroups: [],
+    }));
+
+    expect(html).toContain(
+      '<div>福字款</div><div class="item-material">艳红珠光纸 160g</div><div class="item-process">局部平烫 · 哑金</div>',
+    );
+    // 克重已写在纸张名里时不重复追加；类型不另印，工艺行已写明。
+    expect(html).toContain('<div>招财款</div><div class="item-material">160g杂色珠光纸</div>');
+    expect(html.match(/class="item-material"/g)).toHaveLength(2);
+    expect(html).not.toContain('局部烫金（通版现货）');
+    expect(html).toContain('<span class="txt">福字款</span>');
+    expect(html).toContain('<small class="flow-item">图 1 · 福字款</small>');
+    expect(html).toContain('<div class="lbl">纸张类型</div>');
+  });
+
+  it('全单只用一种纸张时不逐行重复，纸张只看顶部栏；缺纸张的行不单独算一种', async () => {
+    const samePaper = await renderPrintHtml(fixtureOrder({
+      items: [
+        fixtureItem({ name: '福字款', paperType: '珠光艳闪', paperWeightGsm: 160 }),
+        fixtureItem({
+          id: 'item-2',
+          sequence: 2,
+          name: '寿字款',
+          paperType: '珠光艳闪',
+          paperWeightGsm: 160,
+          designs: [fixtureDesign({ id: 'design-2' })],
+        }),
+        fixtureItem({
+          id: 'item-3',
+          sequence: 3,
+          name: '样品',
+          pricingRoute: 'MANUAL_QUOTE',
+          paperType: '  ',
+          paperWeightGsm: null,
+          designs: [fixtureDesign({ id: 'design-3' })],
+        }),
+      ],
+      packagingGroups: [],
+    }));
+    expect(samePaper).not.toContain('class="item-material"');
+    expect(samePaper).not.toContain('待管理员终价');
+
+    const sameNameDifferentWeight = await renderPrintHtml(fixtureOrder({
+      items: [
+        fixtureItem({ name: '红卡款', paperType: '红卡', paperWeightGsm: 250 }),
+        fixtureItem({
+          id: 'item-2',
+          sequence: 2,
+          name: '红卡轻款',
+          paperType: '红卡',
+          paperWeightGsm: 230,
+          designs: [fixtureDesign({ id: 'design-2' })],
+        }),
+      ],
+      packagingGroups: [],
+    }));
+    expect(sameNameDifferentWeight).toContain('<div>红卡款</div><div class="item-material">红卡纸 250g</div>');
+    expect(sameNameDifferentWeight).toContain('<div>红卡轻款</div><div class="item-material">红卡纸 230g</div>');
   });
 
   it('按包装组显示每袋数量，合计真实袋数', async () => {
@@ -614,7 +692,7 @@ describe('buildPrintHtml', () => {
     const html = await renderPrintHtml(fixtureOrder({ productionSteps: [],
       items: [fixtureItem({ craftNames: ['彩印'], printColors: ['C', 'M', 'Y', 'K'] })],
     }));
-    expect(html).toContain('暂无生产工序记录');
+    expect(html).not.toContain('暂无生产工序记录');
     expect(html).not.toContain('<td class="step">');
     expect(html).toContain('<div class="l0">彩印</div>');
     expect(html).not.toContain('待排产');
@@ -652,14 +730,15 @@ describe('buildPrintHtml', () => {
 
   it('单款缺失超过六项时仍只打印一页，保留缺失提示', async () => {
     const html = await renderPrintHtml(fixtureOrder({
-      customerName: '', promisedDate: null, packageRequirement: '',
+      externalSalesName: '', promisedDate: null, packageRequirement: '',
       packagingGroups: [], productionSteps: [],
       items: [{ ...fixtureItems(1)[0], specification: '', designs: [], foilTechnique: 'FLAT', frontFoilColors: [], backFoilColors: [] }],
     }));
     expect(html.match(/<article class="sheet(?: dense)?"/g)).toHaveLength(1);
     expect(html).not.toContain('warning-annex');
     expect(html).not.toContain('项见附页');
-    expect(html).toContain('客户未填');
+    expect(html).toContain('外部销售未填');
+    expect(html).not.toContain('客户未填');
     expect(html).toContain('缺设计图');
     expect(html).toContain('<span>1 / 1</span>');
   });
@@ -707,16 +786,16 @@ describe('buildPrintHtml', () => {
     expect(html).toContain('<span>12 / 12</span>');
   });
 
-  it('显式换行备注、长客户名和超长工单名在有界页眉预览，全文确定性续页', async () => {
-    const customerName = '客'.repeat(128);
+  it('显式换行备注、长外部销售名和超长工单名在有界页眉预览，全文确定性续页', async () => {
+    const externalSalesName = '销'.repeat(64);
     const customName = '单'.repeat(200);
     const remark = Array.from({ length: 500 }, () => '备').join('\n');
-    const html = await renderPrintHtml(fixtureOrder({ customerName, customName, remark }));
+    const html = await renderPrintHtml(fixtureOrder({ externalSalesName, customName, remark }));
     const sheetCount = html.match(/<article class="sheet(?: dense)?"/g)?.length ?? 0;
     expect(sheetCount).toBe(28);
-    expect(html.match(/<div class="cust">客{16}…<\/div>/g)).toHaveLength(sheetCount);
-    expect(html).not.toContain(`<div class="cust">${customerName}</div>`);
-    expect(supplementTextByLabel(html, '客户')).toBe(customerName);
+    expect(html.match(/<div class="cust">销{16}…<\/div>/g)).toHaveLength(sheetCount);
+    expect(html).not.toContain(`<div class="cust">${externalSalesName}</div>`);
+    expect(supplementTextByLabel(html, '外部销售')).toBe(externalSalesName);
     expect(supplementTextByLabel(html, '工单名称')).toBe(customName);
     expect(supplementTextByLabel(html, '备注')).toBe(remark);
     expect(html).toContain(`<span>1 / ${sheetCount}</span>`);
@@ -831,21 +910,21 @@ describe('buildPrintHtml', () => {
 });
 
 describe('buildOrderPdfFilename', () => {
-  it('使用工单号和真实客户名', () => {
+  it('使用工单号和外部销售名（与打印抬头一致）', () => {
     expect(
       buildOrderPdfFilename(
         fixtureOrder({
           orderNo: 'GD-260827-001',
-          customerName: '福明实业',
+          externalSalesName: '外销甲',
         }),
       ),
-    ).toBe('GD-260827-001_福明实业.pdf');
+    ).toBe('GD-260827-001_外销甲.pdf');
   });
 
-  it('客户名缺失时只使用工单号', () => {
+  it('外部销售名缺失时只使用工单号', () => {
     expect(
       buildOrderPdfFilename(
-        fixtureOrder({ orderNo: 'GD-260827-001', customerName: '   ' }),
+        fixtureOrder({ orderNo: 'GD-260827-001', externalSalesName: '   ' }),
       ),
     ).toBe('GD-260827-001.pdf');
   });
@@ -855,9 +934,9 @@ describe('buildOrderPdfFilename', () => {
       buildOrderPdfFilename(
         fixtureOrder({
           orderNo: '../GD-001\r\n\u202e',
-          customerName: '客户/甲:*?<>|\\.\u2066 ',
+          externalSalesName: '外销/甲:*?<>|\\.\u2066 ',
         }),
       ),
-    ).toBe('GD-001_客户 甲.pdf');
+    ).toBe('GD-001_外销 甲.pdf');
   });
 });

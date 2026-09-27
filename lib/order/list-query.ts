@@ -1,4 +1,5 @@
 import { foilColorSearchValues } from '@/lib/order/foil-colors';
+import { paperSearchValues } from '@/lib/rules/paper-label';
 import {
   MachineType,
   OrderKind,
@@ -9,14 +10,7 @@ import {
   ShipmentStatus,
   TaskStatus,
 } from '../../generated/prisma/client';
-import {
-  paginatedResult,
-  paginationWindow,
-  type PaginatedResult,
-  type PaginationWindow,
-  type SortDirection,
-  type TableHrefParams,
-} from '../admin/table';
+import type { SortDirection, TableHrefParams } from '../admin/table';
 import { parseStrictYmd } from '../auth/schemas';
 import { getOrderScopeFilter } from '../auth/order-scope';
 import { db } from '../db';
@@ -24,7 +18,6 @@ import {
   decodeFoilColorFilterValues,
   encodeFoilColorFilterValues,
 } from './foil-color-filter-codec';
-import { selectOrderCustomerFee } from './customer-fee';
 
 export const ORDER_LIST_DEFAULT_PAGE_SIZE = 20;
 export const ORDER_LIST_MAX_PAGE_SIZE = 100;
@@ -36,32 +29,28 @@ const INTEGER_FILTER_RE = /^\d{1,10}$/;
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Reserved URL value used by clickable empty-state labels. It deliberately
-// cannot collide with a real Party/customer snapshot named “未填客户”.
-export const MISSING_ORDER_CUSTOMER_FILTER_VALUE = '__MISSING_CUSTOMER__';
-
 export const ORDER_LIST_SORT_KEYS = [
   'createdAt',
   'orderNo',
   'totalAmount',
   'promisedDate',
 ] as const;
-export type OrderListSortKey = (typeof ORDER_LIST_SORT_KEYS)[number];
+type OrderListSortKey = (typeof ORDER_LIST_SORT_KEYS)[number];
 
 export type OrderListSearchParams = Record<
   string,
   string | string[] | undefined
 >;
 
-export type OrderListFilters = {
+/**
+ * 业主 2026-09-27：工单不再按客户（`customerRef` / `customerPartyId`）展示、
+ * 筛选或搜索。旧书签里的 `customerRef` / `customerPartyId` / `customerRefExact`
+ * 参数不再被解析：静默忽略，既不筛选，也不产生 issue。
+ */
+type OrderListFilters = {
   q?: string;
   orderNo?: string;
   customName?: string;
-  customerRef?: string;
-  /** Stable exact identity used by clickable linked-customer filters. */
-  customerPartyId?: string;
-  /** Exact historical snapshot used by clickable unlinked-customer filters. */
-  customerRefExact?: string;
   receiverName?: string;
   receiverPhone?: string;
   receiverAddress?: string;
@@ -137,68 +126,7 @@ export type OrderListParseResult = {
   issues: string[];
 };
 
-export type OrderListRow = {
-  id: string;
-  orderNo: string;
-  customName: string | null;
-  status: OrderStatus;
-  kind: OrderKind;
-  sourceOrderNo: string | null;
-  isUrgent: boolean;
-  isSfCollect: boolean;
-  shipmentCount: number;
-  customerRef: string | null;
-  receiverName: string | null;
-  receiverPhone: string | null;
-  receiverAddress: string | null;
-  trackingNo: string | null;
-  expressCode: string | null;
-  totalAmount: unknown | null;
-  submitterId: string;
-  submitterName: string;
-  workerNames: string[];
-  promisedDate: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-  pieceworkCost: string | null;
-};
-
-export type OrderListPageWindow = PaginationWindow & {
-  total: number;
-};
-
-/**
- * Commercial amounts are not part of the worker-facing order surface. Keep
- * this normalization at the service boundary as well as in the UI so a
- * hand-crafted URL cannot re-enable amount filters or ordering.
- */
-export function sanitizeOrderListQueryForActor(
-  actor: { role: Role },
-  query: OrderListQuery,
-): OrderListQuery {
-  const roleScopedQuery =
-    actor.role !== Role.SALES &&
-    ORDER_LIST_SALES_VIEW_KEYS.includes(
-      query.view as (typeof ORDER_LIST_SALES_VIEW_KEYS)[number],
-    )
-      ? { ...query, view: undefined }
-      : query;
-  if (actor.role !== Role.WORKER) return roleScopedQuery;
-
-  const requestedCommercialSort = roleScopedQuery.sort === 'totalAmount';
-  return {
-    ...roleScopedQuery,
-    filters: {
-      ...roleScopedQuery.filters,
-      amountMin: undefined,
-      amountMax: undefined,
-    },
-    sort: requestedCommercialSort ? 'createdAt' : roleScopedQuery.sort,
-    dir: requestedCommercialSort ? 'desc' : roleScopedQuery.dir,
-  };
-}
-
-export type OrderFilterOption = { id: string; label: string };
+type OrderFilterOption = { id: string; label: string };
 
 export type OrderListFilterOptions = {
   submitters: OrderFilterOption[];
@@ -496,19 +424,6 @@ export function parseOrderListQuery(
         q: parseText(params, 'q', '搜索词', issues),
         orderNo: parseText(params, 'orderNo', '工单号', issues),
         customName: parseText(params, 'customName', '工单名称', issues),
-        customerRef: parseText(params, 'customerRef', '客户名称', issues),
-        customerPartyId: parseId(
-          params,
-          'customerPartyId',
-          '客户',
-          issues,
-        ),
-        customerRefExact: parseText(
-          params,
-          'customerRefExact',
-          '历史客户快照',
-          issues,
-        ),
         receiverName: parseText(params, 'receiverName', '收件人', issues),
         receiverPhone: parseText(params, 'receiverPhone', '收件电话', issues),
         receiverAddress: parseText(params, 'receiverAddress', '收件地址', issues),
@@ -661,14 +576,6 @@ function globalSearchFilter(query: string): Prisma.OrderWhereInput {
     OR: [
       { orderNo: contains },
       { customName: contains },
-      { customerRef: contains },
-      {
-        customerParty: {
-          is: {
-            OR: [{ name: contains }, { shortName: contains }],
-          },
-        },
-      },
       { receiverName: contains },
       { receiverPhone: contains },
       { receiverAddress: contains },
@@ -694,7 +601,7 @@ function globalSearchFilter(query: string): Prisma.OrderWhereInput {
             OR: [
               { name: contains },
               { specification: contains },
-              { paperType: contains },
+              ...paperSearchValues(query).map((value) => ({ paperType: textContains(value) })),
               ...(foilColorSearchValues([query]).map((color) => ({ foilColors: { has: color } }))),
               { product: { name: contains } },
               {
@@ -712,55 +619,6 @@ function globalSearchFilter(query: string): Prisma.OrderWhereInput {
       { searchPinyin: contains },
       { searchPinyinInitials: contains },
     ],
-  };
-}
-
-/**
- * The list presents the linked Party name ahead of the historical
- * customerRef snapshot. Keep the filter broad enough to find either durable
- * fact, while reserving the rendered empty-state label for orders that have
- * neither one.
- */
-function orderCustomerWhere(value: string): Prisma.OrderWhereInput {
-  if (value === MISSING_ORDER_CUSTOMER_FILTER_VALUE) {
-    return missingOrderCustomerWhere();
-  }
-  const contains = textContains(value);
-  return {
-    OR: [
-      { customerRef: contains },
-      {
-        customerParty: {
-          is: {
-            OR: [{ name: contains }, { shortName: contains }],
-          },
-        },
-      },
-    ],
-  };
-}
-
-/**
- * Clickable customer labels must not reuse the broad text search above:
- * linked customers have a durable Party identity, while unlinked legacy rows
- * only have an immutable-at-display customerRef snapshot.
- */
-function exactOrderCustomerSnapshotWhere(
-  value: string,
-): Prisma.OrderWhereInput {
-  if (value === MISSING_ORDER_CUSTOMER_FILTER_VALUE) {
-    return missingOrderCustomerWhere();
-  }
-  return {
-    customerParty: { is: null },
-    customerRef: { equals: value },
-  };
-}
-
-function missingOrderCustomerWhere(): Prisma.OrderWhereInput {
-  return {
-    customerParty: { is: null },
-    OR: [{ customerRef: null }, { customerRef: '' }],
   };
 }
 
@@ -800,15 +658,6 @@ export function buildOrderWhere(
   if (filters.q) conditions.push(globalSearchFilter(filters.q));
   if (filters.orderNo) conditions.push({ orderNo: textContains(filters.orderNo) });
   if (filters.customName) conditions.push({ customName: textContains(filters.customName) });
-  if (filters.customerRef) {
-    conditions.push(orderCustomerWhere(filters.customerRef));
-  }
-  if (filters.customerPartyId) {
-    conditions.push({ customerPartyId: filters.customerPartyId });
-  }
-  if (filters.customerRefExact) {
-    conditions.push(exactOrderCustomerSnapshotWhere(filters.customerRefExact));
-  }
   if (filters.submitterId) conditions.push({ submitterId: filters.submitterId });
   if (filters.statuses.length > 0) conditions.push({ status: { in: filters.statuses } });
   if (filters.kinds.length > 0) conditions.push({ kind: { in: filters.kinds } });
@@ -874,7 +723,9 @@ export function buildOrderWhere(
     ...(filters.specification
       ? { specification: textContains(filters.specification) }
       : {}),
-    ...(filters.paperType ? { paperType: textContains(filters.paperType) } : {}),
+    ...(filters.paperType
+      ? { OR: paperSearchValues(filters.paperType).map((value) => ({ paperType: textContains(value) })) }
+      : {}),
     ...(filters.quantityMin !== undefined || filters.quantityMax !== undefined
       ? { quantity: rangeFilter(filters.quantityMin, filters.quantityMax) }
       : {}),
@@ -931,9 +782,6 @@ export function serializeOrderListQuery(query: OrderListQuery): TableHrefParams 
     q: f.q,
     orderNo: f.orderNo,
     customName: f.customName,
-    customerRef: f.customerRef,
-    customerPartyId: f.customerPartyId,
-    customerRefExact: f.customerRefExact,
     receiverName: f.receiverName,
     receiverPhone: f.receiverPhone,
     receiverAddress: f.receiverAddress,
@@ -982,165 +830,6 @@ export function serializeOrderListQuery(query: OrderListQuery): TableHrefParams 
 
 function booleanParam(value: boolean | undefined): string | undefined {
   return value === undefined ? undefined : value ? 'yes' : 'no';
-}
-
-export async function getOrderListPageWindow(
-  actor: { id: string; role: Role },
-  query: OrderListQuery,
-): Promise<OrderListPageWindow> {
-  const safeQuery = sanitizeOrderListQueryForActor(actor, query);
-  const where = buildOrderWhere(actor, safeQuery.filters);
-  const total = await db.order.count({ where });
-  const window = paginationWindow(total, safeQuery.page, safeQuery.pageSize);
-
-  return { ...window, total };
-}
-
-export async function listOrdersPage(
-  actor: { id: string; role: Role },
-  query: OrderListQuery,
-  windowPromise: Promise<OrderListPageWindow> = getOrderListPageWindow(
-    actor,
-    query,
-  ),
-): Promise<PaginatedResult<OrderListRow>> {
-  const safeQuery = sanitizeOrderListQueryForActor(actor, query);
-  const where = buildOrderWhere(actor, safeQuery.filters);
-  const { total, ...window } = await windowPromise;
-  const rows = await db.order.findMany({
-    where,
-    select: {
-      id: true,
-      orderNo: true,
-      customName: true,
-      status: true,
-      kind: true,
-      isUrgent: true,
-      isSfCollect: true,
-      customerRef: true,
-      customerParty: { select: { name: true, shortName: true } },
-      receiverName: true,
-      receiverPhone: true,
-      receiverAddress: true,
-      trackingNo: true,
-      expressCode: true,
-      ...(actor.role === Role.WORKER
-        ? {}
-        : {
-            totalAmount: true,
-            quotedFee: true,
-            confirmedFee: true,
-            settledFee: true,
-          }),
-      submitterId: true,
-      promisedDate: true,
-      submitter: { select: { displayName: true } },
-      sourceOrder: { select: { orderNo: true } },
-      _count: { select: { shipments: true } },
-      createdAt: true,
-      updatedAt: true,
-    },
-    orderBy: orderListOrderBy(safeQuery.sort, safeQuery.dir),
-    skip: window.skip,
-    take: window.take,
-  });
-
-  const orderIds = rows.map((row) => row.id);
-  const [assignments, pieceworkTotals] = await Promise.all([
-    orderIds.length > 0
-      ? db.productionTask.findMany({
-          where: {
-            orderItem: { orderId: { in: orderIds } },
-            workerId: { not: null },
-            status: { not: TaskStatus.CANCELLED },
-          },
-          select: {
-            orderItem: { select: { orderId: true } },
-            worker: { select: { displayName: true } },
-          },
-        })
-      : Promise.resolve([]),
-    actor.role === Role.ADMIN && orderIds.length > 0
-      ? db.dailyWorkerSalaryItem.groupBy({
-          by: ['orderId'],
-          where: { orderId: { in: orderIds } },
-          _sum: { pieceworkAmount: true },
-        })
-      : Promise.resolve([]),
-  ]);
-
-  const workerNamesByOrder = new Map<string, Set<string>>();
-  for (const assignment of assignments) {
-    if (!assignment.worker) continue;
-    const names =
-      workerNamesByOrder.get(assignment.orderItem.orderId) ?? new Set<string>();
-    names.add(assignment.worker.displayName);
-    workerNamesByOrder.set(assignment.orderItem.orderId, names);
-  }
-  const pieceworkByOrder = new Map(
-    pieceworkTotals.map((total) => [
-      total.orderId,
-      String(total._sum.pieceworkAmount ?? '0.00'),
-    ]),
-  );
-
-  return paginatedResult(
-    rows.map((row) => {
-      const { submitter, sourceOrder, _count } = row;
-      return {
-        id: row.id,
-        orderNo: row.orderNo,
-        customName: row.customName,
-        status: row.status,
-        kind: row.kind,
-        isUrgent: row.isUrgent,
-        isSfCollect: row.isSfCollect,
-        customerRef:
-          row.customerParty?.shortName?.trim() ||
-          row.customerParty?.name.trim() ||
-          row.customerRef?.trim() ||
-          null,
-        receiverName: row.receiverName,
-        receiverPhone: row.receiverPhone,
-        receiverAddress: row.receiverAddress,
-        trackingNo: row.trackingNo,
-        expressCode: row.expressCode,
-        submitterId: row.submitterId,
-        promisedDate: row.promisedDate,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-        totalAmount:
-          actor.role === Role.WORKER
-            ? null
-            : selectOrderCustomerFee({
-                totalAmount: 'totalAmount' in row ? row.totalAmount : '0',
-                quotedFee: 'quotedFee' in row ? row.quotedFee : null,
-                confirmedFee: 'confirmedFee' in row ? row.confirmedFee : null,
-                settledFee: 'settledFee' in row ? row.settledFee : null,
-              }).amount,
-        sourceOrderNo: sourceOrder?.orderNo ?? null,
-        shipmentCount: _count.shipments,
-        submitterName: submitter.displayName,
-        workerNames: [...(workerNamesByOrder.get(row.id) ?? [])].sort((a, b) =>
-          a.localeCompare(b, 'zh-CN'),
-        ),
-        pieceworkCost:
-          actor.role === Role.ADMIN
-            ? pieceworkByOrder.get(row.id) ?? '0.00'
-            : null,
-      };
-    }),
-    total,
-    window,
-  );
-}
-
-export async function listOrders(
-  actor: { id: string; role: Role },
-  opts: { q?: string | null } = {},
-): Promise<OrderListRow[]> {
-  const parsed = parseOrderListQuery({ q: opts.q ?? undefined, pageSize: '100' });
-  return (await listOrdersPage(actor, parsed.query)).rows;
 }
 
 export async function getOrderListFilterOptions(

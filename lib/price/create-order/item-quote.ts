@@ -8,6 +8,7 @@ import {
   unitPrice,
 } from './money';
 import {
+  PRINT_AUTOMATIC_QUANTITY_LIMIT,
   resolvePrintTierQuantity,
   selectFullUnitPrice,
   selectPartialUnitPrice,
@@ -20,6 +21,7 @@ import type {
   CreateOrderPriceSnapshot,
   CreateOrderQuoteItemInput,
   CreateOrderQuoteLine,
+  PrintPerOrderPrice,
 } from './types';
 
 function quotedItemLine(args: {
@@ -67,9 +69,9 @@ function printFoilValidationErrors(
   const errors: string[] = [];
   const foilMode = item.printFoilMode ?? 'NONE';
   const foilPassCount = item.frontColors.length + item.backColors.length;
-  if (foilMode === 'FULL' && item.backColors.length > 0) {
-    errors.push('彩印叠加专版烫金只能使用正面');
-  }
+  // Back-side foil (with either foil mode) is a legal fact without an
+  // automatic price: printFoilCapabilityManualReasons routes it to manual
+  // pricing (DECISIONS 2026-08-27). Only contradictory facts are rejected here.
   if (foilMode === 'NONE' && foilPassCount > 0) {
     errors.push('彩印未叠加烫金时不能携带烫金颜色');
   }
@@ -588,6 +590,40 @@ function quoteFullProcessing(
   };
 }
 
+/**
+ * Published color-print foil prices cover one flat front-side pass only.
+ * Relief/raised effects and back-side foil have no automatic price, so they
+ * leave automatic pricing before any flat bundle can be matched.
+ */
+function printFoilCapabilityManualReasons(
+  item: CreateOrderQuoteItemInput,
+): CreateOrderManualReason[] {
+  return [
+    ...((item.specialEffect ?? 'NONE') !== 'NONE'
+      ? [manualReason('PRINT_NON_FLAT_FOIL', '彩印浮雕、激凸没有自动价，需管理员核价')]
+      : []),
+    ...(item.backColors.length > 0
+      ? [manualReason('PRINT_BACK_SIDE_FOIL', '彩印反面烫金没有自动价，需管理员核价')]
+      : []),
+  ];
+}
+
+/**
+ * An explicit film must be covered by the published per-order row: ice-white
+ * rows are published without film only. No film fact keeps the paper's
+ * default finishing, as before.
+ */
+function printPriceCoversFinishing(
+  item: CreateOrderQuoteItemInput,
+  price: PrintPerOrderPrice,
+): boolean {
+  return (
+    item.printFinishing === undefined ||
+    price.laminations === undefined ||
+    (item.printFinishing === 'MATTE' && price.laminations.includes('MATTE'))
+  );
+}
+
 function quotePrintProcessing(
   item: CreateOrderQuoteItemInput,
   snapshot: CreateOrderPriceSnapshot,
@@ -598,6 +634,16 @@ function quotePrintProcessing(
   manualReasons: CreateOrderManualReason[];
   errors: string[];
 } {
+  const foilCapabilityReasons = printFoilCapabilityManualReasons(item);
+  if (foilCapabilityReasons.length > 0) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: foilCapabilityReasons,
+      errors: [],
+    };
+  }
   const finishing = item.printFinishing ?? 'MATTE';
   if (finishing !== 'MATTE') {
     return {
@@ -613,7 +659,7 @@ function quotePrintProcessing(
       errors: [],
     };
   }
-  if (item.quantity > 20_000) {
+  if (item.quantity > PRINT_AUTOMATIC_QUANTITY_LIMIT) {
     return {
       lines: [],
       amount: null,
@@ -640,6 +686,20 @@ function quotePrintProcessing(
         manualReason(
           'PRINT_PRICE_NOT_FOUND',
           '彩印纸张、规格或数量档没有配置价格',
+        ),
+      ],
+      errors: [],
+    };
+  }
+  if (!printPriceCoversFinishing(item, selected)) {
+    return {
+      lines: [],
+      amount: null,
+      unitPrice: null,
+      manualReasons: [
+        manualReason(
+          'PRINT_FINISHING_PRICE_NOT_FOUND',
+          '彩印当前纸张的阶梯价不含亚膜，需管理员核价',
         ),
       ],
       errors: [],

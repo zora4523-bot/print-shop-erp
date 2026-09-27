@@ -22,11 +22,10 @@ export async function SalesOrderEditor({ id, user }: { id: string; user: { id: s
     <section className="space-y-4">
       <Link href={`/orders/${id}`} className={buttonVariants({ variant: 'outline' })}>返回工单</Link>
       <EditOrderForm key={`${id}:${order.editVersion}`} orderId={id}
-        expectedEditVersion={order.editVersion} fieldset={fieldset} hideCustomerFields
+        expectedEditVersion={order.editVersion} fieldset={fieldset}
         shipments={order.shipments} isExternalSales={order.settlementType === OrderSettlementType.EXTERNAL_SALES}
         isSfCollect={order.isSfCollect} blocked={order.changeRequests.some((request) => request.status === 'PENDING')}
-        initial={{ customName: order.customName, customerRef: order.customerRef,
-          customerPartyId: order.customerPartyId, receiverName: order.receiver.name,
+        initial={{ customName: order.customName, receiverName: order.receiver.name,
           receiverPhone: order.receiver.phone, receiverAddress: order.receiver.address,
           expressCode: order.expressCode, packageRequirement: order.packageRequirement,
           remark: order.remark, promisedDate: order.promisedDate, isUrgent: order.isUrgent }} />
@@ -38,7 +37,8 @@ export async function SalesOrderEditor({ id, user }: { id: string; user: { id: s
             id: shipment.id, sequence: shipment.sequence, receiverAddress: shipment.receiverAddress,
             lines: shipment.lines.flatMap((line) => {
               const item = order.items.find((candidate) => candidate.sequence === line.itemSequence);
-              return item ? [{ orderItemId: item.id, name: line.itemName, quantity: line.quantity }] : [];
+              return item ? [{ orderItemId: item.id, sequence: item.sequence, name: line.itemName,
+                specification: item.specification, quantity: line.quantity }] : [];
             }),
           }))} /> : null}
     </section>

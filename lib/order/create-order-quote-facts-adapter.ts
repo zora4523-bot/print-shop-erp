@@ -526,7 +526,7 @@ function resolveSpecificationFacts(args: {
   };
 }
 
-const REPRESENTED_CRAFT_CODES: Readonly<Record<CreateOrderCraft, ReadonlySet<string>>> = {
+export const CREATE_ORDER_REPRESENTED_CRAFT_CODES: Readonly<Record<CreateOrderCraft, ReadonlySet<string>>> = {
   PARTIAL: new Set(['FLAT_FOIL_PARTIAL', 'PACKING']),
   FULL: new Set([
     'FLAT_FOIL_SINGLE',
@@ -536,13 +536,13 @@ const REPRESENTED_CRAFT_CODES: Readonly<Record<CreateOrderCraft, ReadonlySet<str
     'BUMP',
     'PACKING',
   ]),
+  // Color-print relief/raised (EMBOSS/BUMP) is outside the published
+  // COLOR_NONSTANDARD_PROCESS_MANUAL allow-list and must stay administrator-priced.
   PRINT: new Set([
     'COATED_COLOR_PRINT',
     'COATED_COLOR_PRINT_FOIL',
     'COLOR_PRINT',
     'COLOR_PRINT_FOIL',
-    'EMBOSS',
-    'BUMP',
     'PACKING',
   ]),
 };
@@ -570,7 +570,7 @@ function craftConfiguration(args: {
       );
     }
   }
-  const represented = REPRESENTED_CRAFT_CODES[routeCraft(item.pricingRoute)];
+  const represented = CREATE_ORDER_REPRESENTED_CRAFT_CODES[routeCraft(item.pricingRoute)];
   return selectedCodes.every((code) => represented.has(code))
     ? 'CATALOG'
     : 'CUSTOM';

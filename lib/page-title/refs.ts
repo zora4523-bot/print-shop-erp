@@ -61,13 +61,6 @@ export const getSalesBillTitleRef = cache(
     }),
 );
 
-export const getCsPeriodTitleRef = cache(async (id: string) =>
-  db.salaryPeriod.findUnique({
-    where: { id },
-    select: { periodStart: true, csUser: { select: { displayName: true } } },
-  }),
-);
-
 export const getOutsourceTitleRef = cache(async (id: string) =>
   db.outsourceOrder.findUnique({
     where: { id },

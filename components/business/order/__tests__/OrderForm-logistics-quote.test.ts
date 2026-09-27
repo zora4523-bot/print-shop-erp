@@ -104,7 +104,7 @@ describe('OrderForm logistics quote authority', () => {
     expect(source).toContain('busy={');
     expect(source).toContain('pendingState.busy ||');
     expect(source).toMatch(
-      /if\s*\(\s*createdDraft\s*\|\|\s*quoting\s*\|\|\s*externalQuoteQuoting\s*\|\|\s*externalQuoteNeedsRefresh\s*\|\|\s*internalQuoteNeedsRefresh\s*\)\s*\{\s*return;\s*\}/,
+      /if\s*\(\s*createdDraft\s*\|\|\s*externalQuoteQuoting\s*\|\|\s*externalQuoteNeedsRefresh\s*\)\s*\{\s*return;\s*\}/,
     );
   });
 
@@ -180,9 +180,7 @@ describe('OrderForm processing quote concurrency', () => {
     expect(source).toContain(
       'invalidateOrderQuoteRequests(externalQuoteRequestGate.current);',
     );
-    expect(source).toContain(
-      'invalidateOrderQuoteRequests(internalQuoteRequestGate.current);',
-    );
+    expect(source).not.toContain('internalQuoteRequestGate');
     expect(source).toContain('setQuoteViews({});');
     expect(source).toContain('setLogisticsQuote(null);');
     expect(source).toContain('setPackagingQuote(null);');
@@ -190,16 +188,14 @@ describe('OrderForm processing quote concurrency', () => {
     expect(source).toContain('onRemove={(index) => {');
   });
 
-  it('offers only B business routes and reserves configuration-outside notes for internal create', () => {
+  it('offers only B business routes and never sends configuration-outside notes from create', () => {
     expect(formBSource).toContain('<OrderItemCraftFields');
     const sharedSource = readFileSync(path.join(process.cwd(), 'components/business/order/order-form-b/OrderItemFields.tsx'), 'utf8');
     expect(sharedSource).toContain('options={ROUTE_OPTIONS}');
     expect(sharedSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
     expect(formBSource).not.toContain('OrderItemPricingRoute.MANUAL_QUOTE');
-    expect(source).toContain(
-      'manualQuoteReason: usesExternalSalesPricing',
-    );
-    expect(source).toContain(': item.manualQuoteReason');
+    expect(source).toContain('manualQuoteReason: null,');
+    expect(source).not.toContain('quoteInternalCreateOrderAction');
   });
 });
 
@@ -207,7 +203,14 @@ describe('OrderForm local draft recovery', () => {
   it('requires an explicit restore/discard decision before enabling the form', () => {
     expect(source).toContain('恢复本地草稿');
     expect(source).toContain('放弃本地草稿');
-    expect(source).toContain('...(pendingLocalDraft.values as unknown as CreateOrderInput)');
+    // 只有外部销售自动恢复；管理员的恢复/放弃提示不能被自动恢复一帧收走。
+    // 真实渲染断言见 OrderFormLocalDraft.browser.spec.tsx。
+    expect(source).toContain(
+      'if (!isExternalSalesActor || !pendingLocalDraft || !transferReady) return;',
+    );
+    expect(source).toContain('const restored = pendingLocalDraft.values as unknown as CreateOrderInput;');
+    // 旧草稿里同一设计款的规格行可能是不同的自动款名，恢复时统一为首行名称。
+    expect(source).toContain('items: unifyDesignNames(restored.items),');
     expect(source).toContain('clientSubmissionId,');
     expect(source).toMatch(
       /<fieldset[\s\S]{0,120}disabled=\{orderFormControlsDisabled\}/,

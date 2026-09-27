@@ -22,8 +22,6 @@ vi.mock('@/lib/cron/schedule', () => ({
   yesterdayShanghai: () => '2026-07-16',
 }));
 vi.mock('@/lib/cron/tasks', () => ({
-  runCsPeriodEndingTask: vi.fn(),
-  runCsSettleTask: vi.fn(),
   runDailySalaryTask: vi.fn(),
   runGenerateBillsTask: vi.fn(),
   runHourlyPayrollTask: vi.fn(),
@@ -37,17 +35,11 @@ vi.mock('@/lib/cron/pending-factory-backlog', () => ({
 vi.mock('@/lib/notification/production-alerts', () => ({
   runProductionAlertNotificationTask: vi.fn(),
 }));
-vi.mock('@/lib/salary/hourly-aggregate', () => ({
-  HourlyAggregateError: class HourlyAggregateError extends Error {},
-}));
 
 import { BACKGROUND_JOB_TYPES } from '@/lib/background-jobs/types';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
-import { POST as csPeriodEndingPost } from '../cs-period-ending/route';
-import { POST as csSettlePost } from '../cs-settle/route';
 import { POST as dailySalaryPost } from '../daily-salary/route';
 import { POST as generateBillsPost } from '../generate-bills/route';
-import { POST as hourlyPayrollPost } from '../hourly-payroll/route';
 import { POST as orderExportCleanupPost } from '../order-export-cleanup/route';
 import { POST as orderOverduePost } from '../order-overdue/route';
 import { POST as outsourceOverduePost } from '../outsource-overdue/route';
@@ -93,27 +85,6 @@ describe('cron durable wires', () => {
       },
     },
     {
-      name: 'hourly payroll',
-      post: hourlyPayrollPost,
-      path: '/api/cron/hourly-payroll',
-      body: { month: '2026-06' },
-      expected: {
-        type: BACKGROUND_JOB_TYPES.CRON_HOURLY_PAYROLL,
-        scope: '2026-06',
-        payload: { month: '2026-06' },
-      },
-    },
-    {
-      name: 'CS settle',
-      post: csSettlePost,
-      path: '/api/cron/cs-settle',
-      expected: {
-        type: BACKGROUND_JOB_TYPES.CRON_CS_SETTLE,
-        scope: '2026-07-17',
-        payload: { runDate: '2026-07-17' },
-      },
-    },
-    {
       name: 'generate bills',
       post: generateBillsPost,
       path: '/api/cron/generate-bills',
@@ -130,16 +101,6 @@ describe('cron durable wires', () => {
       path: '/api/cron/outsource-overdue',
       expected: {
         type: BACKGROUND_JOB_TYPES.CRON_OUTSOURCE_OVERDUE,
-        scope: '2026-07-17',
-        payload: { runDate: '2026-07-17' },
-      },
-    },
-    {
-      name: 'CS period ending',
-      post: csPeriodEndingPost,
-      path: '/api/cron/cs-period-ending',
-      expected: {
-        type: BACKGROUND_JOB_TYPES.CRON_CS_PERIOD_ENDING,
         scope: '2026-07-17',
         payload: { runDate: '2026-07-17' },
       },
@@ -231,18 +192,6 @@ describe('salary cron wires refuse future-dated scopes before enqueuing', () => 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringMatching(/future date/),
-    });
-    expect(enqueueCronJobMock).not.toHaveBeenCalled();
-  });
-
-  it('hourly-payroll answers 400 and does not enqueue', async () => {
-    const response = await hourlyPayrollPost(
-      request('/api/cron/hourly-payroll', { month: '2099-01' }),
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: expect.stringMatching(/future month/),
     });
     expect(enqueueCronJobMock).not.toHaveBeenCalled();
   });

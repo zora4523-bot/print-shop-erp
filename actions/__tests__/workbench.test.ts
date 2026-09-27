@@ -126,7 +126,7 @@ function useFoilCatalog(category: 'CUSTOM_FLAT_FOIL' | 'COLOR_PRINT') {
 }
 
 describe('workbench current-price quote', () => {
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.ADMIN])(
+  it.each([Role.SALES, Role.ADMIN])(
     'uses the real published pricing engine for %s and returns a minimal projection',
     async (role) => {
       mocks.permission.mockResolvedValue({ id: 'u', role });
@@ -382,24 +382,34 @@ describe('workbench automatic quote failure guidance', () => {
       message: '请至少选择一种正面烫金颜色后自动计算',
     });
   });
-  it.each(['CUSTOM_FLAT_FOIL', 'COLOR_PRINT'] as const)(
-    'explains the current %s reverse-side limitation without rejecting production facts in the schema',
-    async (category) => {
-      const currentInput = useFoilCatalog(category);
-      const result = await quoteWorkbenchAction({
-        ...currentInput,
-        backFoilColors: ['哑金'],
-      });
-      expect(mocks.snapshot).toHaveBeenCalled();
-      expect(result).toEqual({
-        status: 'error',
-        message:
-          category === 'COLOR_PRINT'
-            ? '彩印加反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价'
-            : '专版反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
-      });
-    },
-  );
+  it('explains the current CUSTOM_FLAT_FOIL reverse-side limitation without rejecting production facts in the schema', async () => {
+    const result = await quoteWorkbenchAction({
+      ...useFoilCatalog('CUSTOM_FLAT_FOIL'),
+      backFoilColors: ['哑金'],
+    });
+    expect(mocks.snapshot).toHaveBeenCalled();
+    expect(result).toEqual({
+      status: 'error',
+      message: '专版反面烫金暂不支持自动报价；如需反面烫金，请联系管理员核价',
+    });
+  });
+  // DECISIONS 2026-08-27：彩印反面烫金合法但待人工定价——转人工，不报错。
+  it('routes COLOR_PRINT reverse-side foil to manual pricing instead of an error', async () => {
+    const result = await quoteWorkbenchAction({
+      ...useFoilCatalog('COLOR_PRINT'),
+      backFoilColors: ['哑金'],
+    });
+    expect(mocks.snapshot).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 'success',
+      quote: {
+        baseAmount: null,
+        suggestedAmount: null,
+        needsPricing: true,
+        pricingReasons: ['彩印反面烫金需要管理员核价', '彩印加烫金需核对包含制版费的整款报价'],
+      },
+    });
+  });
   it('explains both missing front color and unsupported reverse-side full foil', async () => {
     const result = await quoteWorkbenchAction({
       ...useFoilCatalog('CUSTOM_FLAT_FOIL'),

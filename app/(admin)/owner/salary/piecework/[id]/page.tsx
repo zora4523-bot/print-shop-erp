@@ -25,7 +25,10 @@ import { formatRate } from '@/lib/format/unit-price';
 
 type PageProps = { params: Promise<{ id: string }> };
 
-const getPageData = cache((id: string) => getPieceworkSettlementDetail(id));
+const getPageData = cache(async (id: string) => {
+  const actor = await requirePermission('salary:view:all');
+  return getPieceworkSettlementDetail(id, actor);
+});
 
 const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
   PARTIAL: '局部烫金',

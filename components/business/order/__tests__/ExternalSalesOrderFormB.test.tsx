@@ -116,13 +116,19 @@ function render(
       activeIndex={options.activeIndex ?? 0}
       pendingDesigns={options.pendingDesigns ?? {}}
       packaging={{
-        mode: OrderPackagingMode.SINGLE_STYLE,
-        unitsPerBag: 10,
-        bagCount: 200,
+        rows: items.map((entry, index) => ({
+          label: `设计款 ${index + 1} · ${entry.specification ?? '待选规格'}`,
+          quantity: entry.quantity,
+          mode: OrderPackagingMode.SINGLE_STYLE,
+          unitsPerBag: 10,
+          bagCount: Math.ceil(entry.quantity / 10),
+        })),
+        selection: { type: 'BAG', box: null, mixing: 'SINGLE_STYLE' },
+        summary: `合计 ${items.length * 2000} 个`,
       }}
       paperOptions={[
-        { value: 'touch', label: '触感纸', texture: 'matte-red' },
-        { value: 'tbz', label: '铜版纸', texture: 'coated-white' },
+        { value: 'touch', label: '触感纸' },
+        { value: 'tbz', label: '铜版纸', disabled: true },
       ]}
       paperKey={options.paperKey ?? 'touch'}
       weightOptions={
@@ -151,7 +157,8 @@ function render(
       onPrintFoilModeChange={vi.fn()}
       onLaminationChange={vi.fn()}
       onQuantityChange={vi.fn()}
-      onPackagingModeChange={vi.fn()}
+      onPackagingTypeChange={vi.fn()}
+      onPackagingMixingChange={vi.fn()}
       onUnitsPerBagChange={vi.fn()}
       onPendingDesignsChange={vi.fn()}
       onReceiverAddressChange={vi.fn()}
@@ -236,8 +243,9 @@ describe('OrderFormB', () => {
       '工单',
       '工艺 · 第 1 款',
       '材料',
-      '数量与包装',
+      '数量',
       '设计图与设计文件',
+      '包装',
       '收货',
     ]) {
       expect(html).toContain(`aria-label="${heading}"`);
@@ -406,6 +414,23 @@ describe('OrderFormB', () => {
     )?.[0];
     expect(unavailable).toContain('disabled=""');
     expect(available).not.toContain('disabled=""');
+  });
+
+  it('offers paper as capsule buttons without material swatches', () => {
+    const html = render();
+
+    const paper = html.match(/<fieldset[^>]*>\s*<legend[^>]*>纸张材质[\s\S]*?<\/fieldset>/)?.[0];
+    expect(paper).toBeDefined();
+    const touch = paper!.match(/<button[^>]*id="[^"]*-paper-touch"[^>]*>/)?.[0];
+    const coated = paper!.match(/<button[^>]*id="[^"]*-paper-tbz"[^>]*>/)?.[0];
+    expect(touch).toContain('aria-pressed="true"');
+    expect(touch).toContain('rounded-full');
+    expect(coated).toContain('aria-pressed="false"');
+    expect(coated).toContain('disabled=""');
+    // The option order is kept exactly as given; no swatch artwork remains.
+    expect(paper!.indexOf('触感纸')).toBeLessThan(paper!.indexOf('铜版纸'));
+    expect(paper).not.toContain('gradient');
+    expect(paper).not.toContain('aria-hidden="true"');
   });
 
   it('does not offer an unpersistable manual paper weight', () => {

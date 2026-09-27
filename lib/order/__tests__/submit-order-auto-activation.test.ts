@@ -16,8 +16,8 @@ const mocks = vi.hoisted(() => {
     },
     orderLog: { create: vi.fn() },
     orderChangeRequest: { findFirst: vi.fn().mockResolvedValue(null) },
-    // submitOrder re-checks internal drafts for retired paper before handoff.
-    orderItem: { findMany: vi.fn().mockResolvedValue([]) },
+    // External submits require an image per item before the quote finalizer.
+    orderItem: { findFirst: vi.fn().mockResolvedValue(null) },
   };
   return {
     tx,
@@ -42,9 +42,9 @@ vi.mock('@/lib/notification/dispatch', () => ({
 vi.mock('@/lib/order/production-readiness', () => ({
   prepareOrderForProductionInTx: mocks.activate,
 }));
-// Since 2026-09-18 factory-direct submits run the shared quote finalizer
-// (items, BAGGING and logistics under one snapshot). This test only covers the
-// pricing-to-production handoff, so the finalizer is a stub.
+// External submits run the shared quote finalizer (items, BAGGING and
+// logistics under one snapshot). This test only covers the pricing-to-
+// production handoff, so the finalizer is a stub.
 vi.mock('@/lib/order/submit-external-order', () => ({
   finalizeExternalOrderQuoteInTx: vi.fn().mockResolvedValue({
     pricingRevisionId: 'pricing-revision-1',
@@ -66,20 +66,12 @@ function arrangeSubmit(pricingStatus: OrderPricingStatus) {
     .mockResolvedValueOnce({
       id: 'order-1',
       status: OrderStatus.DRAFT,
-      submitterId: 'owner-1',
+      submitterId: 'sales-1',
       receiverAddress: '佛山市南海区测试路 1 号',
-      receiverPhone: null,
-      settlementType: OrderSettlementType.FACTORY_DIRECT,
+      receiverPhone: '13800000000',
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
       pricingStatus,
       priceRevision: 1,
-    })
-    .mockResolvedValueOnce({
-      submitterId: 'owner-1',
-      submitterRole: Role.ADMIN,
-      billingMode: OrderBillingMode.CHARGE,
-      settlementType: OrderSettlementType.FACTORY_DIRECT,
-      totalAmount: '180.00',
-      revision: 1,
     })
     .mockResolvedValueOnce({
       billingMode: OrderBillingMode.CHARGE,
@@ -88,7 +80,7 @@ function arrangeSubmit(pricingStatus: OrderPricingStatus) {
     .mockResolvedValueOnce(null);
   mocks.tx.order.update.mockResolvedValue({
     id: 'order-1',
-    status: OrderStatus.SUBMITTED,
+    status: OrderStatus.PENDING_FACTORY,
   });
 }
 
@@ -124,16 +116,16 @@ describe('submitOrder pricing-to-production handoff', () => {
     });
   });
 
-  it('leaves manual pricing at SUBMITTED until factory confirmation', async () => {
+  it('leaves manual pricing at PENDING_FACTORY until factory confirmation', async () => {
     arrangeSubmit(OrderPricingStatus.PENDING_ADMIN_CONFIRMATION);
 
-    mocks.activate.mockResolvedValue({ status: OrderStatus.SUBMITTED, ready: false, issues: ['待人工核价'] });
+    mocks.activate.mockResolvedValue({ status: OrderStatus.PENDING_FACTORY, ready: false, issues: ['待人工核价'] });
     const result = await submitOrder('order-1', actor, now);
 
     expect(mocks.activate).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       id: 'order-1',
-      status: OrderStatus.SUBMITTED,
+      status: OrderStatus.PENDING_FACTORY,
     });
   });
 });

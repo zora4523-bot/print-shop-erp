@@ -13,7 +13,10 @@ import {
   OrderSettlementType,
   OrderStatus,
 } from '../../../generated/prisma/enums';
-import { buildTrustedAdminItemPricingSnapshot } from '../admin-pricing-snapshot';
+import {
+  buildTrustedAdminItemPricingSnapshot,
+  buildTrustedAdminPackagingPricingSnapshot,
+} from '../admin-pricing-snapshot';
 import type { CreateOrderPriceSnapshot } from '../../price/create-order';
 import { CREATE_ORDER_GOLDEN_SNAPSHOT } from '../../price/__tests__/fixtures/create-order-golden-fixtures';
 
@@ -1205,57 +1208,6 @@ describe('finalizeExternalOrderQuoteInTx', () => {
     expect(tx.orderItem.update).not.toHaveBeenCalled();
   });
 
-  it('内销空白封不能通过配置外说明绕过纸张规格准入', async () => {
-    const order = draftOrder({
-      settlementType: OrderSettlementType.INTERNAL_SALES,
-      items: [
-        item({
-          productId: null,
-          product: null,
-          paperType: null,
-          paperWeightGsm: null,
-          specification: null,
-          crafts: [],
-          manualQuoteReason: '客供纸与特殊工艺',
-        }),
-      ],
-      packagingGroups: [
-        {
-          id: 'pack-1',
-          sequence: 1,
-          name: '单款',
-          mode: OrderPackagingMode.SINGLE_STYLE,
-          actualBagCount: 125,
-          lines: [{ orderItemId: 'item-1', unitsPerBag: 8 }],
-        },
-      ],
-      shipments: [
-        {
-          id: 'shipment-1',
-          sequence: 1,
-          receiverName: '收件人',
-          receiverPhone: null,
-          destinationProvince: '上海',
-          weightKg: null,
-          lines: [{ orderItemId: 'item-1', quantity: 1_000 }],
-        },
-      ],
-    });
-    const tx = txFor(order, []);
-    const outcome = await finalizeExternalOrderQuoteInTx(
-      tx as unknown as Prisma.TransactionClient,
-      'order-1',
-      'cs-1',
-      NOW,
-    ).catch((error: unknown) => error);
-    if (outcome instanceof Error) {
-      expect(outcome.message).toMatch(/空白封纸张、克重和标准规格/);
-    }
-    expect(outcome).toBeInstanceOf(Error);
-    expect(tx.orderItem.update).not.toHaveBeenCalled();
-    expect(mocks.readPublishedSnapshot).toHaveBeenCalled();
-  });
-
   it('纸张缺货时在读价目前拒绝提交', async () => {
     const order = draftOrder({
       items: [
@@ -1518,4 +1470,91 @@ it('rejected orders with a previous quote reprice instead of reusing it', async 
   const tx = txFor(order);
   const result = await finalizeExternalOrderQuoteInTx(tx as unknown as Prisma.TransactionClient, order.id, 'sales-1', NOW, token);
   expect(result.reused).toBe(false);
+});
+
+it('管理员议定盒价的前提已变（分货改盒数）时提交不按价目簿改价，沿用已保存单价并转待管理员确认', async () => {
+  mocks.readPublishedSnapshot.mockResolvedValue({
+    ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+    boxing: { redCardEmptyBox: '1.5000', tactileEmptyBox: '1.8000', packingPerBox: '0.5000' },
+  });
+  const base = draftOrder();
+  const agreed = {
+    ...base.packagingGroups[0]!, orderId: 'order-1', name: '触感盒混装', mode: OrderPackagingMode.BOX_TACTILE_MIXED,
+    lines: [{ orderItemId: 'item-1', unitsPerBag: 4 }, { orderItemId: 'item-2', unitsPerBag: 2 }],
+    actualBagCount: 249, unitPrice: '3.0000', subtotal: '747.00', priceOverrideReason: '老客户议价',
+  };
+  const confirmed = buildTrustedAdminPackagingPricingSnapshot({
+    previous: null, now: NOW, actorId: 'owner-1', previousPriceRevision: 0, group: agreed,
+  });
+  // 分货后盒数 249 → 250：沿用原单价重算小计，管理员确认仍停在 249 盒，不再受信任。
+  const order = draftOrder({
+    packagingGroups: [{
+      ...agreed, actualBagCount: 250, subtotal: '750.00',
+      pricingSnapshot: { ...confirmed, pendingReason: '分货改变盒数，请重新确认人工包装单价' },
+    }],
+  });
+  const token = await currentQuoteToken(order);
+  const tx = txFor(order);
+
+  const result = await finalizeExternalOrderQuoteInTx(
+    tx as unknown as Prisma.TransactionClient, 'order-1', 'sales-1', NOW, token,
+  );
+
+  expect(tx.orderPackagingGroup.update).not.toHaveBeenCalled();
+  expect(result).toMatchObject({
+    packagingAmount: '750.00',
+    quotedFeeCompleteness: OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS,
+  });
+  expect(mocks.appendRevision).toHaveBeenCalledWith(
+    tx,
+    expect.objectContaining({ status: 'PENDING_ADMIN_CONFIRMATION' }),
+  );
+});
+
+it('分货后不再受信任的议定盒价：确认最新报价的金额、凭证与落库金额使用同一事实', async () => {
+  mocks.readPublishedSnapshot.mockResolvedValue({
+    ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+    boxing: { redCardEmptyBox: '1.5000', tactileEmptyBox: '1.8000', packingPerBox: '0.5000' },
+  });
+  const base = draftOrder();
+  const agreed = {
+    ...base.packagingGroups[0]!, orderId: 'order-1', name: '触感盒混装', mode: OrderPackagingMode.BOX_TACTILE_MIXED,
+    lines: [{ orderItemId: 'item-1', unitsPerBag: 4 }, { orderItemId: 'item-2', unitsPerBag: 2 }],
+    actualBagCount: 249, unitPrice: '3.0000', subtotal: '747.00', priceOverrideReason: '老客户议价',
+  };
+  const confirmed = buildTrustedAdminPackagingPricingSnapshot({
+    previous: null, now: NOW, actorId: 'owner-1', previousPriceRevision: 0, group: agreed,
+  });
+  const staleGroup = {
+    ...agreed, actualBagCount: 250, subtotal: '750.00',
+    pricingSnapshot: { ...confirmed, pendingReason: '分货改变盒数，请重新确认人工包装单价' },
+  };
+  const order = draftOrder({ packagingGroups: [staleGroup] });
+
+  // 第一次提交（无凭证）返回“确认最新报价并提交”所展示的金额与凭证。
+  let changed: ExternalOrderQuoteChangedError | null = null;
+  try {
+    await finalizeExternalOrderQuoteInTx(txFor(order) as unknown as Prisma.TransactionClient, 'order-1', 'sales-1', NOW, null);
+  } catch (error) {
+    if (!(error instanceof ExternalOrderQuoteChangedError)) throw error;
+    changed = error;
+  }
+  expect(changed).not.toBeNull();
+  // 议定价仍待管理员重新确认：确认页不能宣称金额完整。
+  expect(changed!.quotedFeeCompleteness).toBe(OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS);
+
+  // 第二次提交带回同一凭证，落库金额必须与确认页展示的完全一致。
+  const tx = txFor(order);
+  const result = await finalizeExternalOrderQuoteInTx(
+    tx as unknown as Prisma.TransactionClient, 'order-1', 'sales-1', NOW, changed!.quoteToken,
+  );
+  expect(result.packagingAmount).toBe('750.00');
+  expect(result.quotedFee).toBe(changed!.quotedFee);
+  expect(result.totalAmount).toBe(changed!.quotedFee);
+
+  // 议定单价在确认之后被改动时，旧凭证不能再放行。
+  const repriced = draftOrder({ packagingGroups: [{ ...staleGroup, unitPrice: '3.2000', subtotal: '800.00' }] });
+  await expect(finalizeExternalOrderQuoteInTx(
+    txFor(repriced) as unknown as Prisma.TransactionClient, 'order-1', 'sales-1', NOW, changed!.quoteToken,
+  )).rejects.toBeInstanceOf(ExternalOrderQuoteChangedError);
 });

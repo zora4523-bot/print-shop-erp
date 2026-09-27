@@ -50,14 +50,16 @@ it('CDR 全选在部分勾选时保留 mixed 语义与 FormData', async () => {
             {
               id: 'order-1',
               orderNo: '20260824001',
-              customerRef: '客户 A',
+              customName: '中秋礼盒',
+              externalSalesName: '桂林',
               submittedAt: '2026-08-24T01:00:00.000Z',
               cdrCount: 2,
             },
             {
               id: 'order-2',
               orderNo: '20260824002',
-              customerRef: '客户 B',
+              customName: null,
+              externalSalesName: '桂林',
               submittedAt: '2026-08-24T02:00:00.000Z',
               cdrCount: 3,
             },
@@ -76,6 +78,11 @@ it('CDR 全选在部分勾选时保留 mixed 语义与 FormData', async () => {
     );
 
     expect(form).not.toBeNull();
+    expect(
+      [...host.querySelectorAll('tbody tr')].map(
+        (row) => row.querySelectorAll('td')[2]?.textContent,
+      ),
+    ).toEqual(['中秋礼盒 · 桂林', '未命名工单 · 桂林']);
     expect(selectAll?.getAttribute('aria-checked')).toBe('true');
     expect(new FormData(form!).getAll('orderIds')).toEqual([
       'order-1',

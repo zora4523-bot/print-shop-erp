@@ -1,4 +1,3 @@
-import { formatDateInputShanghai } from '../format/dates';
 
 // 详情页浏览器标签标题 —— 业务编号在前、模块名在后。
 //
@@ -34,17 +33,6 @@ export function adminBillTitle(
 export function salesBillTitle(period: string | null): string {
   // 外部销售看的是自己的账单，名字是冗余信息，只留账期。
   return period ? `${period} · 账单` : '账单不存在';
-}
-
-export function csPeriodTitle(
-  ref: { csUserName: string; periodStart: Date } | null,
-): string {
-  if (!ref) return '客服周期不存在';
-  // 同一个客服会有多个周期，用起始月份区分。formatDateInputShanghai
-  // 已是 Asia/Shanghai 口径的 YYYY-MM-DD，取前 7 位得 YYYY-MM；
-  // periodStart 是 @db.Date（UTC 午夜），必须走上海时钟否则会差一天。
-  const startMonth = formatDateInputShanghai(ref.periodStart).slice(0, 7);
-  return `${ref.csUserName} ${startMonth}起 · 客服周期`;
 }
 
 export function outsourceTitle(

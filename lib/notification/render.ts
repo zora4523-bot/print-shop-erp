@@ -13,6 +13,11 @@
 // - 同一 key 多次出现 → 全部替换
 // - `{deepLink}` 的规范工单路径在 APP_PUBLIC_URL 有效时转成完整 URL；
 //   payload 本身保持相对路径，未配置时保持原值。
+// - 其余占位符值一律当纯文本：Markdown 元字符换成全角同形字符，控制字符
+//   （含 CR/LF）折叠成一个空格。customerRef 等字段由外部销售填写，原样拼进
+//   企业微信 Markdown 会注入可点击链接或伪造的消息行。只有系统生成的
+//   deepLink 豁免（它本来就要作为链接）。全角替换不依赖接收端是否支持
+//   反斜杠转义。
 // - 嵌套 `{` `}` 不支持 —— 仅 ASCII letter / digit / underscore 的 key
 //   匹配（`{foo_bar}` ✓，`{foo.bar}` ✗，`{foo-bar}` ✗）
 
@@ -37,8 +42,31 @@ export function renderTemplate(
     // String() 包装：兼容 number / boolean / Decimal-string / Date.toString
     // 避免 "[object Object]" 出现：调用方负责把对象/数组在 payload 里
     // 拍平成 string（events.ts 类型已约束）。
-    return String(value);
+    return toInertMarkdownText(String(value));
   });
+}
+
+const CONTROL_CHAR_RUN_RE = /[\u0000-\u001F\u007F\u0085\u2028\u2029]+/g;
+const MARKDOWN_META_RE = /[[\]()*_`<>#~\\]/g;
+const FULL_WIDTH_MARKDOWN_META: Readonly<Record<string, string>> = {
+  '[': '［',
+  ']': '］',
+  '(': '（',
+  ')': '）',
+  '*': '＊',
+  _: '＿',
+  '`': '｀',
+  '<': '＜',
+  '>': '＞',
+  '#': '＃',
+  '~': '～',
+  '\\': '＼',
+};
+
+function toInertMarkdownText(value: string): string {
+  return value
+    .replace(CONTROL_CHAR_RUN_RE, ' ')
+    .replace(MARKDOWN_META_RE, (character) => FULL_WIDTH_MARKDOWN_META[character] ?? character);
 }
 
 function resolveNotificationDeepLink(value: string): string {

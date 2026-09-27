@@ -13,6 +13,7 @@ type AxeResults = Awaited<ReturnType<AxeBuilder['analyze']>>;
 
 declare module 'vitest/browser' {
   interface BrowserCommands {
+    setReducedMotion(reduce: boolean): Promise<void>;
     checkShellAccessibility(selector?: string): Promise<AxeResults['violations']>;
   }
 }
@@ -34,6 +35,9 @@ export default defineConfig({
       provider: playwright(),
       instances: [{ browser: 'chromium' }],
       commands: {
+        async setReducedMotion({ page }, reduce: boolean) {
+          await page.emulateMedia({ reducedMotion: reduce ? 'reduce' : 'no-preference' });
+        },
         async checkShellAccessibility({ frame }, selector = '[data-testid="admin-shell-fixture"], [data-slot="sheet-content"]') {
           const testFrame = await frame();
           await testFrame.addScriptTag({ path: axePath });

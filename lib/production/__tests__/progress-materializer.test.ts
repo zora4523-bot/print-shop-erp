@@ -11,7 +11,6 @@ const items = [
       'full',
       'packing',
       'gluing',
-      'cleaning',
       'unknown-in-house',
       'outsource',
     ],
@@ -45,7 +44,6 @@ describe('deriveProductionProgressPlan', () => {
         craft('full', 'FLAT_FOIL_SINGLE'),
         craft('packing', 'PACKING'),
         craft('gluing', 'GLUING', { name: '粘封' }),
-        craft('cleaning', 'CLEANING', { name: '清废' }),
         craft('unknown-in-house', 'NEW_IN_HOUSE', { name: '新内制工艺' }),
         craft('outsource', 'UV', { isOutsource: true }),
       ],
@@ -54,7 +52,6 @@ describe('deriveProductionProgressPlan', () => {
     expect(result).toEqual({
       ok: true,
       specs: [
-        expect.objectContaining({ craftCode: 'CLEANING', plannedQty: '100' }),
         expect.objectContaining({ craftCode: 'GLUING', plannedQty: '100' }),
         expect.objectContaining({ craftCode: 'NEW_IN_HOUSE', plannedQty: '100' }),
       ],

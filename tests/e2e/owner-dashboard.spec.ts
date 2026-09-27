@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_USERS, expectNoNextErrorOverlay, getUserIdByUsername, login, seedDashboardSnapshot } from './_helpers';
+import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_USERS, expectNoNextErrorOverlay, getUserIdByUsername, login, seedDashboardSnapshot, seedDraftAgentMonthlyBill, seedSettledExternalSalesOrder } from './_helpers';
 
 async function findLinkedRecord(page: Page, href: string) {
   // Full lists paginate all qualifying records, including earlier fixture runs.
@@ -20,9 +20,19 @@ async function findLinkedRecord(page: Page, href: string) {
 test('工作台重点记录、完整关注列表和经营概览可连续使用', async ({ page }) => {
   test.setTimeout(120_000);
   const salesUserId = await getUserIdByUsername(E2E_USERS.sales.username);
-  const csUserId = await getUserIdByUsername(E2E_USERS.customerService.username);
-  const seeded = await seedDashboardSnapshot({ salesUserId, csUserId });
-  await login(page, { from: '/owner', username: ADMIN_USERNAME, password: ADMIN_PASSWORD });
+  const seeded = await seedDashboardSnapshot({ salesUserId });
+  // 「本月已出账」统计本月确认的 v2 代理商月账单（DECISIONS 2026-09-24）：为上一个已结束的
+  // 上海自然月造一张 5000 元的已结算外部销售单，由管理员在账单页真实确认。
+  const now = new Date();
+  const [year, month] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' })
+    .format(now).split('-').map(Number);
+  const previousMonthMid = new Date(Date.UTC(year!, month! - 2, 15, 4, 0, 0));
+  const settled = await seedSettledExternalSalesOrder({ customerRef: '工作台月账单', settledFee: '5000.00', settledAt: previousMonthMid });
+  const billId = await seedDraftAgentMonthlyBill(settled);
+  await login(page, { from: `/owner/agent-bills/${billId}`, username: ADMIN_USERNAME, password: ADMIN_PASSWORD });
+  await page.getByRole('button', { name: /确认.*账单/ }).click();
+  await expect(page.getByRole('button', { name: '标记已收' })).toBeVisible();
+  await page.goto('/owner');
   await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
   const kpis = page.locator('[data-slot="dashboard-kpi"]');
   await expect(kpis).toHaveCount(4);
@@ -37,14 +47,12 @@ test('工作台重点记录、完整关注列表和经营概览可连续使用',
   expect(Number(amount?.replace(/,/g, ''))).toBeGreaterThanOrEqual(5000);
   await expect(page.locator('[data-slot="dashboard-queue"]')).toHaveCount(0);
   await expect(page.locator('[data-slot="dashboard-charts-deferred"]')).toHaveCount(0);
-  for (const kind of ['due', 'shipments', 'outsource', 'over-reports', 'settlements']) {
+  for (const kind of ['due', 'shipments', 'outsource', 'over-reports']) {
     const panel = page.locator(`[data-slot="dashboard-watchlist-${kind}"]`);
     await expect(panel).toBeVisible();
     expect(await panel.locator('li').count()).toBeLessThanOrEqual(3);
   }
-  const settlements = page.locator('[data-slot="dashboard-watchlist-settlements"]');
-  await expect(settlements).not.toContainText('预测提成');
-  await expect(settlements).not.toContainText('预测总收入');
+  await expect(page.locator('[data-slot="dashboard-watchlist-settlements"]')).toHaveCount(0);
 
   await page.getByRole('link', { name: '查看全部待发货工单' }).click();
   await expect(page).toHaveURL(/kind=shipments/, { timeout: 15_000 });
@@ -58,14 +66,6 @@ test('工作台重点记录、完整关注列表和经营概览可连续使用',
   await page.goto('/owner/attention?kind=outsource');
   await expect(page.locator('main [data-slot="table-body"]')).toBeVisible();
   await expect(await findLinkedRecord(page, `/foreman/outsource/${seeded.outsourceId}`)).toBeVisible();
-  if (seeded.csPeriodId) {
-    await page.goto('/owner/attention?kind=settlements');
-    await expect(page.locator('main [data-slot="table-body"]')).toBeVisible();
-    const period = await findLinkedRecord(page, `/owner/salary/cs/${seeded.csPeriodId}`);
-    await period.click();
-    await expect(page).toHaveURL(new RegExp(`/owner/salary/cs/${seeded.csPeriodId}`), { timeout: 15_000 });
-    await expect(page.getByText('预测总收入', { exact: true })).toBeVisible();
-  }
 
   await page.goto('/owner');
   await page.getByRole('navigation', { name: '工作台快捷操作' }).getByRole('link', { name: '经营概览' }).click();

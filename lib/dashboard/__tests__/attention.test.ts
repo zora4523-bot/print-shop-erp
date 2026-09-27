@@ -46,7 +46,7 @@ describe('completedWaitingLabel', () => {
 });
 
 describe('attentionHref', () => {
-  it.each(['shipments', 'due', 'outsource', 'over-reports', 'settlements'] as const)(
+  it.each(['shipments', 'due', 'outsource', 'over-reports'] as const)(
     '%s 进入完整关注列表并选择相同类别',
     (kind) => {
       const destination = new URL(attentionHref(kind), 'http://localhost:3000');

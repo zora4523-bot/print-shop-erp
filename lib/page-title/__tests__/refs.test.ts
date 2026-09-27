@@ -7,14 +7,12 @@ const { dbMock } = vi.hoisted(() => {
     productionTask: { findFirst: ReturnType<typeof vi.fn> };
     bill: { findUnique: ReturnType<typeof vi.fn> };
     agentMonthlyBill: { findUnique: ReturnType<typeof vi.fn> };
-    salaryPeriod: { findUnique: ReturnType<typeof vi.fn> };
     outsourceOrder: { findUnique: ReturnType<typeof vi.fn> };
   } = {
     order: { findFirst: vi.fn() },
     productionTask: { findFirst: vi.fn() },
     bill: { findUnique: vi.fn() },
     agentMonthlyBill: { findUnique: vi.fn() },
-    salaryPeriod: { findUnique: vi.fn() },
     outsourceOrder: { findUnique: vi.fn() },
   };
   return { dbMock: mock };
@@ -23,7 +21,6 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
   getAdminBillTitleRef,
-  getCsPeriodTitleRef,
   getOrderTitleRef,
   getOutsourceTitleRef,
   getSalesBillTitleRef,
@@ -48,7 +45,6 @@ beforeEach(() => {
   dbMock.order.findFirst.mockReset().mockResolvedValue(null);
   dbMock.productionTask.findFirst.mockReset().mockResolvedValue(null);
   dbMock.bill.findUnique.mockReset().mockResolvedValue(null);
-  dbMock.salaryPeriod.findUnique.mockReset().mockResolvedValue(null);
   dbMock.outsourceOrder.findUnique.mockReset().mockResolvedValue(null);
 });
 
@@ -140,18 +136,6 @@ describe('getAdminBillTitleRef', () => {
     expect(selectOf(dbMock.bill.findUnique)).toEqual({
       period: true,
       salesUser: { select: { displayName: true } },
-    });
-  });
-});
-
-describe('getCsPeriodTitleRef', () => {
-  it('只取周期起始日与客服姓名，不带业绩/提成', () => {
-    getCsPeriodTitleRef('period-1');
-
-    expect(whereOf(dbMock.salaryPeriod.findUnique)).toEqual({ id: 'period-1' });
-    expect(selectOf(dbMock.salaryPeriod.findUnique)).toEqual({
-      periodStart: true,
-      csUser: { select: { displayName: true } },
     });
   });
 });

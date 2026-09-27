@@ -1,9 +1,6 @@
 import bcrypt from 'bcryptjs';
-import Decimal from 'decimal.js';
 import {
   Role,
-  SalaryPeriodStatus,
-  SalaryRuleType,
   WorkerType,
   type User,
 } from '../generated/prisma/client';
@@ -13,22 +10,8 @@ import {
   paginationWindow,
   type PaginatedResult,
 } from './admin/table';
-import { todayShanghai } from './dashboard/shanghai-clock';
-import { csUserLockKey } from './salary/cs-lock';
-import {
-  clampMonthlySalaryWindow,
-  monthlySalaryWindowWithinEmployment,
-  type EmploymentWindow,
-} from './salary/employment';
-import {
-  hourlyPayrollLockKey,
-  salaryIdentityLockKey,
-} from './salary/hourly-lock';
-import {
-  acquireSalaryRuleSnapshotReadLock,
-  getActiveRuleValue,
-  type SalaryRuleClient,
-} from './salary/rules';
+import { type EmploymentWindow } from './salary/employment';
+import { salaryIdentityLockKey } from './salary/hourly-lock';
 
 // Thrown when a mutation would break a system invariant (not an auth issue
 // per se — the caller has permission, but the operation itself is refused).
@@ -59,42 +42,12 @@ type TxClient = {
     update: (args: { where: { id: string }; data: unknown; select?: unknown }) => Promise<AccountSummary>;
     count: (args?: { where?: unknown }) => Promise<number>;
   };
-  salaryRule: SalaryRuleClient['salaryRule'];
-  salaryPeriod: {
-    findFirst: (args: { where: unknown; select?: unknown }) => Promise<{
-      id: string;
-      periodStart: Date;
-      periodEnd: Date;
-      status: SalaryPeriodStatus;
-    } | null>;
-    findMany: (args: {
-      where: { csUserId: string };
-      select: {
-        id: true;
-        periodStart: true;
-        periodEnd: true;
-        status: true;
-      };
-      orderBy: { periodStart: 'asc' };
-    }) => Promise<
-      Array<{
-        id: string;
-        periodStart: Date;
-        periodEnd: Date;
-        status: SalaryPeriodStatus;
-      }>
-    >;
-    create: (args: { data: unknown }) => Promise<unknown>;
-  };
   hourlyWorkerPayroll: {
     findMany: (args: {
       where: { workerId: string };
-      select: { id: true; month: true; isPaid: true };
+      select: { month: true };
       orderBy: { month: 'asc' };
-    }) => Promise<Array<{ id: string; month: string; isPaid: boolean }>>;
-    deleteMany: (args: {
-      where: { workerId: string; isPaid: false };
-    }) => Promise<{ count: number }>;
+    }) => Promise<Array<{ month: string }>>;
   };
 };
 
@@ -150,244 +103,34 @@ function sameEmploymentCoverageForPayrollMonth(
 }
 
 /**
- * Identity edits invalidate every unpaid hourly derivative for the user.
- *
- * The caller already holds salaryIdentityLockKey(userId). We discover all
- * existing month coordinates, lock them in lexical YYYY-MM order, then re-read
- * before deciding. This makes a concurrent mark-paid operation linearizable:
- * either the account edit deletes the unpaid row first, or it observes the
- * committed paid snapshot and preserves it.
+ * Historical PACKER hourly payroll rows are a read-only archive: nothing
+ * recomputes them any more. A direct edit of a worker's employment dates must
+ * not silently change the eligible days of an archived month.
  */
-async function invalidateUnpaidHourlyPayrollsInTx(
+async function assertHourlyArchiveCoverageUnchangedInTx(
   tx: TxClient,
   userId: string,
-  options: {
-    employmentDatesChanged: boolean;
-    previousEmployment: EmploymentWindow;
-    nextEmployment: EmploymentWindow;
-  },
-): Promise<void> {
-  const locators = await tx.hourlyWorkerPayroll.findMany({
-    where: { workerId: userId },
-    select: { id: true, month: true, isPaid: true },
-    orderBy: { month: 'asc' },
-  });
-  if (locators.length === 0) return;
-
-  const months = [...new Set(locators.map((row) => row.month))].sort();
-  for (const month of months) {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${hourlyPayrollLockKey(
-      userId,
-      month,
-    )}))`;
-  }
-
-  const currentRows = await tx.hourlyWorkerPayroll.findMany({
-    where: { workerId: userId },
-    select: { id: true, month: true, isPaid: true },
-    orderBy: { month: 'asc' },
-  });
-
-  if (options.employmentDatesChanged) {
-    const excludedPaid = currentRows.find((row) => {
-      if (!row.isPaid) return false;
-      return !sameEmploymentCoverageForPayrollMonth(
-        row.month,
-        options.previousEmployment,
-        options.nextEmployment,
-      );
-    });
-    if (excludedPaid) {
-      throw new AccountInvariantError(
-        `已发放的 ${excludedPaid.month} 时薪工资所覆盖的雇佣日期会变化，不能修改雇佣日期`,
-      );
-    }
-  }
-
-  await tx.hourlyWorkerPayroll.deleteMany({
-    where: { workerId: userId, isPaid: false },
-  });
-}
-
-async function assertCsPeriodHistoryWithinEmploymentInTx(
-  tx: TxClient,
-  csUserId: string,
+  previousEmployment: EmploymentWindow,
   nextEmployment: EmploymentWindow,
 ): Promise<void> {
-  const periods = await tx.salaryPeriod.findMany({
-    where: { csUserId },
-    select: {
-      id: true,
-      periodStart: true,
-      periodEnd: true,
-      status: true,
-    },
-    orderBy: { periodStart: 'asc' },
+  const archived = await tx.hourlyWorkerPayroll.findMany({
+    where: { workerId: userId },
+    select: { month: true },
+    orderBy: { month: 'asc' },
   });
-  const conflict = periods.find(
-    (period) =>
-      !monthlySalaryWindowWithinEmployment(
-        period.periodStart,
-        period.periodEnd,
+  const changed = archived.find(
+    (row) =>
+      !sameEmploymentCoverageForPayrollMonth(
+        row.month,
+        previousEmployment,
         nextEmployment,
       ),
   );
-  if (conflict) {
+  if (changed) {
     throw new AccountInvariantError(
-      `已有客服工资周期 ${conflict.periodStart.toISOString().slice(0, 10)} ~ ${conflict.periodEnd.toISOString().slice(0, 10)}（${conflict.status}）超出新雇佣月份，不能修改雇佣日期`,
+      `历史时薪月结存档 ${changed.month} 所覆盖的雇佣日期会变化，不能修改雇佣日期`,
     );
   }
-}
-
-async function ensureInitialCsPeriodInTx(
-  tx: TxClient,
-  csUser: Pick<
-    AccountSummary,
-    'id' | 'employmentStartDate' | 'employmentEndDate'
-  >,
-  now: Date = new Date(),
-  options: { identityAndCsLocksHeld?: boolean } = {},
-): Promise<void> {
-  if (!options.identityAndCsLocksHeld) {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(
-      csUser.id,
-    )}))`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
-      csUser.id,
-    )}))`;
-  }
-
-  const month = todayShanghai(now).slice(0, 7);
-  const [year, monthNumber] = month.split('-').map(Number);
-  const requestedStart = new Date(Date.UTC(year, monthNumber - 1, 1));
-  // An employee whose final employment month has already passed must not get
-  // a new liability. Partial first/last months remain whole monthly salary
-  // months: no daily proration has been invented here.
-  const firstEligibleMonth = clampMonthlySalaryWindow(
-    requestedStart,
-    1,
-    csUser,
-  );
-  const activePeriod = await tx.salaryPeriod.findFirst({
-    where: {
-      csUserId: csUser.id,
-      status: SalaryPeriodStatus.IN_PROGRESS,
-    },
-    select: { id: true, periodStart: true, periodEnd: true, status: true },
-  });
-  if (activePeriod) {
-    if (
-      !monthlySalaryWindowWithinEmployment(
-        activePeriod.periodStart,
-        activePeriod.periodEnd,
-        csUser,
-      )
-    ) {
-      throw new AccountInvariantError(
-        '进行中的客服工资周期超出新雇佣区间；请先结算或修正周期',
-      );
-    }
-    if (
-      firstEligibleMonth === null ||
-      (activePeriod.periodStart.getTime() <=
-        firstEligibleMonth.periodEnd.getTime() &&
-        activePeriod.periodEnd.getTime() >=
-          firstEligibleMonth.periodStart.getTime())
-    ) {
-      return;
-    }
-    throw new AccountInvariantError(
-      '客服已有进行中工资周期，但未覆盖目标雇佣月份；请先结算或修正该周期',
-    );
-  }
-  if (firstEligibleMonth === null) return;
-  // "Create an employed CS account under the current rules" does not
-  // authorize freezing today's rules into a period whose employment month has
-  // not begun. Leave the account without a liability until that month; order
-  // sales already fail closed when no period covers their business date, and
-  // the explicit CS-period workflow can create it using the then-current rule.
-  if (
-    firstEligibleMonth.periodStart.getTime() > requestedStart.getTime()
-  ) {
-    return;
-  }
-  await acquireSalaryRuleSnapshotReadLock(tx);
-  const [baseRule, lengthRule] = await Promise.all([
-    getActiveRuleValue<{ monthlyBase: number | string }>(
-      SalaryRuleType.CS_COMMISSION,
-      'CS_BASE_SALARY',
-      now,
-      tx,
-    ),
-    getActiveRuleValue<{ months: number }>(
-      SalaryRuleType.CS_COMMISSION,
-      'CS_PERIOD_LENGTH',
-      now,
-      tx,
-    ),
-  ]);
-  if (!baseRule || !lengthRule) {
-    throw new AccountInvariantError(
-      '缺少当前生效的客服底薪或周期规则，无法创建客服账号',
-    );
-  }
-  let monthlyBase: Decimal;
-  try {
-    monthlyBase = new Decimal(baseRule.monthlyBase);
-  } catch {
-    throw new AccountInvariantError('当前客服底薪规则金额非法');
-  }
-  if (
-    !monthlyBase.isFinite() ||
-    monthlyBase.isNegative() ||
-    monthlyBase.decimalPlaces() > 2 ||
-    monthlyBase.gt('99999999.99')
-  ) {
-    throw new AccountInvariantError('当前客服底薪规则金额非法');
-  }
-  if (
-    !Number.isSafeInteger(lengthRule.months) ||
-    lengthRule.months < 1 ||
-    lengthRule.months > 24
-  ) {
-    throw new AccountInvariantError('当前客服周期月数规则必须是 1 到 24 的整数');
-  }
-  const window = clampMonthlySalaryWindow(
-    requestedStart,
-    lengthRule.months,
-    csUser,
-  );
-  if (!window) return;
-  if (monthlyBase.times(window.durationMonths).gt('9999999999.99')) {
-    throw new AccountInvariantError('当前客服底薪 × 周期月数超过可保存上限');
-  }
-  const { periodStart, periodEnd, durationMonths } = window;
-  const overlap = await tx.salaryPeriod.findFirst({
-    where: {
-      csUserId: csUser.id,
-      periodStart: { lte: periodEnd },
-      periodEnd: { gte: periodStart },
-    },
-    select: { id: true, periodStart: true, periodEnd: true, status: true },
-  });
-  if (overlap) {
-    throw new AccountInvariantError(
-      '客服当前月份已有重叠的历史工资周期，请先在客服周期页面核对后再调整账号',
-    );
-  }
-
-  await tx.salaryPeriod.create({
-    data: {
-      csUserId: csUser.id,
-      periodStart,
-      periodEnd,
-      durationMonths,
-      totalSales: '0.00',
-      initialSales: '0.00',
-      monthlyBase: monthlyBase.toFixed(2),
-      status: SalaryPeriodStatus.IN_PROGRESS,
-    },
-  });
 }
 
 export type AccountSummary = Pick<
@@ -559,23 +302,20 @@ export async function createUser(data: CreateUserData): Promise<AccountSummary> 
             : null,
         isActive: true,
         employmentType:
-          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+          data.role === Role.WORKER
             ? (data.employmentType ?? null)
             : null,
         employmentStartDate:
-          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+          data.role === Role.WORKER
             ? (data.employmentStartDate ?? null)
             : null,
         employmentEndDate:
-          data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+          data.role === Role.WORKER
             ? (data.employmentEndDate ?? null)
             : null,
       },
       select: SUMMARY_SELECT,
     });
-    if (data.role === Role.CUSTOMER_SERVICE) {
-      await ensureInitialCsPeriodInTx(txClient, created);
-    }
     return created;
   });
 }
@@ -611,40 +351,27 @@ export async function updateUser(
     const nextWorkerType =
       data.role === Role.WORKER ? (data.workerType ?? null) : null;
     const nextEmploymentType =
-      data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+      data.role === Role.WORKER
         ? (data.employmentType ?? null)
         : null;
     const nextEmploymentStartDate =
-      data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+      data.role === Role.WORKER
         ? (data.employmentStartDate ?? null)
         : null;
     const nextEmploymentEndDate =
-      data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER
+      data.role === Role.WORKER
         ? (data.employmentEndDate ?? null)
         : null;
     const roleChanging = data.role !== target.role;
-    const workerTypeChanging = nextWorkerType !== target.workerType;
-    const employmentTypeChanging =
-      nextEmploymentType !== target.employmentType;
     const employmentChanging =
       (nextEmploymentStartDate?.getTime() ?? null) !==
         (target.employmentStartDate?.getTime() ?? null) ||
       (nextEmploymentEndDate?.getTime() ?? null) !==
         (target.employmentEndDate?.getTime() ?? null);
-    const hourlyIdentityChanging =
-      roleChanging ||
-      workerTypeChanging ||
-      employmentTypeChanging ||
-      employmentChanging;
     const currentWorkerEmploymentChanging =
       !roleChanging &&
       target.role === Role.WORKER &&
       data.role === Role.WORKER &&
-      employmentChanging;
-    const currentCsEmploymentChanging =
-      !roleChanging &&
-      target.role === Role.CUSTOMER_SERVICE &&
-      data.role === Role.CUSTOMER_SERVICE &&
       employmentChanging;
 
     if (roleChanging) assertNotSelfTarget(target, actor, 'role-change');
@@ -657,43 +384,22 @@ export async function updateUser(
       id,
     )}))`;
     await assertNotStrandingSystemInTx(txClient, target, { role: data.role });
-    // Settlement decides whether to create a successor period from the user's
-    // latest role/active state while holding this same lock. Serialize role
-    // transitions involving CUSTOMER_SERVICE before updating the row, or a
-    // concurrent settlement could read the old role and create an unintended
-    // next salary period after the account has been reassigned.
-    if (
-      (target.role === Role.CUSTOMER_SERVICE ||
-        data.role === Role.CUSTOMER_SERVICE)
-    ) {
-      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
+    // Archived rows are immutable snapshots across role changes. Only a direct
+    // edit of a current worker's employment dates can retroactively alter the
+    // eligible dates of an archived month.
+    if (currentWorkerEmploymentChanging) {
+      await assertHourlyArchiveCoverageUnchangedInTx(
+        txClient,
         id,
-      )}))`;
-    }
-    if (currentCsEmploymentChanging) {
-      await assertCsPeriodHistoryWithinEmploymentInTx(txClient, id, {
-        employmentStartDate: nextEmploymentStartDate,
-        employmentEndDate: nextEmploymentEndDate,
-      });
-    }
-    // Global order: identity -> CS (when applicable) -> worker-month(s).
-    // Invalidating all unpaid rows also covers zero-attendance COOK monthly
-    // salary, whose amount can become stale solely from an identity change.
-    if (hourlyIdentityChanging) {
-      await invalidateUnpaidHourlyPayrollsInTx(txClient, id, {
-        // Paid rows are immutable historical snapshots across role changes.
-        // Only a direct edit of a current worker's employment dates can
-        // retroactively alter the exact eligible dates of that paid month.
-        employmentDatesChanged: currentWorkerEmploymentChanging,
-        previousEmployment: {
+        {
           employmentStartDate: target.employmentStartDate,
           employmentEndDate: target.employmentEndDate,
         },
-        nextEmployment: {
+        {
           employmentStartDate: nextEmploymentStartDate,
           employmentEndDate: nextEmploymentEndDate,
         },
-      });
+      );
     }
     const updated = await txClient.user.update({
       where: { id },
@@ -713,15 +419,6 @@ export async function updateUser(
       },
       select: SUMMARY_SELECT,
     });
-    if (
-      (roleChanging || employmentChanging) &&
-      data.role === Role.CUSTOMER_SERVICE &&
-      updated.isActive
-    ) {
-      await ensureInitialCsPeriodInTx(txClient, updated, new Date(), {
-        identityAndCsLocksHeld: true,
-      });
-    }
     return updated;
   });
 }
@@ -752,24 +449,11 @@ export async function setUserActive(
       id,
     )}))`;
 
-    // See updateUser: active-state changes participate in the same CS-user
-    // critical section as settlement and automatic successor creation.
-    if (target.role === Role.CUSTOMER_SERVICE) {
-      await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${csUserLockKey(
-        id,
-      )}))`;
-    }
-
     const updated = await txClient.user.update({
       where: { id },
       data: { isActive },
       select: SUMMARY_SELECT,
     });
-    if (isActive && target.role === Role.CUSTOMER_SERVICE) {
-      await ensureInitialCsPeriodInTx(txClient, updated, new Date(), {
-        identityAndCsLocksHeld: true,
-      });
-    }
     return updated;
   });
 }

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { writePdfArtifact, cleanupOldPdfArtifacts } from '../pdf/artifacts';
 import {
   BackgroundJobQueue,
@@ -14,6 +13,13 @@ import { db } from '../db';
 import { getSetting } from '../settings';
 import { databaseNow } from './clock';
 import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from './heartbeat-policy';
+import {
+  findInFlightOrderPdfJob,
+  lockOrderPdfScope,
+  ORDER_PDF_IN_FLIGHT_STATUSES,
+  orderPdfScopePrefix,
+  orderPdfScopeWhere,
+} from './pdf-scope';
 import { enqueueBackgroundJob } from './repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from './types';
 
@@ -30,21 +36,68 @@ export async function enqueueOrderPdfJob(input: {
   snapshotKey?: string;
   regenerationKey?: string;
 }): Promise<string> {
-  const enqueuedAt = await databaseNow();
-  const snapshotDigest = createHash('sha256').update(JSON.stringify(input)).digest('hex');
-  const reuseWindow = Math.floor(enqueuedAt.getTime() / PDF_JOB_REUSE_WINDOW_MS);
-  const { job } = await enqueueBackgroundJob({
-    type: BACKGROUND_JOB_TYPES.ORDER_PDF,
-    queue: BackgroundJobQueue.HEAVY,
-    // Unique DB key coalesces concurrent requests for the same authorized
-    // snapshot within a 15-minute window. A new window allows recovery when a
-    // completed artifact expired; all downloads still recheck current access.
-    dedupeKey: `order-pdf:v2:${snapshotDigest}:${reuseWindow}`,
-    payload: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
-    priority: 120,
-    maxAttempts: 2,
+  // The authorized scope (order, actor, work-order version, content snapshot,
+  // base URL) excludes the regeneration key, so every job of one scope shares
+  // this dedupe-key prefix whether it came from the window or a regeneration.
+  const { regenerationKey, ...scope } = input;
+  const scopePrefix = orderPdfScopePrefix(scope);
+  // Every entry (plain download, failure-page regeneration and the operator
+  // retry in repository.ts) runs the same
+  // check-or-create under one transaction-scoped lock per authorized scope, so
+  // a plain download can neither requeue a DEAD window job nor open a new
+  // window job while a regeneration of the same scope is queued or running
+  // (and vice versa). Two HEAVY renders of one scope would only waste the
+  // single-concurrency queue.
+  return db.$transaction(async (tx) => {
+    await lockOrderPdfScope(tx, scopePrefix);
+    const inFlight = await findInFlightOrderPdfJob(tx, scopePrefix);
+    if (inFlight) return inFlight;
+    let dedupeKey: string;
+    if (regenerationKey === undefined) {
+      const enqueuedAt = await databaseNow(tx);
+      const reuseWindow = Math.floor(enqueuedAt.getTime() / PDF_JOB_REUSE_WINDOW_MS);
+      dedupeKey = `${scopePrefix}${reuseWindow}`;
+    } else {
+      const regeneration = await resolveOrderPdfRegeneration(tx, scopePrefix);
+      if ('jobId' in regeneration) return regeneration.jobId;
+      dedupeKey = regeneration.dedupeKey;
+    }
+    const { job } = await enqueueBackgroundJob(
+      {
+        type: BACKGROUND_JOB_TYPES.ORDER_PDF,
+        queue: BackgroundJobQueue.HEAVY,
+        // Unique DB key coalesces requests for the same authorized snapshot
+        // within a 15-minute window. A new window allows recovery when a
+        // completed artifact expired; all downloads still recheck access.
+        dedupeKey,
+        payload: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
+        priority: 120,
+        maxAttempts: 2,
+      },
+      tx,
+    );
+    return job.id;
   });
-  return job.id;
+}
+
+type PdfEnqueueTx = Pick<Prisma.TransactionClient, 'backgroundJob' | '$queryRaw'>;
+
+// A failure-recovery link must not stack HEAVY jobs. The caller already holds
+// the scope lock and found nothing in flight, so the new job's key is anchored
+// on the latest (finished) job of the scope; once that job finishes, the
+// anchor moves on. The operator retry of a DEAD job takes the same scope lock,
+// so the in-flight re-check below is defence in depth.
+async function resolveOrderPdfRegeneration(
+  tx: PdfEnqueueTx,
+  scopePrefix: string,
+): Promise<{ jobId: string } | { dedupeKey: string }> {
+  const latest = await tx.backgroundJob.findFirst({
+    where: orderPdfScopeWhere(scopePrefix),
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, status: true },
+  });
+  if (latest && ORDER_PDF_IN_FLIGHT_STATUSES.includes(latest.status)) return { jobId: latest.id };
+  return { dedupeKey: `${scopePrefix}regenerate:after:${latest?.id ?? 'none'}` };
 }
 
 export async function handleOrderPdfJob(

@@ -257,9 +257,6 @@ function SalesOrderCard({
           >
             {order.customName ?? '未命名工单'}
           </Button>
-          <span className="admin-wrap-anywhere text-xs font-medium text-muted-foreground">
-            {order.customerRef ?? '未填客户'}
-          </span>
           {order.pendingChangeRequest ? (
             <Badge variant="outline" className="border-foreground/60">
               {order.pendingChangeRequest.type === 'CANCEL' ? '取消申请中' : '修改申请中'}
@@ -514,8 +511,6 @@ function SalesOrderDrawer({
           <SalesOrderStatusBadge status={order.status} />
         </div>
         <SheetDescription className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <span>{order.customerRef ?? '未填客户'}</span>
-          <span aria-hidden="true">·</span>
           <span className="font-sans tabular-nums">{order.orderNo}</span>
           <Button
             type="button"

@@ -14,11 +14,7 @@ export async function getOrderPrintScope(
   orderId: string,
   actor: PrintActor,
 ): Promise<Prisma.OrderWhereInput | null> {
-  if (
-    actor.role !== Role.ADMIN &&
-    actor.role !== Role.CUSTOMER_SERVICE &&
-    actor.role !== Role.WORKER
-  ) return null;
+  if (actor.role !== Role.ADMIN && actor.role !== Role.WORKER) return null;
 
   // Background jobs carry an old actor snapshot. Recheck the account instead
   // of trusting a role that may have changed while the job was queued.
@@ -33,9 +29,6 @@ export async function getOrderPrintScope(
   });
   if (!account?.isActive || account.role !== actor.role) return null;
   if (actor.role === Role.ADMIN) return { id: orderId };
-  if (actor.role === Role.CUSTOMER_SERVICE) {
-    return { id: orderId, submitterId: actor.id };
-  }
 
   const current = await db.order.findFirst({
     where: { id: orderId, status: { not: OrderStatus.SUBMITTED } },

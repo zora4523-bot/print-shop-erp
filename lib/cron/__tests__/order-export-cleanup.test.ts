@@ -24,7 +24,6 @@ vi.mock('@/lib/bill', () => ({
   generateBillsForPeriod: vi.fn(),
 }));
 vi.mock('@/lib/dashboard/owner-watchlist', () => ({
-  getEndingPeriods: vi.fn(),
   getOverdueOutsourcing: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({
@@ -39,17 +38,9 @@ vi.mock('@/lib/order/export', () => ({
 vi.mock('@/lib/order/export-retention', () => ({
   scrubTerminalOrderExportFilters: scrubTerminalMock,
 }));
-vi.mock('@/lib/salary/cs', () => ({
-  CsBatchUnexpectedError: class extends Error {},
-  settleReadyCsPeriods: vi.fn(),
-}));
 vi.mock('@/lib/salary/daily', () => ({
   DailyBatchUnexpectedError: class extends Error {},
   computeDailyForAllMachineWorkers: vi.fn(),
-}));
-vi.mock('@/lib/salary/hourly-aggregate', () => ({
-  HourlyBatchUnexpectedError: class extends Error {},
-  computeHourlyForAllInMonth: vi.fn(),
 }));
 
 import { runOrderExportCleanupTask } from '../tasks';

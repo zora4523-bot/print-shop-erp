@@ -19,11 +19,12 @@ type ActiveDecision = 'delivered' | 'retry' | 'ignored';
 export function UnknownNotificationActions({
   logId,
   stateVersion,
-  canRetry,
+  retryUnavailableReason,
 }: {
   logId: string;
   stateVersion: number;
-  canRetry: boolean;
+  /** null = 可以重发；否则为服务端给出的不可重发原因。 */
+  retryUnavailableReason: string | null;
 }) {
   const formIdPrefix = useId();
   const [activeDecision, setActiveDecision] = useState<ActiveDecision | null>(
@@ -81,7 +82,7 @@ export function UnknownNotificationActions({
           ]} confirmText="确认已送达" />
         </ConfirmActionController>
 
-        {canRetry ? (
+        {retryUnavailableReason === null ? (
           <ConfirmActionController level="L2"
             formId={retryFormId}
             disabled={pending}
@@ -99,7 +100,7 @@ export function UnknownNotificationActions({
         ) : (
           <DisabledReason
             cause="status"
-            reason="该消息缺少重发记录，无法自动重发"
+            reason={retryUnavailableReason}
             className="items-end text-right [&_[data-slot=disabled-reason-copy]]:max-w-72 [&_[data-slot=disabled-reason-copy]]:text-xs"
           >
             <Button type="button" size="xs" variant="outline" disabled>

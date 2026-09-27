@@ -9,6 +9,7 @@ import { MAX_ORDER_ITEM_PRINT_COLORS } from '../../order/print-colors';
 import { MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE, isNewOrderPricingRoute, resolveOrderItemFoilSides } from '../../order/pricing-route';
 import { calculateCreateOrderBagCount, MAX_CREATE_ORDER_UNITS_PER_BAG, CREATE_ORDER_PACKAGING_LIMIT_MESSAGE } from '../../order/create-order-packaging';
 import { isMixedPackaging, packagingCapacity, packagingCapacityError } from '../../order/packaging-mode';
+import { duplicateDesignNameMessage, findDuplicateDesignNames } from '../../order/design-groups';
 import { craftIdSchema, decimalStringToScaledInteger, formBoolean, moneyOptionalField, nullableFormBoolean, optionalDateField, optionalShipmentText, optionalTrimmedText, orderItemFoilColorsArray, orderItemFoilSideColorsField, orderItemMoneyOptionalField, orderItemQuantityField, requiredTrimmedText, shipmentBillableWeightField, shipmentChargeMoneyField } from './shared';
 
 // A new command can carry three explicit colors per side. The retired
@@ -731,8 +732,11 @@ export const createOrderSchema = z
       .optional(),
     customName: optionalTrimmedText('工单名称', 100).optional(),
     externalSalesUserId: optionalTrimmedText('关联外部销售', 64).optional(),
-    customerPartyId: optionalTrimmedText('客户主数据', 64).optional(),
-    customerRef: optionalTrimmedText('客户名称/简称', 64),
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）：建单不再录入、也不写库。
+    // 旧客户端、脚本和测试仍可能带着这两个 key（多为 null），这里只为兼容继续接受、
+    // 可省略，不再校验内容；createOrder 一律忽略，新工单的客户字段恒为空。
+    customerPartyId: z.string().nullable().optional(),
+    customerRef: z.string().nullable().optional(),
     receiverName: optionalTrimmedText('收货人', 64),
     receiverPhone: optionalTrimmedText('收货电话', 32),
     receiverAddress: optionalTrimmedText('收货地址', 256)
@@ -776,6 +780,8 @@ export const createOrderSchema = z
         path: ['items', index, 'designGroupKey'], message: '同一设计款的材料和工艺必须一致，不同设计请增加设计款' });
       designFacts.set(item.designGroupKey, facts);
     });
+    for (const duplicate of findDuplicateDesignNames(input.items)) ctx.addIssue({ code: 'custom',
+      path: ['items', duplicate.index, 'name'], message: duplicateDesignNameMessage(duplicate.name) });
     const sample = input.purpose === 'SAMPLE_SHIPMENT';
     if (!sample && input.samplePackagingRuleCode) ctx.addIssue({ code: 'custom', path: ['samplePackagingRuleCode'], message: '只有寄样品工单可以选择寄样包装' });
     input.items.forEach((item, index) => {

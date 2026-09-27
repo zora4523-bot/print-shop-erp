@@ -75,7 +75,7 @@ const MAX_SUPPLEMENT_CHARACTERS_PER_PAGE = 600;
 const MAX_SUPPLEMENT_LINES_PER_PAGE = 22;
 const SUPPLEMENT_CHARACTERS_PER_LINE = 36;
 const MAX_HEADER_FACTORY_CHARACTERS = 24;
-const MAX_HEADER_CUSTOMER_CHARACTERS = 16;
+const MAX_HEADER_SALES_CHARACTERS = 16;
 const MAX_HEADER_ORDER_NAME_CHARACTERS = 100;
 const MAX_HEADER_ORDER_NAME_LINES = 3;
 const MAX_INLINE_ORDER_NUMBER_CHARACTERS = 64;
@@ -113,9 +113,10 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
   const packagingComplete = hasCompleteBagFacts(order, itemPackaging);
   const totalBags = calculateTotalBags(order, itemPackaging);
   const artworks = buildArtworks(order);
-  const { mainItems, itemAnnexPages } = paginateItems(order.items);
+  const showItemPaper = hasMixedItemPaper(order.items);
+  const { mainItems, itemAnnexPages } = paginateItems(order.items, showItemPaper);
   const hasOversizedItem = order.items.some(
-    (item) => estimateItemRowUnits(item) >= 4,
+    (item) => estimateItemRowUnits(item, showItemPaper) >= 4,
   );
   const fullCraft = formatProductionCrafts(order);
   const fullPaper = joinDistinct(order.items.map(formatPaper));
@@ -164,10 +165,10 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
       mainLimit: MAX_HEADER_FACTORY_CHARACTERS,
     },
     {
-      key: 'customer',
-      label: '客户',
-      value: clean(order.customerName),
-      mainLimit: MAX_HEADER_CUSTOMER_CHARACTERS,
+      key: 'external-sales',
+      label: '外部销售',
+      value: clean(order.externalSalesName),
+      mainLimit: MAX_HEADER_SALES_CHARACTERS,
     },
     {
       key: 'order-name',
@@ -299,6 +300,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
           <section className="sec">
             <ItemTable
               items={mainItems}
+              showItemPaper={showItemPaper}
               packaging={itemPackaging}
               totalQuantity={totalQuantity}
               totalBags={totalBags}
@@ -312,13 +314,16 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
             </section>
           ) : null}
 
-          <section className="sec">
-            {mainFlowRows.length === 0 && flowRows.length > 0 ? (
-              <p className="flow-empty">工序明细见附页</p>
-            ) : (
-              <FlowTable rows={mainFlowRows} />
-            )}
-          </section>
+          {/* 工序在下发生产时生成；还没有工序时不占位（原“暂无生产工序记录”）。 */}
+          {flowRows.length > 0 ? (
+            <section className="sec">
+              {mainFlowRows.length === 0 ? (
+                <p className="flow-empty">工序明细见附页</p>
+              ) : (
+                <FlowTable rows={mainFlowRows} />
+              )}
+            </section>
+          ) : null}
 
           <section className="sec">
             {hasShipmentAnnex ? (
@@ -375,6 +380,7 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
                 <div className="annex-title">款式明细（续）</div>
                 <ItemTable
                   items={items}
+                  showItemPaper={showItemPaper}
                   packaging={itemPackaging}
                   totalQuantity={totalQuantity}
                   totalBags={totalBags}
@@ -529,9 +535,9 @@ function WorkOrderHeader({
     clean(factoryName),
     MAX_HEADER_FACTORY_CHARACTERS,
   );
-  const displayCustomerName = previewForHeader(
-    clean(order.customerName),
-    MAX_HEADER_CUSTOMER_CHARACTERS,
+  const displaySalesName = previewForHeader(
+    clean(order.externalSalesName),
+    MAX_HEADER_SALES_CHARACTERS,
   );
   const fullOrderName = clean(order.customName);
   const displayOrderName =
@@ -543,8 +549,9 @@ function WorkOrderHeader({
     <header className="hd">
       <div className="hd-main">
         <div className="factory">{displayFactoryName}</div>
-        <div className={classNames('cust', !displayCustomerName && 'miss')}>
-          {displayCustomerName ?? '客户未填'}
+        {/* 抬头为工单归属的外部销售（原“客户”自 2026-09-13 起不再录入） */}
+        <div className={classNames('cust', !displaySalesName && 'miss')}>
+          {displaySalesName ?? '外部销售未填'}
         </div>
         {displayOrderName ? (
           <div className="order-name">工单 <b>{displayOrderName}</b></div>
@@ -614,12 +621,14 @@ function Fact({
 
 function ItemTable({
   items,
+  showItemPaper,
   packaging,
   totalQuantity,
   totalBags,
   showTotal,
 }: {
   items: PrintOrderItem[];
+  showItemPaper: boolean;
   packaging: Map<string, ItemPackaging>;
   totalQuantity: number;
   totalBags: number | null;
@@ -642,6 +651,7 @@ function ItemTable({
           items.map((item) => {
             const itemPack = packaging.get(item.id);
             const hasPack = Boolean(itemPack?.unitsPerBag && itemPack.unitsPerBag > 0);
+            const itemPaper = showItemPaper ? formatPaper(item) : null;
             const processFacts = formatItemProcess(item);
             return (
               <tr key={item.id}>
@@ -653,6 +663,7 @@ function ItemTable({
                 </td>
                 <td>
                   <div>{clean(item.name) ?? `款式 ${item.sequence}`}</div>
+                  {itemPaper ? <div className="item-material">{itemPaper}</div> : null}
                   {processFacts ? <div className="item-process">{processFacts}</div> : null}
                   {itemPack?.mode && packagingType(itemPack.mode) === 'BOX' ? <div className="item-process">{packagingModeLabel(itemPack.mode)}</div> : null}
                 </td>
@@ -736,7 +747,6 @@ function ArtworkGrid({ artworks, onAnnex }: { artworks: Artwork[]; onAnnex: bool
 }
 
 function FlowTable({ rows }: { rows: FlowRow[] }) {
-  if (rows.length === 0) return <p className="flow-empty">暂无生产工序记录</p>;
   return (
     <table className="flow flow-compact">
       <thead>
@@ -916,7 +926,7 @@ function hasCompleteBagFacts(
 
 function auditOrder(order: PrintOrder, packaging: Map<string, ItemPackaging>): string[] {
   const warnings: string[] = [];
-  if (!clean(order.customerName)) warnings.push('客户未填');
+  if (!clean(order.externalSalesName)) warnings.push('外部销售未填');
   if (!order.promisedDate) warnings.push('交货日期未填');
   // Keep the legacy paper warning only when both the note and bag facts are
   // missing. Complete structured packaging needs no additional free-text note.
@@ -958,6 +968,13 @@ function formatPaper(item: PrintOrderItem): string | null {
   const weight = item.paperWeightGsm;
   if (!weight || new RegExp(`${weight}\\s*(?:g|克)`, 'i').test(paper)) return paper;
   return `${paper} ${weight}g`;
+}
+
+// 款名由建单人自定（DECISIONS 2026-09-26）后不再携带纸张与克重：一张工单混用多种
+// 纸张 / 克重时逐行标出；只用一种时仍看顶部“纸张类型”，版面与页数不变。类型不另印，
+// 每行工艺已写明局部平烫 / 专版平烫 / 彩印。
+function hasMixedItemPaper(items: readonly PrintOrderItem[]): boolean {
+  return new Set(items.map(formatPaper).filter(Boolean)).size > 1;
 }
 
 function formatFoil(item: PrintOrderItem): string | null {
@@ -1151,11 +1168,11 @@ function joinDistinct(values: Array<string | null | undefined>): string | null {
 
 function unique<T>(values: T[]): T[] { return [...new Set(values)]; }
 
-function paginateItems(items: PrintOrderItem[]): {
+function paginateItems(items: PrintOrderItem[], showItemPaper: boolean): {
   mainItems: PrintOrderItem[];
   itemAnnexPages: PrintOrderItem[][];
 } {
-  const itemUnits = items.map(estimateItemRowUnits);
+  const itemUnits = items.map((item) => estimateItemRowUnits(item, showItemPaper));
   const mainUnitLimit =
     items.length >= 4 || itemUnits.some((units) => units > 1)
     ? Math.ceil(MAX_ITEMS_ON_MAIN_PAGE / 2)
@@ -1178,18 +1195,19 @@ function paginateItems(items: PrintOrderItem[]): {
     itemAnnexPages: paginateByWeight(
       items.slice(nextIndex),
       MAX_ITEMS_PER_ANNEX_PAGE,
-      estimateItemRowUnits,
+      (item) => estimateItemRowUnits(item, showItemPaper),
     ),
   };
 }
 
-function estimateItemRowUnits(item: PrintOrderItem): number {
+function estimateItemRowUnits(item: PrintOrderItem, showItemPaper: boolean): number {
   const specificationLines = estimateTextLines(item.specification, 8);
   const nameLines = estimateTextLines(item.name, 20);
+  const materialLines = showItemPaper ? estimateTextLines(formatPaper(item), 24) : 0;
   const processLines = estimateTextLines(formatItemProcess(item), 24);
   const estimatedLines = Math.max(
     specificationLines,
-    nameLines + processLines,
+    nameLines + materialLines + processLines,
   );
   // A normal item uses two short visual lines (name + process) and occupies
   // one historical row slot. Longer legal values consume extra slots before
@@ -1437,7 +1455,8 @@ body{
 .order-document .sheet.dense .items .col-qty{ width:22mm; }
 .order-document .sheet.dense .items .col-pack{ width:18mm; }
 .order-document .sheet.dense .items .col-bags{ width:16mm; }
-.order-document .sheet.dense .item-process{ font-size:6.8pt; margin-top:.4mm; }
+.order-document .sheet.dense .item-process,
+.order-document .sheet.dense .item-material{ font-size:6.8pt; margin-top:.4mm; }
 .order-document .sheet.dense .thumb .box{ max-height:42mm; }
 .sec:first-of-type{ border-top:none; }
 .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:5mm 6mm; align-items:start; }
@@ -1457,7 +1476,8 @@ tbody td{ border-bottom:.15mm solid var(--hair); font-size:10.5pt; font-weight:6
 .num{ text-align:right; font-weight:800; }
 tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5pt; font-weight:800; padding-top:2.2mm; }
 .items tbody td{ height:7mm; }
-.item-process{ max-width:65mm; color:var(--mute); font-size:7.2pt; font-weight:600; line-height:1.35; margin-top:.7mm; }
+.item-process,
+.item-material{ max-width:65mm; color:var(--mute); font-size:7.2pt; font-weight:600; line-height:1.35; margin-top:.7mm; }
 .empty-row{ height:14mm !important; text-align:center; }
 .col-fig{ width:14mm; }.col-spec{ width:26mm; }.col-qty,.col-pack{ width:26mm; }.col-bags{ width:22mm; }
 .flow tbody td{ min-height:11mm; }.flow .step{ font-size:11.5pt; font-weight:800; }

@@ -8,9 +8,11 @@ import { useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import type { PricingCraftIdentity } from '@/lib/order/pricing-route';
+import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
 import {
   createExternalOrderItem,
   normalizeExternalOrderItem,
+  withGeneratedStyleName,
 } from '@/lib/order/order-item-configuration';
 import {
   orderItemSelectionUpdate,
@@ -66,6 +68,7 @@ export function WorkbenchCalculator({
   crafts = [],
   draftScope = '',
   createEntry,
+  externalSalesAccounts,
 }: {
   createEntry?: {
     editorSnapshot?: SampleOrderEditorSnapshot;
@@ -79,7 +82,10 @@ export function WorkbenchCalculator({
     onStandard: (route: import('@/generated/prisma/enums').OrderItemPricingRoute, form: SampleOrderFormState) => void;
     onPurposeChange: (purpose: 'SAMPLE_SHIPMENT' | 'PROOF') => void;
     onComplete: () => void;
+    onExternalSalesChange?: (externalSalesUserId: string | null) => void;
   };
+  /** 管理员可代建的外部销售；外部销售本人使用时不传。 */
+  externalSalesAccounts?: readonly ExternalSalesAccountOption[];
   options: ExternalCreateOrderOptions;
   crafts?: readonly PricingCraftIdentity[];
   draftScope?: string;
@@ -149,7 +155,7 @@ export function WorkbenchCalculator({
               if (value === 'SAMPLE_SHIPMENT' || value === 'PROOF') { setPurpose(value); createEntry?.onPurposeChange(value); }
               else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') { if (createEntry) createEntry.onStandard(value, sampleFormProps.value); else { setPurpose('STANDARD'); select({ type: 'route', value }); } }
             }} />
-          {purpose === 'SAMPLE_SHIPMENT' ? <div className="mt-4"><SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} purpose="SAMPLE_SHIPMENT" {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /></div> : !options.products.length ? <EmptyState title="暂无可报价产品" description="请联系管理员配置产品后重试" /> : <fieldset disabled={specialLocked} className="min-w-0">
+          {purpose === 'SAMPLE_SHIPMENT' ? <div className="mt-4"><SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} externalSalesAccounts={externalSalesAccounts} purpose="SAMPLE_SHIPMENT" {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /></div> : !options.products.length ? <EmptyState title="暂无可报价产品" description="请联系管理员配置产品后重试" /> : <fieldset disabled={specialLocked} className="min-w-0">
           <OrderItemCraftFields
             hideRoute={purpose === 'STANDARD'}
             uid={uid}
@@ -224,7 +230,7 @@ export function WorkbenchCalculator({
           </fieldset>}
         </Card>
         {purpose !== 'SAMPLE_SHIPMENT' && options.products.length > 0 ? <aside className="min-w-0 @min-[881px]:sticky @min-[881px]:top-20 @min-[881px]:self-start">
-          {purpose === 'PROOF' ? <SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} purpose="PROOF" item={item} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
+          {purpose === 'PROOF' ? <SampleOrderForm lifecycle={createEntry?.lifecycle} canEditFees={createEntry?.canEditFees} externalSalesAccounts={externalSalesAccounts} purpose="PROOF" item={withGeneratedStyleName(item, crafts, options.products, options.papers)} {...sampleFormProps} onComplete={() => { sampleFormProps.onComplete(); createEntry?.onComplete(); }} /> : <Card className="min-w-0 gap-4 p-4 sm:p-5">
             <h2
               ref={resultHeading}
               tabIndex={-1}

@@ -25,6 +25,7 @@ const { dbMock } = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 
 import {
+  getAgentMonthlyBillDetail,
   getAgentMonthlyBillingStats,
   listAgentMonthlyBills,
 } from '../query';
@@ -92,5 +93,14 @@ describe('agent monthly billing owner queries', () => {
         take: 100,
       }),
     );
+  });
+
+  it('joins each frozen member to its order name only for the detail label', async () => {
+    dbMock.agentMonthlyBill.findUnique.mockResolvedValue(null);
+    await expect(getAgentMonthlyBillDetail('bill-1')).resolves.toBeNull();
+    const query = dbMock.agentMonthlyBill.findUnique.mock.calls[0][0];
+    expect(query.where).toEqual({ id: 'bill-1' });
+    // 客户名称/简称停用后明细改列工单名称：关联只取名称，金额等仍读成员快照。
+    expect(query.include.items.include.order).toEqual({ select: { customName: true } });
   });
 });

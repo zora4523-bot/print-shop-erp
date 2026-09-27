@@ -36,6 +36,41 @@ describe('safeInternalPath', () => {
     });
   });
 
+  // Browsers strip ASCII tab / LF / CR anywhere in a URL (WHATWG URL basic
+  // parser) before resolving it, so `/\t/evil.example` in a Location header
+  // lands on `//evil.example`. The login page redirects an already signed-in
+  // user straight to this value, so every control char must be rejected.
+  describe('rejects control-char and backslash smuggling', () => {
+    it.each([
+      ['/\t/evil.example'],
+      ['/\t\\evil.example'],
+      ['/\n/evil.example'],
+      ['/\r/evil.example'],
+      ['/\r\n/evil.example'],
+      ['/\t\t//evil.example'],
+      ['/ok\t/still-rejected'],
+      ['/\u0000/evil.example'],
+      ['/\u001F/evil.example'],
+      ['/\u007F/evil.example'],
+      ['/a\\b'],
+      ['/a/\\\\evil.example'],
+    ])('%j → /', (input) => {
+      expect(safeInternalPath(input)).toBe('/');
+    });
+  });
+
+  // Dot segments collapse during URL resolution: `/..//evil.example` resolves
+  // to pathname `//evil.example`. Reject anything whose resolved path is
+  // protocol-relative so no caller can re-emit it as an external target.
+  describe('rejects paths that resolve to a protocol-relative form', () => {
+    it.each([['/..//evil.example'], ['/.//evil.example'], ['/%2e%2e//evil.example']])(
+      '%j → /',
+      (input) => {
+        expect(safeInternalPath(input)).toBe('/');
+      },
+    );
+  });
+
   describe('rejects non-internal or non-string inputs', () => {
     it.each([
       '',

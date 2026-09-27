@@ -146,21 +146,29 @@ function presentComponent(
 function splitItemAmount(item: CreateOrderItemQuote, quantity: number): {
   unitPrice: string | null;
   fixedFee: string | null;
+  error?: string;
 } {
   if (item.amount === null) return { unitPrice: null, fixedFee: null };
-  if (item.unitPrice === null) {
-    return { unitPrice: '0.0000', fixedFee: item.amount };
+  const invalid = (difference: string) => ({
+    unitPrice: null, fixedFee: null,
+    error: `款式 ${item.itemKey} 金额拆分失败：小计=${item.amount}，单价=${item.unitPrice}，数量=${quantity}，差额=${difference}`,
+  });
+  try {
+    const amount = new Decimal(item.amount);
+    let unit = new Decimal(item.unitPrice ?? 0).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+    if (!amount.isFinite() || amount.isNegative() || !unit.isFinite() || unit.isNegative() || !Number.isSafeInteger(quantity) || quantity <= 0) return invalid('无法计算');
+    let fixed = amount.minus(unit.times(quantity).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
+    if (fixed.isNegative()) {
+      // Components are rounded independently. Preserve their sum and the stored
+      // 4dp-unit + 2dp-fixed identity instead of discarding a valid quotation.
+      unit = Decimal.max(0, amount.div(quantity).toDecimalPlaces(4, Decimal.ROUND_DOWN));
+      fixed = amount.minus(unit.times(quantity).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
+    }
+    if (!fixed.isFinite() || fixed.isNegative()) return invalid(fixed.toString());
+    return { unitPrice: unit.toFixed(4), fixedFee: fixed.toFixed(2) };
+  } catch {
+    return invalid('无法计算');
   }
-  const fixedFee = new Decimal(item.amount)
-    .minus(new Decimal(item.unitPrice).times(quantity).toDecimalPlaces(2, Decimal.ROUND_HALF_UP))
-    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-  if (!fixedFee.isFinite() || fixedFee.isNegative()) {
-    return { unitPrice: null, fixedFee: null };
-  }
-  return {
-    unitPrice: new Decimal(item.unitPrice).toFixed(4),
-    fixedFee: fixedFee.toFixed(2),
-  };
 }
 
 function presentItem(
@@ -176,6 +184,7 @@ function presentItem(
     split.fixedFee !== null;
   const errors = [
     ...quote.errors,
+    ...(split.error ? [split.error] : []),
     ...quote.manualReasons.map((reason) => reason.message),
   ];
   return {

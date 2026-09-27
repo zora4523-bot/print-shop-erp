@@ -283,18 +283,8 @@ describe('updatePartyAction', () => {
     const result = await updatePartyAction('party1', null, fd(validParty));
 
     expect(result.status).toBe('success');
-    expect(auditMock.writeAuditLog).toHaveBeenCalledWith({
-      actor: ownerActor,
-      action: 'UPDATE',
-      entityType: 'Party',
-      entityId: 'party1',
-      before,
-      after,
-      requestMetadata: {
-        source: 'owner-parties.updatePartyAction',
-        route: '/owner/parties/party1',
-      },
-    });
+    expect(partyMock.updateParty).toHaveBeenCalledWith('party1', expect.objectContaining({ name: '苹果福' }), ownerActor);
+    expect(auditMock.writeAuditLog).not.toHaveBeenCalled();
   });
 });
 

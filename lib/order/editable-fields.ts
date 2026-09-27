@@ -15,10 +15,10 @@ export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY' | 'NONE';
 // Fields that round-trip through the edit form. Listed as a readonly
 // tuple (not a Set) so tests can assert the exact set + the action
 // layer can map directly to Zod schema keys.
+// 客户名称/简称与关联客户已退役（业主 2026-09-27）：customerRef / customerPartyId
+// 不在任何可编辑集合里，编辑一律不改动工单已存的客户值。
 export const FULL_EDITABLE_FIELDS = [
   'customName',
-  'customerRef',
-  'customerPartyId',
   'receiverName',
   'receiverPhone',
   'receiverAddress',
@@ -101,7 +101,7 @@ export const ORDER_MODIFIABLE_STATUSES: readonly OrderStatus[] = [
 
 export function canRequestOrderModification(actor: { id: string; role: Role }, order: { submitterId: string; status: OrderStatus }, hasPendingRequest = false) {
   return !hasPendingRequest && ORDER_MODIFIABLE_STATUSES.includes(order.status) && (
-    actor.role === Role.ADMIN || ((actor.role === Role.SALES || actor.role === Role.CUSTOMER_SERVICE) && actor.id === order.submitterId)
+    actor.role === Role.ADMIN || (actor.role === Role.SALES && actor.id === order.submitterId)
   );
 }
 

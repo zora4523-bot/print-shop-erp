@@ -24,6 +24,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   generateV2Mock.mockResolvedValue({
     period: '2026-05',
+    errors: [],
     generated: [
       {
         billId: 'agent-bill-1',
@@ -90,4 +91,9 @@ describe('legacy generate-bills cron cutover', () => {
     ).rejects.toThrow(LEGACY_BILL_READ_ONLY_MESSAGE);
     expect(legacyOrderFindManyMock).not.toHaveBeenCalled();
   });
+});
+
+it('preserves v2 reconciliation errors through the cron compatibility adapter', async () => {
+  generateV2Mock.mockResolvedValue({ period: '2026-05', generated: [], errors: [{ agentUserId: 'agent-1', message: 'GD-1 金额不一致' }] });
+  await expect(generateBillsForPeriod('2026-05', { id: 'admin', role: Role.ADMIN })).resolves.toMatchObject({ errors: [{ salesUserId: 'agent-1', message: 'GD-1 金额不一致' }] });
 });

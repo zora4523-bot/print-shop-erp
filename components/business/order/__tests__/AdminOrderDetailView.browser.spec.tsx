@@ -52,7 +52,7 @@ function detailModel(overrides: Partial<AdminOrderDetailModel> = {}): AdminOrder
   return {
     remark: '先核对样稿\n再安排生产',
     id: 'detail-order-1', no: 'GD-260908-DETAIL-001', name: '中秋礼品红包', version: 2,
-    status: OrderStatus.FOILING, customer: '华南礼品包装有限公司', sales: '外部销售 · 林女士',
+    status: OrderStatus.FOILING, sales: '外部销售 · 林女士',
     craft: '局部烫金 · 专版烫金', due: '2026-09-18', dueLeft: '剩 10 天', qty: 3000, isUrgent: false,
     items: [1, 2].map((fig) => ({
       id: `item-${fig}`, fig, sequence: fig, name: fig === 1 ? '花好月圆' : '阖家团圆',
@@ -297,7 +297,7 @@ describe('admin order detail design and interaction gates', () => {
     renderDetail({
       ...original,
       no: `GD-${'LONGORDER'.repeat(9)}`,
-      customer: '华南地区中秋礼品及节庆包装生产采购联合服务有限公司',
+      sales: '华南地区中秋礼品及节庆包装生产采购联合服务外部销售林女士',
       items: original.items.map((item) => ({
         ...item,
         name: `${item.name} · 企业中秋活动定制纪念红包套装`,

@@ -20,7 +20,6 @@ import {
   SmartBotBindingError,
   SmartBotIdentityMismatchError,
   StaleChannelIdsError,
-  TooManyChannelsForPrivateEventError,
   UnboundSmartBotChannelError,
   createSmartBotBindingCode,
   createChannel,
@@ -284,16 +283,6 @@ export async function updateRuleAction(
         fieldErrors: { channelIds: ['启用规则时必须至少选择 1 个群'] },
       };
     }
-    if (err instanceof TooManyChannelsForPrivateEventError) {
-      return {
-        status: 'invalid',
-        fieldErrors: {
-          channelIds: [
-            '此事件含具体客服业绩 / 提成数据，最多绑 1 个群（避免不同客服互相看到金额）',
-          ],
-        },
-      };
-    }
     if (err instanceof StaleChannelIdsError) {
       return {
         status: 'invalid',
@@ -372,9 +361,11 @@ export async function confirmUnknownNotificationDeliveredAction(
     message:
       result.pendingUnknownCount > 0
         ? `已记录该群已送达；同一任务仍有 ${result.pendingUnknownCount} 条待核对`
-        : result.rearmed
-          ? '已记录该群已送达，其他已确认未送达的消息已重新入队'
-          : '已记录人工核对：消息已送达',
+        : result.retiredClosedCount > 0
+          ? `已记录该群已送达；${retiredClosedNotice(result.retiredClosedCount)}`
+          : result.rearmed
+            ? '已记录该群已送达，其他已确认未送达的消息已重新入队'
+            : '已记录人工核对：消息已送达',
   };
 }
 
@@ -445,10 +436,16 @@ export async function ignoreUnknownNotificationAction(
     message:
       result.pendingUnknownCount > 0
         ? `已记录忽略理由；同一任务仍有 ${result.pendingUnknownCount} 条待核对`
-        : result.rearmed
-          ? '已忽略该条，其他已确认未送达的消息已重新入队'
-          : '已记录忽略理由并关闭该条待办',
+        : result.retiredClosedCount > 0
+          ? `已忽略该条；${retiredClosedNotice(result.retiredClosedCount)}`
+          : result.rearmed
+            ? '已忽略该条，其他已确认未送达的消息已重新入队'
+            : '已记录忽略理由并关闭该条待办',
   };
+}
+
+function retiredClosedNotice(count: number): string {
+  return `其余 ${count} 条已确认未送达的消息因事件已停用不再重发，已关闭`;
 }
 
 function notificationResolutionInput(
@@ -508,6 +505,11 @@ function mapUnknownResolutionError(
       };
     case 'INVALID_REASON':
       return { status: 'error', message: '请填写 1–500 字的忽略理由' };
+    case 'RETIRED_EVENT':
+      return {
+        status: 'error',
+        message: '该通知事件已停用，无法重发；请核对后确认已送达或忽略',
+      };
   }
 }
 

@@ -100,6 +100,7 @@ describe('dispatchNotification', () => {
       orderId: 'o1',
       orderNo: 'O-1',
       workOrderVersion: 1,
+      externalSalesName: '外销甲',
       customerRef: null,
     });
     expect(notifyMock).toHaveBeenCalledTimes(1);
@@ -168,6 +169,7 @@ describe('dispatchNotification', () => {
       {
         orderId: 'o1',
         orderNo: 'O-1',
+        externalSalesName: '外销甲',
         customerRef: '客户',
         promisedDate: '2026-08-20',
         daysOverdue: 2,
@@ -194,6 +196,7 @@ describe('dispatchNotification', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         workOrderVersion: 1,
+        externalSalesName: '外销甲',
         customerRef: null,
       }),
     ).rejects.toMatchObject({ name: 'DatabaseUnavailableError' });
@@ -227,6 +230,7 @@ describe('dispatchNotification · notify 返回可重试 outcome 时不带崩同
     orderId: 'o1',
     orderNo: 'O-1',
     workOrderVersion: 1,
+    externalSalesName: '外销甲',
     customerRef: null,
   } as const;
 

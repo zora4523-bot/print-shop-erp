@@ -26,9 +26,9 @@ UI：Tailwind CSS + shadcn/ui
 表单：React Hook Form + Zod
 状态：Server Components 优先，必要时用 useState
 测试：
-  - 单元测试：Vitest（node 环境，`vitest.config.ts`；2026-09-14 实测 618 个测试文件 / 6757 项，
-    其中 27 个 `*.postgres.test.ts` 需要 `DATABASE_URL`，缺失时整文件跳过）
-  - 组件交互契约：Vitest Browser Mode（`vitest.browser.config.ts`，`*.browser.spec.tsx`，47 个文件，
+  - 单元测试：Vitest（node 环境，`vitest.config.ts`；2026-09-24 实测 703 个测试文件 / 7549 项，
+    7505 通过、44 跳过；其中 34 个 `*.postgres.test.ts` 需要 `DATABASE_URL`，缺失时整文件跳过）
+  - 组件交互契约：Vitest Browser Mode（`vitest.browser.config.ts`，`*.browser.spec.tsx`，52 个文件 / 825 项，
     `pnpm test:browser`；CI 有独立步骤，**尚未**纳入 §6.3 的 commit 前门禁，是否纳入待业主拍板）
   - 渲染/交互断言：Playwright（`tests/e2e`）+ 截图与响应式门禁（`tests/visual`）
 后台任务：PostgreSQL 任务账本（`BackgroundJob`）+ PM2 light/heavy worker
@@ -72,28 +72,28 @@ PDF生成：Puppeteer（headless Chrome 渲染打印视图；生产用系统 Chr
 
 ```
 print-shop-erp/
-├── app/                          # Next.js App Router（页面层，118 个 page/route）
+├── app/                          # Next.js App Router（页面层，119 个 page/route）
 │   ├── (auth)/login/             # 登录
 │   ├── (admin)/                  # 后台工作台外壳（侧边栏/面包屑/header）
 │   │   ├── owner/                # ADMIN only（字典、价格、薪资、运维…）
 │   │   ├── foreman/              # ADMIN only（排产、外协、考勤、CDR、领料）
-│   │   ├── orders/               # ADMIN + SALES + CUSTOMER_SERVICE
+│   │   ├── orders/               # ADMIN + SALES
 │   │   └── sales/                # 外部 SALES only（应收、报价）
 │   ├── (billing)/owner/          # 账单 / 代理商账单页：复用 (admin) 鉴权与外壳，但不走它的
 │   │                             #   streaming loading 边界，保证原生财务表单零 JS 可提交；URL 不变
 │   ├── (worker)/worker/          # 师傅端 H5（WORKER only，独立外壳）
 │   ├── account/password/         # 自助改密（§4.6 例外 2）
 │   ├── wo/[orderNo]/             # 工单二维码落地页
-│   ├── api/                      # cron(10) / orders / owner / health / salary / admin / cdr / auth
+│   ├── api/                      # cron(7) / orders / owner / health / salary / admin / cdr / auth
 │   ├── print/orders/[id]/        # 打印视图（Puppeteer 渲染源）
 │   └── dev/showcase/             # 设计系统演示页（非业务）
-├── actions/                      # Server Actions（业务编排层，69 个文件 / 138 个 action）
+├── actions/                      # Server Actions（业务编排层，78 个 .ts 含 28 个 *.types.ts / 143 个 action）
 │   ├── order.ts                  # 'use server'，只能导出 async 函数
 │   └── order.types.ts            # 配套返回类型（'use server' 不能导出类型）
 ├── components/
 │   ├── ui/                       # shadcn 原子件（唯一允许 Tailwind 调色板字面量的目录）
 │   ├── ui-business/              # 跨领域业务原子件（PageHeader/StatCard/StatusBadge…）
-│   └── business/<领域>/          # 业务组件（order 最重，112 个文件；其余 ≤ 21）
+│   └── business/<领域>/          # 业务组件（order 最重，127 个文件；其余 ≤ 22）
 ├── hooks/                        # 客户端通用 hook（目前只有 use-mobile）
 ├── lib/                          # 核心业务逻辑层（Prisma 调用集中于此）
 │   ├── db.ts                     # Prisma client 单例（唯一的 Prisma 入口）
@@ -103,7 +103,7 @@ print-shop-erp/
 │   ├── background-jobs/          # 持久化任务账本 + worker + handler registry
 │   ├── cron/  notification/  oss/  pdf/  cdr/  export/  dashboard/  navigation/  settings/
 │   ├── format/  page-title/  ui/ # 展示层纯函数（金额/日期格式、页标题、状态注册表）
-│   ├── <域>.ts                   # 38 个尚未归目录的域根模块（bill/bom/craft/material*/purchase*/…）
+│   ├── <域>.ts                   # 尚未归目录的域根模块（lib/*.ts 共 40 个，含 db.ts；bill/bom/craft/material*/purchase*/…）
 │   └── __tests__/                # 领域根模块（lib/order.ts 等）的测试
 ├── config/                       # architecture-debt.json（架构门禁债务表）、价目簿发布清单
 ├── generated/prisma/             # Prisma 7 生成产物（已 gitignore，勿手改）
@@ -135,9 +135,11 @@ print-shop-erp/
 - Prisma import 不得出现在 `app/` 和 `actions/` 以外的页面/组件文件中
 - `actions/` 中可以 import Prisma，但应委托给 `lib/` 的函数处理复杂业务
 - `components/` 中不得有任何数据库调用
-- 现状（2026-09-14 实测）：`db` 的直接使用集中在 `lib/`（111 个文件）；`lib/` 之外只有 6 处遗留直连
+- 现状（2026-09-25 实测）：`db` 的直接使用绝大多数集中在 `lib/`；`lib/` 之外有 8 处遗留直连
   —— `actions/account.ts`、`actions/order-workspace.ts`（收藏工单）、`app/api/health/*` 两个探针、
-  `app/wo/[orderNo]/page.tsx`、`app/api/orders/.../labels/[labelId]/route.ts` —— 新代码不要扩大这个口子
+  `app/wo/[orderNo]/page.tsx`、`app/api/orders/.../labels/[labelId]/route.ts`，以及师傅端
+  `app/(worker)/worker/account/page.tsx`、`app/(worker)/worker/tasks/[id]/page.tsx`（把 `db` 作为
+  client 传给 `lib/` 的工价解析函数）—— 新代码不要扩大这个口子
 
 **Prisma 生成物的 import 约定**（易踩坑）：
 
@@ -178,10 +180,10 @@ import type { Prisma } from '../../generated/prisma/client';
 （业主 2026-08-19 拍板；阈值配在 `vitest.config.ts` 的 `coverage.thresholds`，
 `pnpm vitest run --coverage` 不达标即 exit 1）：
 
-- `lib/salary/machine-piecework.ts`：机台计件
-- `lib/salary/cs-commission.ts`：客服提成
-- `lib/salary/hourly-payroll.ts`：时薪月结
-- `lib/**/status-machine.ts`：全部状态机（order / production / bill / outsource / cs）
+- `lib/salary/piecework-pricing.ts`：工序计件工价
+- `lib/order/admin-create-price.ts`：管理员建单定价
+- `lib/order/shipment-box-pricing.ts`：发货装盒计价
+- `lib/**/status-machine.ts`：现有状态机文件（order / production / bill / outsource）。其中 `TASK_TRANSITIONS` 只覆盖已退役的 `TaskStatus` 历史工单路径；现行 `ProductionOperation` 没有状态机保护，不能把文件覆盖率当作新运行时状态流转覆盖率。
 
 `lib/**` 的其余部分（多为读路径与管理 CRUD）设**当前水位**阈值，只防倒退、不强求 100%。
 水位随实测调整，抬高可以、调低要说明理由。
@@ -189,8 +191,6 @@ import type { Prisma } from '../../generated/prisma/client';
 **测试必须覆盖边界case**：
 - 小单（<1000）、超大单
 - 单面单色、双面单色、单面双色、双面双色
-- 客服业绩在档位边界（刚好10万、9.99万、10.01万）
-- 客服业绩超过最高档（100万以上）
 - 师傅当日无任务、请假全休
 
 ### 4.4 薪资规则快照化（铁律）
@@ -226,10 +226,11 @@ await db.productionTask.update({
 
 工单/任务/周期的状态流转必须通过**状态机函数**，禁止裸写`status: 'XXX'`。
 
-**批量路径是显式例外**（业主 2026-08-19 拍板）：`lib/production.ts` 的 `beginTasks` /
-`reportTasks` 用 `where: { status: <前置状态> }` 在 SQL 层表达同一个守卫，换取单条语句的
-原子批量更新——逐行调用状态机会迫使先查后写、丢掉原子性。代价是没有编译期保障，改这两处时
-必须自己维持 `where` 子句与转换表一致。单条路径（`beginTask` / `reportTask`）不适用本例外。
+**生产运行时的现状与例外**：旧 `lib/production.ts` 已于 `674cf8fc` 删除，
+`beginTasks` / `reportTasks` 不再是现行入口。当前运行时为 `ProductionOperation`，
+`lib/order.ts` 与 `lib/order/change-request.ts` 的状态更新使用 `updateMany` 与
+`where: { status: { in: [...] } }` SQL 前置状态守卫；没有对应的状态机或转换表。
+修改这些写入口必须维护其 SQL 状态约束，不能引用历史 `TASK_TRANSITIONS` 作为保护证据。
 
 ```typescript
 // lib/order/status-machine.ts
@@ -251,7 +252,7 @@ export function transitionOrder(order: Order, targetStatus: OrderStatus) {
 'use server';
 export async function createOrder(data: OrderInput) {
   const session = await getSession();
-  if (!session || !['SALES', 'CUSTOMER_SERVICE'].includes(session.user.role)) {
+  if (!session || !['SALES', 'ADMIN'].includes(session.user.role)) {
     throw new UnauthorizedError();
   }
   // ...
@@ -277,14 +278,14 @@ export async function createOrder(data: OrderInput) {
 
 **禁止**：在 `components/` 或 `app/` 的 JSX 中做权限判断来显示/隐藏按钮。正确做法是在 Server Component 里预先判断权限、传给 Client Component 一个 boolean 属性。
 
-**三类例外**（2026-09-14 复核 138 个 Server Action，仍只有这 3 个，全部合理，不要"修复"它们）：
+**四类例外**（2026-09-21 局部复核；例外类别不等于函数数量）：
 
 1. **鉴权入口本身**：`actions/auth.ts` 的 `signInWithCredentials` —— 登录前定义上没有 session。
 2. **自助操作**：`actions/account.ts` 的 `changeMyPassword` / `signOutAction` —— 只作用于调用者
    自己，用 `lib/auth/session.ts` 的 `requireSession()` 而不是权限字典。权限字典里没有也不该有
    `account:self` 这类 key（这三条正是 §15.8 单列的零 JS 硬约束路径）。
-3. **纯签名适配层**：如 `actions/production.ts` 的 `beginTaskFormAction`，函数体只是
-   `return beginTaskAction(taskId)`，真闸口在被调方。这类必须在注释里写明闸口在哪。
+3. **纯签名适配层**：已核对 9 处：`actions/admin-order-edit.ts` 的 2 个入口委托 `runEdit`；`actions/owner-materials.ts` 的 7 个入口委托相应 `*WithScope`。权限在被调方 `requirePermission`，各适配入口必须注明闸口。
+4. **actions 目录外的软授权读取**：`components/business/rules/RuleCenterPriceWorkspaceData.ts` 为 `'use server'` 模块，以 `hasPermission` 返回 `hidden`；审计必须覆盖该模块，不能只搜索 actions/。
 
 ### 4.7 金额处理
 
@@ -341,7 +342,6 @@ amount: 12.34     // JS float 精度问题
 | 返工数 | reworkQty | — |
 | 计件 | piecework | — |
 | 保底 | dailyBase | — |
-| 业绩周期 | SalaryPeriod | 客服专用 |
 
 ---
 
@@ -433,12 +433,12 @@ await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName 
 ### 8.2 组件/渲染测试
 
 **现状（2026-09-14 更新，以此为准）**：`vitest.config.ts` 是 node 环境；组件交互契约走独立的
-`vitest.browser.config.ts`（Vitest Browser Mode，Playwright chromium，`*.browser.spec.tsx`，47 个文件，
+`vitest.browser.config.ts`（Vitest Browser Mode，Playwright chromium，`*.browser.spec.tsx`，52 个文件，
 `pnpm test:browser`），CI 单独跑一步。组件层的验证分四处落地：
 
 - **纯逻辑部分用 Vitest**：Zod schema 校验、报工数量约束、打印布局的网格计算、导航菜单与权限
   相关的可见性推导 —— 抽成纯函数放 `lib/`，在 node 环境测。
-- **SSR markup 断言也用 Vitest**（110 个测试文件在用）：`renderToStaticMarkup` +
+- **SSR markup 断言也用 Vitest**（118 个测试文件在用，2026-09-25）：`renderToStaticMarkup` +
   `vi.mock('react')` 注入 `useActionState` 状态，断言渲染出的 HTML。用于**Playwright 结构上够
   不到**的场景 —— 典型是逐字段错误的 aria 连线：错误 DOM 只在提交失败后存在，而 `tests/visual`
   的 axe 门禁断言的是页面加载态，那条路径它一次都走不到。
@@ -464,10 +464,9 @@ await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName 
 
 **必须覆盖的关键路径**：
 1. 销售创建工单 → 车间主管排产 → 师傅报工 → 工单完工 → 发货
-2. 客服4月周期结算（需要 mock 时间推进）
-3. CDR打包下载流程
-4. 工单修改的权限控制（不同角色、不同状态下的允许/拒绝）
-5. 企业微信推送触发（mock Webhook）
+2. CDR打包下载流程
+3. 工单修改的权限控制（不同角色、不同状态下的允许/拒绝）
+4. 企业微信推送触发（mock Webhook）
 
 ### 8.4 截图回归（Playwright Visual Regression）
 
@@ -720,12 +719,14 @@ pnpm test:admin-ui               # 或 test:worker-ui / test:e2e / test:release
 
 ## 15. 架构现状速查（读代码前先看这里）
 
-### 15.1 角色只有 4 个
+### 15.1 角色只有 3 个
 
-`Role = ADMIN | SALES | CUSTOMER_SERVICE | WORKER`（`prisma/schema.prisma`）。
+`Role = ADMIN | SALES | WORKER`（`prisma/schema.prisma`）；`WorkerType = MACHINE | PACKER`。
 原「老板 OWNER」与「车间主管 FOREMAN」已合并为唯一的 **ADMIN**（DECISIONS 2026-07-19）。
+客服 `CUSTOMER_SERVICE`、清废 `CLEANER`、厨师 `COOK` 已删除（DECISIONS 2026-09-24，SPEC §L）：
+收费工单只有 `EXTERNAL_SALES`（免费重做为 `NO_CHARGE`），管理员建单必须选择外部销售。
 `/owner/*` 与 `/foreman/*` 只是保留的 URL 分区，两者都是 ADMIN only；`/sales/*` 是外部 SALES
-only（把内部客服挡在外部应收之外）。SPEC 里的「老板 / 主管」是业务称谓，不是角色枚举。
+only。SPEC 里的「老板 / 主管」是业务称谓，不是角色枚举。
 
 ### 15.2 会话与权限是三道防线
 
@@ -785,9 +786,14 @@ export async function createProductAction(
   durable 模式下通知、cron、CDR 打包、PDF、XLSX 导出先落 `BackgroundJob` 账本，由 PM2 的
   light/heavy worker 领取执行；heavy 队列（CDR/PDF/导出）并发固定 1。
 - 入队必须带 `dedupeKey`；任务类型用 `BACKGROUND_JOB_TYPES` 常量，不写字符串字面量。
-- 10 个 `/api/cron/*` 端点全部用 `requireCronAuth(req)` 校验 `Authorization: Bearer $CRON_SECRET`；
+- 7 个 `/api/cron/*` 端点全部用 `requireCronAuth(req)` 校验 `Authorization: Bearer $CRON_SECRET`；
   未配置 secret → 503（部署漏配时快速失败）。响应形状对外部调度器是契约，不要改。
 - handler 抛未知异常时必须**携带部分进度重抛**，让 durable job 重试，绝不把漏算的批次标成成功。
+- 已删除功能的任务类型（`CRON_HOURLY_PAYROLL` / `CRON_CS_SETTLE` / `CRON_CS_PERIOD_ENDING`）与已删除
+  通知事件（`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED`）的历史行保留为运行记录，但不能重试 / 重发：
+  `retryDeadBackgroundJob` 以 `isRegisteredBackgroundJobType` 判定并抛 `RetiredBackgroundJobTypeError`，
+  `resolveUnknownNotification` 对不在 `NOTIFICATION_EVENTS` 的事件拒绝 `NOT_DELIVERED_RETRY`
+  （`RETIRED_EVENT`），界面同步不给按钮。以后删除任务类型或事件时沿用这一做法。
 
 ### 15.5 金额与规则快照的实现细节
 
@@ -800,11 +806,9 @@ export async function createProductAction(
   `lib/salary/rules.ts` 与 `lib/price/rule-snapshot-lock.ts`。**新增读取规则的结算路径必须把
   事务 client（`tx`）传进去，用同一把锁**，不要用全局 `db` 读。
 - 没有生效规则时**拒绝继续**，绝不 fallback 到 0 —— 静默按 0 发工资/报价是本项目的头号事故。
-  **唯一显式例外**：厨师的空闲打包时薪（`lib/salary/hourly-aggregate.ts` 的
-  `cookSpareRate ?? 0`）。空闲打包对厨师是可选职责，没配 `COOK_SPARE_HOURLY` 更可能表示
-  「这个厨师不打包」而非配置遗漏，所以按 0 计空闲工资而不是让整个月结失败。同一 if/else 里
-  PACKER / CLEANER / COOK_MONTHLY 三个分支**仍然全部 throw**。业主 2026-08-19 拍板，行为由
-  `lib/salary/__tests__/hourly-payroll.test.ts:186` 锁定 —— 别当 bug 修掉。
+  **没有任何例外**：原厨师空闲打包时薪的 `cookSpareRate ?? 0` 例外已随厨师岗位与时薪月结生成
+  一并删除（DECISIONS 2026-09-24）；时薪月结只剩打包历史只读存档（`lib/salary/hourly-aggregate.ts`），
+  不再计算。
 
 ### 15.6 设计系统门禁（eslint 会 fail）
 
@@ -843,7 +847,7 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 <form action={formAction}>
 ```
 
-- **现状**：111 个 `<form>`（2026-09-14）里仍有一部分后台表单是被箭头函数包裹的（2026-08-17 盘点约
+- **现状**：119 个 `<form>`（2026-09-25）里仍有一部分后台表单是被箭头函数包裹的（2026-08-17 盘点约
   15 处，此后未重新清点），**这是已知且被接受的**，
   不要顺手"修复"——真要动先看 DECISIONS 2026-08-17 的影响一节。
 - **SPEC 有三处强制要求 JS**（§H.1 OSS 直传、§E.1 打印弹窗、浏览器端算建议价），所以
@@ -851,8 +855,10 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 
 ---
 
-**本文档版本**：1.3（2026-09-14 按结构体检同步现状：§2 测试体系、§3 目录树、§3 直连清单、
-§4.6 例外基数、§6.1 分支现状、§8.2 Browser Mode、§15.4 cron 数量、§15.8 表单基数；
+**本文档版本**：1.5（2026-09-25 按 HEAD 复核：§2 测试数量、§3 目录计数与 `db` 直连清单、§8.2 计数、
+§15.4 已删除任务 / 通知不可重试、§15.8 表单计数）。1.4（2026-09-24 按业主删除客服 / 内部与工厂直单结算 / 清废与厨师的决定同步：
+§3 目录注释与 cron 数、§4.3 覆盖清单与边界 case、§5.3 术语表、§8.3 E2E 关键路径、§15.1 角色、
+§15.4 cron 数量、§15.5 去掉 fallback-to-0 例外。1.3 为 2026-09-14 结构体检；
 未动 §4.5 / §15.7 等待业主落笔的条款，见 HANDOFF「CLAUDE.md 待业主落笔」）
-**最后更新**：2026-09-14
+**最后更新**：2026-09-25
 **维护者**：业主 + Claude Code / Codex

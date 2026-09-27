@@ -561,6 +561,132 @@ describe('buildCreateOrderQuoteInputFromCatalog', () => {
     ]);
   });
 
+  it.each([
+    [OrderFoilTechnique.RELIEF, 'craft-emboss'],
+    [OrderFoilTechnique.RAISED, 'craft-bump'],
+  ] as const)(
+    '彩印烫金选 %s 时浮雕、激凸工艺按配置外工艺转人工，不按平烫套餐报价',
+    async (foilTechnique, effectCraftId) => {
+      const coatedProduct = product({
+        id: 'print-coated-large',
+        code: 'EXT-COLOR-COATED-200-LARGE',
+        category: 'COLOR_PRINT',
+        specification: '大号88×165',
+        paperType: '200g铜版纸',
+        paperMaterialId: 'paper-coated-200',
+        weight: 200,
+      });
+      const printFoilItem = (
+        overrides: Partial<LegacyCreateOrderQuoteItemFacts> = {},
+      ) =>
+        item({
+          productId: coatedProduct.id,
+          pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+          specification: '大号88×165',
+          actualWidthMm: 88,
+          actualHeightMm: 165,
+          paperType: '200g铜版纸',
+          paperWeightGsm: 200,
+          quantity: 2_000,
+          crafts: ['craft-print-foil'],
+          foilColors: ['哑金'],
+          frontFoilColors: ['哑金'],
+          foilTechnique: OrderFoilTechnique.FLAT,
+          hasLocalFoil: false,
+          lamination: OrderLamination.MATTE,
+          ...overrides,
+        });
+      const db = client({
+        products: [coatedProduct],
+        crafts: [
+          craft({ id: 'craft-print-foil', code: 'COLOR_PRINT_FOIL' }),
+          craft({ id: 'craft-emboss', code: 'EMBOSS' }),
+          craft({ id: 'craft-bump', code: 'BUMP' }),
+        ],
+        papers: [
+          paper({
+            id: 'paper-coated-200',
+            name: '铜版纸',
+            specification: '200g',
+          }),
+        ],
+      });
+
+      const flat = await buildCreateOrderQuoteInputFromCatalog(
+        db,
+        input([printFoilItem()]),
+      );
+      const effect = await buildCreateOrderQuoteInputFromCatalog(
+        db,
+        input([
+          printFoilItem({
+            crafts: ['craft-print-foil', effectCraftId],
+            foilTechnique,
+          }),
+        ]),
+      );
+
+      expect(flat.items[0]).toMatchObject({
+        printFoilMode: 'FULL',
+        specialEffect: 'NONE',
+        configuration: { craft: 'CATALOG' },
+      });
+      expect(
+        calculateCreateOrderQuote(flat, CREATE_ORDER_GOLDEN_SNAPSHOT).items[0],
+      ).toMatchObject({ status: 'QUOTED', amount: '700.00' });
+      expect(effect.items[0]).toMatchObject({
+        printFoilMode: 'FULL',
+        specialEffect: foilTechnique,
+        configuration: { craft: 'CUSTOM' },
+      });
+      const quote = calculateCreateOrderQuote(
+        effect,
+        CREATE_ORDER_GOLDEN_SNAPSHOT,
+      );
+      expect(quote.items[0]).toMatchObject({
+        status: 'MANUAL_PRICING_REQUIRED',
+        amount: null,
+      });
+      expect(quote.manualReasons.map((reason) => reason.code)).toEqual([
+        'CUSTOM_CRAFT',
+        'PRINT_NON_FLAT_FOIL',
+        'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+      ]);
+    },
+  );
+
+  // DECISIONS 2026-08-27：彩印反面烫金合法但待人工定价。hasLocalFoil=false 经适配器
+  // 得到 printFoilMode FULL，仍须转人工，而不是被判为非法输入阻断报价与提交。
+  it.each([
+    ['只烫反面', [], ['哑金']],
+    ['正反面各烫一色', ['哑金'], ['亮金']],
+  ] as const)('彩印叠加专版烫金%s经目录适配后转人工核价', async (_label, frontFoilColors, backFoilColors) => {
+    const coatedProduct = product({
+      id: 'print-coated-large', code: 'EXT-COLOR-COATED-200-LARGE', category: 'COLOR_PRINT',
+      specification: '大号88×165', paperType: '200g铜版纸', paperMaterialId: 'paper-coated-200', weight: 200,
+    });
+    const db = client({
+      products: [coatedProduct],
+      crafts: [craft({ id: 'craft-print-foil', code: 'COLOR_PRINT_FOIL' })],
+      papers: [paper({ id: 'paper-coated-200', name: '铜版纸', specification: '200g' })],
+    });
+    const facts = await buildCreateOrderQuoteInputFromCatalog(db, input([item({
+      productId: coatedProduct.id, pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
+      specification: '大号88×165', actualWidthMm: 88, actualHeightMm: 165,
+      paperType: '200g铜版纸', paperWeightGsm: 200, quantity: 2_000,
+      crafts: ['craft-print-foil'], foilColors: [...frontFoilColors, ...backFoilColors],
+      frontFoilColors: [...frontFoilColors], backFoilColors: [...backFoilColors],
+      foilTechnique: OrderFoilTechnique.FLAT, hasLocalFoil: false, lamination: OrderLamination.MATTE,
+    })]));
+    expect(facts.items[0]).toMatchObject({ printFoilMode: 'FULL', backColors: backFoilColors });
+    const quote = calculateCreateOrderQuote(facts, CREATE_ORDER_GOLDEN_SNAPSHOT);
+    expect(quote.items[0]).toMatchObject({ status: 'MANUAL_PRICING_REQUIRED', amount: null, errors: [] });
+    expect(quote.manualReasons.map((reason) => reason.code)).toEqual([
+      'PRINT_BACK_SIDE_FOIL',
+      'PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE',
+    ]);
+  });
+
   it('保留混装组成与发货分配，不接受 actualBagCount 或浏览器重量作为计价权威', async () => {
     const items = [
       item({ quantity: 1_000 }),

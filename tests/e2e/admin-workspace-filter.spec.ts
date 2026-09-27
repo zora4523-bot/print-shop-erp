@@ -45,7 +45,7 @@ test.beforeAll(async () => {
              "settlementContractVersion", "settledAt", "pricingStatus", "pricingConfirmedAt", "pricingConfirmedById",
              "submittedAt", "createdAt", "updatedAt"
            ) VALUES (
-             $1, $2, $3, $4, 'ADMIN', $4, 'FACTORY_DIRECT', $5::"OrderStatus",
+             $1, $2, $3, $4, 'SALES', $4, 'EXTERNAL_SALES', $5::"OrderStatus",
              $6, '测试收件人', '13800138000', '隔离测试地址',
              $7::numeric, $8::numeric, $9::numeric, $10::numeric,
              CASE WHEN $5 = 'SETTLED' THEN 2 ELSE NULL END,
@@ -156,7 +156,7 @@ test('待核价详情不把部分报价当应收，完整报价在上下两处�
   const fees = page.getByRole('region', { name: '订单级费用', exact: true });
   await expect(fees).toContainText('待工厂核价');
   await expect(fees).not.toContainText('13.30');
-  await expect(page.getByTestId('admin-order-detail')).not.toContainText(/160g珠光艳闪\s*[·/]\s*160g/);
+  await expect(page.getByTestId('admin-order-detail')).not.toContainText(/160g艳红珠光纸\s*[·/]\s*160g/);
 
   const response = await page.goto(`/orders/${prefix}-quote`);
   expect(response?.status()).toBe(200);
@@ -165,4 +165,60 @@ test('待核价详情不把部分报价当应收，完整报价在上下两处�
   await expect(total).toContainText('28.00');
   await expect(total).toContainText('估');
   await expect(page.getByRole('region', { name: '订单级费用', exact: true })).toContainText(/28\.00.*估/);
+});
+
+test('队列切换仅延迟显示按钮图标，连续点击只采用最后选择', async ({ page }) => {
+  await login(page, { from: `/orders?queue=all&q=${prefix}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
+  const queues = page.getByRole('navigation', { name: '工单队列' });
+  await expect(queues.getByRole('link', { name: /^全部/ })).toHaveAttribute('aria-current', 'page');
+  const releases = new Map<string, () => void>();
+  let printSettled = false;
+  const recordPrintEnd = (request: import('@playwright/test').Request) => {
+    if (new URL(request.url()).searchParams.get('queue') === 'print' && request.headers().rsc === '1') printSettled = true;
+  };
+  page.on('requestfinished', recordPrintEnd);
+  page.on('requestfailed', recordPrintEnd);
+  await page.evaluate(() => {
+    document.addEventListener('click', (event) => {
+      if ((event.target as Element).closest('nav[aria-label="工单队列"] a')) performance.mark('queue-click');
+    }, { capture: true });
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('[data-order-queue-pending="true"]') && performance.getEntriesByName('queue-click').length) {
+        performance.measure('queue-feedback', 'queue-click');
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { attributes: true, childList: true, subtree: true });
+  });
+  await page.route('**/orders?**', async (route) => {
+    const queue = new URL(route.request().url()).searchParams.get('queue');
+    if (route.request().headers().rsc !== '1' || !['print', 'production'].includes(queue ?? '')) return route.continue();
+    await new Promise<void>((resolve) => releases.set(queue!, resolve));
+    await route.continue();
+  });
+  try {
+    const began = performance.now();
+    await queues.getByRole('link', { name: /^待打印/ }).click();
+    await expect(page.getByText('正在切换，当前仍显示切换前的结果', { exact: true })).toHaveCount(0);
+    await expect(queues.getByRole('link', { name: /^待打印/ }).locator('svg')).toBeVisible();
+    console.log('QUEUE_FEEDBACK_MS', { automation: performance.now() - began, browser: await page.evaluate(() => performance.getEntriesByName('queue-feedback')[0]?.duration) });
+    await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('当前筛选 8 单');
+    await expect(queues.getByRole('link', { name: /^全部/ })).toHaveAttribute('aria-current', 'page');
+    await queues.getByRole('link', { name: /^生产中/ }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('status').filter({ hasText: '正在切换至生产中' })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: '正在切换至待打印' })).toHaveCount(0);
+    await expect.poll(() => releases.has('production')).toBe(true);
+    releases.get('production')!();
+    await expect(queues.getByRole('link', { name: /^生产中/ })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('当前筛选 2 单');
+    releases.get('print')?.();
+    await expect.poll(() => printSettled).toBe(true);
+    await expect(page.getByText('正在切换，当前仍显示切换前的结果', { exact: true })).toBeHidden();
+    await expect(page).toHaveURL(/queue=production/);
+    await expect(page.getByRole('list', { name: '管理端工单列表', exact: true }).locator(':scope > li')).toHaveCount(2);
+  } finally {
+    releases.forEach((release) => release());
+    await page.unrouteAll({ behavior: 'wait' });
+  }
 });

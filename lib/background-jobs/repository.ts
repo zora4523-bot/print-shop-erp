@@ -9,6 +9,7 @@ import {
   type BackgroundJobQueue,
 } from '../../generated/prisma/client';
 import { db } from '../db';
+import { isNotificationEvent } from '../notification/events';
 import { scrubAgentMonthlyBillExportFiltersForBackgroundJob } from '../agent-monthly-billing/export-retention';
 import { scrubOrderExportFiltersForBackgroundJob } from '../order/export-retention';
 import {
@@ -16,8 +17,14 @@ import {
   type BackgroundJobResult,
   type ClaimedBackgroundJob,
   type EnqueueBackgroundJobInput,
+  isRegisteredBackgroundJobType,
 } from './types';
 import { databaseNow } from './clock';
+import {
+  findInFlightOrderPdfJob,
+  lockOrderPdfScope,
+  orderPdfScopePrefixOfDedupeKey,
+} from './pdf-scope';
 import { backgroundJobErrorCode, retryDelayMs } from './policy';
 import {
   NOTIFICATION_DELIVERY_UNKNOWN_ERROR_CODE,
@@ -453,11 +460,11 @@ export async function failBackgroundJob(
     });
     if (updated.count !== 1) throw new BackgroundJobLeaseLostError(job.id);
 
-    if (exhausted && job.type === 'CDR_BUNDLE') {
+    if (job.type === 'CDR_BUNDLE') {
       await tx.designBundle.updateMany({
-        where: { backgroundJobId: job.id },
+        where: { backgroundJobId: job.id, status: 'PENDING' },
         data: {
-          status: 'FAILED',
+          status: exhausted ? 'FAILED' : 'PENDING',
           lastErrorCode: errorCode,
         },
       });
@@ -518,8 +525,18 @@ function durationMs(start: Date, end: Date): number {
   return Math.min(2_147_483_647, Math.max(0, end.getTime() - start.getTime()));
 }
 
+function notificationEventOf(job: {
+  type: string;
+  payload: Prisma.JsonValue;
+}): string | null {
+  if (job.type !== BACKGROUND_JOB_TYPES.NOTIFICATION) return null;
+  const payload = job.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  return typeof payload.event === 'string' ? payload.event : null;
+}
+
 export async function listBackgroundJobs(limit = 100) {
-  return db.backgroundJob.findMany({
+  const rows = await db.backgroundJob.findMany({
     orderBy: { createdAt: 'desc' },
     take: Math.min(200, Math.max(1, limit)),
     select: {
@@ -544,8 +561,47 @@ export async function listBackgroundJobs(limit = 100) {
         take: 1,
         select: { durationMs: true },
       },
+      // 只用来提取通知事件名（判断事件是否已停用），不把业务 payload 交给页面。
+      payload: true,
     },
   });
+  return rows.map(({ payload, ...row }) => ({
+    ...row,
+    notificationEvent: notificationEventOf({ type: row.type, payload }),
+  }));
+}
+
+export class RetiredBackgroundJobTypeError extends Error {
+  constructor(public readonly type: string) {
+    super(`retired background job type cannot be retried: ${type}`);
+    this.name = 'RetiredBackgroundJobTypeError';
+  }
+}
+
+/**
+ * An operator retry of a DEAD ORDER_PDF job whose authorized scope already has
+ * another job queued or running (typically a failure-page regeneration). The
+ * DEAD row stays as history; the in-flight job will produce the PDF.
+ */
+export class OrderPdfScopeInFlightError extends Error {
+  constructor(public readonly inFlightJobId: string) {
+    super(`order PDF scope already has an in-flight job: ${inFlightJobId}`);
+    this.name = 'OrderPdfScopeInFlightError';
+  }
+}
+
+// Same lock and in-flight check as enqueueOrderPdfJob (pdf.ts): at most one
+// in-flight job per authorized scope, whichever entry acts first.
+async function assertOrderPdfScopeIdle(
+  tx: Prisma.TransactionClient,
+  dedupeKey: string,
+): Promise<void> {
+  const scopePrefix = orderPdfScopePrefixOfDedupeKey(dedupeKey);
+  // Pre-v2 rows (before 2026-09-11) carry no scope digest; nothing to lock.
+  if (scopePrefix === null) return;
+  await lockOrderPdfScope(tx, scopePrefix);
+  const inFlight = await findInFlightOrderPdfJob(tx, scopePrefix);
+  if (inFlight) throw new OrderPdfScopeInFlightError(inFlight);
 }
 
 export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
@@ -558,9 +614,22 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
         attempts: true,
         maxAttempts: true,
         lastErrorCode: true,
+        payload: true,
+        dedupeKey: true,
       },
     });
     if (!job || job.status !== BackgroundJobStatus.DEAD) return false;
+    // A job whose type lost its handler (feature removed) would only fail
+    // again with UnknownBackgroundJobTypeError. Keep the history row as is.
+    if (!isRegisteredBackgroundJobType(job.type)) {
+      throw new RetiredBackgroundJobTypeError(job.type);
+    }
+    // Same for a notification whose event left the registry: the handler
+    // rejects the payload (InvalidNotificationJobPayloadError).
+    const notificationEvent = notificationEventOf(job);
+    if (notificationEvent !== null && !isNotificationEvent(notificationEvent)) {
+      throw new RetiredBackgroundJobTypeError(`${job.type}:${notificationEvent}`);
+    }
     // Terminal export rows no longer retain their raw filter params. Reusing
     // the old job would therefore be both invalid and misleading; the admin
     // must request a fresh export from the order list with current filters.
@@ -577,6 +646,9 @@ export async function retryDeadBackgroundJob(jobId: string): Promise<boolean> {
     }
     if (backgroundJobRequiresOwnerResolution(job)) {
       return false;
+    }
+    if (job.type === BACKGROUND_JOB_TYPES.ORDER_PDF) {
+      await assertOrderPdfScopeIdle(tx, job.dedupeKey);
     }
     // 「立刻可跑」必须用库时钟表达：web 进程的 new Date() 快了就把重试
     // 推迟到未来，慢了则无所谓 —— 两种都不该由 web 的时钟说了算。

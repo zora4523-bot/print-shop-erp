@@ -276,6 +276,17 @@ describe('admin order decisions require review before mutation', () => {
     expect(actions.hold.mock.calls[0][0]).toMatchObject({ reasonNote: '已收到文件，等待客户确认颜色' });
   });
 
+  it('已有地址发货的取消申请只能驳回：不渲染批准取消，也不会请求取消结算预览', async () => {
+    const order = cancellationOrder();
+    order.status = OrderStatus.PACKING;
+    order.pendingChangeRequest = { ...order.pendingChangeRequest!, approvalBlockedReason: '工单已有地址发货，不能批准取消，请驳回该申请' };
+    renderOrder(order);
+    await expect.element(page.getByRole('note')).toHaveTextContent('工单已有地址发货，不能批准取消，请驳回该申请');
+    await expect.element(page.getByRole('button', { name: '拒绝申请', exact: true })).toBeVisible();
+    expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['拒绝申请']);
+    expect(actions.preview).not.toHaveBeenCalled();
+  });
+
   it('keeps the shipping blocker and recovery path visible without an enabled shipping action', () => {
     const order = baseOrder();
     order.status = OrderStatus.PACKING;
@@ -310,7 +321,7 @@ function cancellationOrder(): AdminOrderWorkspaceRow {
 function baseOrder(): AdminOrderWorkspaceRow {
   return {
     id: 'order-1', orderNo: 'GD-260907-001', revision: 2, workOrderVersion: 1,
-    customName: '春节红包', customer: { id: 'customer-1', name: '客户甲', filterValue: '客户甲' },
+    customName: '春节红包',
     submitter: { id: 'sales-1', name: '业务员甲' }, status: OrderStatus.CONFIRMED,
     statusSummary: null, isUrgent: false, isStarred: false,
     createdAt: '2026-09-07T01:00:00.000Z', submittedAt: '2026-09-07T01:00:00.000Z',

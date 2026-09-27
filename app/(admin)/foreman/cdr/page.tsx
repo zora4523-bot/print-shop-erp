@@ -9,6 +9,7 @@ import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { RegenerateBundleForm } from '@/components/business/cdr/RegenerateBundleForm';
+import { RevokeBundleForm } from '@/components/business/cdr/RevokeBundleForm';
 import { Button } from '@/components/ui/button';
 import { EmptyState, EnvNotice, ErrorBoundary, PageHeader, SectionLoading, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import {
@@ -32,8 +33,8 @@ type EligibleOrdersPromise = ReturnType<typeof listEligibleOrders>;
 type RecentBundlesPromise = ReturnType<typeof listRecentBundles>;
 
 // SPEC §3.5：CDR 汇总下载 = 管理员按日期窗口勾工单 → 生成 24h 短链
-// → 复制给外协模具厂。本页不显示 admin 工单详情链接（外协方不需要）；
-// 只显示工单号 + 客户名称/简称 + CDR 文件数。
+// → 复制给外协模具厂。候选表按工单号 + “工单名称 · 外部销售” + CDR 文件数
+// 指认工单（客户名称/简称已于 2026-09-27 停用）；下载包内容只按工单号组织。
 //
 // `from` / `to` URL query：foreman 输入起 / 止日期（YYYY-MM-DD），
 // 缺省 = 今天，提交后 server fetches eligible orders。
@@ -125,7 +126,8 @@ async function CdrEligibleOrdersSection({
       eligible={eligible.map((order) => ({
         id: order.id,
         orderNo: order.orderNo,
-        customerRef: order.customerRef,
+        customName: order.customName,
+        externalSalesName: order.externalSalesName,
         submittedAt: order.submittedAt.toISOString(),
         cdrCount: order.cdrCount,
       }))}
@@ -214,6 +216,13 @@ async function CdrRecentBundlesSection({
                           />
                           <RegenerateBundleForm {...regenerateProps} />
                         </div>
+                      ) : bundle.revokedAt ? (
+                        <div>
+                          <DesignBundleStatusBadge
+                            status={DESIGN_BUNDLE_DISPLAY_STATUS.REVOKED}
+                          />
+                          <RegenerateBundleForm {...regenerateProps} />
+                        </div>
                       ) : expired ? (
                         <div>
                           <DesignBundleStatusBadge
@@ -225,13 +234,21 @@ async function CdrRecentBundlesSection({
                         <DesignBundleStatusBadge
                           status={DESIGN_BUNDLE_DISPLAY_STATUS.MOCK}
                         />
+                      ) : bundle.downloadUrl ? (
+                        <div className="space-y-1">
+                          <a
+                            href={bundle.downloadUrl}
+                            className="font-mono text-xs break-all underline-offset-2 hover:underline"
+                          >
+                            {bundle.downloadUrl}
+                          </a>
+                          <RevokeBundleForm bundleId={bundle.id} />
+                        </div>
                       ) : (
-                        <a
-                          href={bundle.downloadUrl}
-                          className="font-mono text-xs break-all underline-offset-2 hover:underline"
-                        >
-                          {bundle.downloadUrl}
-                        </a>
+                        <div className="space-y-2 text-xs text-muted-foreground">
+                          <p>链接需要重新生成。</p>
+                          <RegenerateBundleForm {...regenerateProps} />
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs">

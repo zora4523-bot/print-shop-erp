@@ -36,13 +36,11 @@ describe('current production print access', () => {
     expect(dbMock.order.findFirst).not.toHaveBeenCalled();
   });
 
-  it('allows an active administrator and restricts customer service to its submissions', async () => {
+  it('allows an active administrator and denies sales before any account read', async () => {
     await expect(getOrderPrintScope('order-1', { id: 'admin-1', role: Role.ADMIN })).resolves.toEqual({ id: 'order-1' });
-    dbMock.user.findUnique.mockResolvedValue({ role: Role.CUSTOMER_SERVICE, isActive: true });
-    await expect(getOrderPrintScope('order-1', { id: 'cs-1', role: Role.CUSTOMER_SERVICE })).resolves.toEqual({ id: 'order-1', submitterId: 'cs-1' });
-    dbMock.order.findFirst.mockResolvedValue(null);
-    await expect(getOrderPrintTitleRef('other-order', { id: 'cs-1', role: Role.CUSTOMER_SERVICE })).resolves.toBeNull();
-    expect(dbMock.order.findFirst).toHaveBeenCalledWith({ where: { id: 'other-order', submitterId: 'cs-1' }, select: { orderNo: true } });
+    dbMock.user.findUnique.mockClear();
+    await expect(getOrderPrintScope('order-1', { id: 'sales-1', role: Role.SALES })).resolves.toBeNull();
+    expect(dbMock.user.findUnique).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -50,8 +48,6 @@ describe('current production print access', () => {
     [WorkerType.MACHINE, MachineType.WINDMILL, PieceworkOperationType.FULL],
     [WorkerType.PACKER, null, PieceworkOperationType.PACKING],
     [WorkerType.MACHINE, MachineType.GLUE, null],
-    [WorkerType.CLEANER, null, null],
-    [WorkerType.COOK, null, null],
   ])('limits %s/%s to current, non-cancelled lane %s or public progress', async (workerType, machineType, operationType) => {
     dbMock.user.findUnique.mockResolvedValue({ role: Role.WORKER, isActive: true, workerType, machineType });
     const scope = await getOrderPrintScope('order-1', { id: 'worker-1', role: Role.WORKER });

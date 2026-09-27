@@ -180,7 +180,6 @@ async function seedCrafts() {
     { name: '现货加烫', code: 'STOCK_FOIL', isOutsource: false, defaultWorkerType: WorkerType.MACHINE, defaultMachineType: MachineType.HAND_PRESS, sortOrder: 900, isActive: false },
     { name: 'UV', code: 'UV', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 901 },
     { name: '啤（模切）', code: 'DIE_CUT', isOutsource: true, defaultWorkerType: null, defaultMachineType: null, sortOrder: 902 },
-    { name: '清废', code: 'CLEANING', isOutsource: false, defaultWorkerType: WorkerType.CLEANER, defaultMachineType: null, sortOrder: 903 },
   ];
 
   // Seed 只补齐缺失的初始字典。名称、岗位、机型、排序和启用状态都可在
@@ -201,60 +200,8 @@ async function seedSalaryRules() {
   const now = new Date();
 
   const rules = [
-    // --- 客服提成规则 ---
-    {
-      ruleType: 'CS_COMMISSION' as const,
-      ruleKey: 'CS_BASE_SALARY',
-      ruleValue: { monthlyBase: 2000 },
-      remark: '客服月底薪2000',
-    },
-    {
-      ruleType: 'CS_COMMISSION' as const,
-      ruleKey: 'CS_PERIOD_LENGTH',
-      ruleValue: { months: 4 },
-      remark: '客服业绩周期为4个月',
-    },
-    {
-      ruleType: 'CS_COMMISSION' as const,
-      ruleKey: 'CS_TIERS',
-      ruleValue: {
-        mode: 'FLAT',
-        tiers: [
-          { minSales: 100000, rate: 0.010 },
-          { minSales: 200000, rate: 0.020 },
-          { minSales: 300000, rate: 0.030 },
-          { minSales: 400000, rate: 0.045 },
-          { minSales: 500000, rate: 0.060 },
-          { minSales: 600000, rate: 0.065 },
-          { minSales: 700000, rate: 0.070 },
-          { minSales: 800000, rate: 0.075 },
-          { minSales: 900000, rate: 0.080 },
-          { minSales: 1000000, rate: 0.085 },
-        ],
-      },
-      remark: '客服提成档位表（FLAT模式）',
-    },
-
     // 工序计件只初始化独立工价草稿，不再生成旧机型工价。
-    // --- 时薪工规则 ---
-    {
-      ruleType: 'WORKER_HOURLY' as const,
-      ruleKey: 'CLEANER_HOURLY',
-      ruleValue: { hourlyRate: 11 },
-      remark: '清废工时薪',
-    },
-    {
-      ruleType: 'WORKER_HOURLY' as const,
-      ruleKey: 'COOK_SPARE_HOURLY',
-      ruleValue: { hourlyRate: 11 },
-      remark: '厨师打包兼职时薪',
-    },
-    {
-      ruleType: 'WORKER_HOURLY' as const,
-      ruleKey: 'OT_MULTIPLIER',
-      ruleValue: { multiplier: 1.0 },
-      remark: '加班倍率',
-    },
+    // --- 考勤工时段（录入 UI 的"全勤"快捷值） ---
     {
       ruleType: 'WORKER_HOURLY' as const,
       ruleKey: 'WORK_HOURS',
@@ -264,14 +211,6 @@ async function seedSalaryRules() {
         otStart: '18:00',
       },
       remark: '标准工时段',
-    },
-
-    // --- 厨师月薪 ---
-    {
-      ruleType: 'COOK_SALARY' as const,
-      ruleKey: 'COOK_MONTHLY',
-      ruleValue: { monthlyBase: 3000 },
-      remark: '厨师月薪',
     },
   ];
 
@@ -375,23 +314,11 @@ async function seedNotificationEvents() {
     },
     {
       eventType: 'ORDER_OVERDUE',
-      messageTemplate: '🚚 **交期逾期**\n工单：{orderNo}\n客户：{customerRef}\n承诺交期：{promisedDate}\n已逾期：{daysOverdue} 天\n当前状态：{status}',
+      messageTemplate: '🚚 **交期逾期**\n工单：{orderNo}\n外部销售：{externalSalesName}\n承诺交期：{promisedDate}\n已逾期：{daysOverdue} 天\n当前状态：{status}',
     },
     {
       eventType: 'STOCK_ALERT',
       messageTemplate: '📦 **库存告警**\n物料：{materialName}\n当前库存：{currentStock}\n安全库存：{safetyStock}',
-    },
-    // &ldquo;业绩合计&rdquo;反映 Slice D wire 喂入的 salesForTier (= totalSales
-    // + initialSales)，与提成档位口径一致（Codex round 113 medium）。
-    // 之前写&ldquo;当前业绩&rdquo;会让 initialSales != 0 的客服看到&ldquo;业绩&rdquo;
-    // 比命中档位低，管理员看不出 why。
-    {
-      eventType: 'CS_PERIOD_ENDING',
-      messageTemplate: '📅 **客服周期即将结束**\n客服：{csName}\n业绩合计：¥{totalSales}\n还有{daysLeft}天结算',
-    },
-    {
-      eventType: 'CS_PERIOD_SETTLED',
-      messageTemplate: '💰 **客服周期结算**\n客服：{csName}\n周期业绩：¥{totalSales}\n提成：¥{commission}',
     },
     {
       eventType: 'DAILY_WORKER_SALARY',

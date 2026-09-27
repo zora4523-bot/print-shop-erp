@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
   cancelPendingBackgroundJob,
+  OrderPdfScopeInFlightError,
+  RetiredBackgroundJobTypeError,
   retryDeadBackgroundJob,
 } from '@/lib/background-jobs/repository';
 import type { BackgroundJobMutationResult } from './background-jobs.types';
@@ -16,7 +18,26 @@ export async function retryBackgroundJobAction(
 ): Promise<BackgroundJobMutationResult> {
   await requirePermission('ops:jobs:manage');
   const jobId = readJobId(formData);
-  const done = await retryDeadBackgroundJob(jobId);
+  let done: boolean;
+  try {
+    done = await retryDeadBackgroundJob(jobId);
+  } catch (err) {
+    if (err instanceof RetiredBackgroundJobTypeError) {
+      revalidatePath(JOBS_PATH);
+      return {
+        status: 'error',
+        message: '该任务类型对应的功能已停用，无法重试；记录保留为运行历史',
+      };
+    }
+    if (err instanceof OrderPdfScopeInFlightError) {
+      revalidatePath(JOBS_PATH);
+      return {
+        status: 'error',
+        message: '已有同一工单 PDF 正在生成，无需重试；本条失败记录保留为运行历史',
+      };
+    }
+    throw err;
+  }
   revalidatePath(JOBS_PATH);
   // false = 任务已不在 DEAD 态（别人先处理了 / worker 自己重试了）。
   // 静默 no-op 会让运维以为点成功了。

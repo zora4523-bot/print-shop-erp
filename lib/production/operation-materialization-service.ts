@@ -9,6 +9,7 @@ import {
   ProductionOperationStatus,
 } from '../../generated/prisma/enums';
 import { databaseNow } from '../background-jobs/clock';
+import { supersedePreviousProductionGenerationInTx } from './generation-supersede';
 import { orderCascadeLockKey } from '../order/locks';
 import { transitionOrder } from '../order/status-machine';
 import {
@@ -467,6 +468,8 @@ export async function activateProductionOperationsInTx(
     if (carried) carryoverEvidence.push({ progressStepId: created.id, fromStepId: carried.fromStepId, completedQty: carried.completed.toString() });
   }
 
+  // 承接量已按旧代次算完；旧代次不能再报工，同一事务里终止它（审计 M-7）。
+  const supersededProduction = options.allowVersionRematerialization === true ? await supersedePreviousProductionGenerationInTx(tx, orderId, order.workOrderVersion) : null;
   const activatedAt = at ?? (await databaseNow(tx));
   await tx.order.update({
     where: { id: orderId },
@@ -491,6 +494,7 @@ export async function activateProductionOperationsInTx(
           : 'OPERATIONS_MATERIALIZED',
       changedFields: {
         ...(carryoverEvidence.length > 0 ? { productionCarryover: { fromVersion: order.workOrderVersion - 1, toVersion: order.workOrderVersion, entries: carryoverEvidence, payrollEntriesCreated: 0 } } : {}),
+        ...(supersededProduction ? { supersededProduction } : {}),
         status: { before: order.status, after: targetStatus },
         requiresOutsource: {
           before: order.requiresOutsource,
@@ -519,7 +523,7 @@ export async function activateProductionOperationsInTx(
       },
       remark:
         options.allowVersionRematerialization
-          ? `工单升至 v${order.workOrderVersion}，追加新生产代次；旧工序与报工事实保持只读`
+          ? `工单升至 v${order.workOrderVersion}，追加新生产代次；旧代次未完成工序已取消，报工事实保持只读`
           : targetStatus === OrderStatus.RELEASED
           ? '工厂确认后下发生产并物化工序，未进行人员或机器匹配'
           : '价格确认后自动物化计件工序与无计件进度步骤，未进行人员或机器匹配',

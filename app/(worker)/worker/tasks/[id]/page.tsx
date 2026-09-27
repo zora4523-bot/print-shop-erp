@@ -7,10 +7,9 @@ import { databaseClockNow } from '@/lib/background-jobs/clock';
 import { PieceworkRateUnit } from '@/generated/prisma/enums';
 import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
-import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import {
   PieceworkOperationType,
   ProductionOperationStatus,
@@ -23,6 +22,7 @@ import {
   getProductionProgressForReporter,
 } from '@/lib/production/operation-portal';
 import { getLegacyProductionTaskDetail } from '@/lib/production/legacy-task-reader';
+import { defaultReportBatch } from '@/lib/production/report-batch';
 import { OperationReportingError } from '@/lib/production/operation-reporting';
 import {
   OperationReportForm,
@@ -39,7 +39,7 @@ import { formatUnitPrice } from '@/lib/format/unit-price';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PRODUCTION_OPERATION_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = { params: Promise<{ id: string }>; searchParams: Promise<{ reportBatch?: string | string[] }> };
 
 export const metadata = { title: '生产工序' };
 
@@ -59,16 +59,17 @@ async function readWorkerRate(workerId: string, operation: NonNullable<Awaited<R
   }
 }
 
-export default async function WorkerTaskDetailPage({ params }: PageProps) {
+export default async function WorkerTaskDetailPage({ params, searchParams }: PageProps) {
   const { user } = await requireSession();
   const { id } = await params;
+  const requestedBatch = (await searchParams)?.reportBatch;
   const actor = { id: user.id, role: user.role };
   let operation: Awaited<ReturnType<typeof getProductionOperationForReporter>> =
     null;
   try {
     operation = await getProductionOperationForReporter(id, actor);
   } catch (error) {
-    // 旧工资/审计链接可能属于清废等新计件域未定义的岗位。
+    // 旧工资/审计链接可能属于新计件域未定义的历史任务。
     // 只在账号没有新工序 lane 时允许继续查旧任务；其他报工错误不吞。
     if (
       !(error instanceof OperationReportingError) ||
@@ -78,6 +79,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
     }
   }
   if (operation) {
+    const reportBatch = await pinnedReportBatch(id, requestedBatch, 'operation', operation.status, user.id);
     const { currentRate, rateError } = await readWorkerRate(user.id, operation);
     const remainingQty = Decimal.max(
       new Decimal(operation.plannedCompletedQty).minus(operation.completedQty),
@@ -144,7 +146,8 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
               operationId={operation.id}
               payrollRevision={operation.payrollRevision}
               rateKey={currentRate.key}
-              idempotencyKey={randomUUID()}
+              key={reportBatch}
+              idempotencyKey={`batch:${reportBatch}`}
               remainingQty={remainingQty}
               workOrderProgressRemainingQty={workOrderProgressRemainingQty}
             /></> : <p role="alert" className="text-sm text-destructive">{rateError}</p>}
@@ -195,6 +198,7 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
 
   const progress = await getProductionProgressForReporter(id, actor);
   if (progress) {
+    const reportBatch = await pinnedReportBatch(id, requestedBatch, 'progress', progress.status, user.id);
     const remainingQty = Decimal.max(
       new Decimal(progress.plannedQty).minus(progress.completedQty),
       0,
@@ -234,7 +238,8 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
             </p>
             <ProgressReportForm
               progressStepId={progress.id}
-              idempotencyKey={randomUUID()}
+              key={reportBatch}
+              idempotencyKey={`batch:${reportBatch}`}
               remainingQty={remainingQty}
             />
           </section>
@@ -302,6 +307,23 @@ export default async function WorkerTaskDetailPage({ params }: PageProps) {
   }
 
   return renderLegacyTaskDetail(id, actor);
+}
+
+// 扫码、任务列表和工单页的入口都不带批次号。缺省批次按本人已有报工条数推导并固定进地址栏：
+// 刷新同一地址沿用同一批（重提去重），报成功后重新进入得到新批（同量第二批照常入账）。
+// 地址栏里的批次号只接受不大于当前条数的（即曾经推导过的），更大的改回推导值，否则写入后
+// 会被之后推导出的批次撞上。
+async function pinnedReportBatch(
+  id: string,
+  requested: string | string[] | undefined,
+  kind: 'operation' | 'progress',
+  status: ProductionOperationStatus,
+  reporterId: string,
+): Promise<string> {
+  if (status !== ProductionOperationStatus.PENDING && status !== ProductionOperationStatus.IN_PROGRESS) return '0';
+  const derived = await defaultReportBatch(kind, id, reporterId);
+  if (typeof requested === 'string' && /^(0|[1-9]\d{0,8})$/.test(requested) && Number(requested) <= derived) return requested;
+  redirect(`/worker/tasks/${encodeURIComponent(id)}?reportBatch=${derived}`);
 }
 
 // 旧任务分支单独成函数：WorkerTaskDetailPage 已贴着 300 行的架构门禁阈值。

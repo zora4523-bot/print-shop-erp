@@ -32,8 +32,6 @@ export type SalesOrderDetail = {
   purpose?: import('./purpose').OrderPurposeValue;
   orderNo: string;
   customName: string | null;
-  customerRef: string | null;
-  customerPartyId?: string | null;
   status: OrderStatus;
   settlementType: OrderSettlementType;
   isUrgent: boolean;
@@ -142,8 +140,6 @@ export const salesOrderDetailSelect = {
   purpose: true,
   orderNo: true,
   customName: true,
-  customerRef: true,
-  customerPartyId: true,
   status: true,
   settlementType: true,
   isUrgent: true,
@@ -348,8 +344,6 @@ function mapSalesOrderDetail(
     purpose: row.purpose,
     orderNo: row.orderNo,
     customName: row.customName,
-    customerRef: row.customerRef,
-    customerPartyId: row.customerPartyId,
     status: row.status,
     settlementType: row.settlementType,
     isUrgent: row.isUrgent,

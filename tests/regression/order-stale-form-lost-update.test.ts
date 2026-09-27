@@ -116,11 +116,12 @@ describe('P0 regression: stale order edit form', () => {
     };
 
     // Two browser tabs opened from this same snapshot. A changes only remark;
-    // B changes only customerRef, but both forms submit their complete snapshot.
+    // B changes only customName, but both forms submit their complete snapshot.
+    // (The retired customerRef is no longer an edit field; the stored value
+    // must survive both submissions untouched.)
     const initialForm = {
       expectedEditVersion: 0,
       customName: null,
-      customerRef: '初始客户简称',
       receiverName: '张三',
       receiverPhone: '13800000000',
       receiverAddress: '佛山市禅城区旧地址',
@@ -133,7 +134,7 @@ describe('P0 regression: stale order edit form', () => {
     const editorAForm = { ...initialForm, remark: '编辑器 A 新增的备注' };
     const editorBStaleForm = {
       ...initialForm,
-      customerRef: '编辑器 B 修改的客户简称',
+      customName: '编辑器 B 修改的工单名称',
     };
     const actor = { id: 'sales-1', role: Role.SALES };
 
@@ -146,6 +147,7 @@ describe('P0 regression: stale order edit form', () => {
     );
 
     expect(persisted.current).toMatchObject({
+      customName: null,
       customerRef: '初始客户简称',
       remark: '编辑器 A 新增的备注',
     });

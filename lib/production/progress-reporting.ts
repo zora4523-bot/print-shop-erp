@@ -1,3 +1,4 @@
+import { progressCraftIdsForReporter } from './progress-reporter-lane';
 import Decimal from 'decimal.js';
 import type { Prisma } from '../../generated/prisma/client';
 import {
@@ -75,6 +76,7 @@ const PROGRESS_REPORT_SELECT = {
   status: true,
   plannedQty: true,
   carriedCompletedQty: true,
+  craftId: true,
   craftCode: true,
   craftName: true,
   orderItem: { select: { id: true, sequence: true } },
@@ -192,7 +194,7 @@ async function reportProductionProgressInTx(
       }),
       tx.user.findUnique({
         where: { id: actor.id },
-        select: { id: true, role: true, isActive: true },
+        select: { id: true, role: true, isActive: true, workerType: true, machineType: true },
       }),
       tx.productionProgressReport.findUnique({
         where: { idempotencyKey: parsed.idempotencyKey },
@@ -230,6 +232,11 @@ async function reportProductionProgressInTx(
         'ACCOUNT_NOT_AUTHORIZED',
         '报工账号无效或已停用',
       );
+    }
+
+    const craftIds = await progressCraftIdsForReporter(tx, account);
+    if (!craftIds.includes(step.craftId)) {
+      throw new ProgressReportingError('ACCOUNT_NOT_AUTHORIZED', '当前账号不属于该工艺车道');
     }
 
     if (existingReport) {
@@ -419,8 +426,8 @@ async function reportProductionProgressInTx(
 
 /**
  * Append one no-pay progress report. The verified session actor is the only
- * reporter identity; any active WORKER may report it because there is no
- * personnel-to-order matching for these steps.
+ * reporter identity. The configured craft lane is required; there is no
+ * personnel-to-order assignment requirement for these steps.
  */
 export async function reportProductionProgress(
   input: ProgressReportInput,

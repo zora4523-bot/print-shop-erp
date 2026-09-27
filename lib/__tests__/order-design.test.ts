@@ -199,6 +199,22 @@ describe('recordOrderItemDesign', () => {
     ).rejects.toBeInstanceOf(OrderDesignError);
   });
 
+  it.each([
+    '../../a.jpg',
+    '..\\..\\Startup\\a.jpg',
+    'sub/a.jpg',
+    'a\u0000b.jpg',
+    'photo\u202Egpj.png',
+    'a\u2069b.jpg',
+    'design.exe',
+  ])('fileName 不是安全的单段文件名（%j）→ 拒绝，不 HEAD、不写库', async (fileName) => {
+    await expect(
+      recordOrderItemDesign({ ...baseInput, fileName }, salesActor, configuredEnv),
+    ).rejects.toBeInstanceOf(OrderDesignError);
+    expect(headMock).not.toHaveBeenCalled();
+    expect(txMock.orderItemDesign.create).not.toHaveBeenCalled();
+  });
+
   it('HEAD 失败（对象没传上去）→ 拒绝且不写库', async () => {
     const consoleSpy = vi
       .spyOn(console, 'error')
@@ -305,4 +321,9 @@ describe('rejected artwork correction', () => {
     dbMock.orderItem.findFirst.mockResolvedValue(draftItem({ status: OrderStatus.REJECTED, submitterId: 'other' }));
     await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow('只能修改自己');
   });
+});
+
+it.each([OrderStatus.DRAFT, OrderStatus.SUBMITTED])('does not reveal foreign order state %s before ownership', async (status) => {
+  dbMock.orderItem.findFirst.mockResolvedValue(draftItem({ status, submitterId: 'sales-other', _count: { changeRequests: 1 } }));
+  await expect(assertCanUploadDesign('o1', 'i1', salesActor)).rejects.toThrow('只能修改自己创建');
 });

@@ -23,10 +23,10 @@ describe('getWorkerTaskScopeFilter', () => {
     });
   });
 
-  it('SALES / CUSTOMER_SERVICE 走同一条 workerId 过滤（等于一无所获）', () => {
-    // 销售和客服身上不会挂生产任务，workerId 过滤天然把他们挡在外面 ——
+  it('SALES 走同一条 workerId 过滤（等于一无所获）', () => {
+    // 销售身上不会挂生产任务，workerId 过滤天然把他们挡在外面 ——
     // 与改造前「row.workerId !== actor.id → null」的事后过滤等价。
-    for (const role of [Role.SALES, Role.CUSTOMER_SERVICE] as const) {
+    for (const role of [Role.SALES] as const) {
       expect(getWorkerTaskScopeFilter({ id: 'u-1', role })).toEqual({
         workerId: 'u-1',
         orderItem: { order: { status: { not: OrderStatus.SUBMITTED } } },

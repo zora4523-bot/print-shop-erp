@@ -33,7 +33,7 @@ vi.mock('@/lib/material', () => ({
   MaterialInvariantError: class MaterialInvariantError extends Error {},
 }));
 
-import { createStockTransfer } from '../stock-transfer';
+import { createStockTransfer, StockTransferInvariantError } from '../stock-transfer';
 
 const input = {
   idempotencyKey: '00000000-0000-4000-8000-000000000001',
@@ -112,5 +112,50 @@ describe('createStockTransfer', () => {
     expect(txMock.stockTransfer.create).not.toHaveBeenCalled();
     expect(movementMock).not.toHaveBeenCalled();
     expect(numberMock).not.toHaveBeenCalled();
+  });
+
+  it('replays the same request when only the quantity spelling differs', async () => {
+    dbMock.stockTransfer.findUnique.mockResolvedValue(summary);
+
+    const replay = await createStockTransfer({ ...input, quantity: '3' }, { id: 'owner1' });
+
+    expect(replay.transferNo).toBe('ST20260717-0001');
+    expect(txMock.stockTransfer.create).not.toHaveBeenCalled();
+    expect(movementMock).not.toHaveBeenCalled();
+  });
+
+  // L-10：同一幂等键、内容不同的重提必须拒绝，不能把旧调拨单当作成功返回、
+  // 静默丢掉操作员改过的数量 / 库位 / 物料。
+  it.each([
+    ['quantity', { quantity: '7.00' }, {}],
+    ['material', { materialId: 'mat2' }, {}],
+    ['source location', { sourceLocationId: 'loc-c' }, {}],
+    ['destination location', { destinationLocationId: 'loc-c' }, {}],
+    ['remark', { remark: '改过的备注' }, {}],
+    ['operator', {}, { id: 'owner2' }],
+  ])('rejects a fast-path replay whose %s differs from the committed transfer', async (_label, change, actorChange) => {
+    dbMock.stockTransfer.findUnique.mockResolvedValue(summary);
+
+    await expect(
+      createStockTransfer({ ...input, ...change }, { id: 'owner1', ...actorChange }),
+    ).rejects.toThrow(new StockTransferInvariantError('调拨请求与原记录不一致，请刷新页面后重新核对'));
+
+    expect(numberMock).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(movementMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a replay that differs after winning the request lock inside the transaction', async () => {
+    dbMock.stockTransfer.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(summary);
+    txMock.stockTransfer.findUnique.mockResolvedValue(summary);
+
+    await expect(
+      createStockTransfer({ ...input, quantity: '7.00' }, { id: 'owner1' }),
+    ).rejects.toThrow(new StockTransferInvariantError('调拨请求与原记录不一致，请刷新页面后重新核对'));
+
+    expect(txMock.stockTransfer.create).not.toHaveBeenCalled();
+    expect(movementMock).not.toHaveBeenCalled();
   });
 });

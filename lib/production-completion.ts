@@ -1,4 +1,9 @@
 import {
+  ORDER_EXTERNAL_SALES_SELECT,
+  orderExternalSalesName,
+  type OrderExternalSalesFacts,
+} from './order/external-sales-name';
+import {
   OrderStatus,
   OutsourceStatus,
   ProductionOperationStatus,
@@ -37,6 +42,9 @@ export type ProductionCompletionTx = {
       workOrderVersion: number;
       orderNo: string;
       customerRef: string | null;
+      settlementType: OrderExternalSalesFacts['settlementType'];
+      submitter: { displayName: string };
+      sourceOrder: { submitter: { displayName: string } } | null;
       completedAt: Date | null;
     } | null>;
     update: (args: {
@@ -161,6 +169,7 @@ export async function maybeCompleteProductionOrder(
       workOrderVersion: true,
       orderNo: true,
       customerRef: true,
+      ...ORDER_EXTERNAL_SALES_SELECT,
       completedAt: true,
     },
   });
@@ -379,6 +388,7 @@ export async function maybeCompleteProductionOrder(
     orderId,
     orderNo: order.orderNo,
     workOrderVersion: order.workOrderVersion,
+    externalSalesName: orderExternalSalesName(order) ?? '未填',
     customerRef: order.customerRef,
   };
   // Legacy delivery keys stay unchanged so an in-flight pre-cutover job cannot

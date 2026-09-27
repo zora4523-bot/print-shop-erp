@@ -27,8 +27,8 @@ function command(units: number[]) {
     packageRequirement: null,
     remark: null,
     packagingGroups: [group(units)],
-    items: units.map((pack) => ({
-      name: "测试",
+    items: units.map((pack, index) => ({
+      name: `测试 ${index + 1}`,
       pricingRoute: "STOCK_BLANK",
       quantity: pack * 100,
       pack,

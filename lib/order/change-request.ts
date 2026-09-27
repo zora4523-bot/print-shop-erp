@@ -6,14 +6,14 @@ import { packagingBoxType } from './packaging-mode';
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
 import { prepareOrderForProductionInTx } from './production-readiness';
 import { OrderChangeRequestError } from './change-request-error';
+import { assertChangeRequestRespectsShippedShipments } from './change-request-shipment-guard';
 import { ORDER_MODIFIABLE_STATUSES, canChangeOrderPackaging } from './editable-fields';
+import { LOGISTICS_CHARGE_CATEGORY_CODES } from './settlement';
 import Decimal from 'decimal.js';
 import {
   BackgroundJobStatus,
-  CsSalesEntryType,
   CustomerPriceBookPurpose,
   MaterialCategory,
-  OrderBillingMode,
   OrderChangeRequestStatus,
   OrderChangeRequestType,
   OrderCustomerChargeStatus,
@@ -60,11 +60,6 @@ import {
   resolveExternalOrderChargesForFinalization,
 } from '../price/order-charge-service';
 import { calculateExternalOrderCharges } from '../price/external-order-charges';
-import {
-  assertCsOrderSalesLedgerReconciledInTx,
-  CsSalesLedgerError,
-  recordCsSalesEntryInTx,
-} from '../salary/cs-sales';
 import { maybeCompleteProductionOrder, dispatchProductionCompletionNotification, type ProductionCompletionNotification, type ProductionCompletionTx } from '../production-completion';
 import { MAX_ORDER_ITEMS_PER_ORDER } from './limits';
 import { resolveOrderChangeStageInTx } from './change-stage';
@@ -160,6 +155,36 @@ function checkedOrderTotal(value: Decimal): string {
     );
   }
   return value.toFixed(2);
+}
+
+/**
+ * Only external sales re-quote (includeOrderCharges) and rewrite their
+ * SHIPPING_FEE / PACKING_MATERIAL rows when a change is approved. Every other
+ * settlement type keeps its persisted logistics rows inside the approved
+ * total, so the approval preview must keep them too.
+ */
+function refreshesLogisticsChargesOnChange(
+  settlementType: OrderSettlementType,
+): boolean {
+  return settlementType === OrderSettlementType.EXTERNAL_SALES;
+}
+
+/**
+ * An external-sales DRAFT has no SHIPPING_FEE / PACKING_MATERIAL rows yet:
+ * finalizeExternalOrderQuoteInTx generates them authoritatively at submission.
+ * Modifying such a draft therefore re-quotes processing only, like the other
+ * settlement types, instead of demanding rows that cannot exist. Submitted
+ * orders (and drafts that already carry the rows) keep the full refresh and
+ * the fail-closed identity check.
+ */
+function requotesLogisticsChargesOnChange(order: {
+  settlementType: OrderSettlementType;
+  status: OrderStatus;
+  customerCharges: readonly { category: { code: string } }[];
+}): boolean {
+  if (!refreshesLogisticsChargesOnChange(order.settlementType)) return false;
+  return order.status !== OrderStatus.DRAFT || order.customerCharges.some((charge) =>
+    (LOGISTICS_CHARGE_CATEGORY_CODES as readonly string[]).includes(String(charge.category.code)));
 }
 
 function shouldSyncPlateCharge(
@@ -260,6 +285,7 @@ const MODIFICATION_REVIEW_REQUEST_INCLUDE = {
           sequence: true,
           destinationProvince: true,
           weightKg: true,
+          status: true,
         },
       },
       packagingGroups: {
@@ -306,8 +332,7 @@ function assertCanRequest(
 ): void {
   if (
     !(actor.role === Role.ADMIN && isModification) &&
-    actor.role !== Role.SALES &&
-    actor.role !== Role.CUSTOMER_SERVICE
+    actor.role !== Role.SALES
   ) {
     throw new OrderChangeRequestError('当前账号无权提交此类工单申请');
   }
@@ -465,6 +490,7 @@ async function readChangeRequestOrderInTx(
           sequence: true,
           destinationProvince: true,
           weightKg: true,
+          status: true,
         },
       },
       productionOperations: {
@@ -529,6 +555,7 @@ export async function createOrderChangeRequest(
           '只有已确认且未发货的工单可以提交取消申请',
         );
       }
+      assertChangeRequestRespectsShippedShipments({ phase: 'REQUEST', isCancellation: input.type === 'CANCEL', itemChangeCount: input.items.length, shipments: order.shipments });
       if (order.changeRequests.length > 0) {
         throw new OrderChangeRequestError('该工单已有待审核申请，请等待管理员处理');
       }
@@ -727,7 +754,7 @@ export async function withdrawOrderChangeRequest(
   input: WithdrawOrderChangeRequestInput,
   actor: { id: string; role: Role },
 ) {
-  if (actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE && actor.role !== Role.ADMIN) {
+  if (actor.role !== Role.SALES && actor.role !== Role.ADMIN) {
     throw new OrderChangeRequestError('只有申请人可以撤回工单变更申请');
   }
   const locator = await db.orderChangeRequest.findUnique({
@@ -2976,6 +3003,8 @@ async function calculateProjectedOrderQuote(input: {
   customerCharges?: readonly LogisticsProjectionCharge[];
   changes: ResolvedProposedItemChange[];
   preserveAdminConfirmedManual?: boolean;
+  /** Defaults to the settlement rule; unsubmitted drafts pass false. */
+  includeOrderCharges?: boolean;
 }): Promise<{
   calculation: CatalogCreateOrderQuoteCalculation;
   projectedItems: ProjectedQuoteItem[];
@@ -3011,6 +3040,7 @@ async function calculateProjectedOrderQuote(input: {
         shipments: shipmentFacts,
       },
       includeOrderCharges:
+        input.includeOrderCharges ??
         input.settlementType === OrderSettlementType.EXTERNAL_SALES,
     });
   } catch (error) {
@@ -3684,6 +3714,7 @@ async function readReviewableChangeRequestInTx(
               sequence: true,
               destinationProvince: true,
               weightKg: true,
+              status: true,
             },
           },
           packagingGroups: {
@@ -3831,6 +3862,8 @@ export async function previewOrderChangeRequestPricing(
     );
 
     const proposedChanges = readProposedChanges(request.proposedChanges);
+    // 与批准路径同一道发货闸口：已有地址发货后不给出改款式/数量的计价预览。
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: false, itemChangeCount: proposedChanges.length, shipments: request.order.shipments });
     const itemById = new Map(request.order.items.map((item) => [item.id, item]));
     const normalizedChanges = normalizeProposedChanges(
       proposedChanges,
@@ -3874,6 +3907,7 @@ export async function previewOrderChangeRequestPricing(
     const primaryShipment = request.order.shipments.find(
       (shipment) => shipment.sequence === 1,
     )!;
+    const requotesLogistics = requotesLogisticsChargesOnChange(request.order);
     const projected = await calculateProjectedOrderQuote({
       client: tx,
       now: quotedAt,
@@ -3886,6 +3920,7 @@ export async function previewOrderChangeRequestPricing(
       primaryShipmentId: primaryShipment.id,
       packagingGroups: request.order.packagingGroups ?? [],
       changes,
+      includeOrderCharges: requotesLogistics,
     });
     assertPreservedPlateDoesNotOverlapAtomicBundle({
       status: request.order.status,
@@ -3970,8 +4005,9 @@ export async function previewOrderChangeRequestPricing(
     );
 
     const recalculatedChargeCodes = new Set([
-      'SHIPPING_FEE',
-      'PACKING_MATERIAL',
+      ...(requotesLogistics
+        ? ['SHIPPING_FEE', 'PACKING_MATERIAL']
+        : []),
       ...(!quoteHasDefaultZeroPlateCharge(projected.calculation.quote) && shouldSyncPlateCharge(
         request.order.status,
         request.order.settlementType,
@@ -4825,6 +4861,8 @@ export async function previewOrderCancellationSettlement(
     if (versionMismatchReason) {
       throw new OrderChangeRequestError(versionMismatchReason);
     }
+    // 已有地址发货即正常收费（业主 2026-09-24），不给出任何取消结算参考价。
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: true, itemChangeCount: 0, shipments: request.order.shipments });
     const producedQty = validateCancellationProducedQuantity(
       request,
       input.producedQty,
@@ -4955,6 +4993,7 @@ async function reviewOrderCancellationRequest(
     if (!CANCELLABLE_BY_REQUEST_STATUSES.includes(request.order.status)) {
       throw new OrderChangeRequestError('当前工单状态不允许批准取消');
     }
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: true, itemChangeCount: 0, shipments: request.order.shipments });
     if (request.order.outsourceOrders.length > 0) {
       throw new OrderChangeRequestError(
         '工单存在已发出或进行中的外协单，请先处理外协',
@@ -5088,47 +5127,68 @@ type ProjectedOrderQuote = Awaited<
   ReturnType<typeof calculateProjectedOrderQuote>
 >;
 
-/** Pass-through delivery charges are excluded from 客服业绩 (cs-sales.ts). */
-function logisticsChargeAmount(
-  charges: readonly { amount: { toString(): string } | null; category: { code: string } }[],
-): Decimal {
-  return charges.reduce(
-    (sum, charge) =>
-      ['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(String(charge.category.code)) && charge.amount !== null
-        ? sum.plus(charge.amount.toString())
-        : sum,
-    new Decimal(0),
-  );
-}
+type ApprovedModificationFeeInput = {
+  order: Pick<
+    ModificationReviewRequest['order'],
+    'settlementType' | 'quotedFee' | 'confirmedFee'
+  >;
+  locksAdministratorConfirmedFee: boolean;
+  pricingPending: boolean;
+  nextTotal: string;
+};
 
 /**
- * 客服业绩不含代收物流（cs-sales.ts）：流水按扣除快递费 / 耗材后的口径记账。
- * Returns the ledger basis before the change and the basis delta to record.
+ * Fee lifecycle written together with an approved repricing modification.
+ * An administrator-confirmed result locks confirmedFee to the approved total
+ * for every settlement type. Otherwise external sales re-snapshot the quote.
+ * Internal / factory-direct orders do not maintain quotedFee here; their
+ * confirmedFee is stamped at factory confirmation (production-readiness.ts)
+ * and, once present, must follow the approved total (or be withdrawn while
+ * pricing is pending) so shipment, settlement and fulfilment repricing never
+ * read a stale confirmed amount. `null` means the lifecycle is unchanged.
  */
-async function csSalesBasisDeltaInTx(
-  tx: Prisma.TransactionClient,
-  input: {
-    orderId: string;
-    previousTotal: { toString(): string };
-    previousCharges: Parameters<typeof logisticsChargeAmount>[0];
-    nextTotal: string;
-    chargesRewritten: boolean;
-  },
-): Promise<{ previousSalesBasis: string; salesDelta: Decimal }> {
-  const previousLogisticsAmount = logisticsChargeAmount(input.previousCharges);
-  const nextLogisticsAmount = input.chargesRewritten
-    ? new Decimal(
-        (await tx.orderCustomerCharge.aggregate({
-          where: { orderId: input.orderId, category: { code: { in: ['SHIPPING_FEE', 'PACKING_MATERIAL'] } } },
-          _sum: { amount: true },
-        }))._sum.amount ?? 0,
-      )
-    : previousLogisticsAmount;
-  const previousSalesBasis = new Decimal(input.previousTotal.toString()).minus(previousLogisticsAmount).toFixed(2);
+function approvedModificationFeeSnapshot(input: ApprovedModificationFeeInput) {
+  const { order, nextTotal } = input;
+  if (input.locksAdministratorConfirmedFee) {
+    // quotedFee is the sales-side estimate and keeps its original immutable
+    // revision pointer. Administrator resolution creates the distinct
+    // confirmed snapshot.
+    return { quotedFee: order.quotedFee, confirmedFee: nextTotal, settledFee: null };
+  }
+  if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
+    // Match external submit: an automatic quote has a confirmed pricing
+    // status, but confirmedFee remains a later factory/customer-fee
+    // lifecycle snapshot.
+    return { quotedFee: nextTotal, confirmedFee: null, settledFee: null };
+  }
+  if (order.confirmedFee === null) return null;
   return {
-    previousSalesBasis,
-    salesDelta: new Decimal(input.nextTotal).minus(nextLogisticsAmount).minus(previousSalesBasis),
+    quotedFee: order.quotedFee,
+    confirmedFee: input.pricingPending ? null : nextTotal,
+    settledFee: null,
   };
+}
+
+function approvedModificationFeeOrderData(
+  input: ApprovedModificationFeeInput & {
+    pricingRevisionId: string;
+    quotedFeeCompleteness: OrderQuotedFeeCompleteness;
+  },
+): Prisma.OrderUncheckedUpdateInput | null {
+  const snapshot = approvedModificationFeeSnapshot(input);
+  if (!snapshot) return null;
+  const replacesExternalQuote =
+    input.order.settlementType === OrderSettlementType.EXTERNAL_SALES &&
+    !input.locksAdministratorConfirmedFee;
+  return replacesExternalQuote
+    ? {
+        quotedFee: input.nextTotal,
+        quotedFeeCompleteness: input.quotedFeeCompleteness,
+        quotedPricingRevisionId: input.pricingRevisionId,
+        confirmedFee: null,
+        settledFee: null,
+      }
+    : { confirmedFee: snapshot.confirmedFee, settledFee: null };
 }
 
 async function persistApprovedModificationPricingInTx(input: {
@@ -5217,13 +5277,6 @@ async function persistApprovedModificationPricingInTx(input: {
       new Decimal(nextProcessingAmount).plus(customerChargeTotal._sum.amount ?? 0),
     );
   }
-  const { previousSalesBasis, salesDelta } = await csSalesBasisDeltaInTx(tx, {
-    orderId: request.order.id,
-    previousTotal: request.order.totalAmount,
-    previousCharges: request.order.customerCharges,
-    nextTotal,
-    chargesRewritten: Boolean(projected),
-  });
   await tx.order.update({
     where: { id: request.order.id },
     data: {
@@ -5232,7 +5285,10 @@ async function persistApprovedModificationPricingInTx(input: {
       ...(versionedProductionChange
         ? {
             workOrderVersion: nextWorkOrderVersion,
-            scheduledAt: reviewedAt,
+            // scheduledAt is the release boundary of the current generation.
+            // Only a released order is rematerialized now; CONFIRMED gets its
+            // boundary when it is actually released.
+            ...(isReprintChangeStatus(request.order.status) ? { scheduledAt: reviewedAt } : {}),
             // completedAt is the canonical production-readiness marker for
             // one work-order generation. A production-changing revision
             // rematerializes unfinished work and must reopen that marker.
@@ -5301,6 +5357,13 @@ async function persistApprovedModificationPricingInTx(input: {
           ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED
           : ORDER_PRICING_STATUS.AUTO_CONFIRMED
         : ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
+  const feeInput: ApprovedModificationFeeInput = {
+    order: request.order,
+    locksAdministratorConfirmedFee: Boolean(locksAdministratorConfirmedFee),
+    pricingPending: nextPricingStatus === ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION,
+    nextTotal,
+  };
+  const orderFeeSnapshot = approvedModificationFeeSnapshot(feeInput);
   const pricingRevision =
     projected &&
     request.order.settlementType !== OrderSettlementType.NO_CHARGE &&
@@ -5320,28 +5383,7 @@ async function persistApprovedModificationPricingInTx(input: {
           expectedPriceRevision: request.order.priceRevision,
           incrementOrderRevision: false,
           remark: reviewRemark ?? request.reason,
-          ...(request.order.settlementType ===
-          OrderSettlementType.EXTERNAL_SALES
-            ? {
-                orderFeeSnapshot: locksAdministratorConfirmedFee
-                  ? {
-                      // quotedFee is the sales-side estimate and keeps its
-                      // original immutable revision pointer. Administrator
-                      // resolution creates the distinct confirmed snapshot.
-                      quotedFee: request.order.quotedFee,
-                      confirmedFee: nextTotal,
-                      settledFee: null,
-                    }
-                  : {
-                      // Match external submit: an automatic quote has a
-                      // confirmed pricing status, but confirmedFee remains a
-                      // later factory/customer-fee lifecycle snapshot.
-                      quotedFee: nextTotal,
-                      confirmedFee: null,
-                      settledFee: null,
-                    },
-              }
-            : {}),
+          ...(orderFeeSnapshot ? { orderFeeSnapshot } : {}),
           metadata: {
             changeRequestId: request.id,
             workOrderVersion: nextWorkOrderVersion,
@@ -5401,20 +5443,13 @@ async function persistApprovedModificationPricingInTx(input: {
         },
       ],
     });
-    if (request.order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
-      await tx.order.update({
-        where: { id: request.order.id },
-        data:
-          locksAdministratorConfirmedFee
-          ? { confirmedFee: nextTotal, settledFee: null }
-          : {
-              quotedFee: nextTotal,
-              quotedFeeCompleteness: pureQuoteCompleteness!,
-              quotedPricingRevisionId: pricingRevision.pricingRevisionId,
-              confirmedFee: null,
-              settledFee: null,
-            },
-      });
+    const feeOrderData = approvedModificationFeeOrderData({
+      ...feeInput,
+      pricingRevisionId: pricingRevision.pricingRevisionId,
+      quotedFeeCompleteness: pureQuoteCompleteness!,
+    });
+    if (feeOrderData) {
+      await tx.order.update({ where: { id: request.order.id }, data: feeOrderData });
     }
   }
   return {
@@ -5426,8 +5461,6 @@ async function persistApprovedModificationPricingInTx(input: {
     nextWorkOrderVersion,
     pricingRevision,
     nextPricingStatus,
-    salesDelta,
-    previousSalesBasis,
     versionedProductionChange,
   };
 }
@@ -5471,8 +5504,6 @@ async function finalizeApprovedModificationInTx(input: {
     nextWorkOrderVersion,
     pricingRevision,
     nextPricingStatus,
-    salesDelta,
-    previousSalesBasis,
     versionedProductionChange,
   } = pricing;
   const rematerializedProduction = isReprintChangeStatus(request.order.status)
@@ -5535,7 +5566,7 @@ async function finalizeApprovedModificationInTx(input: {
           before: currentWorkOrderVersion,
           after: nextWorkOrderVersion,
         },
-        ...(versionedProductionChange
+        ...(isReprintChangeStatus(request.order.status)
           ? {
               scheduledAt: {
                 before: request.order.scheduledAt?.toISOString() ?? null,
@@ -5618,34 +5649,6 @@ async function finalizeApprovedModificationInTx(input: {
     },
   });
 
-  if (
-    request.order.settlementType === OrderSettlementType.INTERNAL_SALES &&
-    request.order.billingMode === OrderBillingMode.CHARGE &&
-    request.order.status !== OrderStatus.DRAFT
-  ) {
-    try {
-      await assertCsOrderSalesLedgerReconciledInTx(
-        tx,
-        request.order.id,
-        previousSalesBasis,
-      );
-      await recordCsSalesEntryInTx(tx, {
-        eventKey: `order:${request.order.id}:revision:${nextRevision}:change`,
-        csUserId: request.order.submitterId,
-        orderId: request.order.id,
-        orderRevision: nextRevision,
-        type: CsSalesEntryType.ORDER_CHANGED,
-        amount: salesDelta,
-        occurredAt: reviewedAt,
-        remark: `工单修改申请 ${request.id} 审核通过`,
-      });
-    } catch (error) {
-      if (error instanceof CsSalesLedgerError) {
-        throw new OrderChangeRequestError(error.message);
-      }
-      throw error;
-    }
-  }
   return reviewed;
 }
 
@@ -5750,6 +5753,7 @@ export async function reviewOrderChangeRequest(
     }
 
     const proposedChanges = readProposedChanges(request.proposedChanges);
+    assertChangeRequestRespectsShippedShipments({ phase: 'REVIEW', isCancellation: false, itemChangeCount: proposedChanges.length, shipments: request.order.shipments });
     // Re-check the live item count under the per-order lock. This is the
     // authoritative guard for legacy pending requests and any state change
     // that occurred after the proposal was recorded.
@@ -5819,6 +5823,7 @@ export async function reviewOrderChangeRequest(
       request.order.status,
       pricingChanged,
     );
+    const requotesLogistics = requotesLogisticsChargesOnChange(request.order);
     const projected = pricingChanged
       ? await calculateProjectedOrderQuote({
           client: tx,
@@ -5832,6 +5837,7 @@ export async function reviewOrderChangeRequest(
           primaryShipmentId: primaryShipment!.id,
           packagingGroups: request.order.packagingGroups ?? [],
           changes,
+          includeOrderCharges: requotesLogistics,
         })
       : null;
     if (projected) {
@@ -5847,10 +5853,7 @@ export async function reviewOrderChangeRequest(
         customerCharges: request.order.customerCharges,
       });
     }
-    if (
-      projected &&
-      request.order.settlementType === OrderSettlementType.EXTERNAL_SALES
-    ) {
+    if (projected && requotesLogistics) {
       // Validate persisted charge identity before item/package mutations. A
       // transaction rollback is the final safety net, not a substitute for a
       // zero-write preflight when legacy data is cross-linked.
@@ -5917,8 +5920,7 @@ export async function reviewOrderChangeRequest(
           customerCharges: request.order.customerCharges,
           orderId: request.order.id,
           actorId: actor.id,
-          refreshExternalLogistics:
-            request.order.settlementType === OrderSettlementType.EXTERNAL_SALES,
+          refreshExternalLogistics: requotesLogistics,
           // A production generation can already have consumed and finalized
           // physical plates. Pre-production changes instead synchronize the
           // one aggregate manual-pricing exit with projected foil facts.
@@ -6213,30 +6215,6 @@ async function applyApprovedItemChangesInTx({
   if (packagingReprice) {
     await applyPackagingRepricePlans(tx, packagingReprice);
   }
-}
-
-export async function listOrderChangeRequests(input?: {
-  status?: OrderChangeRequestStatus;
-  limit?: number;
-}) {
-  return db.orderChangeRequest.findMany({
-    where: input?.status ? { status: input.status } : undefined,
-    orderBy: { createdAt: 'desc' },
-    take: input?.limit ?? 100,
-    include: {
-      requester: { select: { displayName: true, role: true } },
-      reviewedBy: { select: { displayName: true } },
-      order: {
-        select: {
-          id: true,
-          orderNo: true,
-          customName: true,
-          status: true,
-          revision: true,
-        },
-      },
-    },
-  });
 }
 
 function buildModificationItemPricing(

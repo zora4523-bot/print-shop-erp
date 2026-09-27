@@ -38,8 +38,6 @@ import {
   recordOutsourcePaymentSchema,
   updateEditableOrderSchema,
   setOrderSfCollectSchema,
-  startCsPeriodSchema,
-  recordCsPayrollPaymentSchema,
   recordBillPaymentSchema,
   createOrderCostEntrySchema,
   createOrderChangeRequestSchema,
@@ -56,7 +54,6 @@ describe('attendance schema', () => {
     date: '2026-08-30',
     normalHours: 16,
     otHours: 8,
-    spareHours: 0,
     workUnits: 1,
     leaveUnits: 0,
   };
@@ -978,21 +975,6 @@ describe('createUserSchema', () => {
     expect(invalid.success).toBe(false);
   });
 
-  it('requires employment type for internal customer service', () => {
-    expect(
-      createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.CUSTOMER_SERVICE,
-      }).success,
-    ).toBe(false);
-    expect(
-      createUserSchema.safeParse({
-        ...validCreate,
-        role: Role.CUSTOMER_SERVICE,
-        employmentType: EmploymentType.FULL_TIME,
-      }).success,
-    ).toBe(true);
-  });
 });
 
 describe('updateUserSchema', () => {
@@ -1621,18 +1603,19 @@ describe('createOrderSchema foil colors', () => {
     }
   });
 
-  it('保留选中的客户主数据编号，并将空选择规范为 null', () => {
-    const selected = createOrderSchema.parse({
-      ...order,
-      customerPartyId: '  customer-1  ',
-    });
-    const temporary = createOrderSchema.parse({
-      ...order,
-      customerPartyId: '',
-    });
-
-    expect(selected.customerPartyId).toBe('customer-1');
-    expect(temporary.customerPartyId).toBeNull();
+  // 客户名称/简称与关联客户已退役（业主 2026-09-27）：建单命令仍兼容旧客户端携带的
+  // 这两个 key，但既不要求、也不再校验（写库与否由 createOrder 决定：一律不写）。
+  it('建单兼容但不要求、不校验已退役的客户字段', () => {
+    const withoutCustomer: Record<string, unknown> = { ...order };
+    delete withoutCustomer.customerRef;
+    expect(createOrderSchema.safeParse(withoutCustomer).success).toBe(true);
+    for (const legacy of [
+      { customerRef: null, customerPartyId: null },
+      { customerRef: '', customerPartyId: '' },
+      { customerRef: '客'.repeat(200), customerPartyId: 'x'.repeat(200) },
+    ]) {
+      expect(createOrderSchema.safeParse({ ...order, ...legacy }).success).toBe(true);
+    }
   });
 
   it('defaults an omitted color array to empty for compatibility', () => {
@@ -1800,6 +1783,16 @@ describe('createOrderSchema foil colors', () => {
       }
     },
   );
+
+  it('普通编辑剥离已退役的客户字段，工单已存的客户值保持原样（业主 2026-09-27）', () => {
+    const parsed = updateEditableOrderSchema.parse({
+      expectedEditVersion: '7',
+      customerRef: '旧客户简称',
+      customerPartyId: 'customer-1',
+      remark: '只改备注',
+    });
+    expect(parsed).toEqual({ expectedEditVersion: 7, remark: '只改备注' });
+  });
 
   it('普通编辑修剪地址，且不再解析专用的 isSfCollect 字段', () => {
     const parsed = updateEditableOrderSchema.parse({
@@ -2142,43 +2135,6 @@ describe('external-sales shipment charge schemas', () => {
   });
 });
 
-describe('finance decimal boundaries', () => {
-  it('keeps CS monthly base within Decimal(10,2)', () => {
-    const base = {
-      csUserId: 'cs-1',
-      periodStart: '2026-08-01',
-      durationMonths: 1,
-      initialSales: '9999999999.99',
-    };
-
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        monthlyBase: '99999999.99',
-      }).success,
-    ).toBe(true);
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        monthlyBase: '100000000.00',
-      }).success,
-    ).toBe(false);
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        durationMonths: 4,
-        monthlyBase: '99999999.99',
-      }).success,
-    ).toBe(false);
-    expect(
-      startCsPeriodSchema.safeParse({
-        ...base,
-        monthlyBase: -1,
-      }).success,
-    ).toBe(false);
-  });
-});
-
 describe('createOrderCostEntrySchema', () => {
   const base = {
     idempotencyKey: '00000000-0000-4000-8000-000000000001',
@@ -2285,65 +2241,6 @@ describe('createOrderCostEntrySchema', () => {
         amount: '0.01',
       }).success,
     ).toBe(true);
-  });
-});
-
-describe('recordCsPayrollPaymentSchema', () => {
-  const base = {
-    idempotencyKey: '00000000-0000-4000-8000-000000000003',
-    paidAt: '2026-05-01T10:30',
-    paymentMethod: null,
-    referenceNo: null,
-    remark: null,
-  };
-
-  it('accepts separate bottom-salary and commission amounts', () => {
-    const result = recordCsPayrollPaymentSchema.safeParse({
-      ...base,
-      baseAmount: '2000.00',
-      commissionAmount: '33000.00',
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.paidAt.toISOString()).toBe(
-        '2026-05-01T02:30:00.000Z',
-      );
-    }
-  });
-
-  it('rejects zero total, negative values, overflow, and invalid request keys', () => {
-    for (const input of [
-      { ...base, baseAmount: '', commissionAmount: '' },
-      { ...base, baseAmount: '-1', commissionAmount: '0' },
-      { ...base, baseAmount: '10000000000.00', commissionAmount: '0' },
-      {
-        ...base,
-        idempotencyKey: 'not-a-uuid',
-        baseAmount: '1',
-        commissionAmount: '0',
-      },
-    ]) {
-      expect(recordCsPayrollPaymentSchema.safeParse(input).success).toBe(false);
-    }
-  });
-
-  it('rejects impossible Shanghai calendar dates instead of rolling them forward', () => {
-    for (const paidAt of [
-      '2026-02-31T10:30',
-      '2026-04-31T10:30',
-      '2026-05-01T24:00',
-      '2026-05-01T10:60',
-    ]) {
-      expect(
-        recordCsPayrollPaymentSchema.safeParse({
-          ...base,
-          paidAt,
-          baseAmount: '1.00',
-          commissionAmount: '0',
-        }).success,
-        paidAt,
-      ).toBe(false);
-    }
   });
 });
 

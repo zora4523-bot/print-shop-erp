@@ -43,17 +43,20 @@ for (const actor of ['owner', 'sales'] as const) {
       await expect(pack).toHaveAttribute('aria-invalid', 'false');
       expect(await top(mode)).toBe(modeTop);
 
+      // 包装在整单区，每个规格一行；切换设计款标签不影响各行的值。
       await page.getByRole('button', { name: '＋ 增加设计款' }).click();
-      await pack.fill('6');
+      await expect(pack).toHaveCount(2);
+      await pack.nth(1).fill('6');
       const styles = page.getByRole('tablist', { name: '设计款', exact: true }).getByRole('tab');
       await expect(styles).toHaveCount(2);
       await styles.first().click();
-      await expect(pack).toHaveValue('12');
+      await expect(pack.nth(0)).toHaveValue('12');
       await expect(quantity).toHaveValue('1200');
       await styles.last().click();
-      await expect(pack).toHaveValue('6');
+      await expect(pack.nth(1)).toHaveValue('6');
       await page.getByRole('button', { name: '删除设计款', exact: true }).click();
       await expect(styles).toHaveCount(1);
+      await expect(pack).toHaveCount(1);
       await expect(pack).toHaveValue('12');
 
       const address = page.getByRole('textbox', { name: '收货地址', exact: true });

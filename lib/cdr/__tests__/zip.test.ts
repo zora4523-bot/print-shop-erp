@@ -16,6 +16,7 @@ const {
     finalize: vi.fn(),
     abort: vi.fn(),
     on: vi.fn(),
+    once: vi.fn(),
   };
   return {
     ossCtorMock: vi.fn(),
@@ -67,7 +68,19 @@ beforeEach(() => {
     .mockReset()
     .mockReturnValue('https://signed.example/bundles/b1.zip?sig=abc');
   archiveMock.pipe.mockReset();
-  archiveMock.append.mockReset();
+  // 生产代码逐个追加条目、等 archiver 的 'entry' 事件再打开下一个 GET；
+  // mock 在 append 后异步回放该事件，模拟"条目已处理完"。
+  let onEntry: (() => void) | null = null;
+  archiveMock.once.mockReset().mockImplementation((event: string, fn: () => void) => {
+    if (event === 'entry') onEntry = fn;
+    return archiveMock;
+  });
+  archiveMock.append.mockReset().mockImplementation(() => {
+    const fire = onEntry;
+    onEntry = null;
+    setImmediate(() => fire?.());
+    return archiveMock;
+  });
   archiveMock.finalize.mockReset().mockResolvedValue(undefined);
   archiveMock.abort.mockReset();
   archiveMock.on.mockReset();
@@ -177,11 +190,9 @@ describe('uploadBundleZip — real path', () => {
     ]);
     expect(putStreamMock).toHaveBeenCalledTimes(1);
     expect(putStreamMock.mock.calls[0][0]).toBe('bundles/b1.zip');
-    expect(signatureUrlMock).toHaveBeenCalledWith('bundles/b1.zip', {
-      expires: 24 * 60 * 60,
-      method: 'GET',
-    });
-    expect(r.zipFileUrl).toBe('https://signed.example/bundles/b1.zip?sig=abc');
+    expect(signatureUrlMock).not.toHaveBeenCalled();
+    expect(r.zipFileUrl).toBe('bundles/b1.zip');
+    expect(r.zipObjectKey).toBe('bundles/b1.zip');
     expect(r.expiresAt.toISOString()).toBe('2026-07-06T00:00:00.000Z');
     expect(r.isMock).toBe(false);
   });
@@ -201,6 +212,51 @@ describe('uploadBundleZip — real path', () => {
       { name: 'O-1/a.cdr' },
       { name: 'O-1/(2) a.cdr' },
     ]);
+  });
+
+  it('条目名只取文件名最后一段并去掉控制/双向字符，历史脏数据也不能穿越出工单目录', async () => {
+    const names = [
+      '..\\..\\Startup\\a.bat',
+      '../../x.cdr',
+      'a\u0001b\u202Eexe.cdr',
+      '..',
+      'noext',
+    ];
+    await uploadBundleZip(
+      {
+        files: names.map((fileName, i) => ({
+          orderNo: 'O-1',
+          fileName,
+          fileUrl: designUrl(`cdr-${i}.cdr`),
+        })),
+        bundleId: 'b1',
+      },
+      { mockMode: false, now, env: configuredEnv },
+    );
+    expect(archiveMock.append.mock.calls.map((c) => c[1])).toEqual([
+      { name: 'O-1/a.bat.cdr' },
+      { name: 'O-1/x.cdr' },
+      { name: 'O-1/abexe.cdr' },
+      { name: 'O-1/design.cdr' },
+      { name: 'O-1/noext.cdr' },
+    ]);
+  });
+
+  it.each([
+    ['CDN 域名带路径前缀', 'https://cdn.example.com/assets', 'https://cdn.example.com/assets/design/o1/i1/cdr-1.cdr'],
+    ['CDN 域名带路径前缀（末尾斜杠）', 'https://cdn.example.com/assets/', 'https://cdn.example.com/assets/design/o1/i1/cdr-1.cdr'],
+    ['CDN 域名不带路径', 'https://cdn.example.com', 'https://cdn.example.com/design/o1/i1/cdr-1.cdr'],
+    ['配了 CDN 后的 bucket 直连历史地址', 'https://cdn.example.com/assets', designUrl('cdr-1.cdr')],
+  ])('OSS_PUBLIC_BASE_URL 为%s时按读取域剥掉路径前缀反推 objectKey', async (_label, publicBaseUrl, fileUrl) => {
+    await uploadBundleZip(
+      { files: [{ orderNo: 'O-1', fileName: 'a.cdr', fileUrl }], bundleId: 'b1' },
+      {
+        mockMode: false,
+        now,
+        env: { ...configuredEnv, OSS_PUBLIC_BASE_URL: publicBaseUrl } as NodeJS.ProcessEnv,
+      },
+    );
+    expect(getStreamMock.mock.calls.map((c) => c[0])).toEqual(['design/o1/i1/cdr-1.cdr']);
   });
 
   it('拒绝 design/ 前缀之外的文件 URL，且不发起任何 OSS 调用', async () => {

@@ -49,7 +49,7 @@ export default async function LegacyBillArchiveDetailPage({ params, searchParams
           <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-2 text-left">工单</th>
-              <th className="px-4 py-2 text-left">客户</th>
+              <th className="px-4 py-2 text-left">工单名称</th>
               <th className="px-4 py-2 text-left">finishedAt</th>
               <th className="px-4 py-2 text-right">历史成员金额</th>
             </tr>
@@ -62,7 +62,7 @@ export default async function LegacyBillArchiveDetailPage({ params, searchParams
                     {item.order.orderNo}
                   </Link>
                 </td>
-                <td className="px-4 py-3">{item.order.customerRef ?? '未填'}</td>
+                <td className="px-4 py-3">{item.order.customName?.trim() || '未命名工单'}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTimeShanghai(item.order.finishedAt)}</td>
                 <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(item.orderAmount)}</td>
               </tr>

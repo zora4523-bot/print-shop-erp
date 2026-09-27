@@ -22,15 +22,6 @@
     },
     {
       "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": ".toFixed(2)}%",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "百分比展示，非金额"
-    },
-    {
-      "rule": "money",
       "file": "components/business/dashboard/SalesRankingChart.tsx",
       "text": "return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(v);",
       "clause": "§4.1",
@@ -165,105 +156,6 @@
       "reason": "材料外观色卡（§2.7 例外）"
     },
     {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "'linear-gradient(115deg, #d4262e, #f4535c 32%, #fff0f0 44%, #e03a43 58%, #b81c25)',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "'linear-gradient(115deg, #a80f18, #d8323c 34%, #ffdada 46%, #c02630 60%, #8e0d15)',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "'linear-gradient(115deg, #7b4b9c, #c86ea8 30%, #fff2f8 44%, #5a7fc0 62%, #3f9c8a)',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "'solid-red': { background: '#c2181f' },",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "background: 'linear-gradient(160deg, #a81620, #8e1119)',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "boxShadow: 'inset 0 0 18px rgb(0 0 0 / 28%)',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "backgroundColor: '#b8151f',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "'radial-gradient(circle at 18% 22%, #ffe8a8 0.7px, transparent 0.8px), radial-gradient(circle at 62% 44%, #ffdf8f 0.8px, transparent 0.9px), radial-gradient(cir",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "background: 'repeating-linear-gradient(58deg, #b31620 0 3px, #9c1119 3px 5px)',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "'ice-white': { background: 'linear-gradient(150deg, #fdfdfd, #eef1f4)' },",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
-      "rule": "color",
-      "file": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx",
-      "text": "background: 'linear-gradient(150deg, #fbfbf9, #e7e5df)',",
-      "clause": "§2.1",
-      "migration": "P1-1",
-      "count": 1,
-      "reason": "材料外观色卡（§2.7 例外）"
-    },
-    {
       "rule": "money",
       "file": "components/business/price/ExternalSalesPriceTierGroupEditor.tsx",
       "text": "const quantityFormatter = new Intl.NumberFormat('zh-CN', {",
@@ -271,15 +163,6 @@
       "migration": "P0-1",
       "count": 1,
       "reason": "数量千分位格式器，非金额"
-    },
-    {
-      "rule": "money",
-      "file": "components/business/salary/SettleCsPeriodButton.tsx",
-      "text": "{(Number(visibleState.tierRate) * 100).toFixed(2)}% = 提成 ¥{' '}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "百分比展示，非金额"
     },
     {
       "rule": "money",
@@ -307,24 +190,6 @@
       "migration": "P0-1",
       "count": 1,
       "reason": "用户输入运费的原样回显，服务端确认后走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "components/business/salary/CsPayrollPaymentForm.tsx",
-      "text": "`本次底薪 ${Number.isFinite(baseAmount) ? formatMoney(baseAmount) : `¥ ${preview.baseAmount}`}；记录后预计剩余 ${formatMoney(baseAfter)}。`,",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "服务端返回非数字时的原样回显兜底，正常路径已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "components/business/salary/CsPayrollPaymentForm.tsx",
-      "text": "? `本次提成 ${Number.isFinite(commissionAmount) ? formatMoney(commissionAmount) : `¥ ${preview.commissionAmount}`}；记录后预计剩余 ${formatMoney(commissionAfter)}。`",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "服务端返回非数字时的原样回显兜底，正常路径已走 formatMoney"
     },
     {
       "rule": "money",
@@ -361,105 +226,6 @@
       "migration": "P0-1",
       "count": 1,
       "reason": "采购剩余件数（数量），非金额"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "baseTotal={baseTotal.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "tierSalesTotal={tierSalesTotal.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "tierSalesTotal: tierSalesTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "baseTotal: baseTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "paidBase: paidBase.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "paidCommission: paidCommission.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "remainingBase={remainingBase.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/[id]/page.tsx",
-      "text": "remainingCommission={remainingCommission.toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/page.tsx",
-      "text": "tierSalesTotal: tierSalesTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/page.tsx",
-      "text": "baseTotal: baseTotal.toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
-      "file": "app/(admin)/owner/salary/cs/page.tsx",
-      "text": ".toFixed(2),",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 2,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
     },
     {
       "rule": "money",

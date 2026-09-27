@@ -74,9 +74,25 @@ describe('sales order detail query boundary', () => {
       'costEntries',
       'outsource',
       'outsourceOrders',
+      'customerRef',
+      'customerParty',
+      'customerPartyId',
     ]) {
       expect(serializedSelect).not.toContain(`"${forbidden}"`);
     }
+  });
+
+  it('never exposes the retired order customer to the sales detail page', async () => {
+    // Over-rich record: even if an adapter returned the legacy columns, the DTO must drop them.
+    dbMock.order.findFirst.mockResolvedValue({ ...detailRecord(), customerPartyId: 'party-1' });
+
+    const result = await getSalesOrderDetailById(actor, 'order-1');
+
+    expect(result).not.toBeNull();
+    expect(result).not.toHaveProperty('customerRef');
+    expect(result).not.toHaveProperty('customerPartyId');
+    expect(JSON.stringify(result)).not.toContain('PO-20260827');
+    expect(JSON.stringify(result)).not.toContain('party-1');
   });
 
   it('signs IMAGE files, suppresses CDR URLs and exposes the complete customer fee breakdown', async () => {

@@ -6,11 +6,12 @@ import {
   CdrBundleError,
   createBundle,
   enqueueBundle,
+  revokeBundleAccess,
 } from '@/lib/cdr/bundle';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import { parseStrictYmd } from '@/lib/auth/schemas';
-import type { CreateBundleResult } from './foreman-cdr.types';
+import type { CreateBundleResult, RevokeBundleResult } from './foreman-cdr.types';
 
 // SPEC §3.5：foreman 在 /foreman/cdr 选日期 + 工单 → "生成下载包" →
 // 这里写 DesignBundle + 触发 OSS 打包（mock-mode 下占位）→ revalidate
@@ -87,5 +88,26 @@ export async function createBundleAction(
       return { status: 'error', message: err.message };
     }
     throw err;
+  }
+}
+
+export async function revokeBundleAction(
+  _prev: RevokeBundleResult | null,
+  formData: FormData,
+): Promise<RevokeBundleResult> {
+  await requirePermission('design:bundle:create');
+  const bundleId = formData.get('bundleId');
+  if (typeof bundleId !== 'string' || !bundleId.trim()) {
+    return { status: 'error', message: '下载包不存在' };
+  }
+  try {
+    await revokeBundleAccess(bundleId.trim());
+    revalidatePath('/foreman/cdr');
+    return { status: 'success' };
+  } catch (error) {
+    if (error instanceof CdrBundleError) {
+      return { status: 'error', message: error.message };
+    }
+    throw error;
   }
 }

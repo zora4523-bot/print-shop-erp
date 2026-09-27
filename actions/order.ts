@@ -1,5 +1,6 @@
 'use server';
 
+import { DATABASE_BUSY_MESSAGE, isDatabaseBusyError } from '@/lib/database-errors';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { appendReceipt } from '@/lib/admin/receipt';
@@ -79,10 +80,10 @@ import type {
 } from './order.types';
 import { collectFieldErrorsDeep } from '@/lib/admin/action-helpers';
 import { FULL_EDITABLE_FIELDS } from '@/lib/order/editable-fields';
-import { settlementTypeForOrderCreator } from '@/lib/order/settlement';
 import { parseExternalCreateOrderCommand } from '@/lib/order/external-create-order-command';
+import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE } from '@/lib/order/settlement';
 import { fulfillmentPricingGuardSchema } from '@/lib/order/fulfillment-pricing-input';
-import { OrderSettlementType } from '@/generated/prisma/enums';
+import { Role } from '@/generated/prisma/enums';
 import { ProductionOperationMaterializationError } from '@/lib/production/operation-materialization-service';
 
 // Accepts a pre-parsed `CreateOrderInput` rather than FormData because
@@ -93,10 +94,15 @@ export async function createOrderAction(
   _prev: CreateOrderMutationResult | null,
   raw: unknown,
 ): Promise<CreateOrderMutationResult> {
-  const actor = await requirePermission('order:create');
-  const settlementType = settlementTypeForOrderCreator(actor.role);
+  let actor: Awaited<ReturnType<typeof requirePermission>>;
+  try {
+    actor = await requirePermission('order:create');
+  } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
+    throw error;
+  }
   let input: CreateOrderInput;
-  if (settlementType === OrderSettlementType.EXTERNAL_SALES) {
+  if (actor.role !== Role.ADMIN) {
     const external = parseExternalCreateOrderCommand(raw);
     if (!external.success) {
       return {
@@ -114,12 +120,20 @@ export async function createOrderAction(
       };
     }
     input = parsed.data;
+    // 业主 2026-09-24：所有业务都以外部销售身份开展，管理员建单必须指定销售。
+    if (!input.externalSalesUserId?.trim()) {
+      return {
+        status: 'invalid',
+        fieldErrors: { externalSalesUserId: [ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE] },
+      };
+    }
   }
 
   let created: Awaited<ReturnType<typeof createOrder>>;
   try {
     created = await createOrder(input, actor);
   } catch (err) {
+    if (isDatabaseBusyError(err)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
     if (err instanceof OrderInvariantError) {
       return { status: 'error', message: err.message };
     }

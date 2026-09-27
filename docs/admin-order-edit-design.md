@@ -16,7 +16,7 @@
 
 ## 保存边界
 
-`previewAdminOrderEditAction` / `saveAdminOrderEditAction` 仅允许 ADMIN，销售与客服保留原修改申请流程。
+`previewAdminOrderEditAction` / `saveAdminOrderEditAction` 仅允许 ADMIN，销售保留原修改申请流程。
 
 预览在回滚事务中校验资料、建立临时申请并调用真实报价。临时申请、日志及通知不持久化。保存重新取得工单锁，校验 editVersion、revision、workOrderVersion、priceRevision 与报价 token，然后在同一事务中保存资料、创建并批准款式/交期修改。失败全部回滚。原始报价、历史价格版本、账单与生产记录继续使用既有领域规则。重算后的款式金额与报价状态同步更新，报价快照保留数据库要求的 version=1 兼容外壳及纯引擎 schemaVersion=2 分项。仅资料修改不增加业务版本；款式/交期修改沿用现有审批的版本推进。
 

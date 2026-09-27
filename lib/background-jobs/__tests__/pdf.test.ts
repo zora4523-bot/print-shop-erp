@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { dbMock, enqueueBackgroundJobMock, getOrderForPrintMock, renderMock, writeFileMock } = vi.hoisted(() => ({
   dbMock: {
-    backgroundJob: { findUnique: vi.fn() },
+    $transaction: vi.fn(),
+    $executeRaw: vi.fn(),
+    backgroundJob: { findUnique: vi.fn(), findFirst: vi.fn() },
     backgroundWorkerHeartbeat: { findFirst: vi.fn() },
     user: { findUnique: vi.fn() },
   },
@@ -38,6 +40,10 @@ import {
 
 beforeEach(() => {
   dbMock.backgroundJob.findUnique.mockReset();
+  dbMock.backgroundJob.findFirst.mockReset().mockResolvedValue(null);
+  dbMock.$executeRaw.mockReset().mockResolvedValue(1);
+  dbMock.$transaction.mockReset().mockImplementation(async (callback: (tx: typeof dbMock) => unknown) =>
+    callback(dbMock));
   dbMock.backgroundWorkerHeartbeat.findFirst.mockReset();
   enqueueBackgroundJobMock.mockReset();
   getOrderForPrintMock.mockReset();
@@ -58,6 +64,94 @@ describe('durable order PDF jobs', () => {
     const keys = enqueueBackgroundJobMock.mock.calls.map(([call]) => (call as { dedupeKey: string }).dedupeKey);
     expect(keys[0]).toBe(keys[1]);
     expect(new Set(keys)).toHaveProperty('size', 4);
+  });
+
+  it('reuses a pending/running job of the same authorized scope instead of enqueueing another regeneration', async () => {
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-window' } });
+    await enqueueOrderPdfJob(input);
+    const windowKey = (enqueueBackgroundJobMock.mock.calls[0][0] as { dedupeKey: string }).dedupeKey;
+    dbMock.backgroundJob.findFirst.mockResolvedValue({ id: 'job-in-flight' });
+
+    await expect(enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' })).resolves.toBe('job-in-flight');
+    await expect(enqueueOrderPdfJob({ ...input, regenerationKey: 'r2' })).resolves.toBe('job-in-flight');
+
+    expect(enqueueBackgroundJobMock).toHaveBeenCalledTimes(1);
+    const scopePrefix = windowKey.slice(0, windowKey.lastIndexOf(':') + 1);
+    expect(dbMock.backgroundJob.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        type: 'ORDER_PDF',
+        dedupeKey: { startsWith: scopePrefix },
+        status: { in: [BackgroundJobStatus.PENDING, BackgroundJobStatus.RUNNING] },
+      },
+    }));
+  });
+
+  it('anchors a regeneration on the latest finished job so concurrent retries coalesce into one job', async () => {
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-new' } });
+    await enqueueOrderPdfJob(input);
+    // 两个同时到达的重新生成都没查到在途任务，最近一个任务都是已失败的 job-dead。
+    let latest: { id: string; status: BackgroundJobStatus } = { id: 'job-dead', status: BackgroundJobStatus.DEAD };
+    dbMock.backgroundJob.findFirst.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
+      where.status ? null : latest);
+    await Promise.all([
+      enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' }),
+      enqueueOrderPdfJob({ ...input, regenerationKey: 'r2' }),
+    ]);
+    // 之后那个任务也结束了，再次重新生成应当另起一个任务。
+    latest = { id: 'job-done', status: BackgroundJobStatus.SUCCEEDED };
+    await enqueueOrderPdfJob({ ...input, regenerationKey: 'r3' });
+
+    const [windowKey, firstRetry, concurrentRetry, laterRetry] = enqueueBackgroundJobMock.mock.calls
+      .map(([call]) => (call as { dedupeKey: string }).dedupeKey);
+    const scopePrefix = windowKey.slice(0, windowKey.lastIndexOf(':') + 1);
+    expect(firstRetry.startsWith(scopePrefix)).toBe(true);
+    expect(concurrentRetry).toBe(firstRetry);
+    expect(laterRetry.startsWith(scopePrefix)).toBe(true);
+    expect(new Set([windowKey, firstRetry, laterRetry]).size).toBe(3);
+  });
+
+  it('a plain download reuses an in-flight regeneration instead of requeueing the dead window job', async () => {
+    // A: window job, DEAD. B: in-flight regeneration of the same authorized scope.
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    dbMock.backgroundJob.findFirst.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
+      where.status ? { id: 'job-b-regenerating' } : null);
+
+    await expect(enqueueOrderPdfJob(input)).resolves.toBe('job-b-regenerating');
+
+    expect(enqueueBackgroundJobMock).not.toHaveBeenCalled();
+  });
+
+  it('serializes every PDF entry of one scope on the same transaction lock and enqueues inside it', async () => {
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-x' } });
+    const order: string[] = [];
+    dbMock.$executeRaw.mockImplementation(async () => { order.push('lock'); return 1; });
+    dbMock.backgroundJob.findFirst.mockImplementation(async () => { order.push('lookup'); return null; });
+    enqueueBackgroundJobMock.mockImplementation(async (_input, client) => {
+      order.push(client === dbMock ? 'enqueue:tx' : 'enqueue:global');
+      return { job: { id: 'job-x' } };
+    });
+
+    await enqueueOrderPdfJob(input);
+    await enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' });
+    await enqueueOrderPdfJob({ ...input, actor: { id: 'b', role: Role.ADMIN } });
+
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(3);
+    expect(order.slice(0, 3)).toEqual(['lock', 'lookup', 'enqueue:tx']);
+    expect(order).not.toContain('enqueue:global');
+    const lockKeys = dbMock.$executeRaw.mock.calls.map((call) => JSON.stringify(call.slice(1)));
+    expect(lockKeys[0]).toBe(lockKeys[1]);
+    expect(lockKeys[2]).not.toBe(lockKeys[0]);
+  });
+
+  it('reuses a job that became pending between the in-flight lookup and the anchor lookup', async () => {
+    const input = { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'a', role: Role.ADMIN }, baseUrl: 'https://erp.example.com', snapshotKey: 'same' };
+    dbMock.backgroundJob.findFirst.mockImplementation(async ({ where }: { where: { status?: unknown } }) =>
+      where.status ? null : { id: 'job-just-queued', status: BackgroundJobStatus.PENDING });
+    await expect(enqueueOrderPdfJob({ ...input, regenerationKey: 'r1' })).resolves.toBe('job-just-queued');
+    expect(enqueueBackgroundJobMock).not.toHaveBeenCalled();
   });
 
   it.each(['tasks', 'unknown'])('does not serve retired or invalid PDF jobs (%s)', async (mode) => {
@@ -108,6 +202,7 @@ describe('durable order PDF jobs', () => {
           baseUrl: 'https://erp.example.com',
         },
       }),
+      dbMock,
     );
   });
 

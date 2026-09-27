@@ -242,7 +242,6 @@ describe('createUserAction', () => {
     ).rejects.toThrow(/NEXT_REDIRECT/);
 
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/accounts');
-    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/cs/new');
     expect(redirectMock).toHaveBeenCalledWith('/owner/accounts/u1?created=1');
   });
 });

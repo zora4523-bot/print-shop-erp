@@ -18,7 +18,7 @@ export class EditItemRemarkError extends Error {}
 
 /** Internal text-only edit: never accepts production or pricing fields. */
 export async function editItemRemark(raw: unknown, actor: { id: string; role: Role }) {
-  if (actor.role !== Role.ADMIN && actor.role !== Role.CUSTOMER_SERVICE)
+  if (actor.role !== Role.ADMIN)
     throw new EditItemRemarkError('当前账号不能修改内部款式备注');
   const input = editItemRemarkSchema.parse(raw);
   return db.$transaction(async (tx) => {
@@ -29,8 +29,7 @@ export async function editItemRemark(raw: unknown, actor: { id: string; role: Ro
       select: { submitterId: true, status: true, editVersion: true,
         _count: { select: { changeRequests: { where: { status: 'PENDING' } } } } },
     });
-    if (!order || (actor.role !== Role.ADMIN && order.submitterId !== actor.id))
-      throw new EditItemRemarkError('无权修改该工单，请返回工单列表');
+    if (!order) throw new EditItemRemarkError('工单不存在，请返回工单列表');
     if (!isOrderEditable(order.status) || order._count.changeRequests)
       throw new EditItemRemarkError('工单当前不能修改，请刷新后核对状态');
     if (order.editVersion !== input.expectedEditVersion)

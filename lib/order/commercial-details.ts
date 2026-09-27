@@ -18,6 +18,7 @@ import type {
 import { orderCascadeLockKey } from '@/lib/order/locks';
 import { appendOrderPricingRevisionInTx } from '@/lib/order/pricing-revision';
 import { itemAllowsIndependentPlateDetail } from '@/lib/order/plate-charge-integrity';
+import { orderItemMessageLabel } from '@/lib/order/item-label';
 import {
   ORDER_PRICING_STATUS,
   type OrderPricingStatusValue,
@@ -119,11 +120,8 @@ async function lockAndReadOrder(
   if (order.settledFee != null || order.settledAt != null) throw new OrderCommercialDetailsError('已结算工单不能修改价格明细');
   if (order.purpose === 'PROOF') throw new OrderCommercialDetailsError('打样请通过整单核价修改总价');
   if (order.purpose === 'SAMPLE_SHIPMENT') throw new OrderCommercialDetailsError('寄样品仅收取快递费和包装费');
-  // INTERNAL_SALES is deliberately excluded: its totals feed CsSalesEntry and
-  // this path does not record a 客服业绩 delta, so widening it would leave the
-  // ledger unreconciled (and block cancellation).
-  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES && order.settlementType !== OrderSettlementType.FACTORY_DIRECT) {
-    throw new OrderCommercialDetailsError('只有外部销售或工厂直接业务工单可以维护附加费用');
+  if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
+    throw new OrderCommercialDetailsError('只有外部销售工单可以维护附加费用');
   }
   if (
     order.status === OrderStatus.CANCELLED ||
@@ -463,7 +461,9 @@ export async function saveOrderPlateDetail(
       where: { id: input.orderItemId, orderId: order.id },
       select: {
         id: true,
+        sequence: true,
         name: true,
+        specification: true,
         pricingRoute: true,
         frontFoilColors: true,
         backFoilColors: true,
@@ -641,7 +641,7 @@ export async function saveOrderPlateDetail(
         action: input.plateDetailId
           ? 'ORDER_PLATE_DETAIL_UPDATED'
           : 'ORDER_PLATE_DETAIL_CREATED',
-        remark: `${item.name} · ${input.name} · ${amount.toFixed(2)} 元`,
+        remark: `${orderItemMessageLabel(item)} · ${input.name} · ${amount.toFixed(2)} 元`,
       })),
     };
   });

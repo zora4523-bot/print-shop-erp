@@ -17,7 +17,6 @@ export const externalSalesAssociationSelect = {
   _count: {
     select: {
       billItems: true,
-      csSalesEntries: true,
       reworkOrders: true,
       changeRequests: { where: { status: 'PENDING' } },
     },
@@ -38,7 +37,7 @@ export function externalSalesAssociationBlockReason(order: AssociationOrder): st
   }
   if (order._count.changeRequests > 0) return '处理当前修改申请后才能更换关联外部销售。';
   if (order.settledAt !== null || order.settledFee !== null || order.shippedAt !== null ||
-    order.finishedAt !== null || order._count.billItems > 0 || order._count.csSalesEntries > 0 ||
+    order.finishedAt !== null || order._count.billItems > 0 ||
     order.agentMonthlyBillItem !== null) {
     return '工单已有结算、账单或发货记录，不能更换关联外部销售。';
   }

@@ -55,7 +55,6 @@ export type SalesOrderListRow = {
   id: string;
   orderNo: string;
   customName: string | null;
-  customerRef: string | null;
   status: OrderStatus;
   isUrgent: boolean;
   revision: number;
@@ -157,7 +156,6 @@ const salesOrderSelect = {
   id: true,
   orderNo: true,
   customName: true,
-  customerRef: true,
   status: true,
   isUrgent: true,
   revision: true,
@@ -289,7 +287,6 @@ export function buildSalesOrderWhere(
       OR: [
         { orderNo: contains },
         { customName: contains },
-        { customerRef: contains },
         { searchPinyin: contains },
         { searchPinyinInitials: contains },
       ],
@@ -587,7 +584,6 @@ function mapSalesOrderRow(
     orderNo: row.orderNo,
     purpose: row.purpose,
     customName: row.customName,
-    customerRef: row.customerRef,
     status: row.status,
     isUrgent: row.isUrgent,
     revision: row.revision,

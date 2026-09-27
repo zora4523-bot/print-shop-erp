@@ -22,10 +22,6 @@ const { dbMock } = vi.hoisted(() => {
     billItem: { findMany: vi.fn(), createMany: vi.fn(), update: vi.fn() },
     billPayment: { findUnique: vi.fn(), create: vi.fn() },
     orderCostEntry: { findUnique: vi.fn(), create: vi.fn() },
-    salaryPeriod: {
-      findFirst: vi.fn(),
-      update: vi.fn(),
-    },
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $transaction: vi.fn(async (fn: unknown) => {
       if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(mock);
@@ -42,7 +38,6 @@ import {
   recordPayment,
   listBills,
   getAdminBillDetail,
-  getSalesBillDetail,
   addOrderCostEntry,
   BillError,
   BillGenerationUnexpectedError,
@@ -69,8 +64,6 @@ beforeEach(() => {
   dbMock.billPayment.findUnique.mockReset().mockResolvedValue(null);
   dbMock.orderCostEntry.findUnique.mockReset().mockResolvedValue(null);
   dbMock.orderCostEntry.create.mockReset().mockResolvedValue({ id: 'cost-1' });
-  dbMock.salaryPeriod.findFirst.mockReset().mockResolvedValue(null);
-  dbMock.salaryPeriod.update.mockReset();
   dbMock.$executeRaw.mockReset().mockResolvedValue(undefined);
   dbMock.$transaction.mockReset().mockImplementation(async (fn: unknown) => {
     if (typeof fn === 'function') return await (fn as (tx: unknown) => unknown)(dbMock);
@@ -169,18 +162,11 @@ describe.skip('legacy generateBillsForPeriod implementation', () => {
         totalAmount: '1200.00',
       }),
       billableOrder({
-        id: 'internal-sales-order',
-        submitterId: 'cs-a',
-        submitterRole: Role.CUSTOMER_SERVICE,
-        settlementType: OrderSettlementType.INTERNAL_SALES,
-        totalAmount: '800.00',
-      }),
-      billableOrder({
-        id: 'admin-order',
+        id: 'free-rework-order',
         submitterId: 'admin-a',
         submitterRole: Role.ADMIN,
-        settlementType: OrderSettlementType.FACTORY_DIRECT,
-        totalAmount: '500.00',
+        settlementType: OrderSettlementType.NO_CHARGE,
+        totalAmount: '0.00',
       }),
     ];
     dbMock.order.findMany.mockImplementation(
@@ -242,7 +228,7 @@ describe.skip('legacy generateBillsForPeriod implementation', () => {
       id: 'role-only-sales-order',
       submitterId: 'sales-a',
       submitterRole: Role.SALES,
-      settlementType: OrderSettlementType.INTERNAL_SALES,
+      settlementType: OrderSettlementType.NO_CHARGE,
       totalAmount: '999.00',
     });
     dbMock.order.findMany.mockImplementation(
@@ -976,43 +962,17 @@ describe.skip('legacy recordPayment implementation', () => {
     expect(lockValues[1]).toBe('print-shop-erp:bill:bill-1');
   });
 
-  it('SALES account: does NOT call accumulateCsSales', async () => {
+  it('stores payment method, reference number, remark and injected paidAt', async () => {
     dbMock.bill.findUnique.mockResolvedValue(
       billFixture({ salesUserRole: Role.SALES }),
     );
     dbMock.bill.update.mockResolvedValue({});
-    const r = await recordPayment('bill-1', 500, ownerActor);
-    expect(r.csAccumulated).toBe(false);
-    // salaryPeriod never touched
-    expect(dbMock.salaryPeriod.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('CUSTOMER_SERVICE payments do not change commission sales', async () => {
-    dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({
-        salesUserRole: Role.CUSTOMER_SERVICE,
-        paidAmount: '100.00', // already some paid
-      }),
-    );
-    dbMock.bill.update.mockResolvedValue({});
-    const r = await recordPayment('bill-1', 400, ownerActor);
-    expect(r.csAccumulated).toBe(false);
-    expect(dbMock.salaryPeriod.findFirst).not.toHaveBeenCalled();
-    expect(dbMock.salaryPeriod.update).not.toHaveBeenCalled();
-  });
-
-  it('stores payment method, reference number, remark and injected paidAt', async () => {
-    dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
-    );
-    dbMock.bill.update.mockResolvedValue({});
     const paidAt = new Date('2026-06-08T02:30:00Z');
-    const r = await recordPayment('bill-1', 500, ownerActor, paidAt, {
+    await recordPayment('bill-1', 500, ownerActor, paidAt, {
       paymentMethod: ' 银行转账 ',
       referenceNo: ' TX-20260608 ',
       remark: ' 首付款 ',
     });
-    expect(r.csAccumulated).toBe(false);
     expect(dbMock.billPayment.create).toHaveBeenCalledWith({
       data: {
         idempotencyKey: expect.any(String),
@@ -1029,7 +989,7 @@ describe.skip('legacy recordPayment implementation', () => {
 
   it('payment ledger and bill balance share one transaction', async () => {
     dbMock.bill.findUnique.mockResolvedValue(
-      billFixture({ salesUserRole: Role.CUSTOMER_SERVICE }),
+      billFixture({ salesUserRole: Role.SALES }),
     );
     dbMock.bill.update.mockResolvedValue({});
     await recordPayment('bill-1', 500, ownerActor);
@@ -1444,6 +1404,9 @@ describe('bill detail read models', () => {
     const orderSelect = query.select.items.select.order.select;
     expect(orderSelect.id).toBe(true);
     expect(orderSelect.settlementType).toBe(true);
+    // 归档明细“工单名称”列读 customName；停用的客户名称/简称不再读取。
+    expect(orderSelect.customName).toBe(true);
+    expect(orderSelect).not.toHaveProperty('customerRef');
     expect(orderSelect.costEntries.include.createdBy).toEqual({
       select: { displayName: true },
     });
@@ -1463,79 +1426,5 @@ describe('bill detail read models', () => {
       },
     });
     void salesActor; // reference to avoid unused import
-  });
-
-  it('scopes the external-sales query before reading and returns only receivable fields', async () => {
-    dbMock.bill.findUnique.mockResolvedValue({
-      id: 'bill-1',
-      salesUserId: 'sales-1',
-      items: [],
-      payments: [],
-    });
-
-    await getSalesBillDetail('bill-1', 'sales-1');
-
-    const query = dbMock.bill.findUnique.mock.calls[0][0];
-    expect(query.where).toEqual({ id: 'bill-1', salesUserId: 'sales-1' });
-    expect(query.select.sequence).toBe(true);
-    expect(query.select).not.toHaveProperty('salesUser');
-    expect(query.select).not.toHaveProperty('createdAt');
-    expect(query.select).not.toHaveProperty('updatedAt');
-
-    expect(query.select.payments.select).toEqual({
-      id: true,
-      amount: true,
-      paidAt: true,
-      paymentMethod: true,
-      referenceNo: true,
-      remark: true,
-      idempotencyKey: true,
-    });
-    expect(query.select.payments).not.toHaveProperty('include');
-    expect(query.select.payments.select).not.toHaveProperty('recordedBy');
-
-    expect(query.select.items.where).toEqual({
-      order: {
-        submitterId: 'sales-1',
-        settlementType: OrderSettlementType.EXTERNAL_SALES,
-      },
-    });
-    expect(query.select.items.select.order.select).toEqual({
-      id: true,
-      orderNo: true,
-      customerRef: true,
-      processingAmount: true,
-      finishedAt: true,
-      status: true,
-      customerCharges: {
-        orderBy: { createdAt: 'asc' },
-        select: {
-          amount: true,
-          status: true,
-          category: { select: { code: true, name: true } },
-          shipment: { select: { sequence: true } },
-        },
-      },
-      items: {
-        orderBy: { sequence: 'asc' },
-        select: {
-          id: true,
-          sequence: true,
-          name: true,
-          pricingSnapshot: true,
-        },
-      },
-    });
-    for (const internalField of [
-      'costEntries',
-      'outsourceOrders',
-      'reworkOrders',
-      'csSalesEntries',
-      'shipments',
-    ]) {
-      expect(query.select.items.select.order.select).not.toHaveProperty(
-        internalField,
-      );
-    }
   });
 });

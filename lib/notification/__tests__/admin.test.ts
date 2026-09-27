@@ -61,7 +61,6 @@ import {
   IneligibleChannelBindError,
   RuleNotFoundError,
   StaleChannelIdsError,
-  TooManyChannelsForPrivateEventError,
   UnboundSmartBotChannelError,
   countRecentFailures,
   countUnresolvedNotifications,
@@ -682,56 +681,7 @@ describe('updateRuleWithGuard', () => {
     expect(txMock.notificationRule.update).toHaveBeenCalled();
   });
 
-  // ─── Codex round 114 high：CS_PERIOD_* privacy enforcement ───
-  // UI warning（RuleForm）易被直接 POST / replay 绕开，server side
-  // 必须 enforce ≤ 1 channel for events with per-CS data。
-
-  it('CS_PERIOD_ENDING + channelIds.length > 1 → TooManyChannelsForPrivateEventError', async () => {
-    txMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'CS_PERIOD_ENDING',
-      channelIds: [],
-    });
-    await expect(
-      updateRuleWithGuard('CS_PERIOD_ENDING', {
-        messageTemplate: 'x',
-        channelIds: ['c1', 'c2'],
-        isActive: true,
-      }),
-    ).rejects.toBeInstanceOf(TooManyChannelsForPrivateEventError);
-    expect(txMock.notificationRule.update).not.toHaveBeenCalled();
-  });
-
-  it('CS_PERIOD_SETTLED + channelIds.length > 1 → 同款 reject', async () => {
-    txMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'CS_PERIOD_SETTLED',
-      channelIds: [],
-    });
-    await expect(
-      updateRuleWithGuard('CS_PERIOD_SETTLED', {
-        messageTemplate: 'x',
-        channelIds: ['c1', 'c2', 'c3'],
-        isActive: true,
-      }),
-    ).rejects.toBeInstanceOf(TooManyChannelsForPrivateEventError);
-  });
-
-  it('CS_PERIOD_ENDING + channelIds.length = 1 → 允许（仅管理员群一条）', async () => {
-    txMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'CS_PERIOD_ENDING',
-      channelIds: [],
-    });
-    txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleActiveChannel('c1'),
-    ]);
-    await updateRuleWithGuard('CS_PERIOD_ENDING', {
-      messageTemplate: 'x',
-      channelIds: ['c1'],
-      isActive: true,
-    });
-    expect(txMock.notificationRule.update).toHaveBeenCalled();
-  });
-
-  it('其他事件（ORDER_SUBMITTED 等）不受 ≤1 限制，可绑多个 channel', async () => {
+  it('ORDER_SUBMITTED 等事件可绑多个 channel', async () => {
     txMock.notificationChannel.findMany.mockResolvedValue([
       ruleActiveChannel('c1'),
       ruleActiveChannel('c2'),
@@ -741,24 +691,6 @@ describe('updateRuleWithGuard', () => {
       messageTemplate: 'x',
       channelIds: ['c1', 'c2', 'c3'],
       isActive: true,
-    });
-    expect(txMock.notificationRule.update).toHaveBeenCalled();
-  });
-
-  it('CS_PERIOD_* + isActive=false + 多 channel → 允许（draft；Codex round 115 medium）', async () => {
-    txMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'CS_PERIOD_ENDING',
-      channelIds: [],
-    });
-    // disable channel.findMany guard via mocking active for both
-    txMock.notificationChannel.findMany.mockResolvedValue([
-      ruleActiveChannel('c1'),
-      ruleActiveChannel('c2'),
-    ]);
-    await updateRuleWithGuard('CS_PERIOD_ENDING', {
-      messageTemplate: 'x',
-      channelIds: ['c1', 'c2'],
-      isActive: false,
     });
     expect(txMock.notificationRule.update).toHaveBeenCalled();
   });

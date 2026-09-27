@@ -1,6 +1,7 @@
 import { packagingModeLabel, packagingUnit } from '@/lib/order/packaging-mode';
 import Decimal from 'decimal.js';
 import { formatFoilColors } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import type { ReactNode } from 'react';
 import type { getOrderDetail } from '@/lib/order';
 import {
@@ -275,7 +276,7 @@ export function OrderSavedItemDetails({
             : '未设置'}
         </Fact>
         <Fact label="纸张与克重">
-          {readable(item.paperType)}
+          {paperDisplayLabel(readable(item.paperType))}
           {item.paperWeightGsm !== null ? ` · ${item.paperWeightGsm} g/㎡` : ''}
         </Fact>
         <Fact label="版组">{item.plateGroupId}</Fact>

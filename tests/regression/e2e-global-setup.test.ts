@@ -57,7 +57,7 @@ describe('all E2E setup fails closed before any database connection', () => {
       ...rule, bookId: 'test-price-book', sourceName: E2E_PIECEWORK_SOURCE, ruleSetSha256: 'a'.repeat(64),
     })) });
     await globalSetup();
-    expect(query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO "User"'))).toHaveLength(8);
+    expect(query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO "User"'))).toHaveLength(7);
     expect(end).toHaveBeenCalledOnce();
   });
 });

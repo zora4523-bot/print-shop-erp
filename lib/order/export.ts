@@ -37,6 +37,8 @@ import { db } from '../db';
 import { writeXlsxFile, xlsxDecimal, type XlsxRow, type XlsxSheet } from '../export/xlsx';
 import { formatDateShanghai, formatDateTimeShanghai } from '../format/dates';
 import { actionLabel, formatOrderLogChanges, orderStatusZh } from './log-format';
+import { orderItemTypeLabel } from './item-label';
+import { ORDER_EXTERNAL_SALES_SELECT, orderExternalSalesName } from './external-sales-name';
 import { ORDER_SETTLEMENT_LABELS } from './settlement';
 import {
   buildOrderWhere,
@@ -94,7 +96,7 @@ type StoredExportFilterReceipt = Pick<StoredExportFilter, 'scope'>;
 type MembershipKey = { id: string; orderNo: string };
 type RowCounts = Record<string, number>;
 
-export function orderExportParamsFromQuery(query: OrderListQuery): OrderExportParams {
+function orderExportParamsFromQuery(query: OrderListQuery): OrderExportParams {
   const serialized = serializeOrderListQuery({
     ...query,
     page: 1,
@@ -334,26 +336,29 @@ export async function processQueuedOrderExport(
   await ensureOrderExportArtifactDir();
   let matchedOrderCount = 0;
   try {
-    if (stored.scope === 'selected') {
-      const membership = orderExport.selections.map(({ order }) => order);
-      if (
-        membership.length === 0 ||
-        membership.some((order) => order.createdAt > orderExport.snapshotAt)
-      ) {
-        throw new InvalidOrderExportStoredFilterError();
+    const result = await db.$transaction(async (tx) => {
+      if (stored.scope === 'selected') {
+        const membership = orderExport.selections.map(({ order }) => order);
+        if (
+          membership.length === 0 ||
+          membership.some((order) => order.createdAt > orderExport.snapshotAt)
+        ) {
+          throw new InvalidOrderExportStoredFilterError();
+        }
+        matchedOrderCount = await writeSelectedMembershipManifest(
+          membershipPath,
+          membership,
+        );
+      } else {
+        matchedOrderCount = await writeMembershipManifest(
+          membershipPath,
+          snapshotWhere!,
+          tx,
+        );
       }
-      matchedOrderCount = await writeSelectedMembershipManifest(
-        membershipPath,
-        membership,
-      );
-    } else {
-      matchedOrderCount = await writeMembershipManifest(
-        membershipPath,
-        snapshotWhere!,
-      );
-    }
-    const sheets = buildWorkbookSheets(membershipPath, rowCounts);
-    const result = await writeXlsxFile({ filePath: artifactPath, sheets });
+      const sheets = buildWorkbookSheets(membershipPath, rowCounts, tx);
+      return writeXlsxFile({ filePath: artifactPath, sheets });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 10 * 60_000 });
     await context.assertLease?.();
     context.signal?.throwIfAborted();
     const actor: AuditActor = {
@@ -698,23 +703,23 @@ async function clearDeletedOrderExportArtifact(
   });
 }
 
-function buildWorkbookSheets(membershipPath: string, rowCounts: RowCounts): XlsxSheet[] {
+function buildWorkbookSheets(membershipPath: string, rowCounts: RowCounts, tx: Prisma.TransactionClient): XlsxSheet[] {
   return [
-    trackedSheet('工单', orderRows(membershipPath), rowCounts, [18, 22, 12, 12, 12, 18, 12, 12, 12, 18, 18, 18, 18, 18, 18, 18, 18, 14, 12, 14, 18, 22, 20, 20, 20, 20, 20, 20]),
-    trackedSheet('款式', itemRows(membershipPath), rowCounts, [18, 8, 20, 16, 16, 14, 16, 14, 12, 24, 20, 10, 10, 14, 14, 14, 28, 20]),
-    trackedSheet('包装组及组成', packagingGroupRows(membershipPath), rowCounts),
-    trackedSheet('制版明细', plateDetailRows(membershipPath), rowCounts),
-    trackedSheet('对客收费', customerChargeRows(membershipPath), rowCounts),
-    trackedSheet('价格修订', pricingRevisionRows(membershipPath), rowCounts),
-    trackedSheet('生产任务', taskRows(membershipPath), rowCounts),
-    trackedSheet('收货地址', shipmentRows(membershipPath), rowCounts),
-    trackedSheet('地址款式分配', shipmentLineRows(membershipPath), rowCounts),
-    trackedSheet('外协', outsourceRows(membershipPath), rowCounts),
-    trackedSheet('成本明细', costRows(membershipPath), rowCounts),
-    trackedSheet('修改申请', changeRequestRows(membershipPath), rowCounts),
-    trackedSheet('操作记录', logRows(membershipPath), rowCounts),
-    trackedSheet('设计文件', designRows(membershipPath), rowCounts),
-    trackedSheet('账单关联', billRows(membershipPath), rowCounts),
+    trackedSheet('工单', orderRows(membershipPath, tx), rowCounts, [18, 22, 12, 12, 12, 18, 12, 12, 12, 18, 18, 18, 18, 18, 18, 18, 18, 14, 12, 14, 18, 22, 20, 20, 20, 20, 20, 20]),
+    trackedSheet('款式', itemRows(membershipPath, tx), rowCounts, [18, 8, 20, 16, 16, 14, 16, 14, 8, 18, 12, 24, 20, 10, 10, 14, 14, 14, 28, 20]),
+    trackedSheet('包装组及组成', packagingGroupRows(membershipPath, tx), rowCounts),
+    trackedSheet('制版明细', plateDetailRows(membershipPath, tx), rowCounts),
+    trackedSheet('对客收费', customerChargeRows(membershipPath, tx), rowCounts),
+    trackedSheet('价格修订', pricingRevisionRows(membershipPath, tx), rowCounts),
+    trackedSheet('生产任务', taskRows(membershipPath, tx), rowCounts),
+    trackedSheet('收货地址', shipmentRows(membershipPath, tx), rowCounts),
+    trackedSheet('地址款式分配', shipmentLineRows(membershipPath, tx), rowCounts),
+    trackedSheet('外协', outsourceRows(membershipPath, tx), rowCounts),
+    trackedSheet('成本明细', costRows(membershipPath, tx), rowCounts),
+    trackedSheet('修改申请', changeRequestRows(membershipPath, tx), rowCounts),
+    trackedSheet('操作记录', logRows(membershipPath, tx), rowCounts),
+    trackedSheet('设计文件', designRows(membershipPath, tx), rowCounts),
+    trackedSheet('账单关联', billRows(membershipPath, tx), rowCounts),
   ];
 }
 
@@ -736,10 +741,10 @@ function trackedSheet(
   return { name, rows: rows(), columnWidths };
 }
 
-async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* orderRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '工单名称', '状态', '类型', '计费方式', '结算路径', '来源重做单', '重做原因',
-    '重做说明', '需外协', '急单', '顺丰到付', '客户名称/简称', '主收件人', '收件电话',
+    '重做说明', '需外协', '急单', '顺丰到付', '外部销售', '主收件人', '收件电话',
     '主收货地址', '快递代码', '快递单号', '工单总额', '数据修订版本', '工单版本', '承诺交期', '包装要求',
     '工单备注', '提交人', '提交人角色', '代建人', '代建人角色', '提交时间', '排产时间', '完工时间', '发货时间',
     '结束时间', '创建时间', '更新时间',
@@ -747,7 +752,7 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     // 显式 select：只取本表头 yield 的列。别退回 include —— 那会连
     // searchPinyin / searchPinyinInitials / processingAmount 一起拖回来。
-    const rows = await db.order.findMany({
+    const rows = await tx.order.findMany({
       where: { id: { in: keys.map((key) => key.id) } },
       select: {
         id: true,
@@ -762,7 +767,6 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
         requiresOutsource: true,
         isUrgent: true,
         isSfCollect: true,
-        customerRef: true,
         receiverName: true,
         receiverPhone: true,
         receiverAddress: true,
@@ -784,7 +788,10 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
         updatedAt: true,
         submitter: { select: { displayName: true } },
         createdBy: { select: { displayName: true, role: true } },
-        sourceOrder: { select: { orderNo: true } },
+        // 免费重做的“外部销售”取原单提交人（ORDER_EXTERNAL_SALES_SELECT 同一口径）。
+        sourceOrder: {
+          select: { orderNo: true, ...ORDER_EXTERNAL_SALES_SELECT.sourceOrder.select },
+        },
       },
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -806,7 +813,8 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
         yesNo(row.requiresOutsource),
         yesNo(row.isUrgent),
         yesNo(row.isSfCollect),
-        row.customerRef,
+        // 原“客户名称/简称”列位（业主 2026-09-27 停用），其后各列位置不变。
+        orderExternalSalesName(row),
         row.receiverName,
         row.receiverPhone,
         row.receiverAddress,
@@ -834,18 +842,18 @@ async function* orderRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   }
 }
 
-async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* itemRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '款式序号', '款式名称', '产品编码', '产品名称', '产品分类', '规格',
-    '纸张', '数量', '工艺', '烫金颜色', '双面', '双色', '成交单价', '一次性费用', '成交小计', '系统建议小计',
+    '纸张', '克重', '类型', '数量', '工艺', '烫金颜色', '双面', '双色', '成交单价', '一次性费用', '成交小计', '系统建议小计',
     '人工改价说明', '款式备注', '创建时间',
   ];
-  const crafts = await db.craft.findMany({ select: { id: true, name: true } });
+  const crafts = await tx.craft.findMany({ select: { id: true, name: true } });
   const craftNames = new Map(crafts.map((craft) => [craft.id, craft.name]));
   for await (const keys of membershipBatches(membershipPath)) {
     // pricingSnapshot 是每款一份的报价规则大 JSON，导出一列都不用。
     // 这里必须是 select 而不是 include，否则 15 万款式会把它整表拉回来。
-    const rows = await db.orderItem.findMany({
+    const rows = await tx.orderItem.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -853,6 +861,8 @@ async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
         name: true,
         specification: true,
         paperType: true,
+        paperWeightGsm: true,
+        pricingRoute: true,
         quantity: true,
         crafts: true,
         foilColors: true,
@@ -881,6 +891,8 @@ async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
           row.product ? productCategoryLabel(row.product.category) : null,
           row.specification,
           row.paperType ? paperDisplayLabel(row.paperType) : row.paperType,
+          row.paperWeightGsm === null ? null : `${row.paperWeightGsm}g`,
+          orderItemTypeLabel(row.pricingRoute),
           row.quantity,
           row.crafts.map((id) => craftNames.get(id) ?? '已删除工艺').join('、'),
           row.foilColors.map(foilColorLabel).join('、'),
@@ -901,6 +913,7 @@ async function* itemRows(membershipPath: string): AsyncGenerator<XlsxRow> {
 
 async function* packagingGroupRows(
   membershipPath: string,
+  tx: Prisma.TransactionClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
     '工单号',
@@ -913,7 +926,7 @@ async function* packagingGroupRows(
     '每袋/盒各款组成',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderPackagingGroup.findMany({
+    const rows = await tx.orderPackagingGroup.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -958,6 +971,7 @@ async function* packagingGroupRows(
 
 async function* plateDetailRows(
   membershipPath: string,
+  tx: Prisma.TransactionClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
     '工单号',
@@ -978,7 +992,7 @@ async function* plateDetailRows(
     '创建时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderItemPlateDetail.findMany({
+    const rows = await tx.orderItemPlateDetail.findMany({
       where: {
         orderItem: { orderId: { in: keys.map((key) => key.id) } },
       },
@@ -1034,6 +1048,7 @@ async function* plateDetailRows(
 
 async function* customerChargeRows(
   membershipPath: string,
+  tx: Prisma.TransactionClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
     '工单号',
@@ -1060,7 +1075,7 @@ async function* customerChargeRows(
     '终审时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderCustomerCharge.findMany({
+    const rows = await tx.orderCustomerCharge.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -1138,6 +1153,7 @@ async function* customerChargeRows(
 
 async function* pricingRevisionRows(
   membershipPath: string,
+  tx: Prisma.TransactionClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
     '工单号',
@@ -1153,7 +1169,7 @@ async function* pricingRevisionRows(
     '创建时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderPricingRevision.findMany({
+    const rows = await tx.orderPricingRevision.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -1188,7 +1204,7 @@ async function* pricingRevisionRows(
   }
 }
 
-async function* taskRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* taskRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '款式序号', '款式名称', '工艺', '师傅', '师傅工种', '机型', '任务状态',
     '计划数量', '板数', '下数', '完成数量', '次品数', '重做数', '计件金额', '开始时间',
@@ -1197,7 +1213,7 @@ async function* taskRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     // salaryRuleSnapshot 是完工时锁定的计件规则大 JSON，导出不用。
     // worker 只需要 displayName —— 工种列读的是 row.workerType 快照，不是账号当前 role。
-    const rows = await db.productionTask.findMany({
+    const rows = await tx.productionTask.findMany({
       where: { orderItem: { orderId: { in: keys.map((key) => key.id) } } },
       select: {
         workerType: true,
@@ -1247,13 +1263,13 @@ async function* taskRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   }
 }
 
-async function* shipmentRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* shipmentRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '地址序号', '收件人', '收件电话', '收货地址', '快递代码', '快递单号',
     '重量(kg)', '发货状态', '发货时间', '创建时间', '更新时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderShipment.findMany({
+    const rows = await tx.orderShipment.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -1293,10 +1309,10 @@ async function* shipmentRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   }
 }
 
-async function* shipmentLineRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* shipmentLineRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield ['工单号', '地址序号', '款式序号', '款式名称', '分配数量'];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderShipmentLine.findMany({
+    const rows = await tx.orderShipmentLine.findMany({
       where: { shipment: { orderId: { in: keys.map((key) => key.id) } } },
       select: {
         quantity: true,
@@ -1320,7 +1336,7 @@ async function* shipmentLineRows(membershipPath: string): AsyncGenerator<XlsxRow
   }
 }
 
-async function* outsourceRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* outsourceRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '供应商', '供应商联系方式', '工艺说明', '特殊要求', '关联款式',
     '总数量', '预计日期', '实际日期', '外协金额', '状态', '备注', '创建人', '创建时间',
@@ -1329,7 +1345,7 @@ async function* outsourceRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   for await (const keys of membershipBatches(membershipPath)) {
     const orderIds = keys.map((key) => key.id);
     const [rows, items] = await Promise.all([
-      db.outsourceOrder.findMany({
+      tx.outsourceOrder.findMany({
         where: { orderId: { in: orderIds } },
         select: {
           orderId: true,
@@ -1350,7 +1366,7 @@ async function* outsourceRows(membershipPath: string): AsyncGenerator<XlsxRow> {
         },
         orderBy: { id: 'asc' },
       }),
-      db.orderItem.findMany({
+      tx.orderItem.findMany({
         where: { orderId: { in: orderIds } },
         select: { id: true, sequence: true, name: true },
       }),
@@ -1383,13 +1399,13 @@ async function* outsourceRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   }
 }
 
-async function* costRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* costRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '成本类别', '说明', '数量', '单位', '单价', '金额', '来源类型', '备注',
     '录入人', '创建时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderCostEntry.findMany({
+    const rows = await tx.orderCostEntry.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -1427,7 +1443,7 @@ async function* costRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   }
 }
 
-async function* changeRequestRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* changeRequestRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '基准版本', '申请状态', '申请原因', '申请人', '申请时间', '审核人',
     '审核意见', '审核时间', '更新时间',
@@ -1435,7 +1451,7 @@ async function* changeRequestRows(membershipPath: string): AsyncGenerator<XlsxRo
   for await (const keys of membershipBatches(membershipPath)) {
     // beforeSnapshot 里存的是整单 items（每个 item 又各带一份 pricingSnapshot），
     // proposedChanges 同理。工作表只出审批元数据，两个 JSON 都不能取。
-    const rows = await db.orderChangeRequest.findMany({
+    const rows = await tx.orderChangeRequest.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -1471,12 +1487,12 @@ async function* changeRequestRows(membershipPath: string): AsyncGenerator<XlsxRo
   }
 }
 
-async function* logRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* logRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '操作', '变更字段', '变更前', '变更后', '操作人', '备注', '操作时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderLog.findMany({
+    const rows = await tx.orderLog.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -1526,12 +1542,12 @@ async function* logRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   }
 }
 
-async function* designRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* designRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '款式序号', '款式名称', '文件类型', '文件名', '文件大小(字节)', '上传时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.orderItemDesign.findMany({
+    const rows = await tx.orderItemDesign.findMany({
       where: { orderItem: { orderId: { in: keys.map((key) => key.id) } } },
       select: {
         fileType: true,
@@ -1559,13 +1575,13 @@ async function* designRows(membershipPath: string): AsyncGenerator<XlsxRow> {
   }
 }
 
-async function* billRows(membershipPath: string): AsyncGenerator<XlsxRow> {
+async function* billRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '账单期间', '账单销售', '账单状态', '本工单入账金额', '发单时间',
     '结清时间', '关联时间',
   ];
   for await (const keys of membershipBatches(membershipPath)) {
-    const rows = await db.billItem.findMany({
+    const rows = await tx.billItem.findMany({
       where: { orderId: { in: keys.map((key) => key.id) } },
       select: {
         orderId: true,
@@ -1604,6 +1620,7 @@ async function* billRows(membershipPath: string): AsyncGenerator<XlsxRow> {
 async function writeMembershipManifest(
   filePath: string,
   where: Prisma.OrderWhereInput,
+  tx: Prisma.TransactionClient,
 ): Promise<number> {
   const output = createWriteStream(filePath, { flags: 'wx', mode: 0o600 });
   try {
@@ -1611,7 +1628,7 @@ async function writeMembershipManifest(
     let cursor: string | undefined;
     let count = 0;
     while (true) {
-      const rows = await db.order.findMany({
+      const rows = await tx.order.findMany({
         where,
         select: { id: true, orderNo: true },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -1690,7 +1707,7 @@ function normalizeStoredFilter(
     const params: OrderExportParams = {};
     return { scope, params, filterHash: hashExportParams(params) };
   }
-  const normalized = normalizeParams(params);
+  const normalized = withoutRetiredCustomerParams(normalizeParams(params));
   if (isAdminOrderWorkspaceExportParams(normalized)) {
     const parsed = parseAdminOrderWorkspaceQuery(normalized);
     if (parsed.issues.length > 0) {
@@ -1722,11 +1739,17 @@ function parseStoredFilter(value: Prisma.JsonValue): StoredExportFilter {
     throw new InvalidOrderExportStoredFilterError();
   }
   try {
-    const normalized = normalizeStoredFilter(scope, normalizeParams(params));
+    const storedParams = normalizeParams(params);
+    const normalized = normalizeStoredFilter(scope, storedParams);
     // filterHash was added before the first production rollout. Accepting a
     // missing value keeps fixtures/forward compatibility safe, while a stored
     // value that disagrees with the canonical params is corrupt and must fail.
-    if (value.filterHash !== undefined && value.filterHash !== normalized.filterHash) {
+    const retiredHash = retiredCustomerFilterHash(normalized.params, storedParams);
+    if (
+      value.filterHash !== undefined &&
+      value.filterHash !== normalized.filterHash &&
+      (retiredHash === null || value.filterHash !== retiredHash)
+    ) {
       throw new InvalidOrderExportStoredFilterError();
     }
     return normalized;
@@ -2065,6 +2088,33 @@ function isUniqueViolation(error: unknown): boolean {
 function orderExportErrorCode(error: unknown): string {
   if (error instanceof Error && error.name) return error.name.slice(0, 120);
   return 'OrderExportFailed';
+}
+
+// 客户名称/简称筛选随客户字段停用（业主 2026-09-27，SPEC §3.1.1“旧链接里的客户条件
+// 被忽略”）。这三个旧键仍留在白名单里：旧书签链接和停用前入队、尚待生成的导出都可能
+// 带着它们，删掉会让 normalizeParams 整单拒绝；它们在规范化前被丢弃，导出不再按客户筛选。
+const RETIRED_CUSTOMER_EXPORT_PARAM_KEYS: ReadonlySet<string> = new Set([
+  'customerRef', 'customerPartyId', 'customerRefExact',
+]);
+
+function withoutRetiredCustomerParams(params: OrderExportParams): OrderExportParams {
+  return Object.fromEntries(
+    Object.entries(params).filter(([key]) => !RETIRED_CUSTOMER_EXPORT_PARAM_KEYS.has(key)),
+  );
+}
+
+/**
+ * 停用前入队的导出，filterHash 按当时含客户键的规范参数计算。只把本次丢弃的客户键
+ * 原样补回现行规范参数再比对：其余参数仍须与现行规范形式逐字一致，被篡改的摘要照样拒绝。
+ */
+function retiredCustomerFilterHash(
+  canonical: OrderExportParams,
+  stored: OrderExportParams,
+): string | null {
+  const retired = Object.entries(stored).filter(([key]) => RETIRED_CUSTOMER_EXPORT_PARAM_KEYS.has(key));
+  return retired.length > 0
+    ? hashExportParams({ ...canonical, ...Object.fromEntries(retired) })
+    : null;
 }
 
 const EXPORT_PARAM_KEYS = new Set([

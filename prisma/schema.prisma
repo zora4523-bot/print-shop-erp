@@ -26,15 +26,12 @@ datasource db {
 enum Role {
   ADMIN
   SALES
-  CUSTOMER_SERVICE
   WORKER
 }
 
 enum WorkerType {
   MACHINE
   PACKER
-  CLEANER
-  COOK
 }
 
 enum MachineType {
@@ -78,8 +75,6 @@ model User {
   createdOrders               Order[]                       @relation("OrderCreator")
   assignedTasks               ProductionTask[]
   orderLogs                   OrderLog[]
-  salaryPeriods               SalaryPeriod[]
-  csCommissions               CustomerServiceCommission[]
   dailyWorkerSalaries         DailyWorkerSalary[]
   hourlyPayrolls              HourlyWorkerPayroll[]
   attendanceRecords           Attendance[]                  @relation("AttendanceWorker")
@@ -100,12 +95,10 @@ model User {
   requestedOrderChanges       OrderChangeRequest[]          @relation("OrderChangeRequester")
   reviewedOrderChanges        OrderChangeRequest[]          @relation("OrderChangeReviewer")
   recordedBillPayments        BillPayment[]                 @relation("BillPaymentRecorder")
-  recordedCsPayrollPayments   CsPayrollPayment[]            @relation("CsPayrollPaymentRecorder")
   createdOrderCosts           OrderCostEntry[]              @relation("OrderCostCreator")
   createdOutsourceOrders      OutsourceOrder[]              @relation("OutsourceOrderCreator")
   outsourceAmountChanges      OutsourceAmountChange[]       @relation("OutsourceAmountChanger")
   recordedOutsourcePayments   OutsourcePayment[]            @relation("OutsourcePaymentRecorder")
-  csSalesEntries              CsSalesEntry[]
   createdCustomerCharges      OrderCustomerCharge[]         @relation("OrderCustomerChargeCreator")
   finalizedCustomerCharges    OrderCustomerCharge[]         @relation("OrderCustomerChargeFinalizer")
   createdPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailCreator")
@@ -277,11 +270,11 @@ enum OrderBillingMode {
 }
 
 // 工单的结算路径在创建时锁定，不随账号后续改岗而改变。
-// Role 只负责权限；资金方向由本字段表达。
+// Role 只负责权限；资金方向由本字段表达。业主 2026-09-24：所有收费业务都以
+// 外部销售身份开展（管理员代建也必须归属一个外部销售），不再有内部销售 /
+// 工厂直单；免费重做仍为 NO_CHARGE。
 enum OrderSettlementType {
   EXTERNAL_SALES // 外部销售应付工厂加工费
-  INTERNAL_SALES // 工厂内部销售/客服业绩归属
-  FACTORY_DIRECT // 管理员代录/工厂直接业务
   NO_CHARGE // 免费重做等不产生应收的工单
 }
 
@@ -484,7 +477,6 @@ model Order {
   changeRequests              OrderChangeRequest[]
   costEntries                 OrderCostEntry[]
   customerCharges             OrderCustomerCharge[]
-  csSalesEntries              CsSalesEntry[]
   pricingRevisions            OrderPricingRevision[]        @relation("OrderPricingRevisions")
   quotedPricingRevision       OrderPricingRevision?         @relation("OrderQuotedPricingRevision", fields: [quotedPricingRevisionId], references: [id], onDelete: Restrict)
   productionOperations        ProductionOperation[]
@@ -1152,6 +1144,8 @@ model ProductionOperationSource {
 
 // 每次扫码都追加一行。报工人、工价版本和金额快照同行锁定；
 // 更正只能追加一条 REVERSAL，数据库触发器禁止 UPDATE / DELETE。
+// INSERT REPORT is guarded against the parent operation's current order generation.
+// Historical financial corrections retain their existing anchor/settlement guards.
 model ProductionReport {
   id                   String                    @id @default(cuid())
   operationId          String
@@ -1271,6 +1265,7 @@ model ProductionProgressStep {
 
 // 无计件进度的每次扫码也是只追加事实。质量数量只记录，
 // 没有 rate / amount / priceBook 字段，因此不可能被计入工资。
+// INSERT is guarded against the parent step's current order generation.
 model ProductionProgressReport {
   id             String   @id @default(cuid())
   progressStepId String
@@ -1427,20 +1422,24 @@ model OutsourcePayment {
 // ============================================================
 
 model DesignBundle {
-  id              String             @id @default(cuid())
-  createdById     String
-  dateRangeFrom   DateTime
-  dateRangeTo     DateTime
-  orderIds        String[]
-  designIds       String[]
-  zipFileUrl      String
-  downloadUrl     String
-  expiresAt       DateTime
-  downloadCount   Int                @default(0)
-  status          DesignBundleStatus @default(PENDING)
-  backgroundJobId String?            @unique
-  lastErrorCode   String?
-  createdAt       DateTime           @default(now())
+  id                    String             @id @default(cuid())
+  createdById           String
+  dateRangeFrom         DateTime
+  dateRangeTo           DateTime
+  orderIds              String[]
+  designIds             String[]
+  zipFileUrl            String
+  zipObjectKey          String?
+  downloadUrl           String
+  accessTokenHash       String?            @unique
+  downloadUrlCiphertext String?
+  revokedAt             DateTime?          @db.Timestamptz(3)
+  expiresAt             DateTime
+  downloadCount         Int                @default(0)
+  status                DesignBundleStatus @default(PENDING)
+  backgroundJobId       String?            @unique
+  lastErrorCode         String?
+  createdAt             DateTime           @default(now())
 
   createdBy User @relation(fields: [createdById], references: [id])
 
@@ -2234,10 +2233,8 @@ model PurchaseReceiptItem {
 // ============================================================
 
 enum SalaryRuleType {
-  CS_COMMISSION
   WORKER_MACHINE
   WORKER_HOURLY
-  COOK_SALARY
 }
 
 enum SalaryAdjustmentType {
@@ -2381,138 +2378,21 @@ model SalaryAdjustment {
   @@index([createdById])
 }
 
-// 客服业绩周期
-enum SalaryPeriodStatus {
-  IN_PROGRESS
-  SETTLED
-}
-
-model SalaryPeriod {
-  id             String             @id @default(cuid())
-  csUserId       String
-  periodStart    DateTime           @db.Date
-  periodEnd      DateTime           @db.Date
-  durationMonths Int                @default(4)
-  totalSales     Decimal            @default(0) @db.Decimal(12, 2)
-  initialSales   Decimal            @default(0) @db.Decimal(12, 2) // 导入的期初业绩
-  monthlyBase    Decimal            @db.Decimal(10, 2)
-  status         SalaryPeriodStatus @default(IN_PROGRESS)
-  settledAt      DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-
-  csUser          User                        @relation(fields: [csUserId], references: [id])
-  commissions     CustomerServiceCommission[]
-  salesEntries    CsSalesEntry[]
-  payrollPayments CsPayrollPayment[]
-
-  @@index([csUserId])
-  @@index([status])
-  @@index([periodEnd])
-}
-
-enum CsSalesEntryType {
-  ORDER_SUBMITTED
-  ORDER_CHANGED
-  ORDER_CANCELLED
-  MANUAL_ADJUSTMENT
-}
-
-model CsSalesEntry {
-  id             String           @id @default(cuid())
-  eventKey       String           @unique
-  csUserId       String
-  salaryPeriodId String
-  orderId        String?
-  orderRevision  Int?
-  type           CsSalesEntryType
-  amount         Decimal          @db.Decimal(12, 2)
-  occurredAt     DateTime
-  remark         String?
-  createdAt      DateTime         @default(now())
-
-  csUser       User         @relation(fields: [csUserId], references: [id], onDelete: Restrict)
-  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id], onDelete: Restrict)
-  order        Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
-
-  @@index([csUserId, createdAt])
-  @@index([salaryPeriodId, createdAt])
-  @@index([orderId])
-  @@index([occurredAt])
-}
-
-// 客服提成记录
-model CustomerServiceCommission {
-  id                 String    @id @default(cuid())
-  csUserId           String
-  salaryPeriodId     String    @unique
-  totalSales         Decimal   @db.Decimal(12, 2)
-  tierRate           Decimal   @db.Decimal(6, 4)
-  commissionAmount   Decimal   @db.Decimal(12, 2)
-  monthlyBaseTotal   Decimal   @db.Decimal(12, 2)
-  totalIncome        Decimal   @db.Decimal(13, 2)
-  paidBase           Decimal   @default(0) @db.Decimal(12, 2)
-  paidCommission     Decimal   @default(0) @db.Decimal(12, 2)
-  isFullyPaid        Boolean   @default(false)
-  settledAt          DateTime
-  paidAt             DateTime?
-  // Full rule snapshot at settlement time: CS_TIERS (including mode),
-  // CS_BASE_SALARY, CS_PERIOD_LENGTH. Enough to reproduce WHY this
-  // specific tierRate was picked even after the tier table is edited
-  // (CLAUDE.md §4.4 rule-snapshot bedrock).
-  salaryRuleSnapshot Json?
-  createdAt          DateTime  @default(now())
-
-  csUser       User         @relation(fields: [csUserId], references: [id])
-  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id])
-
-  @@index([csUserId])
-  @@index([settledAt])
-  // 总览的「已结算周期剩余未发」按 isFullyPaid 全表聚合。settledAt 作
-  // 第二列，让「未发且最近结算优先」不必再建一棵索引。
-  @@index([isFullyPaid, settledAt])
-}
-
-// 客服工资发放流水。底薪可在四个月周期进行中按月发放；提成只能在周期
-// 结算、金额锁定后发放。CustomerServiceCommission.paidBase / paidCommission
-// 是便于查询的累计快照，本表才是不可覆盖的财务事实。
-model CsPayrollPayment {
-  id               String   @id @default(cuid())
-  idempotencyKey   String   @unique
-  salaryPeriodId   String
-  baseAmount       Decimal  @default(0) @db.Decimal(12, 2)
-  commissionAmount Decimal  @default(0) @db.Decimal(12, 2)
-  paidAt           DateTime
-  paymentMethod    String?
-  referenceNo      String?
-  remark           String?
-  recordedById     String
-  createdAt        DateTime @default(now())
-
-  salaryPeriod SalaryPeriod @relation(fields: [salaryPeriodId], references: [id], onDelete: Restrict)
-  recordedBy   User         @relation("CsPayrollPaymentRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
-
-  @@index([salaryPeriodId, paidAt])
-  @@index([recordedById, createdAt])
-}
-
-// 时薪工月度工资
+// 历史打包时薪月结存档（只读）：打包已切换工序计件，不再生成新月结。
 model HourlyWorkerPayroll {
   id                 String    @id @default(cuid())
   workerId           String
   month              String // YYYY-MM
   totalWorkHours     Decimal   @db.Decimal(6, 2)
   totalOtHours       Decimal   @default(0) @db.Decimal(6, 2)
-  totalSpareHours    Decimal   @default(0) @db.Decimal(6, 2) // COOK 专用
   hourlyRate         Decimal   @db.Decimal(6, 2)
   otMultiplier       Decimal   @db.Decimal(4, 2)
-  baseSalary         Decimal   @db.Decimal(11, 2) // PACKER/CLEANER=hourlyRate×normal; COOK=monthlyBase
-  otSalary           Decimal   @default(0) @db.Decimal(11, 2) // PACKER/CLEANER only
-  spareSalary        Decimal   @default(0) @db.Decimal(11, 2) // COOK only
+  baseSalary         Decimal   @db.Decimal(11, 2) // hourlyRate×normal
+  otSalary           Decimal   @default(0) @db.Decimal(11, 2)
   totalSalary        Decimal   @db.Decimal(11, 2)
   dailyDetail        Json? // 每日工时明细
-  // Full rule snapshot at settlement time: hourlyRate / cookMonthly /
-  // spareHourlyRate / otMultiplier / workHours config. Enough to
+  // Full rule snapshot at settlement time: hourlyRate / otMultiplier /
+  // workHours config. Enough to
   // reproduce the pay even after the rules table is later edited
   // (CLAUDE.md §4.4 rule-snapshot bedrock, same pattern as CS commission).
   salaryRuleSnapshot Json?
@@ -2530,18 +2410,16 @@ model HourlyWorkerPayroll {
   @@index([isPaid, month])
 }
 
-// 时薪工考勤（PACKER / CLEANER / COOK）
-// MVP：车间主管每日录入三个数字（normalHours / otHours / spareHours）；
+// 员工考勤
+// 车间主管每日录入正常与加班工时；
 // WORK_HOURS 规则仅用于录入 UI 的"全勤"快速填充 hint，不在后端硬编码。
 // 加班边界语义：>= otStart (默认 18:00) 即计入加班（DECISIONS 2026-04-24）。
-// 厨师请假：SPEC 未定义；MVP 按"不折扣月薪"处理（DECISIONS 2026-04-24，TODO 需业主确认）。
 model Attendance {
   id                       String      @id @default(cuid())
   workerId                 String
   date                     DateTime    @db.Date
   normalHours              Decimal     @default(0) @db.Decimal(6, 2)
   otHours                  Decimal     @default(0) @db.Decimal(6, 2)
-  spareHours               Decimal     @default(0) @db.Decimal(6, 2) // COOK 专用
   workUnits                Decimal     @default(1) @db.Decimal(2, 1)
   leaveUnits               Decimal     @default(0) @db.Decimal(2, 1)
   leaveType                String?

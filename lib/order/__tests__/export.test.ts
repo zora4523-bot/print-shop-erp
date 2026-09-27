@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { access } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ import {
   OrderBillingMode,
   OrderChangeRequestStatus,
   OrderExportStatus,
+  OrderItemPricingRoute,
   OrderKind,
   OrderSettlementType,
   OrderStatus,
@@ -182,6 +184,7 @@ beforeEach(() => {
   dbMock.orderExport.findUnique.mockReset().mockResolvedValue(null);
   dbMock.orderExport.findMany.mockReset().mockResolvedValue([]);
   dbMock.orderExport.updateMany.mockReset().mockResolvedValue({ count: 1 });
+  Object.assign(txMock, Object.fromEntries(Object.entries(dbMock).filter(([key]) => !['orderExport', '$transaction'].includes(key))));
   dbMock.$transaction.mockReset().mockImplementation(async (callback: unknown) =>
     (callback as (tx: typeof txMock) => Promise<unknown>)(txMock),
   );
@@ -606,7 +609,6 @@ describe('processQueuedOrderExport', () => {
     ];
     const singleRowSheets = new Set([
       '工单',
-      '款式',
       '包装组及组成',
       '对客收费',
       '价格修订',
@@ -615,7 +617,7 @@ describe('processQueuedOrderExport', () => {
     ]);
     const rowCounts = Object.fromEntries(sheetNames.map((name) => [
       name,
-      singleRowSheets.has(name) ? 1 : name === '操作记录' ? 2 : 0,
+      singleRowSheets.has(name) ? 1 : name === '款式' || name === '操作记录' ? 2 : 0,
     ]));
     const consumed = new Map<string, XlsxRow[]>();
     const order = {
@@ -632,6 +634,7 @@ describe('processQueuedOrderExport', () => {
       requiresOutsource: false,
       isUrgent: true,
       isSfCollect: false,
+      // 历史工单仍可能存着客户名称/简称；停用后导出既不读取也不输出它。
       customerRef: '客户甲',
       receiverName: '张三',
       receiverPhone: '13800000000',
@@ -667,6 +670,8 @@ describe('processQueuedOrderExport', () => {
       },
       specification: '大号',
       paperType: '160g珠光闪红',
+      paperWeightGsm: 160,
+      pricingRoute: OrderItemPricingRoute.COLOR_PRINT,
       quantity: 1000,
       crafts: ['craft-1'],
       foilColors: ['哑金', '银色'],
@@ -679,6 +684,18 @@ describe('processQueuedOrderExport', () => {
       priceOverrideReason: '客户协议价',
       remark: '红色高亮',
       createdAt: NOW,
+    };
+    // 历史款式：未记录克重（导出留空）、无产品；类型按计价路线的业务称呼。
+    const legacyItem = {
+      ...item,
+      id: 'item-2',
+      sequence: 2,
+      name: '款式 A',
+      product: null,
+      specification: '中号封',
+      paperType: '艳红珠光纸',
+      paperWeightGsm: null,
+      pricingRoute: OrderItemPricingRoute.STOCK_BLANK,
     };
     const packagingGroup = {
       orderId: 'order-1',
@@ -805,7 +822,7 @@ describe('processQueuedOrderExport', () => {
     // 款式表查询带 product 关联；外协表借道的款式标签查询只取 {id, sequence, name}。
     dbMock.orderItem.findMany.mockImplementation(
       async (args: { select?: Record<string, unknown> }) =>
-        args.select?.product ? [item] : [],
+        args.select?.product ? [item, legacyItem] : [],
     );
     dbMock.orderPackagingGroup.findMany.mockResolvedValue([packagingGroup]);
     dbMock.orderCustomerCharge.findMany.mockResolvedValue([customerCharge]);
@@ -889,6 +906,27 @@ describe('processQueuedOrderExport', () => {
       '计费',
       '外部销售应付工厂',
     ]);
+    // 原“客户名称/简称”列位改为外部销售（收费单即提交人），其后列位不变。
+    expect(consumed.get('工单')?.[0]?.slice(11, 14)).toEqual([
+      '顺丰到付',
+      '外部销售',
+      '主收件人',
+    ]);
+    expect(consumed.get('工单')?.[1]?.slice(11, 14)).toEqual(['否', '销售甲', '张三']);
+    expect(consumed.get('工单')?.[0]).toHaveLength(35);
+    expect(consumed.get('工单')?.[0]?.slice(24, 26)).toEqual(['提交人', '提交人角色']);
+    expect(JSON.stringify(consumed.get('工单'))).not.toMatch(/客户甲|客户名称/);
+    const orderSheetSelect = dbMock.order.findMany.mock.calls
+      .map(([args]) => args.select as Record<string, unknown>)
+      .find((select) => select.customName);
+    expect(orderSheetSelect).not.toHaveProperty('customerRef');
+    expect(orderSheetSelect).toMatchObject({
+      settlementType: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: {
+        select: { orderNo: true, submitter: { select: { displayName: true } } },
+      },
+    });
     expect(consumed.get('工单')?.[1]?.[18]).toEqual(
       xlsxDecimal('1234.56'),
     );
@@ -897,8 +935,15 @@ describe('processQueuedOrderExport', () => {
       '工单版本',
     ]);
     expect(consumed.get('工单')?.[1]?.slice(19, 21)).toEqual([2, 3]);
-    expect(consumed.get('款式')).toHaveLength(2);
-    expect(consumed.get('款式')?.[1]?.slice(0, 11)).toEqual([
+    expect(consumed.get('款式')).toHaveLength(3);
+    expect(consumed.get('款式')?.[0]?.slice(6, 11)).toEqual([
+      '规格',
+      '纸张',
+      '克重',
+      '类型',
+      '数量',
+    ]);
+    expect(consumed.get('款式')?.[1]?.slice(0, 13)).toEqual([
       'GD-260807-001',
       1,
       '款式 A',
@@ -906,12 +951,26 @@ describe('processQueuedOrderExport', () => {
       '万元封',
       '彩印',
       '大号',
-      '160g珠光暗红',
+      '160g暗红珠光纸',
+      '160g',
+      '彩印',
       1000,
       '铜版纸彩印+烫金',
       '哑金、银金',
     ]);
-    expect(consumed.get('款式')?.[1]?.slice(13, 18)).toEqual([
+    expect(consumed.get('款式')?.[2]?.slice(0, 10)).toEqual([
+      'GD-260807-001',
+      2,
+      '款式 A',
+      undefined,
+      undefined,
+      null,
+      '中号封',
+      '艳红珠光纸',
+      null,
+      '局部烫金（通版现货）',
+    ]);
+    expect(consumed.get('款式')?.[1]?.slice(15, 20)).toEqual([
       xlsxDecimal('0.1234'),
       xlsxDecimal('12.00'),
       xlsxDecimal('135.40'),
@@ -1018,6 +1077,12 @@ describe('processQueuedOrderExport', () => {
       .map(([args]) => args.select as Record<string, unknown>)
       .find((select) => select.product);
     expect(itemSelect).not.toHaveProperty('pricingSnapshot');
+    expect(itemSelect).toMatchObject({
+      paperWeightGsm: true,
+      pricingRoute: true,
+    });
+    // 类型与打印单同一口径，只看计价路线（orderItemTypeLabel）。
+    expect(itemSelect).not.toHaveProperty('order');
     expect(sheetQueries[6].mock.calls[0]?.[0].select)
       .not.toHaveProperty('salaryRuleSnapshot');
     const chargeSelect = sheetQueries[4].mock.calls[0]?.[0].select as Record<
@@ -1128,7 +1193,9 @@ describe('processQueuedOrderExport', () => {
     expect(deleteArtifactMock).toHaveBeenCalledExactlyOnceWith(
       attemptedPath.slice('/tmp/'.length),
     );
-    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'RepeatableRead', maxWait: 10000, timeout: 600000 });
+    expect(txMock.orderExport.updateMany).not.toHaveBeenCalled();
     await expect(access('/tmp/export-1.xlsx.orders')).rejects.toThrow();
   });
 
@@ -1188,6 +1255,7 @@ describe('processQueuedOrderExport', () => {
         byteSize: BigInt(128),
       }),
     );
+    dbMock.$transaction.mockImplementationOnce(async (callback) => callback(txMock));
     dbMock.$transaction.mockImplementationOnce(async (callback: unknown) => {
       await (callback as (tx: typeof txMock) => Promise<unknown>)(txMock);
       throw responseLost;
@@ -1272,6 +1340,168 @@ describe('processQueuedOrderExport', () => {
         },
       },
     });
+  });
+});
+
+// 与 lib/order/export.ts 的 hashExportParams 同一存储格式：按键排序后的 entries 做 SHA-256。
+function storedFilterHash(params: Record<string, string>): string {
+  const stable = Object.entries(params).sort(([left], [right]) => left.localeCompare(right));
+  return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
+}
+
+describe('客户名称/简称停用（业主 2026-09-27）', () => {
+  const retiredCustomerParams = {
+    customerRef: '客户甲',
+    customerPartyId: 'party-1',
+    customerRefExact: '客户甲',
+  };
+
+  async function membershipWhereFor(filters: Record<string, unknown>) {
+    const stop = new Error('membership captured');
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({ filters }));
+    writeXlsxFileMock.mockRejectedValueOnce(stop);
+    await expect(processQueuedOrderExport('export-1')).rejects.toBe(stop);
+    return JSON.stringify(dbMock.order.findMany.mock.calls[0]?.[0].where);
+  }
+
+  it('processes a filter saved before the retirement and ignores its customer conditions', async () => {
+    // 停用前入队：客户键与 filterHash 按当时的规范参数一起保存。
+    const params = { ...retiredCustomerParams, status: 'SUBMITTED' };
+    const where = await membershipWhereFor({
+      scope: 'filtered',
+      params,
+      filterHash: storedFilterHash(params),
+    });
+    expect(where).toContain('"SUBMITTED"');
+    expect(where).not.toMatch(/客户甲|party-1|customerRef|customerPartyId/);
+  });
+
+  it('processes a saved workspace filter with customer keys through the workspace predicate', async () => {
+    const stop = new Error('resolved workspace predicate');
+    resolveAdminWorkspaceResultWhereMock.mockRejectedValueOnce(stop);
+    const params = { adminWorkspace: 'v1', queue: 'production', customerRef: '客户甲' };
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({
+      filters: { scope: 'filtered', params, filterHash: storedFilterHash(params) },
+    }));
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toBe(stop);
+    const query = resolveAdminWorkspaceResultWhereMock.mock.calls[0]?.[1];
+    expect(query).toMatchObject({ queue: 'production' });
+    expect(JSON.stringify(query)).not.toContain('客户甲');
+  });
+
+  it.each([
+    ['a digest over a different customer value', { ...retiredCustomerParams, customerRef: '客户乙', status: 'SUBMITTED' }],
+    ['a digest over different remaining filters', { ...retiredCustomerParams, status: 'CONFIRMED' }],
+    ['a digest that omits the customer keys but not the status', { status: 'CONFIRMED' }],
+  ])('still rejects a stored filter whose hash is %s', async (_label, hashed) => {
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({
+      filters: {
+        scope: 'filtered',
+        params: { ...retiredCustomerParams, status: 'SUBMITTED' },
+        filterHash: storedFilterHash(hashed),
+      },
+    }));
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toMatchObject({
+      name: 'InvalidOrderExportStoredFilterError',
+    });
+    expect(dbMock.order.findMany).not.toHaveBeenCalled();
+  });
+
+  it('still rejects a null filterHash when the stored filter carries no customer keys', async () => {
+    // 兼容摘要只在停用前的客户键确实存在时才参与比对，不能让 null 摘要绕过校验。
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow({
+      filters: { scope: 'filtered', params: { status: 'CONFIRMED' }, filterHash: null },
+    }));
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toMatchObject({
+      name: 'InvalidOrderExportStoredFilterError',
+    });
+    expect(dbMock.order.findMany).not.toHaveBeenCalled();
+  });
+
+  it('accepts customer keys on a new request but neither stores nor applies them', async () => {
+    await requestOrderExport({
+      actor,
+      requestKey: REQUEST_KEY,
+      scope: 'filtered',
+      params: { ...retiredCustomerParams, status: 'SUBMITTED' },
+      durable: false,
+      now: NOW,
+    });
+
+    expect(txMock.orderExport.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        filters: {
+          scope: 'filtered',
+          params: { status: 'SUBMITTED' },
+          filterHash: storedFilterHash({ status: 'SUBMITTED' }),
+        },
+      }),
+    });
+  });
+
+  it('lists the source order salesperson as 外部销售 for an admin-created free rework', async () => {
+    const rework = {
+      id: 'rework-1',
+      orderNo: 'GD-260807-009',
+      customName: '重做 · 中秋礼盒',
+      status: OrderStatus.SUBMITTED,
+      kind: OrderKind.REWORK,
+      billingMode: OrderBillingMode.NO_CHARGE,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      sourceOrder: { orderNo: 'GD-260801-001', submitter: { displayName: '桂林' } },
+      reworkCause: null,
+      reworkReason: '返工',
+      requiresOutsource: false,
+      isUrgent: false,
+      isSfCollect: false,
+      receiverName: null,
+      receiverPhone: null,
+      receiverAddress: null,
+      expressCode: null,
+      trackingNo: null,
+      totalAmount: new Prisma.Decimal('0'),
+      revision: 1,
+      workOrderVersion: 1,
+      promisedDate: null,
+      packageRequirement: null,
+      remark: null,
+      submitter: { displayName: '管理员' },
+      submitterRole: Role.ADMIN,
+      createdBy: { displayName: '管理员', role: Role.ADMIN },
+      submittedAt: NOW,
+      scheduledAt: null,
+      completedAt: null,
+      shippedAt: null,
+      finishedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    dbMock.orderExport.findUnique.mockResolvedValue(queuedExportRow());
+    dbMock.order.findMany.mockImplementation(
+      async (args: { select?: Record<string, unknown> }) =>
+        args.select?.customName
+          ? [rework]
+          : [{ id: 'rework-1', orderNo: 'GD-260807-009' }],
+    );
+    const stop = new Error('order sheet captured');
+    let orderSheet: XlsxRow[] = [];
+    writeXlsxFileMock.mockImplementationOnce(
+      async (input: { sheets: readonly XlsxSheet[] }) => {
+        const rows: XlsxRow[] = [];
+        for await (const row of input.sheets[0]!.rows) rows.push(row);
+        orderSheet = rows;
+        throw stop;
+      },
+    );
+
+    await expect(processQueuedOrderExport('export-1')).rejects.toBe(stop);
+    expect(orderSheet[0]?.[12]).toBe('外部销售');
+    expect(orderSheet[1]?.[6]).toBe('GD-260801-001');
+    expect(orderSheet[1]?.[12]).toBe('桂林');
+    expect(orderSheet[1]?.[24]).toBe('管理员');
   });
 });
 

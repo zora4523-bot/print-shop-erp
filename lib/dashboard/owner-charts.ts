@@ -9,7 +9,7 @@ import { currentShanghaiMonth, todayShanghai } from './shanghai-clock';
 //
 // 3 datasets:
 //   - getProductionTrend(now)       近 30 天每日完工 / 发货 / 完结
-//   - getSalesRanking(now)          本月销售 / 客服业绩 Top 10（按提交时间）
+//   - getSalesRanking(now)          本月销售业绩 Top 10（按提交时间）
 //   - getCategoryDistribution(now)  本月各产品线工单数（按提交时间）
 //
 // 业绩归属时间口径走 DECISIONS 2026-04-26：销售排行 / 产品分布按
@@ -92,7 +92,7 @@ export async function getProductionTrend(
 export type SalesRankingRow = {
   userId: string;
   displayName: string;
-  role: Role; // SALES / CUSTOMER_SERVICE 才会现身（按角色着色）
+  role: Role; // 通常是 SALES；历史管理员工单按 ADMIN 着色
   totalAmount: string; // ¥
   orderCount: number;
 };
@@ -102,8 +102,7 @@ export type SalesRankingRow = {
  * 排行，Top 10。两步查询：先 groupBy submitter 求 sum + count，按
  * sum desc 截 10；再 findMany 拉用户姓名 / 角色拼回。
  *
- * 业绩口径见 DECISIONS 2026-04-26：本表用 submittedAt（夯实即时反馈）；
- * 不与 SalaryPeriod.totalSales（按 mark-paid 累加）混用。
+ * 业绩口径见 DECISIONS 2026-04-26：本表用 submittedAt（夯实即时反馈）。
  */
 export async function getSalesRanking(
   now: Date = new Date(),

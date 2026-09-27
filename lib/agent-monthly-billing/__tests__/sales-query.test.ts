@@ -16,9 +16,13 @@ it('never loads another sales bill or current order prices and internal credit r
   expect(await getSalesMonthlyBill(actor, 'foreign')).toBeNull();
   const query = findFirst.mock.calls[0][0];
   expect(query.where).toEqual({ id: 'foreign', agentUserId: actor.id });
-  const text = JSON.stringify(query.select);
+  // 唯一的工单关联是明细“工单名称”标签；金额仍只读成员冻结快照。
+  expect(query.select.items.select.order).toEqual({ select: { customName: true } });
+  const frozenItem = { ...query.select.items.select };
+  delete frozenItem.order;
+  const text = JSON.stringify({ ...query.select, items: { ...query.select.items, select: frozenItem } });
   expect(text).toContain('settledFeeSnapshot');
-  for (const field of ['pricingSnapshot', 'order', 'reason', 'recordedBy', 'agentUser']) expect(text).not.toContain(`"${field}"`);
+  for (const field of ['pricingSnapshot', 'order', 'reason', 'recordedBy', 'agentUser', 'customerRefSnapshot']) expect(text).not.toContain(`"${field}"`);
 });
 it('fails closed for non-sales actors', async () => {
   await expect(getSalesMonthlyBill({ id: 'admin', role: Role.ADMIN }, 'id')).rejects.toThrow();
@@ -33,7 +37,7 @@ it('selects only customer-facing receipt facts and frozen item identity/status',
   } });
   expect(query.select.items.select).toEqual({
     id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true,
-    orderStatusSnapshot: true, customerRefSnapshot: true, settledFeeSnapshot: true,
-    settledAtSnapshot: true,
+    orderStatusSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true,
+    order: { select: { customName: true } },
   });
 });

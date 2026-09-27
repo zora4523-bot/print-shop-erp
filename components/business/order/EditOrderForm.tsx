@@ -3,7 +3,6 @@
 import type * as React from 'react';
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { CustomerPartyOption } from '@/lib/party';
 import type { OrderExternalSalesAssociation } from '@/lib/order/external-sales-association';
 import { OrderExternalSalesField } from './OrderExternalSalesField';
 import type { EditableShipment } from '@/lib/order/edit-shipment-fields';
@@ -23,10 +22,10 @@ import type { OrderMutationResult } from '@/actions/order.types';
 
 export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY';
 
+// 客户名称/简称与关联客户已退役（业主 2026-09-27）：编辑表单不再展示、提交客户字段；
+// 工单归属改由管理员的“关联外部销售”表达。
 export type EditOrderInitialValues = {
   customName: string | null;
-  customerRef: string | null;
-  customerPartyId?: string | null;
   receiverName?: string | null;
   receiverPhone?: string | null;
   receiverAddress: string | null;
@@ -43,11 +42,10 @@ type Props = {
   expectedEditVersion: number;
   fieldset: EditableFieldset;
   initial: EditOrderInitialValues;
-  customers?: readonly CustomerPartyOption[];
+  /** Admin only. Sales editors omit it and never see the association control. */
   externalSalesAssociation?: OrderExternalSalesAssociation;
   shipments?: readonly EditableShipment[];
   isExternalSales?: boolean;
-  hideCustomerFields?: boolean;
   isSfCollect?: boolean;
   blocked?: boolean;
   busy?: boolean;
@@ -64,7 +62,6 @@ type DeliveryDraft = EditableShipment & { expectedDestinationProvince: string | 
 
 const FULL_ONLY_FIELDS: ReadonlySet<string> = new Set([
   'customName',
-  'customerRef',
   'isUrgent',
 ]);
 
@@ -73,11 +70,9 @@ export function EditOrderForm({
   expectedEditVersion,
   fieldset,
   initial,
-  customers = [],
   externalSalesAssociation,
   shipments,
   isExternalSales = false,
-  hideCustomerFields = false,
   isSfCollect = false,
   blocked = false,
   busy = false,
@@ -106,11 +101,6 @@ export function EditOrderForm({
 
   const pending = actionPending || busy;
   const isShippingOnly = fieldset === 'SHIPPING_ONLY';
-  const [customerId, setCustomerId] = useState(initial.customerPartyId ?? '');
-  const [customerRef, setCustomerRef] = useState(initial.customerRef ?? '');
-  const selectedCustomer = externalSalesAssociation
-    ? undefined
-    : customers.find((customer) => customer.id === customerId);
   const [urgent, setUrgent] = useState(initial.isUrgent);
   const [delivery, setDelivery] = useState(() =>
     shipments?.map((row) => ({
@@ -120,9 +110,6 @@ export function EditOrderForm({
     })),
   );
   const pendingLocked = pending || blocked;
-  const unknownCustomer =
-    initial.customerPartyId &&
-    !customers.some((customer) => customer.id === initial.customerPartyId);
   function changeDelivery(
     index: number,
     key: 'receiverName' | 'receiverPhone' | 'receiverAddress' | 'expressCode',
@@ -201,22 +188,20 @@ export function EditOrderForm({
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
           {designLayout
-            ? '已确认资料中的客户归属保持锁定；款式与交期变更将更新工单版本。'
+            ? '已确认资料中的工单名称与外部销售归属保持锁定；款式与交期变更将更新工单版本。'
             : '工单已确认，仅可修改配送信息、包装补充说明与工单备注。'}
         </div>
       )}
 
       <OrderBasicFieldsSection {...{
-        designLayout, isExternalSales, hideCustomerFields, isShippingOnly, pendingLocked,
-        initial, state, customerRef, setCustomerRef,
-        externalSalesAssociation, customerId, setCustomerId, unknownCustomer,
-        customers, selectedCustomer, delivery, designFields,
+        designLayout, isExternalSales, isShippingOnly, pendingLocked,
+        initial, state, externalSalesAssociation, delivery, designFields,
         urgent, setUrgent,
       }} />
 
       {delivery ? (
         <OrderDeliveryFieldsSection {...{
-          delivery, shipments, pendingLocked, selectedCustomer,
+          delivery, shipments, pendingLocked,
           setDelivery, isExternalSales, changeDelivery, state,
           isSfCollect,
         }} />
@@ -280,7 +265,6 @@ type RenderOrderDeliveryFieldsOptions = {
   delivery: DeliveryDraft[];
   shipments: readonly EditableShipment[] | undefined;
   pendingLocked: boolean;
-  selectedCustomer: CustomerPartyOption | undefined;
   setDelivery: React.Dispatch<React.SetStateAction<DeliveryDraft[] | undefined>>;
   isExternalSales: boolean;
   changeDelivery: (
@@ -296,7 +280,6 @@ function OrderDeliveryFieldsSection({
   delivery,
   shipments,
   pendingLocked,
-  selectedCustomer,
   setDelivery,
   isExternalSales,
   changeDelivery,
@@ -329,38 +312,6 @@ function OrderDeliveryFieldsSection({
                 第 {row.sequence} 票{row.sequence === 1 ? ' · 主收货地址' : ''}
                 {row.status === 'SHIPPED' ? ' · 已发货' : ''}
               </legend>
-              {row.sequence === 1 &&
-              selectedCustomer &&
-              (selectedCustomer.receiverName ||
-                selectedCustomer.receiverPhone ||
-                selectedCustomer.receiverAddress) ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="min-h-11"
-                  disabled={disabled}
-                  onClick={() =>
-                    setDelivery((rows) =>
-                      rows?.map((candidate) =>
-                        candidate.id === row.id
-                          ? {
-                              ...candidate,
-                              receiverName: selectedCustomer.receiverName || candidate.receiverName,
-                              receiverPhone:
-                                selectedCustomer.receiverPhone || candidate.receiverPhone,
-                              receiverAddress:
-                                selectedCustomer.receiverAddress || candidate.receiverAddress,
-                              sameDestination: false,
-                            }
-                          : candidate,
-                      ),
-                    )
-                  }
-                >
-                  采用客户默认收货信息
-                </Button>
-              ) : null}
               <OrderReceiverContactFields
                 idPrefix={`edit-shipment-${index}`}
                 controlled
@@ -456,19 +407,11 @@ function OrderDeliveryFieldsSection({
 type RenderOrderBasicFieldsOptions = {
   designLayout: boolean;
   isExternalSales: boolean;
-  hideCustomerFields: boolean;
   isShippingOnly: boolean;
   pendingLocked: boolean;
   initial: EditOrderInitialValues;
   state: OrderMutationResult | null;
-  customerRef: string;
-  setCustomerRef: React.Dispatch<React.SetStateAction<string>>;
   externalSalesAssociation: OrderExternalSalesAssociation | undefined;
-  customerId: string;
-  setCustomerId: React.Dispatch<React.SetStateAction<string>>;
-  unknownCustomer: string | boolean | null | undefined;
-  customers: readonly CustomerPartyOption[];
-  selectedCustomer: CustomerPartyOption | undefined;
   delivery: DeliveryDraft[] | undefined;
   designFields: ReactNode;
   urgent: boolean;
@@ -478,19 +421,11 @@ type RenderOrderBasicFieldsOptions = {
 function OrderBasicFieldsSection({
   designLayout,
   isExternalSales,
-  hideCustomerFields,
   isShippingOnly,
   pendingLocked,
   initial,
   state,
-  customerRef,
-  setCustomerRef,
   externalSalesAssociation,
-  customerId,
-  setCustomerId,
-  unknownCustomer,
-  customers,
-  selectedCustomer,
   delivery,
   designFields,
   urgent,
@@ -520,72 +455,13 @@ function OrderBasicFieldsSection({
           initial={initial.customName}
           errors={fieldErrors(state, 'customName')}
         />
-        {!hideCustomerFields && <Field
-          name="customerRef"
-          label="客户名称/简称（选填）"
-          disabled={pendingLocked || (FULL_ONLY_FIELDS.has('customerRef') && isShippingOnly)}
-          initial={initial.customerRef}
-          value={customerRef}
-          onValueChange={setCustomerRef}
-          maxLength={64}
-          errors={fieldErrors(state, 'customerRef')}
-        />}
-        {hideCustomerFields ? null : externalSalesAssociation ? (
+        {externalSalesAssociation ? (
           <OrderExternalSalesField
             association={externalSalesAssociation}
             disabled={pendingLocked || isShippingOnly}
             error={fieldErrors(state, 'externalSalesUserId')[0]}
           />
-        ) : (
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="customerPartyId">关联客户</Label>
-            <select
-              id="customerPartyId"
-              name="customerPartyId"
-              value={customerId}
-              aria-describedby={
-                fieldErrors(state, 'customerPartyId').length > 0
-                  ? 'customer-association-hint customerPartyId-error'
-                  : 'customer-association-hint'
-              }
-              aria-invalid={fieldErrors(state, 'customerPartyId').length > 0}
-              onChange={(event) => setCustomerId(event.target.value)}
-              disabled={pendingLocked || isShippingOnly}
-              className="min-h-11 w-full rounded-md border bg-background px-3 text-sm"
-            >
-              <option value="">未关联客户</option>
-              {unknownCustomer ? (
-                <option value={initial.customerPartyId!}>当前关联客户（信息不可用）</option>
-              ) : null}
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.name}
-                  {customer.shortName ? ` · ${customer.shortName}` : ''}
-                </option>
-              ))}
-            </select>
-            <p id="customer-association-hint" className="text-xs text-muted-foreground">
-              更换关联客户会保留已填简称和各票收货信息。
-            </p>
-            {selectedCustomer && !isShippingOnly ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-h-11"
-                disabled={pendingLocked}
-                onClick={() => setCustomerRef(selectedCustomer.shortName || selectedCustomer.name)}
-              >
-                采用客户简称
-              </Button>
-            ) : null}
-            {fieldErrors(state, 'customerPartyId')[0] ? (
-              <p id="customerPartyId-error" role="alert" className="text-xs text-destructive">
-                {fieldErrors(state, 'customerPartyId')[0]}
-              </p>
-            ) : null}
-          </div>
-        )}
+        ) : null}
         {delivery === undefined ? (
           <>
             <div className="sm:col-span-2">
@@ -697,8 +573,6 @@ function Field({
   required,
   disabled,
   type = 'text',
-  value: controlledValue,
-  onValueChange,
   maxLength,
   description,
 }: {
@@ -711,14 +585,10 @@ function Field({
   required?: boolean;
   disabled?: boolean;
   type?: string;
-  value?: string;
-  onValueChange?: (value: string) => void;
   maxLength?: number;
   description?: string;
 }) {
-  const [localValue, setLocalValue] = useState(initial ?? '');
-  const value = controlledValue ?? localValue;
-  const setValue = onValueChange ?? setLocalValue;
+  const [value, setValue] = useState(initial ?? '');
   const hasError = errors.length > 0;
   const describedBy =
     [description ? `${name}-hint` : null, hasError ? `${name}-error` : null]

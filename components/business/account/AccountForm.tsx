@@ -68,15 +68,12 @@ const selectClass =
 const ROLE_OPTIONS = [
   Role.ADMIN,
   Role.SALES,
-  Role.CUSTOMER_SERVICE,
   Role.WORKER,
 ] as const;
 
 const WORKER_TYPE_OPTIONS = [
   WorkerType.MACHINE,
   WorkerType.PACKER,
-  WorkerType.CLEANER,
-  WorkerType.COOK,
 ] as const;
 
 const MACHINE_TYPE_OPTIONS = [
@@ -119,7 +116,7 @@ export function AccountForm(props: Props) {
   );
   const [employmentType, setEmploymentType] = useState<EmploymentType | ''>(
     initial?.employmentType ??
-      (initial?.role === Role.CUSTOMER_SERVICE || initial?.role === Role.WORKER
+      (initial?.role === Role.WORKER
         ? EmploymentType.FULL_TIME
         : ''),
   );
@@ -133,7 +130,7 @@ export function AccountForm(props: Props) {
       setWorkerType('');
       setMachineType('');
     }
-    if (next === Role.CUSTOMER_SERVICE || next === Role.WORKER) {
+    if (next === Role.WORKER) {
       if (!employmentType) setEmploymentType(EmploymentType.FULL_TIME);
     } else {
       setEmploymentType('');
@@ -291,7 +288,7 @@ export function AccountForm(props: Props) {
         </div>
       ) : null}
 
-      {role === Role.CUSTOMER_SERVICE || role === Role.WORKER ? (
+      {role === Role.WORKER ? (
         <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="employmentType">用工类型</Label>

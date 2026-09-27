@@ -17,11 +17,11 @@ function form(version = '3') {
   data.set('remark', '新备注');
   return data;
 }
-beforeEach(() => { vi.resetAllMocks(); mocks.permission.mockResolvedValue({ id: 'cs', role: 'CUSTOMER_SERVICE' }); });
+beforeEach(() => { vi.resetAllMocks(); mocks.permission.mockResolvedValue({ id: 'admin', role: 'ADMIN' }); });
 it('requires permission before mutation and refreshes only related pages', async () => {
   expect(await editItemRemarkAction('order', 'item', null, form())).toEqual({ status: 'success' });
   expect(mocks.permission).toHaveBeenCalledWith('order:create');
-  expect(mocks.edit).toHaveBeenCalledWith({ orderId: 'order', itemId: 'item', expectedEditVersion: 3, remark: '新备注' }, { id: 'cs', role: 'CUSTOMER_SERVICE' });
+  expect(mocks.edit).toHaveBeenCalledWith({ orderId: 'order', itemId: 'item', expectedEditVersion: 3, remark: '新备注' }, { id: 'admin', role: 'ADMIN' });
   expect(mocks.revalidate.mock.calls).toEqual([['/orders'], ['/orders/order'], ['/orders/order/edit']]);
 });
 it('rejects permission before reading or changing order', async () => {

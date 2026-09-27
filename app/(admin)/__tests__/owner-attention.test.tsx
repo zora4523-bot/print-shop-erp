@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   shipments: vi.fn(),
   outsource: vi.fn(),
   'over-reports': vi.fn(),
-  settlements: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({ requirePermission: mocks.permission }));
@@ -22,15 +21,14 @@ vi.mock('@/lib/dashboard/owner-watchlist', () => ({
   getPendingShipments: mocks.shipments,
   getOverdueOutsourcing: mocks.outsource,
   getRecentOverReports: mocks['over-reports'],
-  getEndingPeriods: mocks.settlements,
 }));
 
 import OwnerAttentionPage from '../owner/attention/page';
 import { AttentionContent } from '@/components/business/dashboard/OwnerAttentionContent';
 
-const kinds: AttentionKind[] = ['due', 'shipments', 'outsource', 'over-reports', 'settlements'];
+const kinds: AttentionKind[] = ['due', 'shipments', 'outsource', 'over-reports'];
 const paginatedKinds = ['due', 'shipments', 'over-reports'] as const;
-const fullListKinds = ['outsource', 'settlements'] as const;
+const fullListKinds = ['outsource'] as const;
 
 function findElements(
   node: ReactNode,

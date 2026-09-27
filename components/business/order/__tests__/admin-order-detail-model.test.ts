@@ -71,18 +71,19 @@ function packagingFixture(snapshot: unknown, subtotal = '0.00'): AdminOrderDetai
 }
 
 describe('admin order detail projection', () => {
+  // Stored names stay as persisted; the detail shows the current terminology.
   it.each([
-    ['160g珠光艳闪', 160, '160g珠光艳闪'],
-    ['珠光艳闪 160 G', 160, '珠光艳闪 160 G'],
-    ['珠光艳闪（160克）', 160, '珠光艳闪（160克）'],
-    ['珠光艳闪 160gsm', 160, '珠光艳闪 160gsm'],
-    ['珠光艳闪', 160, '珠光艳闪 · 160g'],
-    ['120g珠光艳闪', 160, '120g珠光艳闪 · 160g'],
-    ['160g珠光艳闪', 60, '160g珠光艳闪 · 60g'],
-    ['1600g红卡', 160, '1600g红卡 · 160g'],
-    ['160.5g珠光艳闪', 160, '160.5g珠光艳闪 · 160g'],
-    ['珠光艳闪', null, '珠光艳闪'],
-    ['160g珠光闪红', 160, '160g珠光暗红'],
+    ['160g珠光艳闪', 160, '160g艳红珠光纸'],
+    ['珠光艳闪 160 G', 160, '艳红珠光纸 160 G'],
+    ['珠光艳闪（160克）', 160, '艳红珠光纸（160克）'],
+    ['珠光艳闪 160gsm', 160, '艳红珠光纸 160gsm'],
+    ['珠光艳闪', 160, '艳红珠光纸 · 160g'],
+    ['120g珠光艳闪', 160, '120g艳红珠光纸 · 160g'],
+    ['160g珠光艳闪', 60, '160g艳红珠光纸 · 60g'],
+    ['1600g红卡', 160, '1600g红卡纸 · 160g'],
+    ['160.5g珠光艳闪', 160, '160.5g艳红珠光纸 · 160g'],
+    ['珠光艳闪', null, '艳红珠光纸'],
+    ['160g珠光闪红', 160, '160g暗红珠光纸'],
     [null, 160, '160g'],
     [null, null, '未记录'],
   ])('preserves paper facts without repeating the same weight: %s / %s', (paperType, paperWeightGsm, expected) => {
@@ -248,8 +249,8 @@ describe('admin order detail projection', () => {
     const input = fixture();
     input.productionOperations = [{ id: 'lane', carriedCompletedQty: new Decimal('100'), sources: [{ orderItemId: 'item-1' }, { orderItemId: 'item-2' }] }] as unknown as NonNullable<AdminOrderDetailInput['productionOperations']>;
     expect(buildAdminOrderDetailModel(input).items[0]!.progress).toEqual([]);
-    input.productionProgressSteps = [{ id: 'step', orderItemId: 'item-1', craftName: '清废', plannedQty: new Decimal('1000'), carriedCompletedQty: new Decimal('100'), reports: [{ completedQty: new Decimal('200') }, { completedQty: new Decimal('300') }] }] as unknown as NonNullable<AdminOrderDetailInput['productionProgressSteps']>;
-    expect(buildAdminOrderDetailModel(input).items[0]!.progress).toEqual([{ label: '清废', done: '600', total: '1000', unit: '个' }]);
+    input.productionProgressSteps = [{ id: 'step', orderItemId: 'item-1', craftName: '粘封', plannedQty: new Decimal('1000'), carriedCompletedQty: new Decimal('100'), reports: [{ completedQty: new Decimal('200') }, { completedQty: new Decimal('300') }] }] as unknown as NonNullable<AdminOrderDetailInput['productionProgressSteps']>;
+    expect(buildAdminOrderDetailModel(input).items[0]!.progress).toEqual([{ label: '粘封', done: '600', total: '1000', unit: '个' }]);
   });
 
   it('keeps only current-version work reports without inventing a cumulative total', () => {
@@ -313,4 +314,43 @@ it('keeps the order-level note separate from style notes', () => {
   const input = fixture();
   input.order.remark = '先核对样稿\n再安排生产';
   expect(buildAdminOrderDetailModel(input).remark).toBe(input.order.remark);
+});
+
+// 业主 2026-09-27：客户名称/简称已退役；详情头部的“业务员”取工单归属的外部销售，
+// 免费重做（管理员提交）取原单的外部销售，不再依赖列表行的客户或提交人。
+describe('external salesperson projection', () => {
+  it('uses the charged order submitter and never projects the retired customer', () => {
+    const input = fixture();
+    Object.assign(input.order, {
+      settlementType: 'EXTERNAL_SALES',
+      customerRef: '旧客户简称',
+      submitter: { id: 'sales-1', displayName: '外部销售甲', username: 'sales-a', role: 'SALES' },
+      sourceOrder: null,
+    });
+    const model = buildAdminOrderDetailModel(input);
+    expect(model.sales).toBe('外部销售甲');
+    expect(model).not.toHaveProperty('customer');
+    expect(JSON.stringify(model)).not.toContain('旧客户简称');
+  });
+
+  it('shows the source order salesperson for an admin-submitted free rework', () => {
+    const input = fixture();
+    Object.assign(input.order, {
+      settlementType: 'NO_CHARGE',
+      submitter: { id: 'admin-1', displayName: '管理员', username: 'admin', role: 'ADMIN' },
+      sourceOrder: { id: 'source-1', orderNo: 'GD-260901-001', customName: '原单', status: 'SHIPPED',
+        submitter: { displayName: '原单销售' } },
+    });
+    expect(buildAdminOrderDetailModel(input).sales).toBe('原单销售');
+  });
+
+  it('leaves the salesperson empty when no external salesperson can be derived', () => {
+    const input = fixture();
+    Object.assign(input.order, {
+      settlementType: 'NO_CHARGE',
+      submitter: { id: 'admin-1', displayName: '管理员', username: 'admin', role: 'ADMIN' },
+      sourceOrder: null,
+    });
+    expect(buildAdminOrderDetailModel(input).sales).toBeNull();
+  });
 });

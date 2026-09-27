@@ -50,7 +50,6 @@ export async function getLegacyProductionTaskDetail(
               orderNo: true,
               customName: true,
               isUrgent: true,
-              customerRef: true,
               status: true,
               submitter: { select: { displayName: true } },
             },

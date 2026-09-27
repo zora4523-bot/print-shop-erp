@@ -10,13 +10,13 @@ beforeEach(() => {
   order.mockResolvedValue({
     submitterId: current.id, submitter: current, status: 'DRAFT', settlementType: 'EXTERNAL_SALES',
     settledAt: null, settledFee: null, shippedAt: null, finishedAt: null, sourceOrderId: null,
-    _count: { billItems: 0, csSalesEntries: 0, reworkOrders: 0, changeRequests: 0 }, agentMonthlyBillItem: null,
+    _count: { billItems: 0, reworkOrders: 0, changeRequests: 0 }, agentMonthlyBillItem: null,
   });
   users.mockResolvedValue([current]);
 });
 
 describe('admin external sales account options', () => {
-  it.each([Role.SALES, Role.CUSTOMER_SERVICE, Role.WORKER])('does not query accounts for %s', async (role) => {
+  it.each([Role.SALES, Role.WORKER])('does not query accounts for %s', async (role) => {
     expect(await getOrderExternalSalesAssociation('order-1', { role })).toBeUndefined();
     expect(order).not.toHaveBeenCalled();
     expect(users).not.toHaveBeenCalled();

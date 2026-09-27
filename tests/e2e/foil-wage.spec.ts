@@ -25,6 +25,7 @@ async function publish(page: Page, workerId: string, full = false, setup?: strin
 }
 async function report(page: Page, id: string, qty: number, c: Client) {
   await page.goto(`/worker/tasks/${id}`);
+  await expect(page).toHaveURL(new RegExp(`/worker/tasks/${id}\\?reportBatch=\\d+$`));
   const panel = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
   for (const [name, value] of [['本次合格完成数', String(qty)], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await panel.getByRole('spinbutton', { name, exact: true }).fill(value);
   const before = Number((await c.query('SELECT count(*) AS n FROM \"ProductionReport\" WHERE \"operationId\"=$1', [id])).rows[0].n);
@@ -135,6 +136,7 @@ test('分档工资、多人转人工核定、不可变差额和页面响应式',
         await worker.emulateMedia({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce' });
         await worker.evaluate((value) => localStorage.setItem('erp-theme', value), theme);
         await worker.goto(`/worker/tasks/${pending.op}`);
+        await expect(worker).toHaveURL(new RegExp(`/worker/tasks/${pending.op}\\?reportBatch=\\d+$`));
         await expect(worker.locator('html')).toHaveAttribute('data-theme', theme);
         expect(await worker.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         for (const control of await worker.locator('main input:not([type=hidden]), main button').all()) if (await control.isVisible()) { const box = await control.boundingBox(); expect(box!.height).toBeGreaterThanOrEqual(44); }

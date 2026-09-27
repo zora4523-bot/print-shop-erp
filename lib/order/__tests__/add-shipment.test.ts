@@ -2,6 +2,11 @@ import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
 import { addOrderShipmentSchema } from '../add-shipment-schema';
+import {
+  buildTrustedAdminPackagingPricingSnapshot,
+  hasAdminPricingConfirmationMarker,
+  isTrustedAdminPackagingPricingSnapshot,
+} from '../admin-pricing-snapshot';
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
@@ -105,7 +110,7 @@ const tx = {
   order: { findUnique: mocks.find, update: mocks.update },
   orderShipment: { create: mocks.create, update: mocks.update },
   orderShipmentLine: { update: mocks.line, delete: mocks.remove },
-  orderCustomerCharge: { update: mocks.charge, create: mocks.charge },
+  orderCustomerCharge: { update: mocks.charge, create: mocks.charge, aggregate: vi.fn() },
   orderLog: { create: mocks.log },
 };
 beforeEach(() => {
@@ -310,7 +315,7 @@ describe('administrator adds a delivery with conserved allocations and frozen lo
 });
 
 it.each([
-  ['FACTORY_DIRECT', 'SUBMITTED', 'UNCHANGED'],
+  ['NO_CHARGE', 'SUBMITTED', 'UNCHANGED'],
   ['EXTERNAL_SALES', 'DRAFT', 'ON_SUBMIT'],
 ])(
   'preserves the existing charge lifecycle for %s %s',
@@ -338,11 +343,11 @@ it.each([
     expect(mocks.revision).not.toHaveBeenCalled();
   },
 );
-it('keeps 补录 logistics rows (priceBookId null) on the unchanged path for internal orders', async () => {
+it('keeps 补录 logistics rows (priceBookId null) on the unchanged path for free rework orders', async () => {
   const order = fixture();
   mocks.find.mockResolvedValue({
     ...order,
-    settlementType: 'FACTORY_DIRECT',
+    settlementType: 'NO_CHARGE',
     status: 'SUBMITTED',
     customerCharges: order.customerCharges.map((charge) => ({ ...charge, priceBookId: null })),
   });
@@ -449,29 +454,29 @@ it('sales cannot forge manual charges', async () => {
   expect(mocks.transaction).not.toHaveBeenCalled();
 });
 
-it('allows customer service to split its own order through the existing quote protocol', async () => {
+it('allows sales to split its own order through the existing quote protocol', async () => {
   const order = fixture();
-  order.submitterId = 'cs';
+  order.submitterId = 'sales-own';
   mocks.find.mockResolvedValue(order);
-  const cs = { id: 'cs', role: Role.CUSTOMER_SERVICE };
+  const cs = { id: 'sales-own', role: Role.SALES };
   const preview = await addOrderShipment(input(), cs, 'preview');
   expect(mocks.create).not.toHaveBeenCalled();
   await addOrderShipment({ ...input(), previewToken: preview!.token }, cs, 'save');
   expect(mocks.create).toHaveBeenCalledOnce();
 });
-it('rejects customer service editing another submitter order', async () => {
-  await expect(addOrderShipment(input(), { id: 'cs', role: Role.CUSTOMER_SERVICE }, 'preview')).rejects.toThrow('自己创建');
+it('rejects sales editing another submitter order', async () => {
+  await expect(addOrderShipment(input(), { id: 'sales-own', role: Role.SALES }, 'preview')).rejects.toThrow('自己创建');
   expect(mocks.create).not.toHaveBeenCalled();
 });
-it('rejects customer service manual pricing before the transaction', async () => {
-  await expect(addOrderShipment({ ...input(), packingMaterialFee: '1', overrideReason: '测试' }, { id: 'cs', role: Role.CUSTOMER_SERVICE }, 'preview')).rejects.toThrow('人工物流费用');
+it('rejects sales manual pricing before the transaction', async () => {
+  await expect(addOrderShipment({ ...input(), packingMaterialFee: '1', overrideReason: '测试' }, { id: 'sales-own', role: Role.SALES }, 'preview')).rejects.toThrow('人工物流费用');
   expect(mocks.transaction).not.toHaveBeenCalled();
 });
 
 describe('split boxed deliveries', () => {
   function boxes() {
     const order = fixture();
-    return { ...order, settlementType: 'FACTORY_DIRECT', processingAmount: new Decimal('83.03'),
+    return { ...order, settlementType: 'EXTERNAL_SALES', processingAmount: new Decimal('83.03'),
       packagingAmount: new Decimal('29.90'), totalAmount: new Decimal('83.03'),
       customerCharges: [], items: [{ ...order.items[0], quantity: 101 }],
       shipments: [{ ...order.shipments[0], lines: [{ orderItemId: 'item', quantity: 101 }] }],
@@ -482,15 +487,41 @@ describe('split boxed deliveries', () => {
     };
   }
   it('updates box count, processing and receivable amounts with a pricing revision', async () => {
-    const order = boxes(); mocks.find.mockResolvedValue(order);
+    const order = boxes(); mocks.find.mockResolvedValue({ ...order, customerCharges: fixture().customerCharges });
     tx.productionOperation.count.mockResolvedValue(0);
     const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
     const preview = await addOrderShipment(split, actor, 'preview');
-    expect(preview).toMatchObject({ oldTotal: '83.03', newTotal: '85.33', packaging: [{ boxCount: 14, subtotal: '32.20' }] });
+    expect(preview).toMatchObject({ packaging: [{ boxCount: 14, subtotal: '32.20' }] });
     await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
     expect(tx.orderPackagingGroup.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actualBagCount: 14, subtotal: '32.20' }) }));
-    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ packagingAmount: '32.20', processingAmount: '85.33', totalAmount: '85.33' }) }));
+    expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ packagingAmount: '32.20', processingAmount: '85.33' }) }));
     expect(mocks.revision).toHaveBeenCalled();
+  });
+  it('管理员议定盒价分货后沿用原单价与原因，保留管理员标记转待重新确认，不当作自动价', async () => {
+    const order = boxes();
+    const group = order.packagingGroups[0]!;
+    const agreed = { ...group, orderId: 'order', priceOverrideReason: '老客户议价' };
+    const snapshot = buildTrustedAdminPackagingPricingSnapshot({
+      previous: { source: 'INTERNAL_CREATE_AUTO' }, now: new Date('2026-09-01T00:00:00.000Z'),
+      actorId: 'admin', previousPriceRevision: 0, group: agreed,
+    });
+    Object.assign(group, { priceOverrideReason: '老客户议价', pricingSnapshot: snapshot });
+    expect(isTrustedAdminPackagingPricingSnapshot(snapshot, agreed)).toBe(true);
+    mocks.find.mockResolvedValue({ ...order, customerCharges: fixture().customerCharges }); tx.productionOperation.count.mockResolvedValue(0);
+    const split = { ...input(), lines: [{ orderItemId: 'item', quantity: 3 }] };
+    const preview = await addOrderShipment(split, actor, 'preview');
+    await addOrderShipment({ ...split, previewToken: preview!.token }, actor, 'save');
+
+    const data = tx.orderPackagingGroup.update.mock.calls[0]![0].data;
+    expect(data).toMatchObject({ actualBagCount: 14, subtotal: '32.20', priceOverrideReason: '老客户议价' });
+    expect(hasAdminPricingConfirmationMarker(data.pricingSnapshot)).toBe(true);
+    expect(isTrustedAdminPackagingPricingSnapshot(data.pricingSnapshot, {
+      ...agreed, actualBagCount: 14, subtotal: '32.20',
+    })).toBe(false);
+    expect(data.pricingSnapshot).toMatchObject({
+      pendingReason: expect.stringContaining('重新确认'),
+      shipmentSplit: { actual: { actualBagCount: 14, unitPrice: '2.3000', subtotal: '32.20' } },
+    });
   });
   it('updates free rework box quantities without reopening price confirmation or erasing free snapshots', async () => {
     const order = boxes();
@@ -510,7 +541,7 @@ describe('split boxed deliveries', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
   it('keeps both boxed destinations pending until actual freight is known', async () => {
-    const order = boxes(); order.settlementType = 'EXTERNAL_SALES';
+    const order = boxes();
     mocks.find.mockResolvedValue({ ...order, customerCharges: fixture().customerCharges });
     tx.productionOperation.count.mockResolvedValue(0);
     const quote = await mocks.quote();

@@ -16,7 +16,6 @@ const sampleContextSchema = z.object({
   customName: createOrderSchema.shape.customName,
   packageRequirement: createOrderSchema.shape.packageRequirement,
   externalSalesUserId: createOrderSchema.shape.externalSalesUserId,
-  customerRef: createOrderSchema.shape.customerRef,
   promisedDate: createOrderSchema.shape.promisedDate,
   isUrgent: createOrderSchema.shape.isUrgent,
   expressCode: createOrderSchema.shape.expressCode,
@@ -26,7 +25,7 @@ export function useSampleWorkbenchDraft(
   item: CreateOrderInput['items'][number],
   setItem: (item: CreateOrderInput['items'][number]) => void,
   draftScope: string,
-  initial?: { purpose: 'SAMPLE_SHIPMENT' | 'PROOF'; form: SampleOrderFormState; context?: SampleOrderContext; editorSnapshot?: SampleOrderEditorSnapshot; onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void },
+  initial?: { purpose: 'SAMPLE_SHIPMENT' | 'PROOF'; form: SampleOrderFormState; context?: SampleOrderContext; editorSnapshot?: SampleOrderEditorSnapshot; onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void; onExternalSalesChange?: (externalSalesUserId: string | null) => void },
 ) {
   // Initial entry values are captured once; later edits belong to this draft.
   const [entryInitial] = useState(initial);
@@ -115,8 +114,15 @@ export function useSampleWorkbenchDraft(
       /* Optional local cache. */
     }
   }
+  const onExternalSalesChange = initial?.onExternalSalesChange;
   const sampleFormProps = {
     context,
+    // The administrator's salesperson choice belongs to this sample draft and,
+    // on the new-order page, is written back to the shared order form.
+    onContextChange: (next: SampleOrderContext) => {
+      setContext(next);
+      onExternalSalesChange?.(next.externalSalesUserId ?? null);
+    },
     value: sampleForm,
     onChange: setSampleForm,
     draft: sampleDraft,

@@ -104,6 +104,25 @@ describe('parseExternalCreateOrderCommand', () => {
     });
   });
 
+  // 客户名称/简称与关联客户已退役（业主 2026-09-27）：旧客户端仍可携带，严格入口不拒绝，
+  // 但既不校验也不进入规范事实；是否写库由 createOrder 决定（一律写空）。
+  it.each([
+    ['省略', {}],
+    ['为 null', { customerPartyId: null, customerRef: null }],
+    ['超长', { customerPartyId: 'x'.repeat(200), customerRef: '客'.repeat(200) }],
+  ])('accepts retired customer keys (%s) without mapping them into canonical facts', (_label, customer) => {
+    const input: Record<string, unknown> = { ...externalOrder(), ...customer };
+    if (!('customerRef' in customer)) {
+      delete input.customerRef;
+      delete input.customerPartyId;
+    }
+    const result = parseExternalCreateOrderCommand(input);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.facts).not.toHaveProperty('customerRef');
+    expect(result.facts).not.toHaveProperty('customerPartyId');
+  });
+
   it.each(EXTERNAL_CREATE_ORDER_SERVER_OWNED_FIELDS.root)(
     'rejects root server-owned field %s even when explicitly null',
     (field) => {
@@ -180,7 +199,8 @@ describe('parseExternalCreateOrderCommand', () => {
     });
   });
 
-  it('rejects PRINT + full-foil back-side colors', () => {
+  // DECISIONS 2026-08-27：彩印反面烫金是合法事实，由计价引擎转人工核价。
+  it('accepts PRINT + full-foil back-side colors as a legal fact for manual pricing', () => {
     const input = externalOrder();
     const result = parseExternalCreateOrderCommand(
       onlyItem(input, {
@@ -195,16 +215,7 @@ describe('parseExternalCreateOrderCommand', () => {
       }),
     );
 
-    expect(result).toMatchObject({
-      success: false,
-      issues: [
-        {
-          path: ['items', 0, 'backFoilColors'],
-          fig: 7,
-          message: '彩印叠加专版烫金只允许正面',
-        },
-      ],
-    });
+    expect(result.success).toBe(true);
   });
 
   it('requires canonical pack and reports the item fig', () => {

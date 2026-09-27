@@ -2,6 +2,7 @@ import { Role, OrderStatus, DesignFileType } from '../generated/prisma/enums';
 import { db } from './db';
 import { readOssConfig } from './oss/config';
 import { createOssClient } from './oss/client';
+import { designFileNameIssue } from './oss/design-file-name';
 import { ALLOWED_EXTENSIONS, FILE_SIZE_LIMITS } from './oss/types';
 import { orderCascadeLockKey } from './order/locks';
 
@@ -100,14 +101,14 @@ function assertDesignEditAllowed(
   order: { status: OrderStatus; submitterId: string; _count?: { changeRequests: number } },
   actor: { id: string; role: Role },
 ): void {
-  if (order._count?.changeRequests) throw new OrderDesignError('工单存在待审批申请，暂不能修改设计文件');
-  if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
-    throw new OrderDesignError('只有草稿或驳回状态的工单可以增删设计图');
-  }
   const globalOverride =
     actor.role === Role.ADMIN;
   if (!globalOverride && order.submitterId !== actor.id) {
     throw new OrderDesignError('只能修改自己创建的工单的设计图');
+  }
+  if (order._count?.changeRequests) throw new OrderDesignError('工单存在待审批申请，暂不能修改设计文件');
+  if (order.status !== OrderStatus.DRAFT && order.status !== OrderStatus.REJECTED) {
+    throw new OrderDesignError('只有草稿或驳回状态的工单可以增删设计图');
   }
 }
 
@@ -163,7 +164,10 @@ export async function recordOrderItemDesign(
     input.fileType,
   );
   const fileName = input.fileName.trim().slice(0, 256);
-  if (!fileName) throw new OrderDesignError('文件名不能为空');
+  // 签发与登记是两次独立调用：登记时必须按同一规则重校文件名，它会原样
+  // 成为 CDR 下载包里的 ZIP 条目名。
+  const fileNameIssue = designFileNameIssue(fileName, input.fileType);
+  if (fileNameIssue) throw new OrderDesignError(fileNameIssue);
 
   // 便宜的预检（拦掉绝大多数非法请求），真正的守卫在 tx 锁内重校。
   await assertCanUploadDesign(input.orderId, input.orderItemId, actor);

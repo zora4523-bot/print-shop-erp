@@ -51,6 +51,15 @@ describe('external create-order command contract', () => {
     expect(result.data.styles[0]).not.toHaveProperty('sideCount');
   });
 
+  it('keeps accepting the retired customer keys without validating them (业主 2026-09-27)', () => {
+    const { customerPartyId: _party, customerRef: _ref, ...withoutCustomer } = validInput();
+    expect([_party, _ref]).toEqual([null, null]);
+    expect(externalCreateOrderSubmitSchema.safeParse(withoutCustomer).success).toBe(true);
+    expect(externalCreateOrderSubmitSchema.safeParse({
+      ...validInput(), customerPartyId: 'x'.repeat(200), customerRef: '客'.repeat(200),
+    }).success).toBe(true);
+  });
+
   it('rejects client supplied price, version and status facts', () => {
     const input = {
       ...validInput(),
@@ -75,7 +84,8 @@ describe('external create-order command contract', () => {
     );
   });
 
-  it('allows print plus partial foil on the back but rejects full foil on the back', () => {
+  // DECISIONS 2026-08-27：彩印反面烫金（叠加局部或专版）是合法事实，由计价引擎转人工核价。
+  it('allows print plus partial or full foil on the back', () => {
     const partial = validInput();
     partial.styles[0] = {
       ...partial.styles[0]!,
@@ -89,7 +99,7 @@ describe('external create-order command contract', () => {
       ...partial,
       styles: [{ ...partial.styles[0]!, printFoilMode: 'FULL' as const }],
     };
-    expect(externalCreateOrderSubmitSchema.safeParse(full).success).toBe(false);
+    expect(externalCreateOrderSubmitSchema.safeParse(full).success).toBe(true);
   });
 
   it('rejects duplicate fig values and reports the affected fig', () => {

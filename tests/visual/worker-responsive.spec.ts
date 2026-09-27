@@ -3,6 +3,7 @@ import { E2E_PASSWORD, E2E_USERS, login } from '../e2e/_helpers';
 import {
   cleanupWorkerUiFixture,
   seedWorkerUiFixture,
+  WORKER_UI_LONG_SALES_NAME,
   type WorkerUiFixture,
 } from './worker-ui-fixture';
 import {
@@ -19,7 +20,10 @@ let fixture: WorkerUiFixture;
 test.describe.configure({ timeout: 90_000 });
 
 test.beforeAll(async ({}, testInfo) => {
-  fixture = await seedWorkerUiFixture(`worker-${testInfo.project.name}`);
+  // 主工单归属超长姓名的外部销售：工单卡片与详情页头部的「外部销售」行承担中英混排不裁切检查。
+  fixture = await seedWorkerUiFixture(`worker-${testInfo.project.name}`, {
+    longExternalSales: true,
+  });
 });
 
 test.afterAll(async () => {
@@ -115,7 +119,7 @@ function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
       name: 'order-detail',
       path: `/worker/orders/${data.orderId}`,
       readyHeading: '工序工单',
-      assertGateState: assertProductionContext,
+      assertGateState: assertOrderDetailContext,
     },
     { name: 'salary', path: '/worker/salary', readyHeading: '我的工资' },
     { name: 'salary-history', path: '/worker/salary?view=history', readyHeading: '历史日薪档案' },
@@ -136,6 +140,15 @@ function workerRoutes(data: WorkerUiFixture): readonly WorkerRoute[] {
 
 async function assertTaskProductionContext(page: Page) {
   await assertProductionContext(page, { expectFoilColors: false });
+}
+
+async function assertOrderDetailContext(page: Page) {
+  await assertProductionContext(page);
+  // 超长外部销售姓名必须真的渲染出来，裁切/溢出门禁才检查得到它（取代原超长客户代号）。
+  await expect(
+    page.getByText(`外部销售：${WORKER_UI_LONG_SALES_NAME}`),
+  ).toBeVisible();
+  await expect(page.getByText('接单人')).toHaveCount(0);
 }
 
 async function assertProductionContext(

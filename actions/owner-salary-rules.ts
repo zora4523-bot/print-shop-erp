@@ -12,7 +12,7 @@ import {
 import type { SalaryRuleVersionMutationResult } from './owner-salary-rules.types';
 
 // Changes are versioned rather than updating a rule in place.  Existing
-// payroll and commission records already retain their own rule snapshots;
+// payroll records already retain their own rule snapshots;
 // this ensures future calculations pick the appropriate version as well.
 export async function createSalaryRuleVersionAction(
   _previous: SalaryRuleVersionMutationResult | null,
@@ -31,8 +31,6 @@ export async function createSalaryRuleVersionAction(
   try {
     const created = await createSalaryRuleVersion(parsed.data, actor);
     revalidatePath('/owner/salary');
-    revalidatePath('/owner/salary/cs');
-    revalidatePath('/owner/salary/hourly');
     revalidatePath(RULE_CENTER_HREFS.employeePay);
     return { status: 'success', ruleId: created.id };
   } catch (error) {

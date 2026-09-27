@@ -10,7 +10,7 @@ test('退出登录后才到达的预取响应不能重新写入会话', async ({
       await route.continue();
     }
   });
-  await login(page, { from: '/orders', username: E2E_USERS.customerService.username, password: E2E_PASSWORD });
+  await login(page, { from: '/orders', username: E2E_USERS.sales.username, password: E2E_PASSWORD });
   const sessionCookies = async () => (await page.context().cookies()).filter((cookie) => /^(?:__Secure-)?authjs\.session-token(?:\.\d+)?$/.test(cookie.name)).map((cookie) => cookie.name);
   expect(await sessionCookies()).toHaveLength(1);
 
@@ -68,7 +68,7 @@ test('保留 Flight 头后公共资源、普通续期和预取认证边界不变
   expect(location.pathname).toBe('/login');
   expect(location.searchParams.get('from')).toBe('/account/password');
 
-  await login(page, { from: '/orders', username: E2E_USERS.customerService.username, password: E2E_PASSWORD });
+  await login(page, { from: '/orders', username: E2E_USERS.sales.username, password: E2E_PASSWORD });
   const normal = await page.request.get('/orders');
   expect(normal.status()).toBe(200);
   expect((normal.headers()['set-cookie'] ?? '').includes('authjs.session-token=')).toBe(true);

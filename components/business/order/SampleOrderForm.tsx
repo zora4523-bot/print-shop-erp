@@ -24,6 +24,10 @@ import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ActionNotice } from '@/components/ui-business';
 import { DesignUploadPanel } from './DesignUploadPanel';
+import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
+import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE } from '@/lib/order/settlement';
+import { NoExternalSalesEmptyState } from './NoExternalSalesEmptyState';
+import { SampleExternalSalesField } from './SampleExternalSalesField';
 
 export const EMPTY_SAMPLE_FORM: SampleOrderFormState = {
   name: '',
@@ -36,10 +40,17 @@ export const EMPTY_SAMPLE_FORM: SampleOrderFormState = {
   collect: false,
   remark: '',
 };
+const emptySampleContext: SampleOrderContext = {
+  externalSalesUserId: null, promisedDate: null, isUrgent: false,
+  expressCode: null, customName: undefined, packageRequirement: null,
+};
 type SampleOrderFormProps = {
   lifecycle?: OrderCreationLifecycle;
   canEditFees?: boolean;
   context?: SampleOrderContext;
+  /** 管理员代建时传入（可为空数组）；外部销售本人建单时不传。 */
+  externalSalesAccounts?: readonly ExternalSalesAccountOption[];
+  onContextChange?: (context: SampleOrderContext) => void;
   purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
   item?: CreateOrderInput['items'][number];
   value: SampleOrderFormState;
@@ -72,6 +83,8 @@ export function SampleOrderForm({
   onBusyChange,
   context,
   canEditFees = false,
+  externalSalesAccounts,
+  onContextChange,
 }: SampleOrderFormProps) {
   const uid = useId();
   const router = useRouter();
@@ -92,6 +105,8 @@ export function SampleOrderForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [salesError, setSalesError] = useState<string | null>(null);
+  const salesField = useRef<HTMLSelectElement>(null);
   const sampleItem: CreateOrderInput['items'][number] = {
     ...createBlankItem([]),
     name,
@@ -110,7 +125,6 @@ export function SampleOrderForm({
     customName: purpose === 'PROOF' ? context?.customName || item?.name : name,
     samplePackagingRuleCode:
       purpose === 'SAMPLE_SHIPMENT' ? packing || null : null,
-    customerRef: context?.customerRef ?? null,
     externalSalesUserId: context?.externalSalesUserId ?? null,
     promisedDate: context?.promisedDate ?? null,
     receiverName,
@@ -169,6 +183,12 @@ export function SampleOrderForm({
     }
   }
   async function create() {
+    // 业主 2026-09-24：管理员代建的寄样品 / 打样同样必须归属外部销售。
+    if (externalSalesAccounts && !context?.externalSalesUserId) {
+      setSalesError(ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE);
+      salesField.current?.focus();
+      return;
+    }
     const data = input();
     if (!data || !currentQuote) return;
     setBusy(true);
@@ -186,6 +206,7 @@ export function SampleOrderForm({
         },
       );
       if (result.status !== 'success') {
+        if (result.status === 'invalid') setSalesError(result.fieldErrors.externalSalesUserId?.[0] ?? null);
         setError(
           result.status === 'error'
             ? result.message
@@ -249,6 +270,7 @@ export function SampleOrderForm({
       lifecycle?.onBusyChange?.(false);
     }
   }
+  if (externalSalesAccounts?.length === 0 && !draft) return <NoExternalSalesEmptyState />;
   return (
     <Card
       className={
@@ -262,6 +284,12 @@ export function SampleOrderForm({
       </h2>
       {!draft ? (
         <>
+          {externalSalesAccounts ? <SampleExternalSalesField ref={salesField} accounts={externalSalesAccounts}
+            value={context?.externalSalesUserId ?? null} error={salesError} disabled={busy}
+            onChange={(externalSalesUserId) => {
+              setSalesError(null);
+              onContextChange?.({ ...emptySampleContext, ...context, externalSalesUserId });
+            }} /> : null}
           <SampleOrderFields
             uid={uid}
             purpose={purpose}
@@ -270,42 +298,7 @@ export function SampleOrderForm({
             busy={busy}
             packagingOptions={quote?.packagingOptions ?? []}
           />
-          {currentQuote ? (
-            <div role="status" className="space-y-2 text-sm">
-              {purpose === 'SAMPLE_SHIPMENT' ? (
-                <dl className="space-y-2">
-                  <div className="flex justify-between">
-                    <dt>快递费</dt>
-                    <dd>
-                      {currentQuote.shippingAmount === null
-                        ? '待核价'
-                        : formatMoney(currentQuote.shippingAmount)}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt>包装费</dt>
-                    <dd>
-                      {currentQuote.packagingAmount === null
-                        ? '待核价'
-                        : formatMoney(currentQuote.packagingAmount)}
-                    </dd>
-                  </div>
-                </dl>
-              ) : null}
-              <p className="text-xl font-semibold">
-                {currentQuote.total === null
-                  ? '待核价'
-                  : formatMoney(currentQuote.total)}
-              </p>
-              {purpose === 'PROOF' ? (
-                <p className="text-muted-foreground">整单总价由管理员填写</p>
-              ) : currentQuote.shippingAmount === null ? (
-                <p className="text-muted-foreground">
-                  请在发货前补齐计费重量并核定快递费
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          {currentQuote ? <SampleQuoteSummary purpose={purpose} quote={currentQuote} /> : null}
           <Button
             type="button"
             variant="outline"
@@ -509,5 +502,44 @@ function SampleOrderFields({
         />
       </div>
     </fieldset>
+  );
+}
+
+function SampleQuoteSummary({ purpose, quote }: { purpose: 'SAMPLE_SHIPMENT' | 'PROOF'; quote: SampleOrderQuote }) {
+  return (
+    <div role="status" className="space-y-2 text-sm">
+      {purpose === 'SAMPLE_SHIPMENT' ? (
+        <dl className="space-y-2">
+          <div className="flex justify-between">
+            <dt>快递费</dt>
+            <dd>
+              {quote.shippingAmount === null
+                ? '待核价'
+                : formatMoney(quote.shippingAmount)}
+            </dd>
+          </div>
+          <div className="flex justify-between">
+            <dt>包装费</dt>
+            <dd>
+              {quote.packagingAmount === null
+                ? '待核价'
+                : formatMoney(quote.packagingAmount)}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+      <p className="text-xl font-semibold">
+        {quote.total === null
+          ? '待核价'
+          : formatMoney(quote.total)}
+      </p>
+      {purpose === 'PROOF' ? (
+        <p className="text-muted-foreground">整单总价由管理员填写</p>
+      ) : quote.shippingAmount === null ? (
+        <p className="text-muted-foreground">
+          请在发货前补齐计费重量并核定快递费
+        </p>
+      ) : null}
+    </div>
   );
 }

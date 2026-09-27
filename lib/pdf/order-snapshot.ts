@@ -4,7 +4,7 @@ import type { PrintOrder } from '../order/print-types';
 /** Signing timestamps rotate without changing the underlying design object. */
 export function orderPdfSnapshotKey(order: PrintOrder, factoryName: string): string {
   const snapshot = {
-    templateVersion: 5, // Bound long identifiers without squeezing the order header.
+    templateVersion: 7, // Header shows the external salesperson; empty flow section omitted (2026-09-27).
     order: {
       ...order,
       items: order.items.map((item) => ({

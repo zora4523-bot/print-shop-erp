@@ -612,7 +612,7 @@ export async function finalizeFulfillmentPricing(input: FinalizeFulfillmentPrici
 /** Called only after the ordinary toggle has acquired the canonical order lock. */
 export async function recordFulfillmentSfCollectChangeInTx(tx: Prisma.TransactionClient, input: PreviewFulfillmentPricingCommand & FulfillmentPricingMutationGuard, actor: Actor) {
   assertGuard(input);
-  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES && actor.role !== Role.CUSTOMER_SERVICE) throw new FulfillmentPricingError('无权修改履约方式');
+  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES) throw new FulfillmentPricingError('无权修改履约方式');
   // Ordinary switches never confirm prices. Browser-supplied administrator
   // corrections belong to the explicit preview/confirmation workflow instead.
   const normalized = normalizedInput({ orderId: input.orderId, isSfCollect: input.isSfCollect, shipments: [] });

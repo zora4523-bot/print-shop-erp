@@ -104,8 +104,13 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 - HEAVY：CDR、PDF、XLSX 等资源密集任务；部署配置保持低并发。
 - `/api/health/ready` 判断实例能否接流量。
 - `/api/health/jobs` 单独表达队列积压、worker 或死信告警，避免队列故障错误地触发 Web 发布回退。
+- 任务类型以 `BACKGROUND_JOB_TYPES`（与处理器表一一对应）为准。已删除功能的历史任务
+  （`CRON_HOURLY_PAYROLL`、`CRON_CS_SETTLE`、`CRON_CS_PERIOD_ENDING`）与已删除事件的通知任务保留为
+  运行记录，运维页不给重试，`retryDeadBackgroundJob` 抛 `RetiredBackgroundJobTypeError`；已删除事件的
+  “送达未知”通知只能确认已送达或忽略（`lib/notification/resolve.ts` 的 `RETIRED_EVENT`）。
 
-定时调度由主机系统 crontab 调用八个受 Bearer secret 保护的端点。调度事实以
+定时调度由主机系统 crontab 调用七个受 Bearer secret 保护的端点（2026-09-24 删除 `hourly-payroll`、
+`cs-settle`、`cs-period-ending`）。调度事实以
 [`deploy/crontab.example`](./deploy/crontab.example) 为准，不使用数据库内的 `pg_cron + pg_net` HTTP 调度。
 
 ## 认证与授权
@@ -116,7 +121,7 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
   [`lib/auth/permissions-dict.ts`](./lib/auth/permissions-dict.ts)。
 - Server Actions 使用 `requirePermission`；被 `auth(handler)` 包装的 Route Handler 使用 `requireSessionPermission`。
 - 所有者范围、工单范围和师傅任务范围在领域查询中继续收窄，不能因角色通过粗粒度权限就跳过资源级检查。
-- 生产打印使用 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 的独立范围，网页正文、标题与同步/后台 PDF 共用。ADMIN 查看全部，CUSTOMER_SERVICE 限本人提交，SALES 拒绝；WORKER 按当前账号固定报工岗位匹配当前版本未取消工序，或访问当前版本公共进度工序，排除 `SUBMITTED`。查询复核账号启用状态与角色，不以旧派工关系授权；后台生成后及下载前再次复核范围与生产版本。
+- 生产打印使用 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 的独立范围，网页正文、标题与同步/后台 PDF 共用。ADMIN 查看全部，SALES 拒绝；WORKER 按当前账号固定报工岗位匹配当前版本未取消工序，或访问当前版本公共进度工序，排除 `SUBMITTED`。查询复核账号启用状态与角色，不以旧派工关系授权；后台生成后及下载前再次复核范围与生产版本。
 - cron 使用 `CRON_SECRET`；CDR 外协下载使用不可猜测且限时的 bundle id，不依赖登录 session。
 
 ## 数据与一致性
@@ -167,8 +172,8 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 ## 外部销售读取边界（2026-09-12）
 
 销售详情及编辑复用 `lib/order/sales-detail-query.ts` 的同一查询/序列化契约；
-`SalesOrderEditor` 不接触通用工单 DTO。客户选项在服务端按当前销售关联工单限定，
-客户表尚无独立销售分配字段，不能把无关联客户默认为销售可见。
+`SalesOrderEditor` 不接触通用工单 DTO。工单“客户名称/简称”自 2026-09-27 停用，
+销售端不再读取或返回客户；按工单指认归属一律用 `lib/order/external-sales-name.ts`。
 `lib/agent-monthly-billing/sales-query.ts` 只读取本人的 `AgentMonthlyBill` 及冻结明细，
 不复用包含管理员内部关系的月账单详情。旧 Bill 仅保留管理历史归档用途。
 
@@ -184,7 +189,7 @@ Next 16.3 默认会在 Proxy 前规范化并剥离 Flight 标头；`skipProxyUrl
 
 ### 跨设备打印输出（2026-09-11）
 
-正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+正式打印入口使用服务端 PDF，网页模板用于预览。自托管字体与内嵌 PDF 字体共享字节，字体/分页失败关闭；版本固定由 `PDF_CHROMIUM_VERSION` 与发布验收共同约束。后台 PDF 支持持久共享卷及 private OSS，产物可重复读取而非读后删除，仍由路由验证用户/版本。该规则取代此前 PDF 仅单机、读后删除的描述，其他 XLSX/CDR 存储契约不变。单张 PDF 的所有入口（普通下载、失败页重新生成）在同一事务里先取该授权范围的 `pg_advisory_xact_lock`，有在途任务则复用，否则按 15 分钟窗口键或重新生成锚点创建 / 复活，同一授权范围不会同时有两个在途任务（`lib/background-jobs/pdf.ts`）。范围与未验收条件见 [跨设备打印](./docs/跨设备打印与可用性.md)。
 
 
 ### 工单批量 PDF
@@ -238,3 +243,7 @@ worker 逐单复用生产打印模板，以 pdf-lib 合并页，进度更新遵�
 创建、预览、首次提交与改单新增/身份切换检查当前正价。历史同身份上下文仅由持订单锁的领域读取提供，停售时只替换材料项，缺少已确认材料依据则要求管理员补核；完成的幂等请求仍复用原结果。补核通过独立授权查询与 Action 暴露，师傅 DTO 不含价格。
 
 BOM 在原版本机制内支持纸张＋规格目标；历史产品目标保留，默认分类 Setting 只用于生产用料。菜单与旧组合写路径删除，旧URL仅鉴权分流。具体模型和操作见[数据库](./DATABASE.md#2026-09-20-空白封按单价管理)与[空白封说明](./docs/空白封纸张规格管理-20260913.md)。
+
+### 无计薪进度授权补充（2026-09-21）
+
+无计薪进度的列表、详情及提交在领域层共享 `lib/production/progress-reporter-lane.ts` 的工艺岗位/机型匹配。步骤 craftId 必须属于当前在职 WORKER 对应的有效自产工艺集合；写入在事务内复核。无配置不放行，不依赖前端隐藏或个人推荐熟练项。生产打印仍由独立 print-access 规则控制（用途权限待业务决策，不以进度页授权替代）。

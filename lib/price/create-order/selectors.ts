@@ -44,11 +44,18 @@ export function selectFullUnitPrice(
   return matches.length === 1 ? matches[0]! : null;
 }
 
+/** Color-print quantities above this are never priced automatically. */
+export const PRINT_AUTOMATIC_QUANTITY_LIMIT = 20_000;
+
 export function resolvePrintTierQuantity(
   quantity: number,
   availableTiers: readonly number[],
 ): number | null {
-  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 20_000) {
+  if (
+    !Number.isSafeInteger(quantity) ||
+    quantity < 1 ||
+    quantity > PRINT_AUTOMATIC_QUANTITY_LIMIT
+  ) {
     return null;
   }
   if (quantity <= 5_000) {

@@ -7,6 +7,7 @@ import {
   ProductionOperationStatus,
   Role,
 } from '../../generated/prisma/enums';
+import { ORDER_EXTERNAL_SALES_SELECT, orderExternalSalesName } from './external-sales-name';
 import { getOrderPrintScope } from './print-access';
 import { productionOperationPassCount } from '../production/operation-quantity';
 import { signDesignReadUrl } from '../oss/read-url';
@@ -173,8 +174,7 @@ function buildCurrentProductionSteps(input: {
 
 // Loads the narrow shape the production print layout needs. SALES uses the
 // customer-facing list drawer and must not receive a production sheet (it
-// contains internal production details). CUSTOMER_SERVICE can
-// print its own submissions, ADMIN sees everything, and WORKER sees only
+// contains internal production details). ADMIN sees everything, and WORKER sees only
 // current-version orders in its reporting lane or with public progress.
 // Returns null when the actor can't see the order — the page
 // maps that to notFound() so there's no "this order exists but you
@@ -193,8 +193,8 @@ export async function getOrderForPrint(
   const order = await db.order.findFirst({
     where,
     include: {
-      customerParty: { select: { name: true } },
-      sourceOrder: { select: { orderNo: true } },
+      submitter: ORDER_EXTERNAL_SALES_SELECT.submitter,
+      sourceOrder: { select: { orderNo: true, ...ORDER_EXTERNAL_SALES_SELECT.sourceOrder.select } },
       changeRequests: {
         where: { status: OrderChangeRequestStatus.PENDING },
         take: 1,
@@ -412,9 +412,7 @@ export async function getOrderForPrint(
     isUrgent: order.isUrgent,
     isSfCollect: order.isSfCollect,
     promisedDate: order.promisedDate,
-    customerName:
-      order.customerParty?.name?.trim() || order.customerRef?.trim() || null,
-    customerRef: order.customerRef,
+    externalSalesName: orderExternalSalesName(order),
     receiverName: order.receiverName,
     receiverPhone: order.receiverPhone,
     receiverAddress: order.receiverAddress,

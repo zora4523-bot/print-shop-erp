@@ -52,7 +52,6 @@ import {
   formatPartyAddress,
   listParties,
   listPartiesPage,
-  listCustomerPartyOptions,
   listSupplierPartyOptions,
   PartyInvariantError,
   setPartyActive,
@@ -229,31 +228,6 @@ describe('listSupplierPartyOptions', () => {
   });
 });
 
-describe('listCustomerPartyOptions', () => {
-  it('only asks for active CUSTOMER/BOTH rows and maps the default delivery facts', async () => {
-    dbMock.party.findMany.mockResolvedValue([makeParty()]);
-
-    const options = await listCustomerPartyOptions();
-
-    expect(dbMock.party.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          isActive: true,
-          OR: [{ type: PartyType.CUSTOMER }, { type: PartyType.BOTH }],
-        },
-      }),
-    );
-    expect(options[0]).toMatchObject({
-      code: 'CUST_001',
-      name: '苹果福',
-      shortName: '苹果',
-      receiverName: '王小姐',
-      receiverPhone: '13800000000',
-      receiverAddress: '广东广州番禺市桥街道 1 号',
-    });
-  });
-});
-
 describe('createParty', () => {
   it('generates a party code when the operator leaves it blank', async () => {
     dbMock.businessCodeSequence.upsert.mockResolvedValueOnce({ value: 8 });
@@ -342,7 +316,7 @@ describe('updateParty', () => {
         defaultCity: null,
         defaultDistrict: null,
         defaultAddressDetail: null,
-      }),
+      }, { id: 'admin', role: 'ADMIN', username: 'admin', displayName: 'Admin' }),
     ).rejects.toBeInstanceOf(PartyInvariantError);
   });
 
@@ -368,7 +342,7 @@ describe('updateParty', () => {
         defaultCity: null,
         defaultDistrict: null,
         defaultAddressDetail: null,
-      }),
+      }, { id: 'admin', role: 'ADMIN', username: 'admin', displayName: 'Admin' }),
     ).rejects.toThrowError(/不能移除供应商类型/);
     expect(txMock.party.update).not.toHaveBeenCalled();
   });
@@ -395,7 +369,7 @@ describe('updateParty', () => {
         defaultCity: null,
         defaultDistrict: null,
         defaultAddressDetail: null,
-      }),
+      }, { id: 'admin', role: 'ADMIN', username: 'admin', displayName: 'Admin' }),
     ).rejects.toThrowError(/不能移除客户类型/);
     expect(txMock.party.update).not.toHaveBeenCalled();
   });

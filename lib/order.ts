@@ -1,20 +1,22 @@
 import { OrderItemPricingRoute } from '../generated/prisma/enums';
 import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './order/blank-price-admission';
-import { createOrderRequestFingerprint, matchesCreateOrderRequest } from './order/create-request-fingerprint';
+import {
+  acceptedCreateOrderRequestFingerprints,
+  createOrderRequestFingerprint,
+  matchesCreateOrderRequest,
+} from './order/create-request-fingerprint';
 import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from './rules/paper-availability';
 import { finalizeSampleOrderInTx, SampleOrderError, SampleQuoteChangedError } from './order/sample-order';
 import { createOrderSchema } from './auth/schemas';
 import { isSampleOrder } from './order/purpose';
-import { subtotalReconciles } from './order/subtotal-reconciliation';
-import { salesCustomerScope } from './order/sales-customer-policy';
+import { orderItemMessageLabel, type OrderItemIdentity } from './order/item-label';
+import { duplicateDesignNameMessage, findDuplicateDesignNames } from './order/design-groups';
 import { planOrderShipmentEdits, OrderShipmentEditError, type EditableShipment } from './order/edit-shipment-fields';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import { calculateAdminCreatePrice, adminCreatePriceFactsKey, calculateAdminPackagingPrice, adminPackagingPriceFactsKey } from './order/admin-create-price';
 import { buildTrustedAdminItemPricingSnapshot, buildTrustedAdminPackagingPricingSnapshot } from './order/admin-pricing-snapshot';
 import {
-  CsSalesEntryType,
-  CustomerPriceBookPurpose,
   DesignFileType,
   OrderBillingMode,
   OrderChangeRequestStatus,
@@ -27,7 +29,6 @@ import {
   OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
-  PartyType,
   Prisma,
   ProductionOperationStatus,
   Role,
@@ -55,6 +56,10 @@ import {
   type ExternalSalesAccountOption,
 } from './order/external-sales-association';
 import {
+  ORDER_EXTERNAL_SALES_SELECT,
+  orderExternalSalesName,
+} from './order/external-sales-name';
+import {
   collectOutsourceCraftIds,
   findUndercoveredOutsourceItems,
   outsourceCoverageApplies,
@@ -69,18 +74,8 @@ import { dispatchNotification } from './notification/dispatch';
 import { enqueueNotificationInTransaction } from './notification/transactional-outbox';
 import type { EnqueueClient } from './background-jobs/repository';
 import { backgroundJobsMode } from './background-jobs/mode';
-import {
-  assertCsOrderSalesLedgerReconciledInTx,
-  CsSalesLedgerError,
-  recordCsSalesEntryInTx,
-  csSalesBasisAmountInTx,
-} from './salary/cs-sales';
-import { hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics, settlementTypeForOrderCreator } from './order/settlement';
-import {
-  calculateCreateOrderQuoteFromCatalogInTx,
-  CreateOrderQuoteError,
-  type CatalogCreateOrderQuoteCalculation,
-} from './order/create-order-quote-service';
+import { isDirectCancelStatus } from './order/direct-cancel';
+import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE, hasLogisticsChargeRows, LOGISTICS_CHARGE_CATEGORY_CODES, orderBillsLogistics, settlementBillsLogistics } from './order/settlement';
 import {
   OrderCustomerChargeError,
   resolveExternalOrderChargesForFinalization,
@@ -100,16 +95,9 @@ import {
   type FulfillmentPricingMutationGuard,
 } from './order/fulfillment-pricing';
 import {
-  PendingPlateChargeError,
-  quoteHasPendingPlateCharge,
-  requireActivePlateCategoryIdInTx,
-  upsertPendingPlateChargeInTx,
-} from './order/pending-plate-charge';
-import {
   LEGACY_STOCK_FOIL_CRAFT_CODE,
   STOCK_LOCAL_FOIL_CRAFT_CODE,
   deriveLegacyOrderItemFoilFacts,
-  isNewOrderPricingRoute,
 } from './order/pricing-route';
 import {
   calculateCreateOrderBagCount,
@@ -123,12 +111,6 @@ import {
 } from './order/submit-external-order';
 import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
-
-export {
-  listOrders,
-  listOrdersPage,
-  type OrderListRow,
-} from './order/list-query';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -149,43 +131,17 @@ export class OrderQuoteChangedError extends Error {
   }
 }
 
-const DECIMAL_10_4_MAX = new Decimal('999999.9999');
 const DECIMAL_12_2_MAX = new Decimal('9999999999.99');
 const ORDER_TOTAL_LIMIT_MESSAGE =
   '工单总金额超过系统上限 9,999,999,999.99 元';
 
-function assertOrderQuantity(quantity: number, itemName: string): void {
+function assertOrderQuantity(item: OrderItemIdentity & { quantity: number }): void {
+  const { quantity } = item;
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9_999_999) {
     throw new OrderInvariantError(
-      `款式“${itemName}”数量必须是 1 至 9,999,999 的整数`,
+      `${orderItemMessageLabel(item)}数量必须是 1 至 9,999,999 的整数`,
     );
   }
-}
-
-function assertStorableMoney(
-  value: string,
-  itemName: string,
-  label: string,
-  max: Decimal,
-  scale: number,
-): Decimal {
-  let amount: Decimal;
-  try {
-    amount = new Decimal(value);
-  } catch {
-    throw new OrderInvariantError(`款式“${itemName}”${label}格式非法`);
-  }
-  if (
-    !amount.isFinite() ||
-    amount.isNegative() ||
-    amount.decimalPlaces() > scale ||
-    amount.gt(max)
-  ) {
-    throw new OrderInvariantError(
-      `款式“${itemName}”${label}超出系统允许范围`,
-    );
-  }
-  return amount;
 }
 
 function assertStorableOrderTotal(value: string): void {
@@ -203,29 +159,6 @@ function assertStorableOrderTotal(value: string): void {
   ) {
     throw new OrderInvariantError(ORDER_TOTAL_LIMIT_MESSAGE);
   }
-}
-
-function rethrowCreateOrderQuoteError(error: unknown): never {
-  if (!(error instanceof CreateOrderQuoteError)) throw error;
-  if (error.message.includes('整单已知金额合计超过可保存上限')) {
-    throw new OrderInvariantError(ORDER_TOTAL_LIMIT_MESSAGE);
-  }
-  throw new OrderInvariantError(error.message);
-}
-
-// Decimal(12,2) column — 12 total digits, 2 after the point. Quantity is
-// an int and unitPrice is a string like '0.1234'. The multiplication must
-// happen in Decimal.js to preserve precision (plain JS floats round).
-function computeSubtotal(
-  quantity: number,
-  unitPrice: string | null,
-  fixedFee: string | null | undefined,
-): string {
-  const price = new Decimal(unitPrice ?? '0');
-  return price
-    .times(quantity)
-    .plus(new Decimal(fixedFee ?? '0'))
-    .toFixed(2);
 }
 
 function sumTotals(subtotals: string[]): string {
@@ -340,10 +273,9 @@ type CreateOrderCommand = Omit<
   | 'items'
   | 'additionalShipments'
   | 'packagingGroups'
-  | 'customerPartyId'
   | ShipmentChargeField
 > &
-  Partial<Pick<CreateOrderInput, ShipmentChargeField | 'customerPartyId'>> & {
+  Partial<Pick<CreateOrderInput, ShipmentChargeField>> & {
     items: CreateOrderItemCommand[];
     additionalShipments?: AdditionalShipmentCommand[];
     packagingGroups?: CreateOrderInput['packagingGroups'];
@@ -614,6 +546,7 @@ export async function createOrder(
   now: Date = new Date(),
 ): Promise<CreatedOrderSummary> {
   const requestFingerprint = createOrderRequestFingerprint(input);
+  const acceptedRequestFingerprints = acceptedCreateOrderRequestFingerprints(input);
   const special = isSampleOrder(input.purpose);
   const sampleShipment = input.purpose === 'SAMPLE_SHIPMENT';
   if (special) {
@@ -628,10 +561,17 @@ export async function createOrder(
   if (externalSalesUserId && actor.role !== Role.ADMIN) {
     throw new OrderInvariantError('只有管理员可以关联外部销售');
   }
+  // 业主 2026-09-24：所有业务都以外部销售身份开展。销售本人建单；管理员
+  // 代建必须指定一个启用的外部销售，工单归属该销售并按 EXTERNAL_SALES 结算。
+  if (actor.role === Role.ADMIN) {
+    if (!externalSalesUserId) {
+      throw new OrderInvariantError(ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE);
+    }
+  } else if (actor.role !== Role.SALES) {
+    throw new OrderInvariantError('当前账号不能创建工单');
+  }
   const submitterId = externalSalesUserId ?? actor.id;
-  const settlementType = externalSalesUserId
-    ? OrderSettlementType.EXTERNAL_SALES
-    : settlementTypeForOrderCreator(actor.role);
+  const settlementType = OrderSettlementType.EXTERNAL_SALES;
   for (const item of input.items) {
     if (
       item.pack != null &&
@@ -647,8 +587,6 @@ export async function createOrder(
   if (hasRetiredPaperItem(input.items)) {
     throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
   }
-  const isExternalSalesDraft =
-    settlementType === OrderSettlementType.EXTERNAL_SALES || special;
   if (!input.receiverAddress?.trim()) {
     throw new OrderInvariantError('请填写收货地址');
   }
@@ -670,6 +608,10 @@ export async function createOrder(
   );
   if (new Set(resolvedItemFigs).size !== resolvedItemFigs.length) {
     throw new OrderInvariantError('款式编号不能重复');
+  }
+  const duplicateDesignName = findDuplicateDesignNames(input.items)[0];
+  if (duplicateDesignName) {
+    throw new OrderInvariantError(duplicateDesignNameMessage(duplicateDesignName.name));
   }
   const minimumNextItemFig = Math.max(...resolvedItemFigs) + 1;
   if (
@@ -700,7 +642,7 @@ export async function createOrder(
         ) {
           throw new OrderInvariantError('提交标识已被其他账号使用');
         }
-        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, acceptedRequestFingerprints)) {
           throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
         }
         return {
@@ -770,113 +712,12 @@ export async function createOrder(
     // is a review aid, not a financial write: the submit finalizer re-quotes
     // persisted facts, locks price versions and creates revision 1 atomically.
     // Internal settlement keeps its existing create-time quote behavior.
-    for (const item of items) {
-      assertOrderQuantity(item.quantity, item.name);
+    for (const [index, item] of items.entries()) {
+      assertOrderQuantity({ ...item, sequence: index + 1 });
     }
-    const customerPartyId =
-      actor.role === Role.ADMIN ? null : input.customerPartyId ?? null;
-    if (customerPartyId) {
-      const customer = await txClient.party.findUnique({
-        where: { id: customerPartyId },
-        select: { id: true, type: true, isActive: true },
-      });
-      if (actor.role === Role.SALES && !await txClient.party.findFirst({ where: { id: customerPartyId, ...salesCustomerScope(actor.id) }, select: { id: true } })) {
-        throw new OrderInvariantError('只能选择自己关联的客户');
-      }
-      if (!customer || !customer.isActive) {
-        throw new OrderInvariantError('所选客户不存在或已停用');
-      }
-      if (
-        customer.type !== PartyType.CUSTOMER &&
-        customer.type !== PartyType.BOTH
-      ) {
-        throw new OrderInvariantError('所选往来单位不是客户');
-      }
-    }
-    let internalQuote: CatalogCreateOrderQuoteCalculation | null = null;
-    if (!isExternalSalesDraft) {
-      try {
-        const itemKeys = items.map((_, index) => String(index + 1));
-        const primaryQuantities = items.map((item, itemIndex) => {
-          const extraQuantity = additionalShipments.reduce(
-            (sum, shipment) =>
-              sum + (shipment.itemQuantities[itemIndex] ?? 0),
-            0,
-          );
-          return item.quantity - extraQuantity;
-        });
-        internalQuote = await calculateCreateOrderQuoteFromCatalogInTx(tx, {
-          now,
-          includeOrderCharges: false,
-          facts: {
-            items: items.map((item, index) => {
-              if (!isNewOrderPricingRoute(item.pricingRoute)) {
-                throw new OrderInvariantError(
-                  `款式“${item.name}”必须选择有效计价路线`,
-                );
-              }
-              return {
-                ...item,
-                pricingRoute: item.pricingRoute,
-                itemKey: itemKeys[index]!,
-                fig: resolvedItemFigs[index]!,
-                productId: item.productId ?? null,
-                specification: item.specification ?? null,
-                actualWidthMm: item.actualWidthMm ?? null,
-                actualHeightMm: item.actualHeightMm ?? null,
-                paperType: item.paperType ?? null,
-                paperWeightGsm: item.paperWeightGsm ?? null,
-                frontFoilColors: item.frontFoilColors,
-                backFoilColors: item.backFoilColors,
-                manualQuoteReason: item.manualQuoteReason ?? null,
-              };
-            }),
-            packagingGroups: packagingGroups.map((group, groupIndex) => ({
-              groupKey: String(groupIndex + 1),
-              mode: group.mode,
-              actualBagCount: group.actualBagCount,
-              items: group.itemUnitsPerBag.flatMap(
-                (unitsPerBag, itemIndex) =>
-                  unitsPerBag > 0 && itemKeys[itemIndex]
-                    ? [
-                        {
-                          itemKey: itemKeys[itemIndex]!,
-                          unitsPerBag,
-                        },
-                      ]
-                    : [],
-              ),
-            })),
-            isSfCollect: false,
-            shipments: [
-              {
-                shipmentKey: '1',
-                province: input.destinationProvince ?? null,
-                itemQuantities: Object.fromEntries(
-                  itemKeys.map((itemKey, index) => [
-                    itemKey,
-                    primaryQuantities[index] ?? 0,
-                  ]),
-                ),
-              },
-              ...additionalShipments.map((shipment, shipmentIndex) => ({
-                shipmentKey: String(shipmentIndex + 2),
-                province: shipment.destinationProvince ?? null,
-                itemQuantities: Object.fromEntries(
-                  itemKeys.map((itemKey, index) => [
-                    itemKey,
-                    shipment.itemQuantities[index] ?? 0,
-                  ]),
-                ),
-              })),
-            ],
-          },
-        });
-      } catch (error) {
-        rethrowCreateOrderQuoteError(error);
-      }
-    }
-
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）：命令里即便带着
+    // customerRef / customerPartyId 也不校验、不写库，新工单的客户字段恒为空；
+    // “是谁的单”统一看工单归属的外部销售（lib/order/external-sales-name.ts）。
     // (4) product FK check — one batch findMany over the distinct ids
     // (was per-item findUnique: a 10-item order paid up to 10 round
     // trips inside the tx). No productId → no query at all. Deliberately
@@ -885,213 +726,37 @@ export async function createOrder(
     await assertCreateOrderProductsInTx(txClient, items.filter((item) => item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK));
 
     // (5) processing totals and per-shipment allocation facts.
-    const automaticItems = items.map((it, index) => {
-      if (isExternalSalesDraft) {
-        return {
-          ...it,
-          priceOverrideReason: null,
-          unitPrice: '0',
-          fixedFee: '0',
-          subtotal: '0.00',
-          suggestedSubtotal: null,
-          quoteDisposition: null,
-          quotedAmount: null,
-          requiresAdminConfirmation: true,
-          pricingSnapshot: null,
-        };
-      }
-
-      const quote = internalQuote!.quote.items[index];
-      const presentation = internalQuote!.processing.items[index];
-      if (!quote || !presentation || quote.itemKey !== String(index + 1)) {
-        throw new OrderInvariantError(
-          `款式“${it.name}”的纯引擎结果与建单事实不一致`,
-        );
-      }
-      if (quote.status === 'MANUAL_PRICING_REQUIRED' || (it.adminPrice && quote.status !== 'QUOTED')) {
-        return {
-          ...it,
-          manualQuoteReason: it.manualQuoteReason?.trim() || null,
-          priceOverrideReason: null,
-          unitPrice: '0',
-          fixedFee: '0',
-          subtotal: '0.00',
-          suggestedSubtotal: null,
-          quoteDisposition:
-            OrderItemQuoteDisposition.MANUAL_PRICING_REQUIRED,
-          quotedAmount: null,
-          requiresAdminConfirmation: true,
-          pricingSnapshot: {
-            ...presentation.snapshot,
-            // Compatibility fence for OrderItem_suggested_snapshot_consistent.
-            // The pure-engine schemaVersion remains unchanged; `version` is
-            // the legacy persistence envelope expected by the database.
-            version: 1,
-            source: 'INTERNAL_CREATE_MANUAL_REQUIRED',
-            quotedAt: now.toISOString(),
-            actual: {
-              amount: null,
-              overrideReason: null,
-              provisional: true,
-            },
-          } satisfies Prisma.InputJsonObject,
-        };
-      }
-
-      if (
-        quote.status !== 'QUOTED' ||
-        !presentation.complete ||
-        presentation.suggestedUnitPrice === null ||
-        presentation.suggestedFixedFee === null ||
-        presentation.suggestedSubtotal === null
-      ) {
-        const details = [...quote.errors, ...presentation.errors].join('；');
-        throw new OrderInvariantError(
-          `款式“${it.name}”无法生成可保存的自动报价${details ? `：${details}` : ''}`,
-        );
-      }
-      const unitPrice = presentation.suggestedUnitPrice;
-      const fixedFee = presentation.suggestedFixedFee;
-      const subtotal = presentation.suggestedSubtotal;
-      assertStorableMoney(
-        unitPrice,
-        it.name,
-        '成交单价',
-        DECIMAL_10_4_MAX,
-        4,
-      );
-      assertStorableMoney(
-        fixedFee,
-        it.name,
-        '一次性费用',
-        DECIMAL_12_2_MAX,
-        2,
-      );
-      assertStorableMoney(
-        subtotal,
-        it.name,
-        '款式小计',
-        DECIMAL_12_2_MAX,
-        2,
-      );
-      if (
-        !subtotalReconciles(computeSubtotal(it.quantity, unitPrice, fixedFee),
-          subtotal,
-        )
-      ) {
-        throw new OrderInvariantError(
-          `款式“${it.name}”纯引擎分项与小计不一致`,
-        );
-      }
-      return {
-        ...it,
-        priceOverrideReason: null,
-        unitPrice,
-        fixedFee,
-        subtotal,
-        suggestedSubtotal: subtotal,
-        quoteDisposition: OrderItemQuoteDisposition.PRICED,
-        quotedAmount: subtotal,
-        requiresAdminConfirmation: false,
-        pricingSnapshot: {
-          ...presentation.snapshot,
-          version: 1,
-          source: 'INTERNAL_CREATE_AUTO',
-          quotedAt: now.toISOString(),
-          actual: {
-            unitPrice,
-            fixedFee,
-            subtotal,
-            overrideReason: null,
-            provisional: false,
-          },
-        } satisfies Prisma.InputJsonObject,
-      };
-    });
+    // Every create is an external-sales draft: amounts are server-owned and
+    // priced by the submit finalizer; only explicit admin prices apply now.
+    const automaticItems = items.map((it) => ({
+      ...it,
+      priceOverrideReason: null,
+      unitPrice: '0',
+      fixedFee: '0',
+      subtotal: '0.00',
+      suggestedSubtotal: null,
+      quoteDisposition: null,
+      quotedAmount: null,
+      requiresAdminConfirmation: true,
+      pricingSnapshot: null,
+    }));
     const itemsWithSubtotals = automaticItems.map(applyAdminCreateItemPrice);
-    const adminPriceDelta = itemsWithSubtotals.reduce((sum, item, index) =>
-      sum.plus(item.subtotal).minus(automaticItems[index].subtotal), new Decimal(0));
     const itemProcessingAmount = sumTotals(
       itemsWithSubtotals.map((i) => i.subtotal),
     );
-    if (
-      !isExternalSalesDraft &&
-      (internalQuote!.quote.packagingGroups.length !== packagingGroups.length ||
-        internalQuote!.processing.packaging.groups.length !==
-          packagingGroups.length)
-    ) {
-      throw new OrderInvariantError('纯引擎包装组结果与建单事实不一致');
-    }
-    const automaticPackagingGroups = packagingGroups.map((group, index) => {
-      if (isExternalSalesDraft) return {
-        ...group,
-        unitPrice: '0.0000',
-        subtotal: '0.00',
-        suggestedSubtotal: null,
-        complete: false,
-        pricingSnapshot: null,
-      };
-      const quote = internalQuote!.quote.packagingGroups[index];
-      const presentation = internalQuote!.processing.packaging.groups[index];
-      if (!quote || !presentation || quote.groupKey !== String(index + 1)) {
-        throw new OrderInvariantError(
-          `包装组 ${index + 1} 的纯引擎结果与建单事实不一致`,
-        );
-      }
-      if (
-        quote.status === 'QUOTED' &&
-        presentation.complete &&
-        presentation.suggestedUnitPrice !== null &&
-        presentation.suggestedSubtotal !== null
-      ) {
-        return {
-          ...group,
-          unitPrice: presentation.suggestedUnitPrice,
-          subtotal: presentation.suggestedSubtotal,
-          suggestedSubtotal: presentation.suggestedSubtotal,
-          complete: true,
-          pricingSnapshot: {
-            ...presentation.snapshot,
-            source: 'INTERNAL_CREATE_AUTO',
-            quotedAt: now.toISOString(),
-            actual: {
-              unitPrice: presentation.suggestedUnitPrice,
-              subtotal: presentation.suggestedSubtotal,
-              overrideReason: null,
-              provisional: false,
-            },
-          } satisfies Prisma.InputJsonObject,
-        };
-      }
-      if (quote.status === 'EXCLUDED_MANUAL' || group.adminPrice) {
-        return {
-          ...group,
-          unitPrice: '0.0000',
-          subtotal: '0.00',
-          suggestedSubtotal: null,
-          complete: false,
-          pricingSnapshot: {
-            ...presentation.snapshot,
-            source: 'INTERNAL_CREATE_MANUAL_REQUIRED',
-            quotedAt: now.toISOString(),
-            actual: {
-              amount: null,
-              overrideReason: null,
-              provisional: true,
-            },
-          } satisfies Prisma.InputJsonObject,
-        };
-      }
-      throw new OrderInvariantError(
-        `包装组 ${index + 1} 无法生成可保存的入袋报价${presentation.errors.length > 0 ? `：${presentation.errors.join('；')}` : ''}`,
-      );
-    });
+    const automaticPackagingGroups = packagingGroups.map((group) => ({
+      ...group,
+      unitPrice: '0.0000',
+      subtotal: '0.00',
+      suggestedSubtotal: null,
+      complete: false,
+      pricingSnapshot: null,
+    }));
     const packagingGroupsWithPrices = automaticPackagingGroups.map((group): Omit<typeof group, 'pricingSnapshot'> & { pricingSnapshot: Prisma.InputJsonObject | null; priceOverrideReason: string | null } => {
       if (!group.adminPrice) return { ...group, priceOverrideReason: null };
       try { return { ...group, ...calculateAdminPackagingPrice(group.adminPrice, group.actualBagCount), complete: true }; }
       catch (error) { throw new OrderInvariantError(error instanceof Error ? error.message : '包装价格无效'); }
     });
-    const adminPackagingDelta = packagingGroupsWithPrices.reduce((sum, group, index) => sum.plus(group.subtotal).minus(automaticPackagingGroups[index].subtotal), new Decimal(0));
     const packagingAmount = sumTotals(
       packagingGroupsWithPrices.map((group) => group.subtotal),
     );
@@ -1099,13 +764,6 @@ export async function createOrder(
       .plus(packagingAmount)
       .toFixed(2);
     assertStorableOrderTotal(processingAmount);
-    if (
-      !isExternalSalesDraft &&
-      !new Decimal(processingAmount).minus(adminPriceDelta).minus(adminPackagingDelta).equals(internalQuote!.quote.knownTotal)
-    ) {
-      throw new OrderInvariantError('建单持久化合计与纯引擎已知合计不一致');
-    }
-
     const primaryQuantities = items.map((item, itemIndex) => {
       const extraQuantity = additionalShipments.reduce(
         (sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0),
@@ -1113,7 +771,7 @@ export async function createOrder(
       );
       return item.quantity - extraQuantity;
     });
-    let shipmentInputs = [
+    const draftShipmentInputs = [
       {
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
@@ -1123,124 +781,62 @@ export async function createOrder(
         // External sales create orders from a browser and cannot establish a
         // carrier billable weight. The browser value is discarded here; only
         // validated item/allocation facts are kept for the submit finalizer's
-        // server-owned weight policy. Non-external callers keep their shape.
-        quotedWeightKg:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.quotedWeightKg ?? null,
-        shippingFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.shippingFee ?? null,
-        packingMaterialFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.packingMaterialFee ?? null,
-        customerChargeOverrideReason:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : input.customerChargeOverrideReason ?? null,
+        // server-owned weight policy.
+        quotedWeightKg: null,
+        shippingFee: null,
+        packingMaterialFee: null,
+        customerChargeOverrideReason: null,
         itemQuantities: primaryQuantities,
       },
       ...additionalShipments.map((shipment) => ({
         ...shipment,
         destinationProvince: shipment.destinationProvince ?? null,
-        quotedWeightKg:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.quotedWeightKg ?? null,
-        shippingFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.shippingFee ?? null,
-        packingMaterialFee:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.packingMaterialFee ?? null,
-        customerChargeOverrideReason:
-          settlementType === OrderSettlementType.EXTERNAL_SALES
-            ? null
-            : shipment.customerChargeOverrideReason ?? null,
+        quotedWeightKg: null,
+        shippingFee: null,
+        packingMaterialFee: null,
+        customerChargeOverrideReason: null,
       })),
     ];
 
-    const externalChargeShipments =
-      settlementType === OrderSettlementType.EXTERNAL_SALES
-        ? deriveExternalOrderChargeShipments({
-            isSfCollect: input.isSfCollect,
-            items: items.map((item, index) => ({
-              itemKey: String(index + 1),
-              quantity: item.quantity,
-              paperWeightGsm: item.paperWeightGsm,
-              paperType: item.paperType,
-              productStructure: item.productStructure,
-            })),
-            shipments: shipmentInputs.map((shipment, index) => ({
-              shipmentKey: String(index + 1),
-              province: shipment.destinationProvince,
-              billableWeightKg: shipment.quotedWeightKg,
-              itemQuantities: shipment.itemQuantities,
-            })),
-          })
-        : null;
-    if (externalChargeShipments) {
-      shipmentInputs = shipmentInputs.map((shipment, index) => ({
-        ...shipment,
-        quotedWeightKg:
-          externalChargeShipments[index]?.billableWeightKg ?? null,
-      }));
-    }
-
-    const suppliedCustomerChargeFacts = shipmentInputs.some(
-      (shipment) =>
-        shipment.shippingFee != null ||
-        shipment.packingMaterialFee != null ||
-        shipment.customerChargeOverrideReason != null,
-    );
-    if (
-      settlementType !== OrderSettlementType.EXTERNAL_SALES &&
-      suppliedCustomerChargeFacts
-    ) {
-      throw new OrderInvariantError(
-        '快递费与打包耗材应收仅适用于外部销售结算工单',
-      );
-    }
+    const externalChargeShipments = deriveExternalOrderChargeShipments({
+      isSfCollect: input.isSfCollect,
+      items: items.map((item, index) => ({
+        itemKey: String(index + 1),
+        quantity: item.quantity,
+        paperWeightGsm: item.paperWeightGsm,
+        paperType: item.paperType,
+        productStructure: item.productStructure,
+      })),
+      shipments: draftShipmentInputs.map((shipment, index) => ({
+        shipmentKey: String(index + 1),
+        province: shipment.destinationProvince,
+        billableWeightKg: shipment.quotedWeightKg,
+        itemQuantities: shipment.itemQuantities,
+      })),
+    });
+    const shipmentInputs = draftShipmentInputs.map((shipment, index) => ({
+      ...shipment,
+      quotedWeightKg:
+        externalChargeShipments[index]?.billableWeightKg ?? null,
+    }));
 
     // No customer charge is materialized for an external DRAFT. The submit
     // finalizer prices these persisted shipment/item facts under one snapshot.
     const totalAmount = processingAmount;
     assertStorableOrderTotal(totalAmount);
-    const requiresAdminPricing =
-      isExternalSalesDraft ||
-      itemsWithSubtotals.some((item) => item.requiresAdminConfirmation) ||
-      packagingGroupsWithPrices.some((group) => !group.complete) ||
-      Boolean(internalQuote && quoteHasPendingPlateCharge(internalQuote.quote));
-    const pricingStatus = requiresAdminPricing
-      ? ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION
-      : hasAdminPrices ? ORDER_PRICING_STATUS.ADMIN_CONFIRMED : ORDER_PRICING_STATUS.AUTO_CONFIRMED;
-    let internalPlateCategoryId: string | null = null;
-    const internalHasPendingPlate =
-      !isExternalSalesDraft &&
-      quoteHasPendingPlateCharge(internalQuote!.quote);
-    if (internalHasPendingPlate) {
-      try {
-        internalPlateCategoryId = await requireActivePlateCategoryIdInTx(tx);
-      } catch (error) {
-        if (error instanceof PendingPlateChargeError) {
-          throw new OrderInvariantError(error.message);
-        }
-        throw error;
-      }
-    }
+    // External drafts are always priced by the admin/submit finalizer.
+    const pricingStatus = ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
 
     // (5) one nested write: Order + items + first OrderLog.
     const created = await txClient.order.create({
       data: {
         orderNo,
         submitterId,
-        submitterRole: externalSalesUserId ? Role.SALES : actor.role,
+        submitterRole: Role.SALES,
         createdById: actor.id,
-        customerPartyId,
+        // 客户字段已退役：无论命令里带什么，一律写空（见上方说明）。
+        customerPartyId: null,
+        customerRef: null,
         status: OrderStatus.DRAFT,
         purpose: input.purpose ?? 'STANDARD',
         pricingMode: input.purpose === 'PROOF' ? 'MANUAL_TOTAL' : 'ITEMIZED',
@@ -1253,7 +849,6 @@ export async function createOrder(
         isUrgent: input.isUrgent,
         isSfCollect: input.isSfCollect,
         customName: input.customName ?? null,
-        customerRef: actor.role === Role.ADMIN ? null : input.customerRef,
         receiverName: input.receiverName,
         receiverPhone: input.receiverPhone,
         receiverAddress: input.receiverAddress,
@@ -1265,9 +860,9 @@ export async function createOrder(
         processingAmount,
         totalAmount,
         pricingStatus,
-        priceRevision: isExternalSalesDraft ? 0 : 1,
-        pricingConfirmedAt: requiresAdminPricing ? null : now,
-        pricingConfirmedById: hasAdminPrices && !requiresAdminPricing ? actor.id : null,
+        priceRevision: 0,
+        pricingConfirmedAt: null,
+        pricingConfirmedById: null,
         items: {
           create: itemsWithSubtotals.map((it, idx) => ({
             sequence: idx + 1,
@@ -1344,24 +939,6 @@ export async function createOrder(
     });
 
     await confirmCreatedAdminItemPricesInTx(txClient, created.id, itemsWithSubtotals, actor.id, now);
-
-    if (internalHasPendingPlate) {
-      try {
-        await upsertPendingPlateChargeInTx({
-          tx,
-          orderId: created.id,
-          actorId: actor.id,
-          categoryId: internalPlateCategoryId!,
-          quote: internalQuote!.quote,
-          source: 'INTERNAL_CREATE_PENDING_PLATE',
-        });
-      } catch (error) {
-        if (error instanceof PendingPlateChargeError) {
-          throw new OrderInvariantError(error.message);
-        }
-        throw error;
-      }
-    }
 
     const itemBySequence = new Map(
       created.items.map((item) => [item.sequence, item.id]),
@@ -1441,105 +1018,6 @@ export async function createOrder(
       }
     }
 
-    if (!isExternalSalesDraft) {
-      await txClient.orderPricingRevision.create({
-        data: {
-          orderId: created.id,
-          revision: 1,
-          status: pricingStatus,
-          source: hasAdminPrices ? 'ORDER_CREATED_ADMIN' : requiresAdminPricing
-            ? 'ORDER_CREATED_PROVISIONAL'
-            : 'ORDER_CREATED_AUTO',
-          createdById: actor.id,
-          createdAt: now,
-          priceVersionLocks: {
-            create: [
-              {
-                purpose: CustomerPriceBookPurpose.PROCESSING,
-                priceBookId: internalQuote!.quote.priceVersion.processing.id,
-                priceBookVersion:
-                  internalQuote!.quote.priceVersion.processing.version,
-                sourceSha256:
-                  internalQuote!.quote.priceVersion.processing.sourceSha256,
-                createdAt: now,
-              },
-              {
-                purpose: CustomerPriceBookPurpose.LOGISTICS,
-                priceBookId: internalQuote!.quote.priceVersion.logistics.id,
-                priceBookVersion:
-                  internalQuote!.quote.priceVersion.logistics.version,
-                sourceSha256:
-                  internalQuote!.quote.priceVersion.logistics.sourceSha256,
-                createdAt: now,
-              },
-            ],
-          },
-          snapshot: {
-            version: 2,
-            engineVersion: 'CREATE_ORDER_PURE_V1',
-            priceVersion: internalQuote!.quote.priceVersion,
-            engineStatus: internalQuote!.quote.status,
-            knownTotal: processingAmount,
-            automaticKnownTotal: internalQuote!.quote.knownTotal,
-            manualReasons: internalQuote!.quote.manualReasons,
-            pendingReasons: internalQuote!.quote.pendingReasons,
-            source: hasAdminPrices ? 'ORDER_CREATED_ADMIN' : requiresAdminPricing
-              ? 'ORDER_CREATED_PROVISIONAL'
-              : 'ORDER_CREATED_AUTO',
-            pricedAt: now.toISOString(),
-            order: {
-              id: created.id,
-              orderNo: created.orderNo,
-              settlementType,
-              pricingStatus,
-              priceRevision: 1,
-              packagingAmount,
-              processingAmount,
-              totalAmount,
-            },
-            items: itemsWithSubtotals.map((item, index) => ({
-              id: created.items[index]?.id ?? null,
-              sequence: index + 1,
-              fig: resolvedItemFigs[index],
-              name: item.name,
-              pricingRoute: item.pricingRoute,
-              craft: canonicalCraftForPricingRoute(item.pricingRoute),
-              pack:
-                item.pack ??
-                packagingGroupsWithPrices.find(
-                  (group) => (group.itemUnitsPerBag[index] ?? 0) > 0,
-                )?.itemUnitsPerBag[index] ??
-                null,
-              manualQuoteReason: item.manualQuoteReason ?? null,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              fixedFee: item.fixedFee,
-              subtotal: item.subtotal,
-              quoteDisposition: item.quoteDisposition,
-              suggestedSubtotal: item.suggestedSubtotal,
-              priceOverrideReason: item.priceOverrideReason ?? null,
-              requiresAdminConfirmation: item.requiresAdminConfirmation,
-              pricingSnapshot: item.pricingSnapshot,
-            })),
-            packagingGroups: packagingGroupsWithPrices.map((group, index) => ({
-              sequence: index + 1,
-              name: group.name ?? null,
-              mode: group.mode,
-              actualBagCount: group.actualBagCount,
-              itemUnitsPerBag: [...group.itemUnitsPerBag],
-              unitPrice: group.unitPrice,
-              subtotal: group.subtotal,
-              suggestedSubtotal: group.suggestedSubtotal,
-              priceOverrideReason: group.priceOverrideReason,
-              requiresAdminConfirmation: !group.complete,
-              pricingSnapshot: group.pricingSnapshot,
-            })),
-            customerCharges: [],
-          },
-        },
-      });
-    }
-
     return {
       id: created.id,
       orderNo: created.orderNo,
@@ -1561,7 +1039,7 @@ export async function createOrder(
     ) {
       const existing = await findOrderBySubmissionId(db, input.clientSubmissionId);
       if (existing?.createdById === actor.id && existing.submitterId === submitterId) {
-        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, requestFingerprint)) {
+        if (!matchesCreateOrderRequest(existing.logs?.[0]?.changedFields, acceptedRequestFingerprints)) {
           throw new OrderInvariantError(`工单 ${existing.orderNo} 已保存，本次填写与原记录不一致或无法核对。请从工单列表打开核对后修改。`);
         }
         return {
@@ -1992,19 +1470,18 @@ export async function submitOrder(
       ReturnType<typeof finalizeExternalOrderQuoteInTx>
     > | null;
   } = { current: null };
+  // Only chargeable external-sales drafts (and their rejected corrections)
+  // are submitted here; free rework orders are created directly as SUBMITTED.
   const result = await transitionWithLog(
     orderId,
-    (order) =>
-      order.settlementType === OrderSettlementType.EXTERNAL_SALES
-        ? OrderStatus.PENDING_FACTORY
-        : OrderStatus.SUBMITTED,
+    OrderStatus.PENDING_FACTORY,
     actor,
     {
       remark: '提交工单',
       now,
       authz: (order) => {
         if (order.status === OrderStatus.REJECTED) submissionNotificationKey = `${orderId}:correction:${order.revision}`;
-        // 'order:create' permission lets SALES / CS create AND submit — but
+        // 'order:create' permission lets SALES create AND submit — but
         // only for their own rows. ADMIN keeps the global override.
         const globalOverride = actor.role === Role.ADMIN;
         if (!globalOverride && order.submitterId !== actor.id) {
@@ -2015,12 +1492,13 @@ export async function submitOrder(
             '工单缺少收货地址，请先补全收货地址再提交',
           );
         }
-        if (order.settlementType === OrderSettlementType.EXTERNAL_SALES) {
-          if (!order.receiverPhone?.trim()) {
-            throw new OrderInvariantError(
-              '工单缺少收货人手机号，请先补全再提交',
-            );
-          }
+        if (order.settlementType !== OrderSettlementType.EXTERNAL_SALES) {
+          throw new OrderInvariantError('只有外部销售收费工单可以提交');
+        }
+        if (!order.receiverPhone?.trim()) {
+          throw new OrderInvariantError(
+            '工单缺少收货人手机号，请先补全再提交',
+          );
         }
       },
       cascade: async (tx, lockedOrderId, lockedOrder) => {
@@ -2033,9 +1511,7 @@ export async function submitOrder(
             if (error instanceof SampleOrderError) throw new OrderInvariantError(error.message);
             throw error;
           }
-        } else if (
-          lockedOrder.settlementType === OrderSettlementType.EXTERNAL_SALES
-        ) {
+        } else {
           const itemWithoutImage = await prismaTx.orderItem.findFirst({
             where: {
               orderId: lockedOrderId,
@@ -2052,66 +1528,6 @@ export async function submitOrder(
           finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
             prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
           );
-        } else {
-          // Internal drafts saved before the retirement are new business on
-          // first submit. External drafts are checked in
-          // assertSelectedPapersAvailable, sample drafts in finalizeSampleOrderInTx.
-          const items = await prismaTx.orderItem.findMany({
-            where: { orderId: lockedOrderId },
-            select: { pricingRoute: true, paperType: true, paperWeightGsm: true, specification: true, actualWidthMm: true, actualHeightMm: true, manualQuoteReason: true },
-          });
-          if (hasRetiredPaperItem(items ?? [])) {
-            throw new OrderInvariantError(RETIRED_PAPER_MESSAGE);
-          }
-          try { await assertBlankPriceAdmissionInTx(prismaTx, items, now); }
-          catch (error) {
-            if (error instanceof BlankPriceAdmissionError) throw new OrderInvariantError(error.message);
-            throw error;
-          }
-          // Since 2026-09-18 internal and factory-direct orders price their
-          // delivery from the same published logistics book as external
-          // sales; the shared finalizer materializes the charges at submit.
-          if (settlementBillsLogistics(lockedOrder.settlementType)) {
-            finalizedExternalQuote.current = await finalizeSubmittedOrderQuoteInTx(
-              prismaTx, lockedOrderId, actor.id, now, expectedQuoteToken,
-            );
-          }
-        }
-
-        const submittedOrder = await prismaTx.order.findUnique({
-          where: { id: lockedOrderId },
-          select: {
-            submitterId: true,
-            submitterRole: true,
-            billingMode: true,
-            settlementType: true,
-            totalAmount: true,
-            revision: true,
-          },
-        });
-        if (
-          submittedOrder?.settlementType ===
-            OrderSettlementType.INTERNAL_SALES &&
-          submittedOrder.billingMode === OrderBillingMode.CHARGE
-        ) {
-          try {
-            await recordCsSalesEntryInTx(prismaTx, {
-              eventKey: `order:${lockedOrderId}:revision:${submittedOrder.revision}:submit`,
-              csUserId: submittedOrder.submitterId,
-              orderId: lockedOrderId,
-              orderRevision: submittedOrder.revision,
-              type: CsSalesEntryType.ORDER_SUBMITTED,
-              // 客服业绩不含代收物流（快递费 / 打包耗材），见 cs-sales.ts。
-              amount: await csSalesBasisAmountInTx(prismaTx, lockedOrderId, submittedOrder.totalAmount),
-              occurredAt: now,
-              remark: '客服工单提交计入销售额',
-            });
-          } catch (error) {
-            if (error instanceof CsSalesLedgerError) {
-              throw new OrderInvariantError(error.message);
-            }
-            throw error;
-          }
         }
       },
       afterTransition: async (tx, lockedOrderId, previousOrder) => {
@@ -2136,6 +1552,7 @@ export async function submitOrder(
             orderNo: true,
             customerRef: true,
             isUrgent: true,
+            ...ORDER_EXTERNAL_SALES_SELECT,
             submitter: { select: { displayName: true } },
           },
         });
@@ -2163,6 +1580,7 @@ export async function submitOrder(
               orderId: payload.id,
               orderNo: payload.orderNo,
               submitterName: payload.submitter.displayName,
+              externalSalesName: orderExternalSalesName(payload) ?? '未填',
               customerRef: payload.customerRef,
             },
             { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
@@ -2188,6 +1606,7 @@ export async function submitOrder(
       orderNo: true,
       customerRef: true,
       isUrgent: true,
+      ...ORDER_EXTERNAL_SALES_SELECT,
       submitter: { select: { displayName: true } },
     },
         });
@@ -2218,6 +1637,7 @@ export async function submitOrder(
           orderId: payload.id,
           orderNo: payload.orderNo,
           submitterName: payload.submitter.displayName,
+          externalSalesName: orderExternalSalesName(payload) ?? '未填',
           customerRef: payload.customerRef,
         },
         { dedupeKey: `notification:URGENT_ORDER:${payload.id}` },
@@ -2252,17 +1672,14 @@ export async function cancelOrder(
     remark: `取消：${normalizedReason}`,
     now,
     // Direct cancellation is only the withdrawal path for an order that has
-    // not entered the confirmed production contract. Once confirmed, every
-    // cancellation must be an OrderChangeRequest so producedQty, settlement
-    // and the administrator decision are written atomically and auditable.
+    // not entered the confirmed production contract (see direct-cancel.ts,
+    // which includes the internal SUBMITTED waiting state). Once confirmed,
+    // every cancellation must be an OrderChangeRequest so producedQty,
+    // settlement and the administrator decision are written atomically.
     authz: (order) => {
       if (actor.role !== Role.ADMIN && (actor.role !== Role.SALES || order.submitterId !== actor.id)) throw new OrderInvariantError('只能取消自己创建的工单');
       if (actor.role === Role.SALES && (!Number.isSafeInteger(expectedEditVersion) || expectedEditVersion !== order.editVersion)) throw new OrderInvariantError('工单已更新，请刷新后重新取消');
-      if (
-        order.status !== OrderStatus.DRAFT &&
-        order.status !== OrderStatus.PENDING_FACTORY &&
-        order.status !== OrderStatus.REJECTED
-      ) {
+      if (!isDirectCancelStatus(order.status)) {
         throw new OrderInvariantError(
           '已确认或已生产工单不能直接取消，请提交取消申请由管理员裁决',
         );
@@ -2468,48 +1885,6 @@ export async function cancelOrder(
               remark: `随历史工单取消 ${pendingLegacyTasks.length} 个未开工任务`,
             },
           });
-        }
-      }
-      const prismaTx = tx as unknown as Prisma.TransactionClient;
-      const cancelledOrder = await prismaTx.order.findUnique({
-        where: { id },
-        select: {
-          submitterId: true,
-          submitterRole: true,
-          billingMode: true,
-          settlementType: true,
-          status: true,
-          totalAmount: true,
-          revision: true,
-        },
-      });
-      if (
-        cancelledOrder?.settlementType === OrderSettlementType.INTERNAL_SALES &&
-        cancelledOrder.billingMode === OrderBillingMode.CHARGE &&
-        // A DRAFT has never emitted ORDER_SUBMITTED, so there is no positive
-        // sales event to reverse. Using the pre-transition status here avoids
-        // creating a phantom negative balance when an abandoned draft is
-        // cancelled.
-        cancelledOrder.status !== OrderStatus.DRAFT
-      ) {
-        try {
-          const salesBasis = await csSalesBasisAmountInTx(prismaTx, id, cancelledOrder.totalAmount);
-          await assertCsOrderSalesLedgerReconciledInTx(prismaTx, id, salesBasis);
-          await recordCsSalesEntryInTx(prismaTx, {
-            eventKey: `order:${id}:revision:${cancelledOrder.revision}:cancel`,
-            csUserId: cancelledOrder.submitterId,
-            orderId: id,
-            orderRevision: cancelledOrder.revision,
-            type: CsSalesEntryType.ORDER_CANCELLED,
-            amount: new Decimal(salesBasis).negated(),
-            occurredAt: now,
-            remark: `取消工单：${normalizedReason}`,
-          });
-        } catch (error) {
-          if (error instanceof CsSalesLedgerError) {
-            throw new OrderInvariantError(error.message);
-          }
-          throw error;
         }
       }
     },
@@ -3098,8 +2473,6 @@ type EditTxClient = {
           totalAmount: Decimal.Value;
           confirmedFee?: Decimal.Value | null;
           customName: string | null;
-          customerRef: string | null;
-          customerPartyId: string | null;
           shipments: EditableShipment[];
           changeRequests: { id: string }[];
           customerCharges?: { id: string }[];
@@ -3151,9 +2524,7 @@ type EditTxClient = {
 type EditableOrderFieldValue = string | boolean | Date | null;
 
 type EditableOrderSnapshot = {
-  customerPartyId: string | null;
   customName: string | null;
-  customerRef: string | null;
   receiverName: string | null;
   receiverPhone: string | null;
   receiverAddress: string | null;
@@ -3205,9 +2576,10 @@ function editableValueEquals(
 }
 
 // Shallow-pick only the fields that are editable at this status. Anything
-// else in `input` is silently dropped. The action extracts the canonical
-// FULL_EDITABLE_FIELDS tuple before Zod parsing; this remains a second
-// defense for direct domain callers.
+// else in `input` is silently dropped — including the retired customerRef /
+// customerPartyId (业主 2026-09-27), so an edit never changes a stored customer.
+// The action extracts the canonical FULL_EDITABLE_FIELDS tuple before Zod
+// parsing; this remains a second defense for direct domain callers.
 function pickEditableFields(
   input: Record<string, unknown>,
   allowed: readonly string[],
@@ -3260,7 +2632,7 @@ async function updateOrderEditableFields(
   actor: { id: string; role: Role },
   transaction?: Prisma.TransactionClient,
 ): Promise<UpdateOrderResult> {
-  if (![Role.ADMIN, Role.SALES, Role.CUSTOMER_SERVICE].some((role) => role === actor.role)) {
+  if (actor.role !== Role.ADMIN && actor.role !== Role.SALES) {
     throw new OrderInvariantError('无权编辑工单');
   }
   const work = async (tx: Prisma.TransactionClient): Promise<UpdateOrderResult> => {
@@ -3288,8 +2660,6 @@ async function updateOrderEditableFields(
         processingAmount: true,
         totalAmount: true,
         customName: true,
-        customerRef: true,
-        customerPartyId: true,
         isSfCollect: true,
         changeRequests: { where: { status: 'PENDING' }, select: { id: true } },
         shipments: { select: { id: true, sequence: true, status: true, receiverName: true, receiverPhone: true, receiverAddress: true, expressCode: true, destinationProvince: true } },
@@ -3306,7 +2676,7 @@ async function updateOrderEditableFields(
     });
     if (!order) throw new OrderInvariantError('工单不存在或无权访问');
 
-    // SALES / CUSTOMER_SERVICE can only edit their own orders. ADMIN
+    // SALES can only edit their own orders. ADMIN
     // has a global override so they can correct field data for
     // anyone. Same pattern as submitOrder's ownership guard.
     const globalOverride = actor.role === Role.ADMIN;
@@ -3402,22 +2772,6 @@ async function updateOrderEditableFields(
       // Action 层会经过 Zod trim；领域层也做同样归一化，
       // 避免测试/脚本等直接调用者把首尾空格持久化。
       nextFields.receiverAddress = receiverAddress.trim();
-    }
-    if ('customerPartyId' in nextFields && nextFields.customerPartyId !== (order.customerPartyId ?? null)) {
-      const customerId = nextFields.customerPartyId;
-      if (typeof customerId === 'string') {
-        const customer = await tx.party.findUnique({
-          where: { id: customerId },
-          select: { id: true, isActive: true, type: true },
-        });
-        if (actor.role === Role.SALES && !await tx.party.findFirst({ where: { id: customerId, ...salesCustomerScope(actor.id) }, select: { id: true } })) {
-          throw new OrderInvariantError('只能选择自己关联的客户');
-        }
-        if (!customer || !customer.isActive ||
-          (customer.type !== PartyType.CUSTOMER && customer.type !== PartyType.BOTH)) {
-          throw new OrderInvariantError('所选客户不存在、已停用或不是客户，请重新选择');
-        }
-      }
     }
     const shipmentInput = command.kind === 'full-form' && 'shipments' in command.input ? command.input.shipments : undefined;
     let shipmentEdits: ReturnType<typeof planOrderShipmentEdits> = [];
@@ -3821,7 +3175,6 @@ export async function setOrderSfCollect(
         totalAmount: true,
         confirmedFee: true,
         customName: true,
-        customerRef: true,
         receiverName: true,
         receiverPhone: true,
         receiverAddress: true,
@@ -4342,13 +3695,21 @@ export async function getOrderDetail(id: string, user: { id: string; role: Role 
           lines: {
             orderBy: { orderItem: { sequence: 'asc' } },
             include: {
-              orderItem: { select: { id: true, sequence: true, name: true } },
+              orderItem: { select: { id: true, sequence: true, name: true, specification: true } },
             },
           },
         },
       },
+      // 原单的外部销售：免费重做（NO_CHARGE）的归属销售取原单提交人，
+      // 与 ORDER_EXTERNAL_SALES_SELECT / orderExternalSalesName 同一口径。
       sourceOrder: {
-        select: { id: true, orderNo: true, customName: true, status: true },
+        select: {
+          id: true,
+          orderNo: true,
+          customName: true,
+          status: true,
+          submitter: { select: { displayName: true } },
+        },
       },
       reworkOrders: {
         orderBy: { createdAt: 'desc' },

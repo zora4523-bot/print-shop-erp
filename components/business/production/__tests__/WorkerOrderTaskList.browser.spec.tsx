@@ -74,9 +74,22 @@ describe('工单统一扫码任务选择', () => {
   });
 
   it('共享进度与计件分组，清楚标注不计薪', async () => {
-    mount([], [{ id: 'clean-1', title: '清废', sources: ['#1 · 花好月圆'], status: ProductionOperationStatus.PENDING, planned: '2000', completed: '1500', remaining: '500', unit: '个' }]);
+    mount([], [{ id: 'glue-1', title: '粘封', sources: ['#1 · 花好月圆'], status: ProductionOperationStatus.PENDING, planned: '2000', completed: '1500', remaining: '500', unit: '个' }]);
     await expect.element(page.getByText('当前工单没有本岗位计件工序。')).toBeVisible();
     await expect.element(page.getByText('仅推进生产进度，不计入工资。')).toBeVisible();
-    await expect.element(page.getByRole('link', { name: /清废/ })).toHaveAttribute('href', '/worker/tasks/clean-1');
+    await expect.element(page.getByRole('link', { name: /粘封/ })).toHaveAttribute('href', '/worker/tasks/glue-1');
   });
+});
+
+// 审计 L-8：他车道进度点进去会 404，只能作为只读行展示，不渲染链接。
+it('他岗位进度只读展示，不提供报工链接', async () => {
+  mount([], [
+    { id: 'emboss-1', title: '压凹', sources: ['#1 · 花好月圆'], status: ProductionOperationStatus.PENDING, planned: '2000', completed: '0', remaining: '2000', unit: '个' },
+    { id: 'glue-1', title: '粘盒', sources: ['#1 · 花好月圆'], status: ProductionOperationStatus.PENDING, planned: '2000', completed: '0', remaining: '2000', unit: '个', readOnly: true },
+  ]);
+  await expect.element(page.getByRole('link', { name: /压凹/ })).toHaveAttribute('href', '/worker/tasks/emboss-1');
+  await expect.element(page.getByText('粘盒')).toBeVisible();
+  await expect.element(page.getByRole('link', { name: /粘盒/ })).not.toBeInTheDocument();
+  await expect.element(page.getByText('由其他岗位报工')).toBeVisible();
+  expect(host.querySelector('a[href="/worker/tasks/glue-1"]')).toBeNull();
 });

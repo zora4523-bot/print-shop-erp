@@ -10,7 +10,8 @@ import {
 } from '../generated/prisma/enums';
 import { paginatedResult, paginationWindow, parsePositiveInt } from './admin/table';
 import { db } from './db';
-import { getReporterOperationTypeOrNull } from './production/operation-portal';
+import { ORDER_EXTERNAL_SALES_SELECT, orderExternalSalesName } from './order/external-sales-name';
+import { getProgressCraftIdsForReporter, getReporterOperationTypeOrNull } from './production/operation-portal';
 import { getHourlyPayrollWorkerType } from './salary/hourly-aggregate';
 import {
   getPieceworkSettlementDetail,
@@ -60,12 +61,8 @@ function requireOperationSalaryActor(actor: WorkerSalaryActor): void {
 
 function requireHourlySalaryActor(actor: WorkerSalaryActor): void {
   requireWorkerActor(actor);
-  if (
-    actor.workerType !== WorkerType.PACKER &&
-    actor.workerType !== WorkerType.CLEANER &&
-    actor.workerType !== WorkerType.COOK
-  ) {
-    throw new WorkerPortalError('仅打包、清废或厨师账号可访问时薪月结');
+  if (actor.workerType !== WorkerType.PACKER) {
+    throw new WorkerPortalError('仅打包师傅可访问历史时薪档案');
   }
 }
 
@@ -164,11 +161,10 @@ export async function listWorkerOrders(
           customName: true,
           status: true,
           isUrgent: true,
-          customerRef: true,
           promisedDate: true,
           createdAt: true,
           workOrderVersion: true,
-          submitter: { select: { displayName: true } },
+          ...ORDER_EXTERNAL_SALES_SELECT,
           productionOperations: {
             where: {
               operationType: operationType ?? { in: [] },
@@ -215,10 +211,11 @@ export async function listWorkerOrders(
               customName: order.customName,
               status: order.status,
               isUrgent: order.isUrgent,
-              customerRef: order.customerRef,
               promisedDate: order.promisedDate,
               createdAt: order.createdAt,
-              submitterName: order.submitter?.displayName ?? '未记录',
+              // 工单归属的外部销售（业主 2026-09-27，取代「客户名称/简称」与「接单人」）：
+              // 免费重做由管理员发起，显示原单的外部销售而不是管理员。
+              externalSalesName: orderExternalSalesName(order),
               operationCount: operations.length + progressSteps.length,
               completedOperationCount:
                 operations.filter(
@@ -253,6 +250,7 @@ export async function getWorkerOrderDetail(
 ) {
   requireWorkerActor(actor);
   const operationType = await getReporterOperationTypeOrNull(actor);
+  const progressCraftIds = new Set(await getProgressCraftIdsForReporter(actor));
   const order = await db.order.findFirst({
     where: { id: orderId, ...operationOrderWhere(operationType) },
     select: {
@@ -261,13 +259,12 @@ export async function getWorkerOrderDetail(
       customName: true,
       status: true,
       isUrgent: true,
-      customerRef: true,
       promisedDate: true,
       packageRequirement: true,
       remark: true,
       createdAt: true,
       workOrderVersion: true,
-      submitter: { select: { displayName: true } },
+      ...ORDER_EXTERNAL_SALES_SELECT,
       items: {
         orderBy: { sequence: 'asc' },
         select: {
@@ -348,6 +345,7 @@ export async function getWorkerOrderDetail(
         select: {
           id: true,
           workOrderVersion: true,
+          craftId: true,
           craftCode: true,
           craftName: true,
           status: true,
@@ -375,17 +373,25 @@ export async function getWorkerOrderDetail(
     (operation) => operation.workOrderVersion === order.workOrderVersion &&
       operation.status !== ProductionOperationStatus.CANCELLED,
   );
+  // 工单页仍列出全部当前进度（可见范围不变），但只有本人工艺车道的进度可以点进报工。
   const productionProgressSteps = order.productionProgressSteps.filter(
     (step) => step.workOrderVersion === order.workOrderVersion &&
       step.status !== ProductionOperationStatus.CANCELLED,
-  );
+  ).map((step) => ({ ...step, reportable: progressCraftIds.has(step.craftId) }));
   if (
     productionOperations.length === 0 &&
     productionProgressSteps.length === 0
   ) {
     return null;
   }
-  return { ...order, productionOperations, productionProgressSteps };
+  // 只交出归属结论：页面拿不到提交人，免费重做就不会误显示发起的管理员。
+  const { settlementType, submitter, sourceOrder, ...detail } = order;
+  return {
+    ...detail,
+    externalSalesName: orderExternalSalesName({ settlementType, submitter, sourceOrder }),
+    productionOperations,
+    productionProgressSteps,
+  };
 }
 
 export async function listWorkerSalaries(
@@ -454,7 +460,7 @@ export async function getWorkerPieceworkSettlementDetail(
   actor: WorkerSalaryActor,
 ) {
   requireOperationSalaryActor(actor);
-  return getPieceworkSettlementDetail(settlementId, actor.id);
+  return getPieceworkSettlementDetail(settlementId, actor);
 }
 
 export async function getWorkerSalaryDetail(
@@ -509,12 +515,10 @@ export async function listWorkerHourlyPayrolls(
       month: true,
       totalWorkHours: true,
       totalOtHours: true,
-      totalSpareHours: true,
       hourlyRate: true,
       otMultiplier: true,
       baseSalary: true,
       otSalary: true,
-      spareSalary: true,
       totalSalary: true,
       salaryRuleSnapshot: true,
       isPaid: true,
@@ -541,12 +545,10 @@ export async function getWorkerHourlyPayrollDetail(
       month: true,
       totalWorkHours: true,
       totalOtHours: true,
-      totalSpareHours: true,
       hourlyRate: true,
       otMultiplier: true,
       baseSalary: true,
       otSalary: true,
-      spareSalary: true,
       totalSalary: true,
       dailyDetail: true,
       salaryRuleSnapshot: true,

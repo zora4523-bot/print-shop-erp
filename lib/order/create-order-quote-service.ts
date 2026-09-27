@@ -58,20 +58,6 @@ export type CreateOrderQuoteInput = {
 export type CreateOrderQuoteResult = CreateOrderQuotePresentation;
 export type { CreateOrderItemQuotePreview } from './create-order-quote-presentation';
 
-export type InternalCreateOrderQuoteInput = {
-  factsKey: string;
-  settlementType:
-    | typeof OrderSettlementType.INTERNAL_SALES
-    | typeof OrderSettlementType.FACTORY_DIRECT;
-  items: CreateOrderQuoteItemInput[];
-  orderItemCount: number;
-  packagingGroups: QuoteCreateOrderPackagingGroupsInput['groups'];
-  logistics: QuoteExternalOrderChargesInput;
-};
-
-/** Internal previews carry the same logistics quote and handshake token as external ones. */
-export type InternalCreateOrderQuoteResult = CreateOrderQuotePresentation;
-
 export class CreateOrderQuoteError extends Error {
   constructor(message: string) {
     super(message);
@@ -291,72 +277,3 @@ export async function quoteExternalCreateOrder(
   }
 }
 
-/**
- * Internal (客服 / 工厂直接) create preview. Since 2026-09-18 it prices the same
- * things as the external preview — processing, BAGGING and the published
- * logistics charges — and returns the same handshake token, so the submit
- * finalizer can verify the quote the operator acknowledged.
- */
-export async function quoteInternalCreateOrder(
-  input: InternalCreateOrderQuoteInput,
-  now: Date = new Date(),
-): Promise<InternalCreateOrderQuoteResult> {
-  if (
-    input.settlementType !== OrderSettlementType.INTERNAL_SALES &&
-    input.settlementType !== OrderSettlementType.FACTORY_DIRECT
-  ) {
-    throw new CreateOrderQuoteError('仅支持内部收费建单报价');
-  }
-  if (input.orderItemCount !== input.items.length) {
-    throw new CreateOrderQuoteError('工单款式数与报价款式不一致');
-  }
-  if (hasRetiredPaperItem(input.items)) {
-    throw new CreateOrderQuoteError(RETIRED_PAPER_MESSAGE);
-  }
-
-  try {
-    return await db.$transaction(async (tx) => {
-      const itemKeys = input.items.map((_, index) => String(index + 1));
-      const calculated = await calculateCreateOrderQuoteFromCatalogInTx(tx, {
-        now,
-        facts: {
-          items: input.items.map((item, index) => {
-            if (!isNewOrderPricingRoute(item.pricingRoute)) {
-              throw new CreateOrderQuoteError(
-                `款式 ${index + 1}：新建工单必须选择有效计价路线`,
-              );
-            }
-            return {
-              ...item,
-              pricingRoute: item.pricingRoute,
-              manualQuoteReason: item.manualQuoteReason,
-              itemKey: itemKeys[index]!,
-              fig: index + 1,
-            };
-          }),
-          packagingGroups: packagingFacts(input.packagingGroups, itemKeys),
-          isSfCollect: input.logistics.isSfCollect,
-          shipments: shipmentFacts(input),
-        },
-        includeOrderCharges: true,
-      });
-      return presentCreateOrderQuote({
-        factsKey: input.factsKey,
-        input: calculated.input,
-        quote: calculated.quote,
-        logistics: trustedChargeQuote(calculated.input, calculated.snapshot),
-        quoteToken: calculated.quoteToken,
-      });
-    });
-  } catch (error) {
-    if (error instanceof CreateOrderQuoteError) throw error;
-    if (
-      error instanceof BlankPriceAdmissionError ||
-      error instanceof CreateOrderQuoteFactsAdapterError ||
-      error instanceof PublishedCreateOrderPriceAdapterError
-    ) {
-      throw new CreateOrderQuoteError(error.message);
-    }
-    throw error;
-  }
-}

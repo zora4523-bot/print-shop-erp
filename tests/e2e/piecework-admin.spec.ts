@@ -132,7 +132,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 393, height: 852 }
   });
 }
 
-for (const username of ['e2e-sales', 'e2e-worker-hand', 'e2e-cs']) test(`${username}不能打开工价管理`, async ({ page }) => {
+for (const username of ['e2e-sales', 'e2e-worker-hand']) test(`${username}不能打开工价管理`, async ({ page }) => {
   await login(page, { username, password: E2E_PASSWORD, from: '/owner/rules/employee-pay' });
   await expect(page.getByRole('heading', { name: '计件工价', exact: true })).toHaveCount(0);
 });

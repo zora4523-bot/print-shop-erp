@@ -39,11 +39,13 @@ async function runEdit(
   }
 }
 
+// 签名适配层：权限闸口在 runEdit 的 requirePermission。
 export async function previewAdminOrderEditAction(
   payload: unknown,
 ): Promise<AdminOrderEditResult> {
   return runEdit(payload, 'preview');
 }
+// 签名适配层：权限闸口在 runEdit 的 requirePermission。
 export async function saveAdminOrderEditAction(
   payload: unknown,
 ): Promise<AdminOrderEditResult> {

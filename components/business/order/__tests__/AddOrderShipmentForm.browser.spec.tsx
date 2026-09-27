@@ -27,7 +27,11 @@ const props = {
       id: 'source',
       sequence: 1,
       receiverAddress: '广东省佛山市南海区测试路 1 号',
-      lines: [{ orderItemId: 'item', name: '花好月圆红包', quantity: 1000 }],
+      // 同一设计款的两个规格行共用款名：标签必须靠序号与规格区分。
+      lines: [
+        { orderItemId: 'item', sequence: 1, name: '花好月圆红包', specification: '大号封', quantity: 1000 },
+        { orderItemId: 'item-2', sequence: 2, name: '花好月圆红包', specification: '中号封', quantity: 500 },
+      ],
     },
   ],
 };
@@ -62,7 +66,9 @@ async function fill() {
   await page
     .getByRole('textbox', { name: '计费省份', exact: true })
     .fill('江西');
-  await page.getByRole('spinbutton').fill('400');
+  await page
+    .getByRole('spinbutton', { name: '#1 花好月圆红包 · 大号封 · 分配数量（最多 1000）', exact: true })
+    .fill('400');
 }
 describe('add delivery', () => {
   it('reviews money and allocations, invalidates preview before editing, then saves', async () => {
@@ -89,9 +95,12 @@ describe('add delivery', () => {
     await expect
       .element(page.getByRole('button', { name: '保存地址' }))
       .toBeVisible();
-    expect(host.textContent).toContain('1000 → 600');
+    expect(host.textContent).toContain('#1 花好月圆红包 · 大号封：地址 1 1000 → 600');
+    expect(host.textContent).not.toContain('#2 花好月圆红包 · 中号封：');
     expect(host.textContent).toContain('108.25');
-    await expect.element(page.getByRole('spinbutton')).toBeDisabled();
+    await expect
+      .element(page.getByRole('spinbutton', { name: '#2 花好月圆红包 · 中号封 · 分配数量（最多 500）', exact: true }))
+      .toBeDisabled();
     await page.getByRole('button', { name: '继续修改' }).click();
     await expect
       .element(page.getByRole('button', { name: '预览费用' }))
@@ -108,7 +117,10 @@ describe('add delivery', () => {
     expect(addOrderShipmentAction).toHaveBeenLastCalledWith(
       expect.objectContaining({
         previewToken: 'token',
-        lines: [{ orderItemId: 'item', quantity: 400 }],
+        lines: [
+          { orderItemId: 'item', quantity: 400 },
+          { orderItemId: 'item-2', quantity: 0 },
+        ],
       }),
       'save',
     );

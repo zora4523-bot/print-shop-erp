@@ -12,10 +12,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
-  OrderPaperSwatchPicker,
-  type OrderPaperSwatchOption,
-} from './OrderPaperSwatchPicker';
-import {
   OrderFoilSwatchPicker,
   type OrderFoilSwatchOption,
 } from './OrderFoilSwatchPicker';
@@ -42,6 +38,12 @@ const LAMINATION_OPTIONS = [
 ] as const;
 
 type Item = CreateOrderInput['items'][number];
+/** 纸张胶囊选项；label 已是 paperDisplayLabel 后的现行叫法。 */
+export type OrderPaperOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+};
 type Common = {
   uid: string;
   item: Item;
@@ -61,7 +63,7 @@ export type OrderItemCraftFieldsProps = Common & {
   hideRoute?: boolean;
   title?: string;
   paperKey: string | null;
-  paperOptions: readonly OrderPaperSwatchOption[];
+  paperOptions: readonly OrderPaperOption[];
   foilOptions: readonly OrderFoilSwatchOption[];
   onRouteChange: (value: OrderItemPricingRoute) => void;
   onLaminationChange: (value: OrderLamination) => void;
@@ -74,7 +76,7 @@ export type OrderItemMaterialFieldsProps = Common & {
   materialExtras?: ReactNode;
   hideSpecification?: boolean;
   paperKey: string | null;
-  paperOptions: readonly OrderPaperSwatchOption[];
+  paperOptions: readonly OrderPaperOption[];
   weightOptions: readonly { value: number; disabled?: boolean }[];
   specificationOptions: readonly {
     value: string;
@@ -90,7 +92,7 @@ export type OrderItemMaterialFieldsProps = Common & {
 };
 function isCopperPaper(
   paperKey: string | null,
-  options: readonly OrderPaperSwatchOption[],
+  options: readonly OrderPaperOption[],
 ): boolean {
   const option = options.find((entry) => entry.value === paperKey);
   return isCoatedOrderPaper(paperKey) || isCoatedOrderPaper(option?.label);
@@ -385,9 +387,10 @@ export function OrderItemMaterialFields({
   return (
     <Group title="材料" first={first} appearance={appearance}>
       {materialExtras}
-      <OrderPaperSwatchPicker
+      <PillPicker
         id={`${uid}-paper`}
-        value={paperKey}
+        label="纸张材质"
+        value={paperKey ?? ''}
         options={paperOptions}
         disabled={disabled}
         error={itemErrors?.paper}

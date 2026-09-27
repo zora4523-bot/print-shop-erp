@@ -185,8 +185,7 @@ function enforceEmployment(
   },
   ctx: z.RefinementCtx,
 ) {
-  const isInternalEmployee =
-    data.role === Role.CUSTOMER_SERVICE || data.role === Role.WORKER;
+  const isInternalEmployee = data.role === Role.WORKER;
   if (isInternalEmployee && !data.employmentType) {
     ctx.addIssue({
       code: 'custom',

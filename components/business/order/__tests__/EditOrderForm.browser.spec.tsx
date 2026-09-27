@@ -18,8 +18,6 @@ let host: HTMLDivElement;
 let root: Root;
 const initial = {
   customName: '春节礼盒',
-  customerRef: '客户简称',
-  customerPartyId: 'customer-1',
   receiverName: '张三',
   receiverPhone: '13800138000',
   receiverAddress: '广东省佛山市原地址',
@@ -69,17 +67,6 @@ function mount(props: Partial<ComponentProps<typeof EditOrderForm>> = {}) {
         fieldset="FULL"
         initial={initial}
         shipments={shipments}
-        customers={[
-          {
-            id: 'customer-1',
-            name: '客户公司',
-            shortName: '客户简称',
-            code: 'C001',
-            receiverName: null,
-            receiverPhone: null,
-            receiverAddress: null,
-          },
-        ]}
         isExternalSales
         {...props}
       />,
@@ -179,7 +166,9 @@ describe('complete order editing', () => {
       .toHaveTextContent('工单已更新，请刷新后重试');
     const data = save.mock.calls[0][2] as FormData;
     expect(data.get('expectedEditVersion')).toBe('4');
-    expect(data.get('customerPartyId')).toBe('customer-1');
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）：编辑表单不再提交客户字段。
+    expect(data.has('customerPartyId')).toBe(false);
+    expect(data.has('customerRef')).toBe(false);
     expect(data.get('customName')).toBe('新的礼盒名称');
     const saved = JSON.parse(String(data.get('shipments')));
     expect(saved[0]).toMatchObject({
@@ -202,17 +191,17 @@ describe('complete order editing', () => {
       )
       .toHaveValue('13700137000');
   });
-  it('admin changes an external sales account without overwriting customer or delivery data', async () => {
+  it('admin changes an external sales account without touching customer or delivery data', async () => {
     mount({ externalSalesAssociation });
     expect(host.querySelector('[name="customerPartyId"]')).toBeNull();
+    expect(host.querySelector('[name="customerRef"]')).toBeNull();
     await page.getByRole('combobox', { name: '关联外部销售' }).selectOptions('sales-2');
-    await expect.element(page.getByRole('textbox', { name: '客户名称/简称（选填）' })).toHaveValue('客户简称');
     await page.getByRole('button', { name: '保存', exact: true }).click();
     await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
     const data = save.mock.calls[0][2] as FormData;
     expect(data.get('externalSalesUserId')).toBe('sales-2');
     expect(data.has('customerPartyId')).toBe(false);
-    expect(data.get('customerRef')).toBe('客户简称');
+    expect(data.has('customerRef')).toBe(false);
     expect(JSON.parse(String(data.get('shipments'))).map((row: { receiverAddress: string }) => row.receiverAddress)).toEqual(shipments.map((row) => row.receiverAddress));
     await expect.element(page.getByRole('combobox', { name: '关联外部销售' })).toHaveValue('sales-2');
   });
@@ -283,65 +272,6 @@ describe('complete order editing', () => {
     );
   });
 
-  it('adopts customer defaults only on request, preserving other shipments and resetting the province check', async () => {
-    mount({
-      customers: [
-        {
-          id: 'customer-2',
-          code: 'C002',
-          name: '新客户公司',
-          shortName: '新客户',
-          receiverName: '王五',
-          receiverPhone: '13600136000',
-          receiverAddress: '广东省深圳市新地址',
-        },
-      ],
-    });
-    await page
-      .getByRole('combobox', { name: '关联客户' })
-      .selectOptions('customer-2');
-    await expect
-      .element(page.getByRole('textbox', { name: '客户名称/简称（选填）' }))
-      .toHaveValue('客户简称');
-    await expect
-      .element(
-        page.getByRole('textbox', { name: '收货地址', exact: true }).nth(0),
-      )
-      .toHaveValue('广东省佛山市原地址');
-    await page.getByRole('button', { name: '采用客户简称' }).click();
-    await page.getByRole('button', { name: '采用客户默认收货信息' }).click();
-    await expect
-      .element(page.getByRole('textbox', { name: '客户名称/简称（选填）' }))
-      .toHaveValue('新客户');
-    await expect
-      .element(
-        page.getByRole('textbox', { name: '收货地址', exact: true }).nth(0),
-      )
-      .toHaveValue('广东省深圳市新地址');
-    await expect
-      .element(
-        page.getByRole('textbox', { name: '收件人', exact: true }).nth(0),
-      )
-      .toHaveValue('王五');
-    await expect
-      .element(
-        page.getByRole('textbox', { name: '收货电话', exact: true }).nth(0),
-      )
-      .toHaveValue('13600136000');
-    await expect
-      .element(
-        page.getByRole('textbox', { name: '收货地址', exact: true }).nth(1),
-      )
-      .toHaveValue('浙江省杭州市第二地址');
-    await expect
-      .element(
-        page.getByRole('checkbox', {
-          name: '配送省份仍为广东，运费计费条件未变',
-        }),
-      )
-      .not.toBeChecked();
-  });
-
   it('requires rechecking the province after every further address edit', async () => {
     mount();
     const address = page
@@ -359,14 +289,16 @@ describe('complete order editing', () => {
   it('locks production facts after confirmation and locks shipped contacts', async () => {
     mount({
       fieldset: 'SHIPPING_ONLY',
+      externalSalesAssociation,
       shipments: [{ ...shipments[0], status: 'SHIPPED' }, shipments[1]],
     });
     await expect
       .element(page.getByRole('textbox', { name: '工单名称', exact: true }))
       .toBeDisabled();
     await expect
-      .element(page.getByRole('combobox', { name: '关联客户' }))
+      .element(page.getByRole('combobox', { name: '关联外部销售' }))
       .toBeDisabled();
+    expect(host.querySelector('[name="customerRef"], [name="customerPartyId"]')).toBeNull();
     await expect
       .element(
         page.getByRole('textbox', { name: '收货电话', exact: true }).nth(0),

@@ -338,10 +338,10 @@ async function loginRoleSessions(url) {
   }
 
   const roles = countBy(sessions, (session) => session.role);
-  const salesCs = (roles.SALES ?? 0) + (roles.CUSTOMER_SERVICE ?? 0);
+  const salesCs = roles.SALES ?? 0;
   if (salesCs !== 20 || roles.ADMIN !== 3 || roles.WORKER !== 5) {
     throw new Error(
-      `Formal role mix must be sales/customer-service=20, ADMIN=3, WORKER=5; received ${JSON.stringify(roles)}`,
+      `Formal role mix must be SALES=20, ADMIN=3, WORKER=5; received ${JSON.stringify(roles)}`,
     );
   }
   return sessions;
@@ -384,7 +384,6 @@ function rolePaths(role, configuredPaths) {
   const defaults = {
     ADMIN: ['/owner', '/orders'],
     SALES: ['/orders'],
-    CUSTOMER_SERVICE: ['/orders'],
     WORKER: ['/worker'],
   };
   const paths = configuredPaths ?? defaults[role];

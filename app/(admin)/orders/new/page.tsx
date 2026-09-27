@@ -2,14 +2,10 @@ import { redirect } from "next/navigation";
 import { Role } from "../../../../generated/prisma/enums";
 import { requireSession } from "@/lib/auth/session";
 import { listActiveCraftOrderOptions } from "@/lib/craft";
-import { listSalesCustomerOptions } from "@/lib/order/sales-customer-scope";
-import { listCustomerPartyOptions } from "@/lib/party";
 import { listExternalSalesAccountOptions } from "@/lib/order/external-sales-association";
 import { OrderCreationWorkspace } from "@/components/business/order/OrderCreationWorkspace";
-import {
-  ORDER_SETTLEMENT_LABELS,
-  settlementTypeForOrderCreator,
-} from "@/lib/order/settlement";
+import { PageHeader } from "@/components/ui-business";
+import { NoExternalSalesEmptyState } from "@/components/business/order/NoExternalSalesEmptyState";
 import { loadExternalCreateOrderBootstrap } from "@/lib/order/create-order-bootstrap";
 
 export const metadata = {
@@ -25,27 +21,28 @@ export default async function NewOrderPage({
       ? transfer
       : undefined;
   const { user } = await requireSession();
-  const canCreate =
-    user.role === Role.SALES ||
-    user.role === Role.CUSTOMER_SERVICE ||
-    user.role === Role.ADMIN;
-  if (!canCreate) redirect("/orders");
+  // 业主 2026-09-24：所有业务都以外部销售身份开展。销售本人建单；管理员
+  // 代建时必须选择一个启用的外部销售账号。
+  if (user.role !== Role.SALES && user.role !== Role.ADMIN) redirect("/orders");
 
-  const settlementType = settlementTypeForOrderCreator(user.role);
-  const [crafts, customers, createOrderBootstrap, externalSalesAccounts] =
-    await Promise.all([
-      listActiveCraftOrderOptions(),
-      user.role === Role.SALES
-        ? listSalesCustomerOptions(user)
-        : user.role === Role.CUSTOMER_SERVICE
-          ? listCustomerPartyOptions()
-          : [],
-      // Every chargeable create path uses the same published catalog snapshot.
-      // Role changes who may request manual pricing, not which paper/spec/craft
-      // dictionary the form renders.
-      loadExternalCreateOrderBootstrap(),
-      listExternalSalesAccountOptions(user),
-    ]);
+  const externalSalesAccounts =
+    user.role === Role.ADMIN ? await listExternalSalesAccountOptions(user) : undefined;
+  if (externalSalesAccounts && externalSalesAccounts.length === 0) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="新建工单" />
+        <NoExternalSalesEmptyState />
+      </div>
+    );
+  }
+
+  const [crafts, createOrderBootstrap] = await Promise.all([
+    listActiveCraftOrderOptions(),
+    // Every chargeable create path uses the same published catalog snapshot.
+    // Role changes who may request manual pricing, not which paper/spec/craft
+    // dictionary the form renders.
+    loadExternalCreateOrderBootstrap(),
+  ]);
 
   return (
     <div className="space-y-4">
@@ -55,12 +52,7 @@ export default async function NewOrderPage({
         draftScope={user.id}
         crafts={crafts}
         products={createOrderBootstrap.options.products}
-        customers={customers}
-        externalSalesAccounts={
-          user.role === Role.ADMIN ? externalSalesAccounts : undefined
-        }
-        settlementLabel={ORDER_SETTLEMENT_LABELS[settlementType]}
-        settlementType={settlementType}
+        externalSalesAccounts={externalSalesAccounts}
         externalCreateOrderOptions={createOrderBootstrap.options}
         initialExternalPriceSnapshot={createOrderBootstrap.priceSnapshot}
       />

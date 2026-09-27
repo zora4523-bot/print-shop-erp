@@ -29,15 +29,13 @@ afterEach(() => {
 describe('dashboard fixture isolation', () => {
   it('appends disjoint fixture populations without deleting or rewriting history', async () => {
     const { seedDashboardSnapshot } = await import('../e2e/_helpers');
-    const options = { salesUserId: 'e2e-sales', csUserId: 'e2e-cs' };
+    const options = { salesUserId: 'e2e-sales' };
     const first = await seedDashboardSnapshot(options);
     const second = await seedDashboardSnapshot(options);
 
     expect(second.fixtureRunId).not.toBe(first.fixtureRunId);
     expect(second.salesUserId).not.toBe(first.salesUserId);
-    expect(second.csUserId).not.toBe(first.csUserId);
-    expect(second.billId).not.toBe(first.billId);
-    expect(second.csPeriodId).not.toBe(first.csPeriodId);
+    expect(second.outsourceId).not.toBe(first.outsourceId);
     const firstOrders = new Set([
       ...first.submittedOrderIds,
       ...first.completedOrderIds,
@@ -63,7 +61,7 @@ describe('dashboard fixture isolation', () => {
   it('rolls back a partial seed if a ledger insert fails', async () => {
     const { seedDashboardSnapshot } = await import('../e2e/_helpers');
     database.query.mockImplementation(async (sql: string) => {
-      if (sql.includes('INSERT INTO "Bill"')) throw new Error('fixture insert failed');
+      if (sql.includes('INSERT INTO "OutsourceOrder"')) throw new Error('fixture insert failed');
       return { rowCount: 1, rows: [] };
     });
 

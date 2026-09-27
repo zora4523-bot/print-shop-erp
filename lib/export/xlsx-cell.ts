@@ -1,4 +1,5 @@
 import { xlsxColumnName } from './xlsx-column';
+import { escapeXmlText } from './xml-text';
 
 export type XlsxCellValue =
   | string
@@ -7,15 +8,6 @@ export type XlsxCellValue =
   | Date
   | null
   | undefined;
-
-function escapeXmlText(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
-}
 
 export function xlsxCellXml(
   value: XlsxCellValue,

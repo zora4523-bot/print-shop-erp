@@ -4,6 +4,7 @@ const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     backgroundJob: {
       createMany: vi.fn(),
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -39,7 +40,9 @@ import {
   enqueueBackgroundJob,
   failBackgroundJob,
   heartbeatBackgroundJob,
+  OrderPdfScopeInFlightError,
   releaseUndispatchedBackgroundJobClaim,
+  RetiredBackgroundJobTypeError,
   retryDeadBackgroundJob,
 } from '../repository';
 import { backgroundJobErrorCode, retryDelayMs } from '../policy';
@@ -1001,6 +1004,44 @@ describe('claim and lease lifecycle', () => {
     expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
   });
 
+  it.each(['CRON_HOURLY_PAYROLL', 'CRON_CS_SETTLE', 'CRON_CS_PERIOD_ENDING'])(
+    'refuses to requeue a dead %s job whose handler was removed, keeping the history row',
+    async (type) => {
+      dbMock.backgroundJob.findUnique.mockResolvedValue({
+        status: BackgroundJobStatus.DEAD,
+        type,
+        attempts: 5,
+        maxAttempts: 5,
+        lastErrorCode: 'SalaryRuleMissingError',
+      });
+      dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(retryDeadBackgroundJob('retired-1')).rejects.toBeInstanceOf(
+        RetiredBackgroundJobTypeError,
+      );
+
+      expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+      expect(dbMock.backgroundJob.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses to requeue a dead notification whose event was retired', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'NOTIFICATION',
+      attempts: 5,
+      maxAttempts: 5,
+      lastErrorCode: 'NotificationDeliveryFailedError',
+      payload: { event: 'CS_PERIOD_ENDING', payload: { periodId: 'p-1' } },
+    });
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(retryDeadBackgroundJob('retired-n')).rejects.toBeInstanceOf(
+      RetiredBackgroundJobTypeError,
+    );
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+  });
+
   it('an operator channel-test retry authorizes exactly one more execution', async () => {
     dbMock.backgroundJob.findUnique.mockResolvedValue({
       status: BackgroundJobStatus.DEAD,
@@ -1074,6 +1115,72 @@ describe('claim and lease lifecycle', () => {
   });
 });
 
+describe('retryDeadBackgroundJob · ORDER_PDF authorized scope', () => {
+  const scopePrefix = `order-pdf:v2:${'a'.repeat(64)}:`;
+  const deadPdf = {
+    status: BackgroundJobStatus.DEAD,
+    type: 'ORDER_PDF',
+    attempts: 2,
+    maxAttempts: 2,
+    lastErrorCode: 'PdfRenderError',
+    dedupeKey: `${scopePrefix}1234`,
+    payload: { orderId: 'order-1' },
+  };
+
+  it('does not revive a DEAD PDF job while another job of the same scope is in flight', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue(deadPdf);
+    dbMock.backgroundJob.findFirst.mockResolvedValue({ id: 'job-regenerate' });
+
+    await expect(retryDeadBackgroundJob('job-dead-pdf')).rejects.toBeInstanceOf(
+      OrderPdfScopeInFlightError,
+    );
+
+    // Same transaction-scoped lock as the download / regenerate entries.
+    const lockCall = dbMock.$executeRaw.mock.calls[0];
+    expect(lockCall?.[0].join('?')).toContain('pg_advisory_xact_lock(hashtext(');
+    expect(lockCall?.slice(1)).toEqual([scopePrefix]);
+    expect(dbMock.backgroundJob.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          type: 'ORDER_PDF',
+          dedupeKey: { startsWith: scopePrefix },
+          status: { in: [BackgroundJobStatus.PENDING, BackgroundJobStatus.RUNNING] },
+        },
+      }),
+    );
+    expect(dbMock.backgroundJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('revives a DEAD PDF job under the scope lock when nothing of the scope is in flight', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue(deadPdf);
+    dbMock.backgroundJob.findFirst.mockResolvedValue(null);
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(retryDeadBackgroundJob('job-dead-pdf')).resolves.toBe(true);
+
+    const lockOrder = dbMock.$executeRaw.mock.invocationCallOrder[0] ?? Infinity;
+    const findOrder = dbMock.backgroundJob.findFirst.mock.invocationCallOrder[0] ?? -1;
+    const updateOrder = dbMock.backgroundJob.updateMany.mock.invocationCallOrder[0] ?? -1;
+    expect(lockOrder).toBeLessThan(findOrder);
+    expect(findOrder).toBeLessThan(updateOrder);
+  });
+
+  it('leaves non-PDF retries free of the PDF scope lock', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({
+      status: BackgroundJobStatus.DEAD,
+      type: 'CDR_BUNDLE',
+      attempts: 3,
+      maxAttempts: 3,
+      dedupeKey: 'cdr-bundle:b1',
+    });
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(retryDeadBackgroundJob('job-cdr')).resolves.toBe(true);
+    expect(dbMock.$executeRaw).not.toHaveBeenCalled();
+    expect(dbMock.backgroundJob.findFirst).not.toHaveBeenCalled();
+  });
+});
+
 describe('terminal CDR state', () => {
   const claimed: ClaimedBackgroundJob = {
     id: 'job-cdr',
@@ -1099,8 +1206,18 @@ describe('terminal CDR state', () => {
     );
 
     expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith({
-      where: { backgroundJobId: 'job-cdr' },
+      where: { backgroundJobId: 'job-cdr', status: 'PENDING' },
       data: { status: 'FAILED', lastErrorCode: 'CdrUploadError' },
+    });
+  });
+
+  it('keeps a retryable CDR failure pending with its error code', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+    await failBackgroundJob({ ...claimed, attempts: 1 }, new Error('temporary'), new Date('2026-07-17T08:01:00Z'));
+    expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith({
+      where: { backgroundJobId: 'job-cdr', status: 'PENDING' },
+      data: { status: 'PENDING', lastErrorCode: 'Error' },
     });
   });
 

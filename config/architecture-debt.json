@@ -16,10 +16,6 @@
       "maxLines": 324
     },
     {
-      "id": "app/(admin)/owner/salary/cs/[id]/page.tsx::function:CsPeriodDetailPage",
-      "maxLines": 324
-    },
-    {
       "id": "app/dev/showcase/page.tsx::function:ShowcasePage",
       "maxLines": 441
     },
@@ -42,10 +38,6 @@
     {
       "id": "components/business/order/OrderPricingReviewForm.tsx::function:OrderPricingReviewForm",
       "maxLines": 723
-    },
-    {
-      "id": "components/business/order/OrdersTable.tsx::function:OrdersTable",
-      "maxLines": 347
     },
     {
       "id": "components/business/order/SalesOrderDetailView.tsx::function:SalesOrderDetailView",

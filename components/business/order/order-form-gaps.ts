@@ -42,8 +42,6 @@ export type OrderFormGapShipment = {
 };
 
 export type OrderFormGapInput = {
-  customerRef?: string | null;
-  requiresCustomerRef?: boolean;
   promisedDate?: Date | string | null;
   items: readonly OrderFormGapItem[];
   shipping: {
@@ -82,10 +80,10 @@ function quoteGapLabel(
 
 /**
  * Builds the operator-facing readiness list. These are not all Zod-required
- * fields: customer/deadline and the automatic quote paths are intentionally
+ * fields: the deadline and the automatic quote paths are intentionally
  * allowed to remain incomplete while a DRAFT is created. The rail makes that
  * debt visible and provides an exact focus target without weakening the
- * server-side create contract.
+ * server-side create contract. 客户名称/简称已退役（业主 2026-09-27），不再列为缺口。
  */
 export function collectOrderFormGaps(
   input: OrderFormGapInput,
@@ -93,18 +91,6 @@ export function collectOrderFormGaps(
   const gaps: OrderFormGap[] = [];
   const usesExternalSalesPricing = input.shipping.usesExternalSalesPricing;
 
-  if (
-    !usesExternalSalesPricing &&
-    input.requiresCustomerRef !== false &&
-    !hasText(input.customerRef)
-  ) {
-    gaps.push({
-      id: 'customer-ref',
-      step: 'customer',
-      label: '未填写客户名称/简称',
-      fieldId: 'customerRef',
-    });
-  }
   if (!usesExternalSalesPricing && !hasDate(input.promisedDate)) {
     gaps.push({
       id: 'promised-date',

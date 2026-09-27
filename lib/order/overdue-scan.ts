@@ -1,3 +1,4 @@
+import { ORDER_EXTERNAL_SALES_SELECT, orderExternalSalesName } from './external-sales-name';
 import type { Prisma } from '../../generated/prisma/client';
 import { OrderStatus } from '../../generated/prisma/enums';
 import { db } from '../db';
@@ -27,6 +28,9 @@ export const ORDER_OVERDUE_NOTIFY_CAP = 200;
 export type OverdueOrderRow = {
   id: string;
   orderNo: string;
+  /** 工单归属的外部销售（免费重做取原单销售）。 */
+  externalSalesName: string | null;
+  /** @deprecated 客户自 2026-09-13 起不再录入；仅供旧自定义模板。 */
   customerRef: string | null;
   status: OrderStatus;
   promisedDate: Date;
@@ -65,6 +69,7 @@ export async function scanOverdueOrders(
       id: true,
       orderNo: true,
       customerRef: true,
+      ...ORDER_EXTERNAL_SALES_SELECT,
       status: true,
       promisedDate: true,
     },
@@ -73,6 +78,7 @@ export async function scanOverdueOrders(
   const rows = raw.slice(0, cap).map((r) => ({
     id: r.id,
     orderNo: r.orderNo,
+    externalSalesName: orderExternalSalesName(r),
     customerRef: r.customerRef,
     status: r.status,
     promisedDate: r.promisedDate as Date,

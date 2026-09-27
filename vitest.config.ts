@@ -40,12 +40,6 @@ export default defineConfig({
         'lib/salary/piecework-pricing.ts': {
           statements: 100, branches: 100, functions: 100, lines: 100,
         },
-        'lib/salary/cs-commission.ts': {
-          statements: 100, branches: 100, functions: 100, lines: 100,
-        },
-        'lib/salary/hourly-payroll.ts': {
-          statements: 100, branches: 100, functions: 100, lines: 100,
-        },
         'lib/**/status-machine.ts': {
           statements: 100, branches: 100, functions: 100, lines: 100,
         },

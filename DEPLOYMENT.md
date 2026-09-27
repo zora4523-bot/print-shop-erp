@@ -28,10 +28,19 @@ applies_to: repository deployment workflow at last_verified
 | Nginx 示例 | [`deploy/nginx.conf.example`](./deploy/nginx.conf.example) |
 | 支持的 cron 端点与时间 | [`deploy/crontab.example`](./deploy/crontab.example) |
 | cron 安全调用脚本 | [`deploy/run-cron.sh`](./deploy/run-cron.sh) |
-| 受控更新脚本 | [`deploy/update.sh`](./deploy/update.sh) |
+| 当前生产候选目录切换 | [09-21 实际发布流程](./docs/audits/2026-09-21-production-release-ef6fa012.md) |
+| 其他适配环境的更新脚本（不适用于当前生产） | [`deploy/update.sh`](./deploy/update.sh) |
 | Pigsty 扩展激活 | [`docs/pigsty-production-activation-runbook.md`](./docs/pigsty-production-activation-runbook.md) |
 | SLO、告警与恢复目标 | [`docs/production-slo-and-recovery.md`](./docs/production-slo-and-recovery.md) |
 | 数据库规则 | [DATABASE.md](./DATABASE.md) |
+
+当前生产不是 `main` 检出，应用机 1.6 GiB 内存不能承担本机构建，不得直接运行 `deploy/update.sh`。
+2026-09-21 两条空白封迁移已 applied，脚本的 `--check-applied` 门禁会放行，不能再依赖它防止误用。
+
+下一批发布（2026-09-24 删除客服 / 清废厨师）含三条迁移
+`20260924100000_remove_cleaner_cook_cleaning`、`20260924110000_remove_customer_service_role`、
+`20260924150000_prune_removed_sensitive_column_policies`，前两条遇到业务数据引用即整体中止；发布前的只读预查、
+crontab 重装和历史数据清理脚本步骤见 [`docs/上线前置操作清单.md`](./docs/上线前置操作清单.md)。
 
 ## 不可跳过的边界
 

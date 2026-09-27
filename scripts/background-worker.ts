@@ -7,6 +7,8 @@ loadEnvConfig(
   process.env.NODE_ENV !== 'production',
 );
 
+process.env.DATABASE_PROCESS_ROLE = 'worker';
+
 void import('./background-worker-runtime')
   .then(({ runBackgroundWorkerProcess }) => runBackgroundWorkerProcess())
   .catch((error: unknown) => {

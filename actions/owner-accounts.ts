@@ -169,5 +169,4 @@ export async function resetUserPasswordAction(
 function revalidateAccountPickerPaths(id: string) {
   revalidatePath('/owner/accounts');
   revalidatePath(`/owner/accounts/${id}`);
-  revalidatePath('/owner/salary/cs/new');
 }

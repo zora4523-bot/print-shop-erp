@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
   ProductionOperationStatus,
@@ -22,6 +23,9 @@ type FakeOrderRow = {
   workOrderVersion?: number;
   orderNo?: string;
   customerRef?: string | null;
+  settlementType?: OrderSettlementType;
+  submitter?: { displayName: string };
+  sourceOrder?: { submitter: { displayName: string } } | null;
   completedAt?: Date | null;
 };
 
@@ -57,6 +61,9 @@ function makeTx(opts: {
       workOrderVersion: 1,
       orderNo: 'O-1',
       customerRef: null,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      submitter: { displayName: '外销甲' },
+      sourceOrder: null,
       completedAt: null,
       ...(opts.order ?? {}),
     };
@@ -316,6 +323,7 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
           orderId: 'order-1',
           orderNo: 'O-1',
           workOrderVersion: 7,
+          externalSalesName: '外销甲',
           customerRef: null,
         },
         dedupeKey: 'notification:ORDER_COMPLETED:order-1:v7',
@@ -381,6 +389,7 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
           orderId: 'order-1',
           orderNo: 'O-1',
           workOrderVersion: 1,
+          externalSalesName: '外销甲',
           customerRef: null,
         },
         dedupeKey: 'notification:ORDER_COMPLETED:order-1',
@@ -390,6 +399,33 @@ describe('maybeCompleteProductionOrder — 早退顺序', () => {
     expect(h.outsourceFindMany).not.toHaveBeenCalled();
     expect(h.itemFindMany).not.toHaveBeenCalled();
     expect(h.craftFindMany).not.toHaveBeenCalled();
+  });
+
+  it('完工通知的外部销售：免费重做取原单销售，查不到时写「未填」', async () => {
+    const rework = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.IN_PRODUCTION,
+        settlementType: OrderSettlementType.NO_CHARGE,
+        submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '原单销售' } },
+      },
+      tasks: [{ id: 'task-1', status: TaskStatus.COMPLETED }],
+    });
+    const reworkOut = await maybeCompleteProductionOrder(rework.tx, 'order-1', 'user-1', NOW);
+    expect(reworkOut.completed && reworkOut.notification?.payload.externalSalesName).toBe('原单销售');
+
+    const orphan = makeTx({
+      order: {
+        id: 'order-1',
+        status: OrderStatus.IN_PRODUCTION,
+        settlementType: OrderSettlementType.NO_CHARGE,
+        sourceOrder: null,
+      },
+      tasks: [{ id: 'task-1', status: TaskStatus.COMPLETED }],
+    });
+    const orphanOut = await maybeCompleteProductionOrder(orphan.tx, 'order-1', 'user-1', NOW);
+    expect(orphanOut.completed && orphanOut.notification?.payload.externalSalesName).toBe('未填');
   });
 
   it('requiresOutsource 缺失（undefined）走与 false 相同的路径 —— 与横幅共用谓词', async () => {
@@ -538,6 +574,7 @@ describe('maybeCompleteProductionOrder — 款式级覆盖闸口', () => {
           orderId: 'order-1',
           orderNo: 'O-1',
           workOrderVersion: 1,
+          externalSalesName: '外销甲',
           customerRef: null,
         },
         dedupeKey: 'notification:ORDER_COMPLETED:order-1',

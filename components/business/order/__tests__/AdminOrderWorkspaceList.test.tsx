@@ -65,7 +65,6 @@ describe('AdminOrderWorkspaceList', () => {
     const html = renderToStaticMarkup(<AdminOrderWorkspaceList orders={[order]} submitterFilterHrefs={{}} selectedExportRequestKey="name-export" />);
     expect(html).toContain('href="/orders/order-1"');
     expect(html).toContain('端午定制');
-    expect(html).not.toContain('客户甲');
     expect(html).toContain('2026-09-05');
     expect(html).not.toContain('剩 8 天');
     expect(html.replace(/<[^>]*>/g, '')).not.toContain(order.orderNo);
@@ -128,7 +127,6 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).toContain('/orders?submitterId=sales-1');
     expect(html).not.toContain('v2');
     expect(html).toContain('端午定制');
-    expect(html).not.toContain('客户甲');
     expect(html).toContain('业务员甲');
     expect(html).not.toContain('局部烫金');
     expect(html).toContain('2 款 · 2,000');
@@ -369,7 +367,6 @@ function row(): AdminOrderWorkspaceRow {
     revision: 4,
     workOrderVersion: 2,
     customName: '端午定制',
-    customer: { id: 'party-1', name: '客户甲', filterValue: '客户甲' },
     submitter: { id: 'sales-1', name: '业务员甲' },
     status: OrderStatus.CONFIRMED,
     statusSummary: null,

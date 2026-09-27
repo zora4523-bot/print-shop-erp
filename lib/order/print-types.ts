@@ -115,8 +115,9 @@ export type PrintOrder = {
   isUrgent: boolean;
   isSfCollect: boolean;
   promisedDate?: Date | null;
-  customerName?: string | null;
-  customerRef?: string | null;
+  // 打印单抬头：工单归属的外部销售（DECISIONS 2026-09-24 起收费工单一律归属外部销售；
+  // 免费重做取原单的外部销售）。原“客户名称/简称”自 2026-09-13 起不再录入，不再打印。
+  externalSalesName?: string | null;
   receiverName?: string | null;
   receiverPhone?: string | null;
   receiverAddress?: string | null;

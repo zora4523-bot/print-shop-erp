@@ -74,7 +74,7 @@ describe('outsource payment ledger contract', () => {
 
     expect(paymentDomain).toContain('tx.outsourcePayment.create');
     expect(paymentDomain).not.toMatch(
-      /tx\.(?:bill|billPayment|salaryPeriod|dailyWorkerSalary|hourlyWorkerPayroll|csPayrollPayment)\b/,
+      /tx\.(?:bill|billPayment|dailyWorkerSalary|hourlyWorkerPayroll|pieceworkSettlement)\b/,
     );
   });
 });

@@ -6,7 +6,6 @@ import {
   getTodayOrderStats,
 } from '@/lib/dashboard/owner-stats';
 import {
-  getEndingPeriods,
   getOverdueOutsourcing,
   getDueOrders,
   getPendingShipments,
@@ -27,7 +26,6 @@ import {
   PendingShipmentsWatchlist,
   OverdueOutsourcingWatchlist,
   OverReportsWatchlist,
-  EndingPeriodsWatchlist,
 } from '@/components/business/dashboard/OwnerWatchlists';
 import { countRecentFailures } from '@/lib/notification/admin';
 
@@ -43,7 +41,6 @@ export default async function OwnerDashboardPage() {
   const overdueOutsourcingPromise = getOverdueOutsourcing(now);
   const dueOrdersPromise = getDueOrders(now, DASHBOARD_PREVIEW_LIMIT);
   const overReportsPromise = getRecentOverReports(now, DASHBOARD_PREVIEW_LIMIT);
-  const endingPeriodsPromise = getEndingPeriods(now);
   const recentNotificationFailuresPromise = countRecentFailures(24);
 
   return (
@@ -115,7 +112,7 @@ export default async function OwnerDashboardPage() {
           </Suspense>
         </ErrorBoundary>
       </div>
-      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-3">
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
         <ErrorBoundary
           scope="section"
           title="超期外协暂时无法加载"
@@ -136,17 +133,6 @@ export default async function OwnerDashboardPage() {
             fallback={<DashboardSectionLoading label="超计划报工记录" compact />}
           >
             <OverReportsWatchlist resultPromise={overReportsPromise} />
-          </Suspense>
-        </ErrorBoundary>
-        <ErrorBoundary
-          scope="section"
-          title="即将结算客服周期暂时无法加载"
-          description="其他关注列表仍可使用。"
-        >
-          <Suspense
-            fallback={<DashboardSectionLoading label="即将结算客服周期" compact />}
-          >
-            <EndingPeriodsWatchlist resultPromise={endingPeriodsPromise} />
           </Suspense>
         </ErrorBoundary>
       </div>
@@ -215,7 +201,7 @@ async function MonthlyStatsSection({
       value={formatMoney(monthly.total)}
       hint={(
         <>
-          已收 {formatMoney(monthly.paid)} · 未收 {formatMoney(monthly.outstanding)}
+          本月已收 {formatMoney(monthly.paid)} · 待收款 {formatMoney(monthly.outstanding)}
         </>
       )}
     />

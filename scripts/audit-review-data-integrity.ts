@@ -33,16 +33,14 @@ async function main(): Promise<void> {
       SELECT p.id AS "payrollId",
              item ->> 'date' AS date,
              (item ->> 'normalHours')::numeric AS normal,
-             (item ->> 'otHours')::numeric AS ot,
-             (item ->> 'spareHours')::numeric AS spare
+             (item ->> 'otHours')::numeric AS ot
         FROM paid p
         CROSS JOIN LATERAL jsonb_array_elements(p.detail) item
     ), facts AS (
       SELECT p.id AS "payrollId",
              to_char(a.date, 'YYYY-MM-DD') AS date,
              a."normalHours" AS normal,
-             a."otHours" AS ot,
-             a."spareHours" AS spare
+             a."otHours" AS ot
         FROM paid p
         JOIN "Attendance" a
           ON a."workerId" = p."workerId"
@@ -57,7 +55,6 @@ async function main(): Promise<void> {
        WHERE f.date IS NULL
           OR f.normal IS DISTINCT FROM d.normal
           OR f.ot IS DISTINCT FROM d.ot
-          OR f.spare IS DISTINCT FROM d.spare
       UNION
       SELECT f."payrollId"
         FROM facts f

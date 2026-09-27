@@ -5,11 +5,8 @@ export const BACKGROUND_JOB_TYPES = {
   NOTIFICATION: 'NOTIFICATION',
   NOTIFICATION_CHANNEL_TEST: 'NOTIFICATION_CHANNEL_TEST',
   CRON_DAILY_SALARY: 'CRON_DAILY_SALARY',
-  CRON_HOURLY_PAYROLL: 'CRON_HOURLY_PAYROLL',
-  CRON_CS_SETTLE: 'CRON_CS_SETTLE',
   CRON_GENERATE_BILLS: 'CRON_GENERATE_BILLS',
   CRON_OUTSOURCE_OVERDUE: 'CRON_OUTSOURCE_OVERDUE',
-  CRON_CS_PERIOD_ENDING: 'CRON_CS_PERIOD_ENDING',
   CRON_ORDER_OVERDUE: 'CRON_ORDER_OVERDUE',
   CRON_PENDING_FACTORY_BACKLOG: 'CRON_PENDING_FACTORY_BACKLOG',
   CRON_PRODUCTION_ALERTS: 'CRON_PRODUCTION_ALERTS',
@@ -23,6 +20,21 @@ export const BACKGROUND_JOB_TYPES = {
 
 export type BackgroundJobType =
   (typeof BACKGROUND_JOB_TYPES)[keyof typeof BACKGROUND_JOB_TYPES];
+
+const REGISTERED_BACKGROUND_JOB_TYPES: ReadonlySet<string> = new Set(
+  Object.values(BACKGROUND_JOB_TYPES),
+);
+
+/**
+ * 当前仍有处理器的任务类型（handlers.test 锁定处理器表与本字典一一对应）。
+ * 已删除功能的历史任务（如 2026-09-24 删除的 CRON_HOURLY_PAYROLL /
+ * CRON_CS_SETTLE / CRON_CS_PERIOD_ENDING）保留为运行记录，但不能再重试。
+ */
+export function isRegisteredBackgroundJobType(
+  type: string,
+): type is BackgroundJobType {
+  return REGISTERED_BACKGROUND_JOB_TYPES.has(type);
+}
 
 export type EnqueueBackgroundJobInput = {
   type: BackgroundJobType;

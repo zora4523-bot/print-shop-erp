@@ -228,7 +228,11 @@ describe('CustomerPricingDedicatedSection', () => {
     const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
     expect(html).toContain('红卡');
     expect(html).toContain('0.135');
-    expect(html).toContain('纸张已停用');
+    // A stopped paper is marked on its row and explained, not reported as a data fault to repair.
+    expect(html).toContain('红卡纸（已停用）');
+    expect(html).toContain('180g红卡：纸张已停用，此价格对新工单不生效。');
+    expect(html).not.toContain('请到纸张管理修复');
+    expect(html).not.toContain('资料异常');
   });
 
   it('停用重复记录仍参与身份查重，不把同名在用记录误开放编辑', () => {

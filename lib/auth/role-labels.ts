@@ -12,15 +12,12 @@ import {
 export const ROLE_LABELS: Record<Role, string> = {
   [Role.ADMIN]: '管理员',
   [Role.SALES]: '外部销售',
-  [Role.CUSTOMER_SERVICE]: '内部销售/客服',
   [Role.WORKER]: '师傅',
 };
 
 export const WORKER_TYPE_LABELS: Record<WorkerType, string> = {
   [WorkerType.MACHINE]: '开机师傅',
   [WorkerType.PACKER]: '打包工',
-  [WorkerType.CLEANER]: '清废工',
-  [WorkerType.COOK]: '厨师',
 };
 
 export const MACHINE_TYPE_LABELS: Record<MachineType, string> = {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  OrderSettlementType,
   OrderStatus,
   PieceworkOperationType,
   ProductionOperationStatus,
@@ -32,6 +33,39 @@ beforeEach(() => {
 });
 
 describe('getOrderForPrint permissions', () => {
+  it('打印抬头取外部销售；免费重做由管理员发起，取原单的外部销售', async () => {
+    const baseOrder = {
+      id: 'rework-1', orderNo: 'GD-REWORK', workOrderVersion: 1, status: OrderStatus.CONFIRMED,
+      changeRequests: [], createdAt: new Date('2026-09-27T00:00:00Z'), items: [],
+      packagingGroups: [], shipments: [], productionProgressSteps: [], productionOperations: [],
+    };
+    dbMock.order.findFirst.mockResolvedValue({
+      ...baseOrder,
+      kind: 'REWORK',
+      settlementType: OrderSettlementType.NO_CHARGE,
+      submitter: { displayName: '管理员甲' },
+      sourceOrder: { orderNo: 'GD-SOURCE', submitter: { displayName: '外销乙' } },
+    });
+    const rework = await getOrderForPrint('rework-1', { id: 'admin-1', role: Role.ADMIN }, 'https://erp.example.com');
+    expect(rework?.externalSalesName).toBe('外销乙');
+    expect(rework?.sourceOrderNo).toBe('GD-SOURCE');
+
+    dbMock.order.findFirst.mockResolvedValue({
+      ...baseOrder,
+      kind: 'NORMAL',
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      submitter: { displayName: '  ' },
+      sourceOrder: null,
+    });
+    const blank = await getOrderForPrint('rework-1', { id: 'admin-1', role: Role.ADMIN }, 'https://erp.example.com');
+    expect(blank?.externalSalesName).toBeNull();
+
+    const query = dbMock.order.findFirst.mock.calls[0]?.[0];
+    expect(query.include.submitter).toEqual({ select: { displayName: true } });
+    expect(query.include.sourceOrder).toEqual({ select: { orderNo: true, submitter: { select: { displayName: true } } } });
+    expect(query.include).not.toHaveProperty('customerParty');
+  });
+
   it('50款聚合工序只引用完整图号列表，DTO款式仍保留全部64字名称', async () => {
     const items = Array.from({ length: 50 }, (_, index) => ({
       id: `item-${index + 1}`,
@@ -130,7 +164,9 @@ describe('getOrderForPrint permissions', () => {
       isUrgent: false,
       isSfCollect: false,
       promisedDate: null,
-      customerParty: null,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      submitter: { displayName: ' 外销甲 ' },
+      // 原“客户”不再进入打印 DTO。
       customerRef: '客户甲',
       receiverName: null,
       receiverPhone: null,
@@ -274,6 +310,8 @@ describe('getOrderForPrint permissions', () => {
       }),
     );
     expect(result?.items[0]).not.toHaveProperty('tasks');
+    expect(result?.externalSalesName).toBe('外销甲');
+    expect(result).not.toHaveProperty('customerName');
     expect(result?.status).toBe(OrderStatus.RELEASED);
     expect(result?.hasPendingChange).toBe(false);
     expect(result?.productionSteps).toEqual([

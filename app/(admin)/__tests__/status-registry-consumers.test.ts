@@ -53,10 +53,8 @@ describe('high-risk status registry consumers', () => {
     );
   });
 
-  it('shares salary period and payment badge adapters', () => {
+  it('shares the payment badge adapter', () => {
     const files = [
-      'app/(admin)/owner/salary/cs/page.tsx',
-      'app/(admin)/owner/salary/cs/[id]/page.tsx',
       'app/(admin)/owner/salary/daily/page.tsx',
       'app/(admin)/owner/salary/daily/[id]/page.tsx',
       'app/(admin)/owner/salary/hourly/page.tsx',
@@ -66,12 +64,9 @@ describe('high-risk status registry consumers', () => {
 
     for (const file of files) {
       expect(source(file), file).toMatch(
-        /(?:Payment|SalaryPeriod)StatusBadge/,
+        /PaymentStatusBadge/,
       );
     }
-    expect(source(files[1]!)).not.toContain(
-      '<Badge variant="destructive">待结算</Badge>',
-    );
   });
 
   it('centralizes order-change, outsource, production-task, and price-version states', () => {
@@ -125,7 +120,7 @@ describe('high-risk status registry consumers', () => {
     ).not.toContain('statusBadgeClass');
   });
 
-  it('centralizes purchase, shipment, CDR, export, and order-filter status UI', () => {
+  it('centralizes purchase, shipment, CDR, and export status UI', () => {
     const consumers: Array<[string, string]> = [
       [
         'components/business/purchase/PurchaseStatusBadge.tsx',
@@ -147,22 +142,6 @@ describe('high-risk status registry consumers', () => {
         'components/business/order/OrderExportControls.tsx',
         'ORDER_EXPORT_STATUS_REGISTRY',
       ],
-      [
-        'components/business/order/OrderAdvancedFilters.tsx',
-        'SHIPMENT_STATUS_REGISTRY',
-      ],
-      [
-        'components/business/order/OrderAdvancedFilters.tsx',
-        'PRODUCTION_TASK_STATUS_REGISTRY',
-      ],
-      [
-        'components/business/order/OrderAdvancedFilters.tsx',
-        'OUTSOURCE_STATUS_REGISTRY',
-      ],
-      [
-        'components/business/order/OrderListFilters.tsx',
-        'SHIPMENT_STATUS_REGISTRY',
-      ],
     ];
 
     for (const [file, registry] of consumers) {
@@ -182,12 +161,6 @@ describe('high-risk status registry consumers', () => {
       'ShipmentStatusBadge',
     );
 
-    const filterFields = source(
-      'components/business/order/OrderListFilterFields.tsx',
-    );
-    expect(filterFields).not.toContain('SHIPMENT_STATUS_LABELS');
-    expect(filterFields).not.toContain('TASK_STATUS_LABELS');
-    expect(filterFields).not.toContain('OUTSOURCE_STATUS_LABELS');
     expect(source('lib/purchase.ts')).not.toContain(
       'PURCHASE_ORDER_STATUS_LABELS',
     );

@@ -2,6 +2,7 @@ import type { Prisma } from '@/generated/prisma/client';
 import { Role } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
 import { orderCascadeLockKey } from './locks';
+import { orderItemRowLabel } from './item-label';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
 import { ORDER_PRICING_STATUS, type OrderPricingStatusValue } from './pricing-status';
 import { buildBlankMaterialConfirmation, readConfirmedHistoricalBlankPrice } from './historical-blank-price';
@@ -82,7 +83,7 @@ export async function readHistoricalBlankPriceEditor(orderId: string, actor: { i
   } });
   if (!order || !canConfirmHistoricalBlankPrice(order.status) || order.items.length === 0) return null;
   return { orderId: order.id, orderRevision: order.revision, priceRevision: order.priceRevision,
-    items: order.items.map((item) => ({ id: item.id, name: item.name,
+    items: order.items.map((item) => ({ id: item.id, label: orderItemRowLabel(item),
       unitPrice: readConfirmedHistoricalBlankPrice(item)?.unitPrice ?? null })),
   };
 }

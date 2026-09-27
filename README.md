@@ -94,7 +94,7 @@ pnpm dev
    - 产品基础管理
 
 3. **工单核心**（2周）
-   - 销售/客服：创建工单、多款式、双面双色、工艺多选
+   - 销售（管理员可代建并必须选择外部销售）：创建工单、多款式、双面双色、工艺多选
    - 上传JPG设计图 + CDR源文件（OSS）
    - 工单列表、详情、修改（按状态限制）
    - 服务端稳定分页、逐项筛选、管理员异步多表 XLSX 导出
@@ -108,10 +108,9 @@ pnpm dev
    - 不良/返工记录
 
 5. **薪资系统（核心难点）**（2周）
-   - 三套薪资规则配置界面
+   - 三套薪资规则配置界面（历史规划；现行为师傅工序计件工价与日薪结算，客服 / 时薪月结已删除，见 SPEC §K、§L）
    - 开机师傅日薪计算（调度时间以 `deploy/crontab.example` 为准）
-   - 客服业绩周期累计 + 结算
-   - 时薪工工时录入 + 月结
+   - 员工考勤录入
 
 6. **应收账单**（3天）
    - 月度自动生成销售账单
@@ -123,7 +122,7 @@ pnpm dev
 
 8. **推送与Dashboard**（1周）
    - 企业微信Webhook配置
-   - 15个预置事件
+   - 15个预置事件（历史规划；现行 13 个，见 SPEC §8.1）
    - 管理员Dashboard
 
 9. **测试与上线准备**（3天）
@@ -163,7 +162,6 @@ pnpm dev
 - [ ] 销售能在手机上10秒内录完一张简单工单
 - [ ] 师傅能在30秒内完成扫码报工
 - [ ] 管理员能30秒内汇总当日CDR并拿到分享链接
-- [ ] 客服能实时看到自己当前周期的业绩和距离下一档的差额
 - [ ] 管理员能在Dashboard上一眼看到今日工单、产量、待发货
 - [ ] 急单提交后企业微信群3秒内收到推送
 
@@ -196,7 +194,7 @@ pnpm dev
 > 可执行部署步骤的唯一入口是 `DEPLOYMENT.md`，详细 runbook 是
 > `docs/部署指南.md`。本节包含带日期的历史快照，不应替代目标环境核验。
 
-截至 2026-08-02，`aa42ba0` 已运行在 <https://bag.sshapi.cn>，生产数据库为 45 / 45 migrations。本节记录当前生产口径和后续发布门禁，不再把“首次生产激活”当作待办。
+截至 2026-09-21，生产运行 `ef6fa012`，160 条迁移（见 [09-21 发布记录](./docs/audits/2026-09-21-production-release-ef6fa012.md)）。当前仓库有 165 条迁移，`20260921100000` 起的 5 条（含 2026-09-24 删除客服 / 清废厨师的三条）尚未在生产执行，发布前置见 [上线前置操作清单](./docs/上线前置操作清单.md)。本节记录当前生产口径和后续发布门禁，不再把“首次生产激活”当作待办。
 
 > 当前已确认 Web、LIGHT worker、HEAVY worker、ready 和系统 Chromium PDF 正常；仍需补异地备份 repo2、30 天保留与恢复演练、`SENTRY_DSN / APP_VERSION`，并将 1.6 GiB 应用机升级到至少 4 GiB。生产只有 repo1 不能算备份基线通过。
 
@@ -207,7 +205,7 @@ pnpm dev
 | `DATABASE_URL` | Pigsty PG 连接串 | 应用起不来 |
 | `AUTH_SECRET` | Auth.js 会话签名 | Auth.js 拒启 |
 | `AUTH_TRUST_HOST` | Nginx 反代场景必填 `"true"` | 登录跳转失败 |
-| `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 10 个 `/api/cron/*` 全部 503 |
+| `CRON_SECRET` | Web/worker 服务端校验 cron endpoints 的 `Authorization: Bearer <secret>` | 7 个 `/api/cron/*` 全部 503 |
 | `BACKGROUND_JOBS_MODE` | 生产设 `durable`，通知/cron/PDF/CDR/工单导出进 PostgreSQL 任务账本 | `inline` 会失去持久重试和资源隔离 |
 | `ORDER_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的私有 XLSX 目录，单机建议 `/var/tmp/print-shop-erp/order-exports` | 留空回退到系统临时目录；多机或临时目录清理后待下载文件会丢失 |
 | `AGENT_MONTHLY_BILL_EXPORT_ARTIFACT_DIR` | Web 与 HEAVY worker 共享的月账单 XLSX 私有目录，必须与工单导出目录分离 | 留空回退到独立系统临时目录；多机部署时会无法稳定下载 |
@@ -249,7 +247,7 @@ Bot ID + Secret 智能机器人使用企业微信官方的
 
 ### 2. Cron 调度：服务端环境 + root-only 发送文件
 
-P0 + P1 #2 期间建立的 cron 通道现有 10 个 endpoints，用 shared-secret + 外部 cron 调用。
+cron 通道现有 7 个 endpoints（2026-09-24 删除 `hourly-payroll`、`cs-settle`、`cs-period-ending`），用 shared-secret + 外部 cron 调用。
 
 > 调度时间的唯一事实源是 `deploy/crontab.example`。下方命令仅用于人工触发示例，
 > 不定义生产执行时间。
@@ -265,14 +263,6 @@ P0 + P1 #2 期间建立的 cron 通道现有 10 个 endpoints，用 shared-secre
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/daily-salary
 
-# 时薪工月结
-printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
-  curl -X POST --header @- https://host/api/cron/hourly-payroll
-
-# 扫描已到期客服周期（每条结算推 CS_PERIOD_SETTLED 到规则绑定的单个授权共享群）
-printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
-  curl -X POST --header @- https://host/api/cron/cs-settle
-
 # 销售应收账单
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/generate-bills
@@ -280,10 +270,6 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 # P1 #2 新增：每日扫超期外协 → OUTSOURCE_OVERDUE 推送到管理群
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/outsource-overdue
-
-# P1 #2 新增：每日扫 7 天内将到期客服周期 → CS_PERIOD_ENDING 推送到规则绑定的单个授权共享群
-printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
-  curl -X POST --header @- https://host/api/cron/cs-period-ending
 
 # 2026-07-07 新增：每日扫承诺交期已过仍未发货的工单 → ORDER_OVERDUE 推送到管理群
 printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
@@ -302,10 +288,9 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
   curl -X POST --header @- https://host/api/cron/production-alerts
 ```
 
-**手工带 body 重跑日薪 / 月结时会多一个 400**（2026-08-21 起）：`daily-salary` 的
-`body.date` 严格晚于上海日历今天、`hourly-payroll` 的 `body.month` 严格晚于上海本月时，
-直接返回 `400 { "error": "future date: <date>" }` / `{ "error": "future month: <month>" }`，
-不入队。crontab 里不带 body 的默认调用算的是「昨天 / 上月」，永远不会命中这个分支；
+**手工带 body 重跑日薪时会多一个 400**（2026-08-21 起）：`daily-salary` 的
+`body.date` 等于上海日历今天时返回 `400 { "error": "open date: <date>" }`，严格晚于今天时返回
+`400 { "error": "future date: <date>" }`，都不入队（只能结算已经结束的业务日）。crontab 里不带 body 的默认调用算的是「昨天」，永远不会命中这个分支；
 `202 queued` / `200` / `401` / `503` 的既有形状一律不变。
 
 生产固定使用 `deploy/run-cron.sh` + 系统 crontab。同一个密钥必须存在两个
@@ -315,7 +300,7 @@ printf '%s\n' "Authorization: Bearer $CRON_SECRET" |
 角色可通过 `current_setting()` 读取数据库级设置。
 `pg_cron` + `pg_net` HTTP 调度已经退役，前向迁移会撤销遗留 ERP job 并清理旧设置。
 
-**10 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
+**7 个 cron endpoints 都不走 session Proxy**（`proxy.ts` matcher 排除 `api/cron`）—— 它们用自己的 `Authorization: Bearer $CRON_SECRET` 闸口。`CRON_SECRET` 留空时 endpoint 直接 503，不会被误调用。
 
 ### 3. 备份（pgBackRest）
 
@@ -378,28 +363,27 @@ fc-list :lang=zh | head
 
 脚本先在旧进程在线时完成依赖安装、生产环境预检、Prisma Client 生成和构建；随后停止 Web、LIGHT worker、HEAVY worker，执行 `prisma migrate deploy`，立即启动新版本并检查 `/api/health/ready`。进入停机窗口后的任何失败都会让三个进程保持停止，防止旧代码继续写入新数据库结构。
 
-数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 必须完整应用 `prisma/migrations/` 中的全部 migration，并用 `pnpm exec prisma migrate status` 核对；不要把 README 中的固定数量当门禁。当前仓库快照、最新 migration 和完整规则见 `DATABASE.md`，发布批次的外协历史快照对账、无效索引检查和视觉 fixture 见 `docs/部署指南.md` §14 与 `docs/上线前置操作清单.md`。`20260821120100_notification_log_delivery_key_unique` 的唯一索引仍是通知重试的正确性依赖，必须验收 `indisvalid`；仓库状态不代表生产已经迁移。
+数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 必须完整应用 `prisma/migrations/` 中的全部 migration，并用 `pnpm exec prisma migrate status` 核对；不要把 README 中的固定数量当门禁。当前仓库快照、最新 migration 和完整规则见 `DATABASE.md`，无效索引检查和视觉 fixture 见 `docs/部署指南.md` §14，下一批发布的迁移前置见 `docs/上线前置操作清单.md`。`20260821120100_notification_log_delivery_key_unique` 的唯一索引仍是通知重试的正确性依赖，必须验收 `indisvalid`；仓库状态不代表生产已经迁移。
 
 ### 8. 上线 smoke checklist
 
 按顺序跑一遍（**本次发布批次另有前置排查与单向门，先过一遍 `docs/上线前置操作清单.md`**）：
-- [ ] `docs/上线前置操作清单.md` §零的历史外协逐款数量已凭原始证据对账，§一的覆盖缺口也已清零
+- [ ] `docs/上线前置操作清单.md` §二的两段只读预查每列为 0（2026-09-24 两条删除迁移遇到业务引用即中止）
 - [ ] `pnpm prisma migrate deploy`（生产 migration）
-- [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（`docs/上线前置操作清单.md` §二）
+- [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（部署指南 §14 的无效并发索引检查）
 - [ ] `pnpm prisma db seed`（仅首次部署且确认 seed 行为后执行）
 - [ ] `chromium --version`、`fc-list :lang=zh`，并按部署指南用 `/usr/bin/chromium` 真生成一份中文 PDF
 - [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
 - [ ] 管理员登录 `/owner/accounts` 改默认密码
-- [ ] 销售 / 客服 / 师傅各创一个测试账号
+- [ ] 销售 / 师傅各创一个测试账号
 - [ ] 跑通 工单创建 → 工厂确认 → 下发（`CONFIRMED → RELEASED`）→ 报工 → 生产完成 → 发货一条链
 - [ ] 触发一次 `/api/cron/daily-salary` 验证 shared-secret + 入库
 - [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
 - [ ] ADMIN 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
 - [ ] 用受控测试错误确认 Sentry 收到事件；生产未配置 `SENTRY_DSN` 时此项明确不通过，禁止临时破坏真实业务 action
-- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 15 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证真发**。Webhook 通道核对 URL；智能机器人通道先轮换已暴露 Secret，成对注入两个 `WECOM_SMART_BOT_*` 变量，确认只有一个 LIGHT worker 进程，再于目标群 `@机器人` 并发送一次性绑定码。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
+- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 13 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证真发**。Webhook 通道核对 URL；智能机器人通道先轮换已暴露 Secret，成对注入两个 `WECOM_SMART_BOT_*` 变量，确认只有一个 LIGHT worker 进程，再于目标群 `@机器人` 并发送一次性绑定码。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
 - [ ] 真实触发一次 `ORDER_SCHEDULED`（下发 `RELEASED`）与 `ORDER_COMPLETED`（当前 work-order generation 通过生产完成闸口），核对群消息和投递日志各只有一次。
-- [ ] `CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED` 当前最多只能绑定 1 个授权共享群；尚未实现&ldquo;管理员群 + 对应客服&rdquo;按人双路由，不得按已完成验收。
-- [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/cs-period-ending` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
+- [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/order-overdue` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
 - [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online
 - [ ] `/api/health/ready` 返回 200，且两类 worker 心跳存在
 - [ ] `/api/health/jobs` 返回 200（有死信 / 卡死 RUNNING / worker 缺失会 503）；把它接进外部监控，否则「死信 30 分钟响应」这条 SLO 不生效

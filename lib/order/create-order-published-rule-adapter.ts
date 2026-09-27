@@ -13,11 +13,16 @@ import {
   type CanonicalCreateOrderPaperFact,
 } from '../price/create-order/canonical-facts';
 import type {
+  CreateOrderManualReasonCode,
   CreateOrderPriceSnapshot,
   CreateOrderPriceVersionBundle,
   CreateOrderPricingGroup,
 } from '../price/create-order/types';
 import { CREATE_ORDER_PRINT_FOIL_PRICING_POLICY } from '../price/create-order/types';
+import {
+  PRINT_AUTOMATIC_QUANTITY_LIMIT,
+  resolvePrintTierQuantity,
+} from '../price/create-order/selectors';
 import { BOX_PRICE_RULES } from '@/lib/price/box-packaging-rules';
 import { parseCustomerRuleCondition } from '../price/customer-rule-condition';
 import type {
@@ -802,6 +807,21 @@ function tierQuantityFromCode(
   return quantity;
 }
 
+/**
+ * The engine applies a color-print row to every technique listed here; a
+ * published row restricted to fewer techniques cannot be honored.
+ */
+function coversFoilTechniques(
+  condition: ReturnType<typeof processingCondition>,
+  techniques: readonly ('NONE' | 'FLAT')[],
+): boolean {
+  const published: readonly string[] | undefined = condition.foilTechniques;
+  return (
+    published === undefined ||
+    techniques.every((technique) => published.includes(technique))
+  );
+}
+
 function projectPrint(
   rules: readonly PublishedCreateOrderRuleRow[],
   consumed: Set<string>,
@@ -833,6 +853,10 @@ function projectPrint(
     ) {
       invalidRule(rule, '\u5f69\u5370\u57fa\u7840\u4ef7\u672a\u552f\u4e00\u9650\u5b9a\u5f69\u5370\u8def\u7ebf');
     }
+    // The engine uses one base total for pure print and flat foil alike.
+    if (!coversFoilTechniques(condition, ['NONE', 'FLAT'])) {
+      invalidRule(rule, '\u5f69\u5370\u9636\u68af\u4ef7\u7684\u70eb\u91d1\u65b9\u5f0f\u5fc5\u987b\u540c\u65f6\u8986\u76d6\u65e0\u70eb\u91d1\u4e0e\u5e73\u70eb');
+    }
     const paper = canonicalPaperFromRule(
       exactlyOne(condition.paperTypes, rule, '\u7eb8\u5f20'),
       rule,
@@ -861,6 +885,10 @@ function projectPrint(
         label: '\u5f69\u5370\u9636\u68af\u603b\u4ef7',
         nullable: true,
       }),
+      // The published lamination matcher is part of the price identity.
+      ...(condition.laminations
+        ? { laminations: [...condition.laminations].sort(compareText) }
+        : {}),
     };
   });
 
@@ -887,6 +915,9 @@ function projectPrint(
       condition.foilPassCount !== 1
     ) {
       invalidRule(rule, '\u5f69\u5370\u70eb\u91d1\u52a0\u4ef7\u5fc5\u987b\u552f\u4e00\u5339\u914d\u5f69\u5370\u5355\u6b21\u70eb\u91d1');
+    }
+    if (!coversFoilTechniques(condition, ['FLAT'])) {
+      invalidRule(rule, '\u5f69\u5370\u70eb\u91d1\u5957\u9910\u7684\u70eb\u91d1\u65b9\u5f0f\u5fc5\u987b\u8986\u76d6\u5e73\u70eb');
     }
     const tierQuantity = tierQuantityFromCode(rule);
     const previous = seenFoilTiers.get(tierQuantity);
@@ -1289,17 +1320,172 @@ function projectLogistics(
   };
 }
 
-const SUPPORTED_BLOCKING_REFERENCE_CODES = new Set([
-  'COLOR_BACK_SIDE_FOIL_MANUAL',
-  'COLOR_MULTI_FOIL_MANUAL',
-  'COLOR_NON_FLAT_FOIL_MANUAL',
-  'COLOR_NONSTANDARD_LAMINATION_MANUAL',
-  'COLOR_NONSTANDARD_PROCESS_MANUAL',
-  'COLOR_SINGLE_FRONT_FOIL_LT_1000_MANUAL',
-  'CUSTOM_DOUBLE_SIDED_MANUAL',
-  'CUSTOM_TEN_THOUSAND_MANUAL',
-  'CUSTOM_THREE_PLUS_COLORS_MANUAL',
-]);
+type BlockingReferenceEnforcement = {
+  /** The exact published trigger condition the engine check implements. */
+  condition: Readonly<Record<string, unknown>>;
+  /** What the pure engine returns for every item this condition matches. */
+  engine:
+    | { status: 'MANUAL_PRICING_REQUIRED'; reason: CreateOrderManualReasonCode }
+    | { status: 'INVALID_INPUT'; error: string };
+  /**
+   * Quantity-bounded blocks are enforced only when no quantity in the
+   * published window can select a color-print foil bundle.
+   */
+  printFoilBundleUnreachable?: true;
+};
+
+/**
+ * Published blocking references and the engine check that enforces each one.
+ * A blocking rule is consumed only when its code is listed here and its
+ * condition is exactly the one the engine implements; any other published
+ * block fails projection instead of being silently accepted.
+ */
+export const ENGINE_ENFORCED_BLOCKING_REFERENCES: Readonly<
+  Record<string, BlockingReferenceEnforcement>
+> = {
+  COLOR_BACK_SIDE_FOIL_MANUAL: {
+    condition: { pricingRoutes: ['COLOR_PRINT'], isDoubleSided: true },
+    engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'PRINT_BACK_SIDE_FOIL' },
+  },
+  // projectPrint only publishes single-pass color-print foil bundles.
+  COLOR_MULTI_FOIL_MANUAL: {
+    condition: { pricingRoutes: ['COLOR_PRINT'], minFoilPassCount: 2 },
+    engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'PRINT_FOIL_PRICE_NOT_FOUND' },
+  },
+  COLOR_NON_FLAT_FOIL_MANUAL: {
+    condition: { pricingRoutes: ['COLOR_PRINT'], foilTechniques: ['RELIEF', 'RAISED'] },
+    engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'PRINT_NON_FLAT_FOIL' },
+  },
+  COLOR_NONSTANDARD_LAMINATION_MANUAL: {
+    condition: {
+      pricingRoutes: ['COLOR_PRINT'],
+      laminations: ['SOFT_TOUCH', 'NEW_GLOSS', 'LASER'],
+    },
+    engine: {
+      status: 'MANUAL_PRICING_REQUIRED',
+      reason: 'PRINT_FINISHING_PRICE_NOT_FOUND',
+    },
+  },
+  // The create-order facts adapter marks crafts outside its color-print set CUSTOM.
+  COLOR_NONSTANDARD_PROCESS_MANUAL: {
+    condition: {
+      pricingRoutes: ['COLOR_PRINT'],
+      anyCraftCodeOutside: [
+        'COATED_COLOR_PRINT',
+        'COATED_COLOR_PRINT_FOIL',
+        'COLOR_PRINT',
+        'COLOR_PRINT_FOIL',
+        'DIE_CUT',
+        'GLUING',
+        'PACKING',
+      ],
+    },
+    engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'CUSTOM_CRAFT' },
+  },
+  COLOR_SINGLE_FRONT_FOIL_LT_1000_MANUAL: {
+    condition: {
+      pricingRoutes: ['COLOR_PRINT'],
+      foilTechniques: ['FLAT'],
+      foilPassCount: 1,
+    },
+    engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'PRINT_FOIL_PRICE_NOT_FOUND' },
+    printFoilBundleUnreachable: true,
+  },
+  CUSTOM_DOUBLE_SIDED_MANUAL: {
+    condition: { pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'], isDoubleSided: true },
+    engine: { status: 'INVALID_INPUT', error: '专版烫金只能使用正面' },
+  },
+  CUSTOM_TEN_THOUSAND_MANUAL: {
+    condition: {
+      pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'],
+      productStructures: ['TEN_THOUSAND_ENVELOPE'],
+    },
+    engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'FULL_TEN_THOUSAND_ENVELOPE' },
+  },
+  CUSTOM_THREE_PLUS_COLORS_MANUAL: {
+    condition: { pricingRoutes: ['CUSTOM_SINGLE_FLAT_FOIL'], minFoilColorCount: 3 },
+    engine: { status: 'MANUAL_PRICING_REQUIRED', reason: 'FULL_THREE_OR_MORE_COLORS' },
+  },
+};
+
+/** Order-insensitive identity of a parsed condition (every list is a set). */
+function canonicalConditionKey(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalConditionKey).sort().join(',')}]`;
+  }
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalConditionKey(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * Mirrors the engine's color-print foil tier selection, including its
+ * rounding up of 7001-14999 pieces to the 10000 tier: true only when no
+ * quantity in the published window can reach a foil bundle row.
+ */
+function printFoilBundleUnreachable(
+  rule: PublishedCreateOrderRuleRow,
+  print: CreateOrderPriceSnapshot['print'],
+): boolean {
+  if (rule.maxQty === null) return false;
+  const baseTiers = print.perOrderPrices.map((price) => price.tierQuantity);
+  const foilTiers = new Set(
+    print.foilPerOrderPrices.map((price) => price.tierQuantity),
+  );
+  const upper = Math.min(rule.maxQty, PRINT_AUTOMATIC_QUANTITY_LIMIT);
+  for (
+    let quantity = Math.max(rule.minQty ?? 1, 1);
+    quantity <= upper;
+    quantity += 1
+  ) {
+    const tier = resolvePrintTierQuantity(quantity, baseTiers);
+    if (tier !== null && foilTiers.has(tier)) return false;
+  }
+  return true;
+}
+
+function assertBlockingReferenceEnforced(
+  rule: PublishedCreateOrderRuleRow,
+  print: CreateOrderPriceSnapshot['print'],
+): void {
+  const code = textCode(rule.code);
+  const enforcement: BlockingReferenceEnforcement | undefined =
+    Object.hasOwn(ENGINE_ENFORCED_BLOCKING_REFERENCES, code)
+      ? ENGINE_ENFORCED_BLOCKING_REFERENCES[
+          code
+        ]
+      : undefined;
+  if (
+    !enforcement ||
+    rule.kind !== CustomerPriceRuleKind.REFERENCE ||
+    !rule.blocksAutomaticQuote
+  ) {
+    throw new PublishedCreateOrderPriceAdapterError(
+      'UNSUPPORTED_RULE',
+      `加工费价目簿包含无法投影的启用规则 ${code}`,
+      ruleIdentity(rule),
+    );
+  }
+  const published = parseCustomerRuleCondition(rule.triggerCondition).condition;
+  const expected = parseCustomerRuleCondition(enforcement.condition).condition;
+  if (
+    !published ||
+    !expected ||
+    canonicalConditionKey(published) !== canonicalConditionKey(expected) ||
+    (enforcement.printFoilBundleUnreachable &&
+      !printFoilBundleUnreachable(rule, print))
+  ) {
+    throw new PublishedCreateOrderPriceAdapterError(
+      'UNSUPPORTED_RULE',
+      `人工核价规则 ${code} 的适用条件与系统转人工的条件不一致`,
+      ruleIdentity(rule),
+    );
+  }
+}
 
 function priceVersionBundle(
   snapshot: ExternalCreateOrderPriceSnapshot,
@@ -1362,20 +1548,8 @@ export function projectPublishedCreateOrderPriceSnapshot(
   const boxing = projectBoxing(automaticProcessingRules, consumed);
   for (const rule of automaticProcessingRules) {
     if (consumed.has(rule.id)) continue;
-    const code = textCode(rule.code);
-    if (
-      rule.kind === CustomerPriceRuleKind.REFERENCE &&
-      rule.blocksAutomaticQuote &&
-      SUPPORTED_BLOCKING_REFERENCE_CODES.has(code)
-    ) {
-      consumed.add(rule.id);
-      continue;
-    }
-    throw new PublishedCreateOrderPriceAdapterError(
-      'UNSUPPORTED_RULE',
-      `\u52a0\u5de5\u8d39\u4ef7\u76ee\u7c3f\u5305\u542b\u65e0\u6cd5\u6295\u5f71\u7684\u542f\u7528\u89c4\u5219 ${code}`,
-      ruleIdentity(rule),
-    );
+    assertBlockingReferenceEnforced(rule, print.snapshot);
+    consumed.add(rule.id);
   }
   const logistics = projectLogistics(
     automaticLogisticsRules,

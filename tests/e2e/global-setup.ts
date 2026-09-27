@@ -27,8 +27,8 @@ export const E2E_PASSWORD = 'e2e-test-password-1234';
 
 // String literal unions matching the Prisma enums; we don't import
 // the generated enums object (CJS / ESM tangle, see file header).
-type Role = 'ADMIN' | 'SALES' | 'CUSTOMER_SERVICE' | 'WORKER';
-type WorkerType = 'MACHINE' | 'PACKER' | 'CLEANER' | 'COOK';
+type Role = 'ADMIN' | 'SALES' | 'WORKER';
+type WorkerType = 'MACHINE' | 'PACKER';
 type MachineType = 'HAND_PRESS' | 'WINDMILL' | 'GLUE';
 type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'TEMPORARY';
 
@@ -89,14 +89,6 @@ export const E2E_USERS: Record<string, E2EUser> = {
     workerType: 'PACKER',
     machineType: null,
     employmentType: 'FULL_TIME',
-  },
-  // CUSTOMER_SERVICE user — needed for the CS event-ledger E2E. Charged
-  // order submission credits sales; later BillPayment rows must not credit it
-  // again.
-  customerService: {
-    username: 'e2e-cs',
-    displayName: 'E2E 客服',
-    role: 'CUSTOMER_SERVICE',
   },
 };
 

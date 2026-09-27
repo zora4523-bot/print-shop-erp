@@ -70,11 +70,10 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
           <p className="text-sm font-semibold">{order.customName}</p>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          客户名称/简称：{order.customerRef ?? '—'}
+          外部销售：{order.externalSalesName ?? '未填'}
           {order.promisedDate
             ? ` · 交期 ${formatDateShanghai(order.promisedDate)}`
             : ''}
-          {' · '}接单人：{order.submitter.displayName}
         </p>
       </header>
 
@@ -148,6 +147,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
               new Decimal(step.plannedQty).minus(completed), 0,
             ).toString(),
             unit: '个',
+            readOnly: !step.reportable,
           };
         })}
       />

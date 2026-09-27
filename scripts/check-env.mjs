@@ -26,7 +26,7 @@ const warnings = [];
 const REQUIRED = [
   ['DATABASE_URL', '数据库连不上，应用起不来'],
   ['AUTH_SECRET', '会话签名密钥缺失，Auth.js 拒启'],
-  ['CRON_SECRET', '9 个定时任务全部返回 503'],
+  ['CRON_SECRET', '10 个定时任务全部返回 503'],
 ];
 
 for (const [key, why] of REQUIRED) {

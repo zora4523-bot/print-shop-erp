@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  OrderSettlementType,
   OrderStatus,
   PieceworkOperationType,
   ProductionOperationStatus,
@@ -10,6 +11,7 @@ import {
 const {
   dbMock,
   operationTypeMock,
+  progressCraftIdsMock,
   listSettlementMock,
   getSettlementMock,
 } = vi.hoisted(() => ({
@@ -21,12 +23,14 @@ const {
     hourlyWorkerPayroll: { findMany: vi.fn(), findFirst: vi.fn() },
   },
   operationTypeMock: vi.fn(),
+  progressCraftIdsMock: vi.fn(),
   listSettlementMock: vi.fn(),
   getSettlementMock: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({ db: dbMock }));
 vi.mock('@/lib/production/operation-portal', () => ({
   getReporterOperationTypeOrNull: operationTypeMock,
+  getProgressCraftIdsForReporter: progressCraftIdsMock,
 }));
 vi.mock('@/lib/salary/piecework-settlement', () => ({
   listWorkerPieceworkSettlements: listSettlementMock,
@@ -79,11 +83,28 @@ beforeEach(() => {
   operationTypeMock
     .mockReset()
     .mockResolvedValue(PieceworkOperationType.PARTIAL);
+  progressCraftIdsMock.mockReset().mockResolvedValue(['craft-emboss']);
   listSettlementMock.mockReset().mockResolvedValue([]);
   getSettlementMock.mockReset().mockResolvedValue(null);
 });
 
 describe('worker order visibility', () => {
+  // 审计 L-8：工单页可见范围不变，但他车道进度只能看、不能点进报工（详情页按车道 404）。
+  it('marks which current progress steps belong to the reporter\'s craft lane', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'order-1', workOrderVersion: 2, productionOperations: [],
+      productionProgressSteps: [
+        { id: 'emboss', workOrderVersion: 2, craftId: 'craft-emboss', status: ProductionOperationStatus.PENDING },
+        { id: 'glue', workOrderVersion: 2, craftId: 'craft-glue', status: ProductionOperationStatus.PENDING },
+      ],
+    });
+    await expect(getWorkerOrderDetail('order-1', worker)).resolves.toMatchObject({
+      productionProgressSteps: [{ id: 'emboss', reportable: true }, { id: 'glue', reportable: false }],
+    });
+    expect(progressCraftIdsMock).toHaveBeenCalledWith(worker);
+    expect(dbMock.order.findFirst.mock.calls[0][0].select.productionProgressSteps.select).toMatchObject({ craftId: true });
+  });
+
   it('shows the account lane plus shared no-pay progress without personnel matching', async () => {
     dbMock.$queryRaw
       .mockReset()
@@ -96,11 +117,12 @@ describe('worker order visibility', () => {
         customName: null,
         status: OrderStatus.IN_PRODUCTION,
         isUrgent: false,
-        customerRef: null,
         promisedDate: null,
         createdAt: new Date(),
         workOrderVersion: 3,
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
         submitter: { displayName: '销售 A' },
+        sourceOrder: null,
         productionOperations: [
           {
             id: 'operation-v2',
@@ -143,6 +165,7 @@ describe('worker order visibility', () => {
       operationCount: 2,
       completedOperationCount: 1,
       pieceworkAmount: '12.00',
+      externalSalesName: '销售 A',
     });
     const visibilitySql = dbMock.$queryRaw.mock.calls[0][0];
     expect(visibilitySql.strings.join('')).toContain(
@@ -250,6 +273,131 @@ describe('worker order visibility', () => {
   });
 });
 
+// 业主 2026-09-27：师傅端不再显示「客户名称/简称」与单独的「接单人」，合成一行
+// 「外部销售」——收费单取提交的外部销售；免费重做由管理员发起，取原单的外部销售。
+describe('worker order external salesperson', () => {
+  const EXTERNAL_SALES_FACTS = {
+    settlementType: true,
+    submitter: { select: { displayName: true } },
+    sourceOrder: { select: { submitter: { select: { displayName: true } } } },
+  };
+
+  function listRow(overrides: Record<string, unknown>) {
+    return {
+      orderNo: '20260927-0001',
+      customName: null,
+      status: OrderStatus.IN_PRODUCTION,
+      isUrgent: false,
+      promisedDate: null,
+      createdAt: new Date('2026-09-27T01:00:00.000Z'),
+      workOrderVersion: 1,
+      productionOperations: [],
+      productionProgressSteps: [],
+      ...overrides,
+    };
+  }
+
+  it('reads the attribution facts instead of the retired customer field', async () => {
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(1) }])
+      .mockResolvedValueOnce([{ id: 'order-1' }]);
+    await listWorkerOrders(worker);
+    await getWorkerOrderDetail('order-1', worker);
+
+    const listQuery = dbMock.order.findMany.mock.calls[0][0];
+    const detailQuery = dbMock.order.findFirst.mock.calls[0][0];
+    for (const query of [listQuery, detailQuery]) {
+      expect(query.select).toMatchObject(EXTERNAL_SALES_FACTS);
+      expect(query.select).not.toHaveProperty('customerRef');
+      expect(query.select).not.toHaveProperty('customerPartyId');
+    }
+  });
+
+  it('labels a free rework card with the source order salesperson, never the admin', async () => {
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(3) }])
+      .mockResolvedValueOnce([{ id: 'charged' }, { id: 'rework' }, { id: 'orphan' }]);
+    dbMock.order.findMany.mockResolvedValue([
+      listRow({
+        id: 'charged',
+        settlementType: OrderSettlementType.EXTERNAL_SALES,
+        submitter: { displayName: '桂林' },
+        sourceOrder: null,
+      }),
+      listRow({
+        id: 'rework',
+        settlementType: OrderSettlementType.NO_CHARGE,
+        submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '桂林' } },
+      }),
+      // 原单已删（sourceOrderId SetNull）：宁可显示“未填”，也不回退成发起的管理员。
+      listRow({
+        id: 'orphan',
+        settlementType: OrderSettlementType.NO_CHARGE,
+        submitter: { displayName: '管理员' },
+        sourceOrder: null,
+      }),
+    ]);
+
+    const result = await listWorkerOrders(worker);
+
+    expect(result.rows.map((row) => [row.id, row.externalSalesName])).toEqual([
+      ['charged', '桂林'],
+      ['rework', '桂林'],
+      ['orphan', null],
+    ]);
+    for (const row of result.rows) {
+      expect(row).not.toHaveProperty('customerRef');
+      expect(row).not.toHaveProperty('submitterName');
+    }
+  });
+
+  it('hands the detail page the attribution only, not the admin who created a rework', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'rework',
+      workOrderVersion: 1,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      submitter: { displayName: '管理员' },
+      sourceOrder: { submitter: { displayName: '桂林' } },
+      productionOperations: [
+        { id: 'op-1', workOrderVersion: 1, status: ProductionOperationStatus.PENDING },
+      ],
+      productionProgressSteps: [],
+    });
+
+    const detail = await getWorkerOrderDetail('rework', worker);
+
+    expect(detail).toMatchObject({
+      id: 'rework',
+      externalSalesName: '桂林',
+      productionOperations: [{ id: 'op-1' }],
+    });
+    expect(detail).not.toHaveProperty('submitter');
+    expect(detail).not.toHaveProperty('sourceOrder');
+    expect(detail).not.toHaveProperty('settlementType');
+  });
+
+  it('keeps a charged order on its submitting salesperson in the detail', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      id: 'charged',
+      workOrderVersion: 1,
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      submitter: { displayName: ' 桂林 ' },
+      sourceOrder: null,
+      productionOperations: [],
+      productionProgressSteps: [
+        { id: 'step-1', workOrderVersion: 1, craftId: 'craft-emboss', status: ProductionOperationStatus.PENDING },
+      ],
+    });
+
+    await expect(getWorkerOrderDetail('charged', worker)).resolves.toMatchObject({
+      externalSalesName: '桂林',
+    });
+  });
+});
+
 describe('worker order list pagination', () => {
   it('bounds the first page instead of streaming the whole history', async () => {
     dbMock.$queryRaw
@@ -349,17 +497,17 @@ describe('worker salary visibility', () => {
       );
       expect(getSettlementMock).toHaveBeenCalledWith(
         'settlement-1',
-        actor.id,
+        actor,
       );
     },
   );
 
-  it('rejects non-operation workers before querying the new ledger', async () => {
+  it('rejects workers without a worker type before querying the new ledger', async () => {
     await expect(
       listWorkerPieceworkSettlementsForPortal({
-        id: 'cleaner-1',
+        id: 'untyped-1',
         role: Role.WORKER,
-        workerType: WorkerType.CLEANER,
+        workerType: null,
       }),
     ).rejects.toBeInstanceOf(WorkerPortalError);
     expect(listSettlementMock).not.toHaveBeenCalled();
@@ -381,13 +529,9 @@ describe('worker salary visibility', () => {
     );
   });
 
-  it.each([
-    WorkerType.PACKER,
-    WorkerType.CLEANER,
-    WorkerType.COOK,
-  ])('lists only the current %s worker monthly payrolls', async (workerType) => {
+  it('lists only the current packer archived monthly payrolls', async () => {
     await listWorkerHourlyPayrolls(
-      { id: 'hourly-a', role: Role.WORKER, workerType },
+      { id: 'hourly-a', role: Role.WORKER, workerType: WorkerType.PACKER },
       { fromMonth: '2026-01', toMonth: '2026-06' },
     );
 
@@ -423,13 +567,8 @@ describe('worker salary visibility', () => {
       id: 'payroll-1',
       salaryRuleSnapshot: { workerType: WorkerType.PACKER },
     });
-    const currentCook = { ...packer, workerType: WorkerType.COOK };
-
-    const list = await listWorkerHourlyPayrolls(currentCook);
-    const detail = await getWorkerHourlyPayrollDetail(
-      'payroll-1',
-      currentCook,
-    );
+    const list = await listWorkerHourlyPayrolls(packer);
+    const detail = await getWorkerHourlyPayrollDetail('payroll-1', packer);
 
     expect(list[0].payrollWorkerType).toBe(WorkerType.PACKER);
     expect(detail?.payrollWorkerType).toBe(WorkerType.PACKER);
@@ -464,8 +603,8 @@ describe('worker salary visibility', () => {
     ).rejects.toBeInstanceOf(WorkerPortalError);
     await expect(
       listWorkerHourlyPayrolls({
-        id: 'cs-1',
-        role: Role.CUSTOMER_SERVICE,
+        id: 'sales-1',
+        role: Role.SALES,
         workerType: null,
       }),
     ).rejects.toBeInstanceOf(WorkerPortalError);

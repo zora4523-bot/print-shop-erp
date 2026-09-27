@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { Client } from 'pg';
 import sharp from 'sharp';
-import { E2E_PASSWORD, E2E_USERS, login } from './_helpers';
+import { E2E_PASSWORD, E2E_USERS, login, selectExternalSalesForAdminOrder } from './_helpers';
 
 for (const actor of ['owner', 'sales'] as const) {
   for (const variant of [
@@ -17,17 +17,18 @@ for (const actor of ['owner', 'sales'] as const) {
       page.on('pageerror', (error) => errors.push(error.message));
       // Packaging E2E uses a database artwork fixture, matching blank-paper-pricing.
       // Object-storage connectivity is a separate integration boundary.
-      if (actor === 'sales')
-        await page.route(
-          (url) => url.hostname.endsWith('.aliyuncs.com'),
-          (route) =>
-            route.request().method() === 'PUT' ? route.abort('failed') : route.continue(),
-        );
+      await page.route(
+        (url) => url.hostname.endsWith('.aliyuncs.com'),
+        (route) =>
+          route.request().method() === 'PUT' ? route.abort('failed') : route.continue(),
+      );
       await login(page, {
         from: '/orders/new',
         username: E2E_USERS[actor].username,
         password: E2E_PASSWORD,
       });
+      // 业主 2026-09-24：管理员建单必须归属一个外部销售。
+      if (actor === 'owner') await selectExternalSalesForAdminOrder(page);
       const type = page.getByRole('group', { name: '包装类型', exact: true });
       await expect(type.getByRole('button', { name: '入袋', exact: true })).toHaveAttribute(
         'aria-pressed',
@@ -66,6 +67,7 @@ for (const actor of ['owner', 'sales'] as const) {
         )
         .toBe(true);
       await page.reload();
+      // 外部销售自动恢复本地草稿；管理员须在恢复/放弃提示里明确选择。
       if (actor === 'owner') await page.getByRole('button', { name: /恢复.*草稿/ }).click();
       await expect(
         type.getByRole('button', {
@@ -73,12 +75,9 @@ for (const actor of ['owner', 'sales'] as const) {
           exact: true,
         }),
       ).toHaveAttribute('aria-pressed', 'true');
-      if (actor === 'owner') {
-        const save = page.getByRole('button', { name: '保存草稿', exact: true });
-        await expect(save).toBeEnabled({ timeout: 30_000 });
-        await save.click();
-        await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+$/, { timeout: 45_000 });
-      } else {
+      // 管理员代外部销售与销售本人一样，包装在提交时按权威价目定价。
+      {
+        if (actor === 'owner') await page.getByLabel('承诺交期', { exact: true }).fill('2099-01-01');
         await page
           .locator('input[type="file"]')
           .first()
@@ -113,7 +112,7 @@ for (const actor of ['owner', 'sales'] as const) {
         )
         .not.toBe('');
       try {
-        if (actor === 'sales') {
+        {
           await expect(
             page.getByRole('dialog').getByRole('button', { name: '继续完成', exact: true }),
           ).toBeVisible();
@@ -156,7 +155,7 @@ for (const actor of ['owner', 'sales'] as const) {
       } finally {
         await db.end();
       }
-      if (actor === 'sales') await page.goto(`/orders/${id}`);
+      await page.goto(`/orders/${id}`);
       await expect(
         page
           .getByText(
@@ -178,10 +177,11 @@ test('管理员多地址装盒分别进位，保存两盒而非一盒', async ({
   // 与同文件其它装盒用例一致：CI 的 2 核 runner 上登录 + 报价 + 保存跳转超过默认 30 秒。
   test.setTimeout(150_000);
   await login(page, {from: '/orders/new', username: E2E_USERS.owner.username, password: E2E_PASSWORD});
+  await selectExternalSalesForAdminOrder(page);
   await page.getByRole('textbox', {name: '工单名称', exact: true}).fill('分址装盒验证');
   // 显式选纸：全套 spec 共库时表单默认纸张会变成别的 spec 造的夹具纸（CI 第六轮选中了
   // blank-paper-pricing 的「验证纸…」，其 4 位小数单价让金额守卫拒绝保存）。
-  await page.getByRole('group', {name: '纸张材质'}).getByRole('button', {name: '珠光艳闪', exact: true}).click();
+  await page.getByRole('group', {name: '纸张材质'}).getByRole('button', {name: '艳红珠光纸', exact: true}).click();
   await page.getByRole('group', {name: '克重'}).getByRole('button', {name: '160g', exact: true}).click();
   await page.getByRole('group', {name: '规格'}).getByRole('button', {name: '大号封', exact: true}).click();
   await page.getByRole('spinbutton', {name: '数量', exact: true}).fill('10');
@@ -214,6 +214,8 @@ test('管理员多地址装盒分别进位，保存两盒而非一盒', async ({
   try {
     const id = page.url().split('/').pop();
     const result = await db.query('SELECT mode,"actualBagCount",subtotal::text FROM "OrderPackagingGroup" WHERE "orderId"=$1', [id]);
-    expect(result.rows).toEqual([{mode: 'BOX_RED_CARD', actualBagCount: 2, subtotal: '3.60'}]);
+    // 代外部销售的草稿在提交时才定价；这里核对分址各自进位后的盒数。
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({mode: 'BOX_RED_CARD', actualBagCount: 2});
   } finally { await db.end(); }
 });

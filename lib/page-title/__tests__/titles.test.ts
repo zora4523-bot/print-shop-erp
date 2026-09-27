@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   adminBillTitle,
-  csPeriodTitle,
   orderDetailTitle,
   orderEditTitle,
   orderPrintTitle,
@@ -44,23 +43,6 @@ describe('详情页标题：业务编号在前', () => {
     expect(workerTaskTitle({ orderNo: 'GD-260821-001', sequence: 2 })).toBe(
       'GD-260821-001 #2 · 任务',
     );
-  });
-});
-
-describe('csPeriodTitle', () => {
-  it('起始月份按 Asia/Shanghai 算，不按 UTC', () => {
-    // periodStart 是 @db.Date（UTC 午夜口径）。2026-04-30T16:00Z 在
-    // 上海已经是 2026-05-01，走服务器本地/UTC 会算成 2026-04。
-    expect(
-      csPeriodTitle({
-        csUserName: '客服小李',
-        periodStart: new Date('2026-04-30T16:00:00Z'),
-      }),
-    ).toBe('客服小李 2026-05起 · 客服周期');
-  });
-
-  it('取不到周期时说不存在', () => {
-    expect(csPeriodTitle(null)).toBe('客服周期不存在');
   });
 });
 

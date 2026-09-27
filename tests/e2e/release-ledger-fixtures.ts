@@ -25,7 +25,7 @@ async function createAccount(db: Client, prefix: string, worker: boolean, startD
     "workerType", "employmentType", "employmentStartDate", "isActive", "updatedAt")
     VALUES ($1,$2,$3,$4,$5::"Role",$6::"WorkerType",'FULL_TIME',$7::date,true,NOW())`,
   [account.id, account.username, account.name, await bcrypt.hash(E2E_PASSWORD, 10),
-    worker ? 'WORKER' : 'ADMIN', worker ? 'CLEANER' : null, startDate]);
+    worker ? 'WORKER' : 'ADMIN', worker ? 'PACKER' : null, startDate]);
   return account;
 }
 
@@ -78,16 +78,18 @@ export async function seedSalaryLedgerFixture() {
   const period = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth() + 1).padStart(2, '0')}`;
   return withLedgerDb(async (db) => {
     const admin = await createAccount(db, 'salary-admin', false, `${period}-01`);
-    const worker = await createAccount(db, 'salary-cleaner', true, `${period}-01`);
-    const rules = await db.query<{ ruleKey: string; ruleValue: { hourlyRate?: number; multiplier?: number } }>(
-      `SELECT DISTINCT ON ("ruleKey") "ruleKey","ruleValue" FROM "SalaryRule"
-       WHERE "ruleType"='WORKER_HOURLY' AND "ruleKey" IN ('CLEANER_HOURLY','OT_MULTIPLIER')
-        AND "effectiveFrom"<=CURRENT_TIMESTAMP AND ("effectiveTo" IS NULL OR "effectiveTo">CURRENT_TIMESTAMP)
-       ORDER BY "ruleKey","effectiveFrom" DESC`);
-    const rate = rules.rows.find((row) => row.ruleKey === 'CLEANER_HOURLY')?.ruleValue.hourlyRate;
-    const multiplier = rules.rows.find((row) => row.ruleKey === 'OT_MULTIPLIER')?.ruleValue.multiplier;
-    if (rate === undefined || multiplier === undefined) throw new Error('Salary E2E requires effective cleaner and overtime rules from seed');
-    return { admin, worker, month: period, date: `${period}-01`, rate: String(rate), multiplier: String(multiplier) };
+    const worker = await createAccount(db, 'salary-packer', true, `${period}-01`);
+    return { admin, worker, month: period, date: `${period}-01` };
+  });
+}
+
+// 历史打包时薪月结只剩存档：直接写一条已归档记录，模拟切换工序计件前的旧数据。
+export async function archiveHourlyPayroll(workerId: string, month: string) {
+  return withLedgerDb(async (db) => {
+    await db.query(`INSERT INTO "HourlyWorkerPayroll" (id,"workerId",month,"totalWorkHours","totalOtHours",
+      "hourlyRate","otMultiplier","baseSalary","otSalary","totalSalary","salaryRuleSnapshot","isPaid","updatedAt")
+      VALUES ($1,$2,$3,8,2,11,1,88,22,110,'{"workerType":"PACKER"}'::jsonb,true,NOW())`,
+    [`e2e-archive-${randomUUID().slice(0, 8)}`, workerId, month]);
   });
 }
 

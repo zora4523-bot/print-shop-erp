@@ -76,21 +76,29 @@ applies_to: repository source at last_verified
 
 ### Cron
 
-以下八个端点都是 `POST`、Node runtime、动态响应并使用 Bearer 认证。在 `durable` 模式下正常接受返回 `202 {status:"queued", ...}`；`inline` 模式直接执行并返回任务汇总。`CRON_SECRET` 未配置返回 `503`，不匹配返回 `401`。调度时间以
+以下端点都是 `POST`、Node runtime、动态响应并使用 Bearer 认证。在 `durable` 模式下正常接受返回 `202 {status:"queued", ...}`；`inline` 模式直接执行并返回任务汇总。`CRON_SECRET` 未配置返回 `503`，不匹配返回 `401`。调度时间以
 [`deploy/crontab.example`](./deploy/crontab.example) 为唯一事实源。
 
 | 路径 | 可选 JSON 输入 | 默认业务范围 |
 |---|---|---|
-| `/api/cron/daily-salary` | `{ "date": "YYYY-MM-DD" }` | 上海日历昨天；格式错误或未来日期为 `400` |
-| `/api/cron/hourly-payroll` | `{ "month": "YYYY-MM" }` | 上海日历上月；格式错误或未来月份为 `400` |
-| `/api/cron/cs-settle` | 无 | 当前上海业务日扫描 |
+| `/api/cron/daily-salary` | `{ "date": "YYYY-MM-DD" }` | 上海日历昨天；格式错误为 `400`，当天为 `400 open date`，未来日期为 `400 future date` |
 | `/api/cron/generate-bills` | `{ "period": "YYYY-MM" }` | 上海日历上月；显式空值或格式错误为 `400` |
 | `/api/cron/outsource-overdue` | 无 | 当前上海业务日扫描 |
-| `/api/cron/cs-period-ending` | 无 | 当前上海业务日扫描 |
 | `/api/cron/order-overdue` | 无 | 当前上海业务日扫描 |
 | `/api/cron/order-export-cleanup` | 无 | 当前上海业务日清理范围 |
+| `/api/cron/pending-factory-backlog` | 无 | 当前待工厂确认积压扫描 |
+| `/api/cron/production-alerts` | 无 | 报工超前与下发未认领扫描 |
+
+`hourly-payroll`、`cs-settle`、`cs-period-ending` 三个端点已于 2026-09-24 删除（SPEC §L），请求返回 404。
 
 调用方不得依赖响应中的金额、人员清单或逐行错误；cron 响应保持 counts/status 级别，细节在受权限保护的后台页面和日志中查看。
+
+`generate-bills` 的执行结果保留 `errorCount`，
+并增加同值 `failed` 与去重字符串数组 `errorCodes`，供后台任务错误摘要展示。
+非空错误数组使用 `BillGenerationIncomplete` 类别码；不把人员、客户信息或逐行错误正文放入错误码。
+v2 月账单入账前使用 Decimal 核对加工费＋对客收费明细＝工单总额＝结算金额。异常工单包含工单号写入内部 `errors`，所属销售当月账单整张保持原样，其他销售正常继续；cron 将这些失败计入 `failed/errorCount`，手动生成返回明确的部分失败结果。
+
+无错误时 `errorCodes` 为 `[]`；`daily-salary` 成功结果另带 `failed: 0`。
 
 ### 下载、导出与查询
 
@@ -98,7 +106,7 @@ applies_to: repository source at last_verified
 |---|---|---|---|
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
 | `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
-| `GET /api/cdr/bundles/:id` | Capability URL | cuid 风格 bundle id | 就绪后 `302` 到产物；生成中 `409` + `Retry-After`；失效或不存在统一 `404`；OSS 不可用 `503` |
+| `GET /api/cdr/bundles/:accessToken` | 256-bit capability URL | 服务端生成的 43 位 base64url token；不接受数据库 id | 就绪后校验 token 并 `302` 到 60 秒 OSS GET 签名；生成中 `409` + `Retry-After`；失效、撤销或不存在统一 `404`；频率超限 `429`；OSS 不可用 `503` |
 | `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
@@ -110,7 +118,7 @@ Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到�
 
 工单 PDF 仅输出每页一个主码的生产主单。工序流转单已移除：`mode=tasks` 下载请求返回 `400`，浏览器打印页返回 `404`。后台任务继续绑定用户、工单和生产版本；兼容缺省或 `mode=order` 的历史任务，拒绝生成或下载旧流转单任务。浏览器打印页 `/print/orders/:id` 使用相同模板与分页规则。
 
-生产打印范围统一由 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 提供，适用于网页正文、页面标题、同步 PDF 及后台 PDF。每次读取复核账号仍启用且角色未变化：ADMIN 可查看全部，CUSTOMER_SERVICE 仅查看自己提交的工单，SALES 不可查看生产打印件。WORKER 按当前账号的固定报工岗位匹配当前版本未取消的计件工序，或读取包含当前版本公共进度工序的工单；`SUBMITTED` 不向师傅开放。旧 `ProductionTask.workerId` 派工关系不授予打印权限，无权访问的页面标题不含工单号。
+生产打印范围统一由 [`lib/order/print-access.ts`](./lib/order/print-access.ts) 提供，适用于网页正文、页面标题、同步 PDF 及后台 PDF。每次读取复核账号仍启用且角色未变化：ADMIN 可查看全部，SALES 不可查看生产打印件。WORKER 按当前账号的固定报工岗位匹配当前版本未取消的计件工序，或读取包含当前版本公共进度工序的工单；`SUBMITTED` 不向师傅开放。旧 `ProductionTask.workerId` 派工关系不授予打印权限，无权访问的页面标题不含工单号。
 
 打印工序只读取当前 `workOrderVersion` 的 `ProductionOperation` / `ProductionProgressStep`，排除已取消工序；缺记录时显示空态，不生成旧任务或推测进度。状态来自当前工单，待审批标记只来自真实的 PENDING 修改申请。后台渲染后、下载响应前继续复核账号、范围及生产版本；撤权不返回产物，响应前发现升版返回 `409` 并要求重新生成。
 
@@ -152,27 +160,29 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 
 ### 工单修改与价格确认
 
-- MODIFY 提案可携带 `promisedDate: YYYY-MM-DD | null`；省略代表不改、`null` 代表清除。允许 `items: []` 的纯交期申请，但拒绝无实际变化。预览返回 `promisedDateChange: { before, after }`，批准后才写入交期。纯交期等不影响计价的变更保留原加工费、总价和费用快照，不从历史明细重建金额，不产生客服业绩差额。
+- MODIFY 提案可携带 `promisedDate: YYYY-MM-DD | null`；省略代表不改、`null` 代表清除。允许 `items: []` 的纯交期申请，但拒绝无实际变化。预览返回 `promisedDateChange: { before, after }`，批准后才写入交期。纯交期等不影响计价的变更保留原加工费、总价和费用快照，不从历史明细重建金额。
 - 普通独立制版费默认 `QUOTED / 0.00`，不再生成版费待定原因。管理员逐款制版明细入口继续保留；人工金额加入应收和新费用快照。彩印烫金含版费套餐、其他未知价格和待补运费的规则不变。旧待定快照可读，重算只将尚未核价的版费转为零，不覆盖已确认人工版费。
 - 待审申请不自动暂停生产。工厂可在待审期间暂停/恢复；这两个仅切换执行状态的操作不使现有申请版本失效。批准暂停中的申请保持暂停，恢复仍须提供恢复证据。已经下发生产的暂停工单可为批准的新版本创建重打任务，仍禁止首次下发绕过暂停。
-- 生产改版只承接能唯一对应同一工序、款式或包装组的已完成量；过版工资不重复计入。低于已产量、已产来源无法对应或多款汇总后无法确认各款剩余量的变更整体拒绝。新版完工条件重新检查，旧版报工继续拒绝。
+- 生产改版只承接能唯一对应同一工序、款式或包装组的已完成量；过版工资不重复计入。低于已产量、已产来源无法对应或多款汇总后无法确认各款剩余量的变更整体拒绝。新版完工条件重新检查，旧版报工继续拒绝。旧版仍待开工/进行中的工序与无计件进度步骤在同一批准事务内置为已取消（报工事实不改）；其中带分档烫金报工的旧工序标记需人工核定，管理员在工单提成明细确认后，这些报工日才能锁定计件结算。
 
 实现见 [`actions/order.ts`](./actions/order.ts)、
 [`actions/admin-order-workflow.ts`](./actions/admin-order-workflow.ts) 和
 [`lib/order/change-request.ts`](./lib/order/change-request.ts)。
 
-- `quoteExternalCreateOrderAction` 同时允许 SALES 自助报价与 ADMIN 代建预览；仍使用同一已发布价目、参数校验和报价 token，不允许客服伪造外部结算。关联账号的有效性在实际创建事务中重验。
-- `createOrderAction` 新增选填 `externalSalesUserId`：仅 ADMIN 可指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志；未指定仍为 `FACTORY_DIRECT`。外部销售原始输入出现该字段（包括 null）直接拒绝；客服/师傅不能代指定。重复创建按实际创建人和原归属校验。
-- 管理员新建页移除 `customerPartyId/customerRef` 输入；管理员新建时这两个值统一为空，忽略旧浏览器草稿中的残留。其他角色和既有工单的客户关联保持原契约。
+- `quoteExternalCreateOrderAction` 同时允许 SALES 自助报价与 ADMIN 代建预览；仍使用同一已发布价目、参数校验和报价 token，其他角色一律拒绝。关联账号的有效性在实际创建事务中重验。内部/工厂直单预览 `quoteInternalCreateOrderAction` 已于 2026-09-24 删除（业主拍板：所有业务都以外部销售身份开展）。
+- `createOrderAction` 的 `externalSalesUserId`：ADMIN 建单**必填**（2026-09-24 起取消工厂直单），缺失时返回 `invalid` 且 `fieldErrors.externalSalesUserId = ['请选择关联外部销售']`；只能指定启用的 SALES 账号。事务内锁定并验证账号，写入 `submitterId` 与 `EXTERNAL_SALES` 结算方向，`submitterRole=SALES` 满足结算一致性约束，实际管理员保留在 `createdById` 和创建日志。SALES 本人建单时原始输入出现该字段（包括 null）直接拒绝；其他角色不能建单。管理员新建页在没有启用的外部销售账号时不渲染表单，提示先去账号管理创建或启用。重复创建按实际创建人和原归属校验。寄样品 / 打样（`purpose=SAMPLE_SHIPMENT|PROOF`）同样适用：管理员从 `/workbench` 或 `/orders/new` 直接进入样品流程时，样品表单渲染「关联外部销售（必填）」并在保存前校验，服务端返回的同一字段错误显示在该字段下；没有启用的外部销售时显示与新建页相同的空状态。
+- 工单“客户名称/简称”自 2026-09-27 停用（DECISIONS 同日）：建单页不再有客户输入。`createOrderAction` 仍接受旧客户端或旧草稿带来的 `customerPartyId/customerRef`（不校验、不查客户主数据），但领域层对 SALES 与 ADMIN 一律写入空值；重做单不再复制原单客户。既有工单已存的客户列原样保留。
 - 新建的 `items[].pack` 上限为 12；`packagingGroups[].itemUnitsPerBag` 的一包合计最多 12，混装按各款相加。预报价、创建 schema、创建领域及页面同步校验，不改变旧工单包装及历史报价。数量为正整数；超限须调整，不能自动截断或按零费用放行。
-- `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；`customerPartyId` 只能选择活动客户（不变的历史关联可保留）。ADMIN 可修改范围内工单，SALES / CUSTOMER_SERVICE 仅可修改自己创建的工单；存在待审批申请时拒绝保存。
-- 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）、客服业绩或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、客户简称、配送及全部金额快照；日志记录前后账号名称与账号 ID。
+- `updateOrderAction` 必须携带页面读取的 `expectedEditVersion`。基本信息按当前状态白名单保存；客户不在白名单内，旧表单带来的 `customerRef/customerPartyId` 被丢弃，已存客户列不改动。ADMIN 可修改范围内工单，SALES 仅可修改自己的工单；存在待审批申请时拒绝保存。
+- 管理员编辑页的“关联外部销售”使用 `externalSalesUserId`，只列出启用的 SALES 账号。它更新工单 `submitterId`，同步销售访问范围及后续对账归属，不写入客户主数据 `customerPartyId`。仅 ADMIN 可更换 DRAFT / PENDING_FACTORY / REJECTED / SUBMITTED 的 EXTERNAL_SALES 工单；已有结算、发货、账单（含草稿）或重做关联时拒绝转移。非外部销售工单不得借此转换结算方向。空账号和无效账号拒绝；未更换的历史账号可保留。事务内锁定工单与目标账号并验证递增编辑版本，保留创建人、创建时角色、已存客户列、配送及全部金额快照；日志记录前后账号名称与账号 ID。
 - 完整编辑页用 `shipments` JSON 提交全部现有配送记录的 `id`、收件人、电话、地址、快递代码、`expectedDestinationProvince` 和 `sameDestination`。服务端校验记录集合与工单归属，拒绝新增、遗漏、重复和已发货记录的修改；外部销售需完整联系人。寄付地址变更必须明确确认原计费省份与条件未变；跨省、未核定或计费条件变化不能用普通编辑跳过物流核价。未带配送 JSON 的旧入口不能修改外部寄付地址。
 - 外部销售工单显式修改 `customName` 时不得清空，领域层按工单保存的 `settlementType` 校验，不能以操作者角色绕过；未传该字段的历史局部更新仍按原白名单执行。
 - `packageRequirement` / 外部创建命令 `packRaw` 保持既有字段契约，含义是选填的包装补充说明。保存该文字不变更包装组、分袋组成、实际袋数或入袋费用。
 - 联系信息保存只更新工单及对应配送联系人，不重建款式、分货、包装或历史价格。主地址同步、递增编辑版本与变更日志在同一事务中完成，过期版本拒绝覆盖。
-- `createOrderChangeRequestAction` 的 MODIFY 支持管理员及工单所有者（SALES / CUSTOMER_SERVICE），状态窗口由 `ORDER_MODIFIABLE_STATUSES` 统一定义，包含草稿、待工厂确认和已驳回。管理员新增的权限不开放 CANCEL 申请；取消继续沿用原有流程。申请人（包含管理员）只能撤回本人待审申请；待审批期间也禁止增删设计文件。
+- `createOrderChangeRequestAction` 的 MODIFY 支持管理员及工单所有者（SALES），状态窗口由 `ORDER_MODIFIABLE_STATUSES` 统一定义，包含草稿、待工厂确认和已驳回。管理员新增的权限不开放 CANCEL 申请；取消继续沿用原有流程。申请人（包含管理员）只能撤回本人待审申请；待审批期间也禁止增删设计文件。
 - 修改申请中的规格变更：非空白路线同时提交 `specification` 与 `targetProductId`；空白封只提交 `targetBlankIdentity`（纸张、克重、规格），不能同时携带旧产品选择字段。服务端重新解析当前身份与准入，不能只改文字沿用旧产品。原样复制模板也单独检查当前正价。
+- 未提交的外部销售草稿（本人或管理员代建）尚无快递 / 耗材收费行时，改数量或规格的预览与批准只重算加工费（`requotesLogisticsChargesOnChange` 为 false 时 `includeOrderCharges=false`），不刷新物流行、不做“每个地址两行”校验；提交时 `finalizeExternalOrderQuoteInTx` 按最新物流价目权威生成物流行。已提交的外部销售工单、以及已带物流行的草稿仍按原口径重算，缺行时在首次写入前拒绝。
+- 任一收货地址已发货（SHIPPED）后，修改申请只能改交期；取消申请、改款式数量的预览与取消结算预览都拒绝（`lib/order/change-request-shipment-guard.ts`）。
 - `previewOrderChangeRequestPricingAction` 接受 `requestId`、可选的 `expectedPriceRevision` 与 `pendingChargeResolutions`。人工物流决议只适用于本次预览实际待核的收费，需携带收费业务键、发货记录、预览数量、省份、金额和依据。
 - 批准修改须提交 `expectedPriceRevision`；涉及重新计价时，还须将预览返回的 `quoteToken` 作为 `expectedQuoteToken` 提交（`order-change-approval-v1:` 前缀）。服务端持有订单锁后重新核对报价、版本及人工收费内容，变化时拒绝写入并要求刷新预览。无需重新计价的修改不提交报价令牌；拒绝申请不依赖价格版本。
 - 取消参考结算预览返回原参考金额、明细及价目依据，并附 `priceRevision`、`quoteToken`。批准取消必须提交对应的 `expectedPriceRevision` 与 `expectedQuoteToken`；服务端持订单锁重算，核对材料补核、产量、发布价目与参考金额是否变化。过期预览拒绝批准；人工调整结算额仍保留原有依据要求。
@@ -244,17 +254,20 @@ pnpm test --run
 
 `events` 仅包含展示所需的操作标题、时间、人员、备注和已格式化变更；不返回原始 `changedFields` 或内部报价修订标识。首屏使用同一领域查询；非管理员详情继续使用原有授权裁剪结果，不使用该分页入口。查询不修改审计记录或财务数据。
 
-### 管理员添加发货地址
+### 添加发货地址（管理员 / 工单本人销售）
 
-`actions/order-shipment.ts:addOrderShipmentAction(payload, mode)`：权限
-`order:update:post-schedule`，领域层再次限定 ADMIN。`mode` 为 `preview` 或
-`save`；预览只读，保存必须提交预览返回的 `previewToken`。
+`actions/order-shipment.ts:addOrderShipmentAction(payload, mode)`：入口权限
+`order:create`（ADMIN、SALES）；领域层 `lib/order/add-shipment.ts` 再次限定为
+ADMIN（任意工单）或工单本人 SALES（`submitterId` 为本人），其他账号拒绝。`mode`
+为 `preview` 或 `save`；预览只读，保存必须提交预览返回的 `previewToken`。
+销售侧入口与限制另见下文「销售编辑页新增收货地址（2026-09-12）」。
 
 输入包含 `orderId`、`sourceShipmentId`、`expectedRevision`、
 `expectedEditVersion`、`expectedWorkOrderVersion`、`expectedPriceRevision`，
 新地址的 `receiverName / receiverPhone / receiverAddress / destinationProvince`，
 以及 `lines: { orderItemId, quantity }[]`。新地址的 `shippingFee`、
-`packingMaterialFee` 可选，填写时必须有 `overrideReason`，仅适用于已提交的
+`packingMaterialFee` 可选，**仅 ADMIN 可填**（SALES 传入人工运费、纸箱费或
+`overrideReason` 一律拒绝），填写时必须有 `overrideReason`，仅适用于已提交的
 外部销售工单。返回 `preview`（原总额、新总额、差额、各地址费用）、`saved`
 或 `error`。
 
@@ -262,7 +275,7 @@ pnpm test --run
 追加价格修订与操作日志。最多 10 个地址，原地址至少保留一件；拒绝跨工单
 款式/地址、超分配、待审批、已发货、已结算及来源地址已有物流登记的请求。
 外部销售沿用原物流价目，保留原地址人工确认金额及历史证据；新金额进入待核价。
-外部销售草稿按原流程在提交时物化费用，内部结算保持原有不产生物流应收的规则。
+外部销售草稿按原流程在提交时物化费用（2026-09-24 起不再有内部结算工单）。
 
 
 ### 外部销售建单备注与额外地址（2026-09-12）
@@ -296,7 +309,7 @@ pnpm test --run
 
 ### 外部销售补正与账单（2026-09-12）
 
-- 建单客户选项使用 `listSalesCustomerOptions`：以 session 销售 ID 限制 `Party.customerOrders.some.submitterId`，仅返回 ID、编码、名称、简称。客户联系人、电话和地址不进入该投影。建单和编辑写入同时校验客户范围，管理员原权限不变。
+- 建单与编辑不再提供客户选项（2026-09-27 客户字段停用）；原按销售限定的客户查询与写入校验随之删除。销售列表、详情与 `GET /api/orders/sales/[orderNo]` 不再返回 `customerRef/customerPartyId`。
 - 销售工单详情及编辑共同使用 `getSalesOrderDetailById` 的显式查询与序列化；通用 `getOrderDetail` 不再用于销售编辑。工单自身收件信息继续可见，内部改价说明、成本及生产记录不进入销售 DTO。
 - `cancelOrderAction` 允许 ADMIN / SALES。SALES 必须提交 `expectedEditVersion` 和取消原因；领域事务再次校验所有权、版本、无待审申请及 DRAFT / PENDING_FACTORY / REJECTED 状态。已确认订单仍走审批取消；ON_HOLD 通过已保存暂停决定还原原生产阶段后校验取消申请和结算。
 - `submitOrderAction` 支持 REJECTED 补正重提：禁止待审申请、缺图或失效报价；重新计算并确认报价，回到 PENDING_FACTORY 由工厂复核。补正通知使用独立去重键。
@@ -318,10 +331,10 @@ F47：同一文字编辑入口增加 `itemRemark`，最多1000字符，空字符
 
 F48：同一入口增加 `packagingName`，仅更新该工单所属包装组名称，允许清空；不改变 mode、actualBagCount、成员组成、入袋费或报价。款式文字及包装组文字可在非终态、无待审申请时直接保存；工单名称的确认后锁定保持不变。
 
-### 内部款式备注与客服配送补齐（2026-09-12）
+### 内部款式备注与配送补齐（2026-09-12；2026-09-24 删除客服角色后更新）
 
-- `editItemRemarkAction(orderId, itemId, previous, formData)`：要求 `order:create`；领域层仅允许管理员及该工单的客服创建者。接收 `expectedEditVersion` 与最长 1000 字的 `remark`，统一换行符为 LF，空白清空为 null；待审批和不可编辑状态拒绝。校验款式归属，事务内保存备注、推进编辑/业务版本并记审计；不改变金额、价格版本、纸质工单版本或生产数据。返回 `success`、带 `fieldErrors` 的 `invalid` 或业务 `error`。
-- `addOrderShipmentAction` 沿用既有预览凭证与四版本校验，新增允许客服对本人创建的工单调用；客服和销售均不可传人工物流费用。其他分货、物流登记、已结算和收费历史限制保持不变。
+- `editItemRemarkAction(orderId, itemId, previous, formData)`：要求 `order:create`；领域层仅允许管理员。接收 `expectedEditVersion` 与最长 1000 字的 `remark`，统一换行符为 LF，空白清空为 null；待审批和不可编辑状态拒绝。校验款式归属，事务内保存备注、推进编辑/业务版本并记审计；不改变金额、价格版本、纸质工单版本或生产数据。返回 `success`、带 `fieldErrors` 的 `invalid` 或业务 `error`。
+- `addOrderShipmentAction` 沿用既有预览凭证与四版本校验，销售可对本人工单调用；销售不可传人工物流费用。其他分货、物流登记、已结算和收费历史限制保持不变。
 - 共享修改申请表单支持既有款式 `pack`（每袋数量），只在领域允许的未生产阶段、且款式有唯一包装明细时提供输入。它仍经过修改申请、计价预检与管理员审批，不通过基础资料保存直接改包装或金额。
 
 ### 发布整改后的认证与表单契约（2026-09-11）
@@ -334,13 +347,13 @@ Proxy 仅将包含非空 `user.id`、合法且未过期 `expires` 的 session �
 
 PDF 生成接口仍执行认证、角色和资源所有权校验；页面下载入口使用原生链接，导航预取不得创建后台任务。P2002 仅按已识别的约束字段映射为表单业务错误，未知冲突继续抛出。
 
-手工出入库 action 必须携带有效的 `idempotencyKey`；同键重放仅返回原流水，同键不同操作者或业务内容拒绝，成功后表单换新键。时薪重复标记为已发保留首次发放时间。数据库前向迁移与历史兼容边界见 [数据库说明](./DATABASE.md#手工出入库请求幂等2026-09-11-局部核对)。
+手工出入库 action 必须携带有效的 `idempotencyKey`；同键重放仅返回原流水，同键不同操作者或业务内容拒绝，成功后表单换新键。（原“时薪重复标记为已发保留首次发放时间”随时薪月结生成与标记发放于 2026-09-24 删除；打包历史时薪月结只读。）数据库前向迁移与历史兼容边界见 [数据库说明](./DATABASE.md#手工出入库请求幂等2026-09-11-局部核对)。
 
 认证预取仍完整验证会话，但 GET/HEAD 预取响应不回写代理层滚动会话 Cookie，防止晚响应复活已经登出的会话；普通导航续期策略保持。
 
 ### 跨设备 PDF（2026-09-11）
 
-`GET /api/orders/:id/pdf` 默认 attachment；`view=inline` 使用 inline 供系统 PDF 阅读器打开，其他/重复 view 返回 400。202 轮询保留 view 与 jobId；失败恢复链接携带 `regenerate=1` 新建生成请求。同一授权内容在 15 分钟数据库时间窗口内复用任务；产物保留 1 小时，可重复下载，每次仍检查账号、所有权及当前工单版本。产物存储可选持久共享卷或私有 OSS，不提供公开下载地址。详见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+`GET /api/orders/:id/pdf` 默认 attachment；`view=inline` 使用 inline 供系统 PDF 阅读器打开，其他/重复 view 返回 400。202 轮询保留 view 与 jobId；失败恢复链接携带 `regenerate=1` 新建生成请求；同一授权内容（工单、账号与角色、工单版本、内容快照）已有排队或生成中的任务时复用该任务，不再重复入队。所有入口（普通下载、`regenerate=1`，以及 `/owner/background-jobs` 的运维重试 `retryBackgroundJobAction`）在同一事务里先取该授权范围的 `pg_advisory_xact_lock`，再查在途任务：下载与重新生成复用在途任务，否则按 15 分钟窗口键或重新生成锚点在同一事务内创建或复活；运维重试遇到同范围在途任务时不复活已失败任务，返回「已有同一工单 PDF 正在生成」。同一授权范围始终最多一个在途任务（2026-09-24 修复：此前普通下载可能把已失败的窗口任务与在途的重新生成任务同时排进 HEAVY 队列；2026-09-26 修复：此前运维重试不取范围锁，可让已失败任务与在途的重新生成任务同时在途）。2026-09-11 之前的旧格式任务键（`order-pdf:<工单>:<随机>`）不含授权范围摘要，不在此保证内。同一授权内容在 15 分钟数据库时间窗口内复用任务；产物保留 1 小时，可重复下载，每次仍检查账号、所有权及当前工单版本。产物存储可选持久共享卷或私有 OSS，不提供公开下载地址。详见 [跨设备打印](./docs/跨设备打印与可用性.md)。
 
 
 ### 批量打印工单
@@ -387,8 +400,8 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 - `previewOrderPricingReviewAction({ orderId, editAll: true })` 返回当前可编辑的加工单价、一次性费用、包装加工费、订单级收费及逐地址快递／耗材费；默认省略 `editAll` 时仍为原待核价流程。
 - `finalizeOrderPricingAction` 接受相同的 `editAll` 标志及原有版本、金额、依据字段。在同一工单锁与事务中校验价格／工单版本、待审批申请、金额精度、合计、资源归属，保存可信人工价格和价格修订。仅 ADMIN 可使用；外部销售不可通过构造参数越权。
 - 全项模式用于已提交至发货后的未结算收费工单；草稿／驳回待修改／作废／结算／归档不可用。管理员新建入口“创建并编辑收费”先执行原提交与上传校验，再进入收费编辑，避免提交重新报价覆盖人工价。
-- 工厂直接业务允许首次补录逐地址物流费用。顺丰到付快递费必须为零。内部销售保持既有物流计费边界和销售额差额记账。
-- 寄样仅快递＋包装耗材；打样仅一条整单总价。逐款制版通过现有制版明细维护，不能同时重复恢复已免收的汇总版费；附加收费、优惠继续使用现有商业明细接口，工厂直接业务可维护。已有经审批调整允许有符号金额，普通费用不能为负数。
+- 顺丰到付快递费必须为零。2026-09-24 起不再有工厂直单与内部销售工单，全项收费编辑只对外部销售收费工单开放。
+- 寄样仅快递＋包装耗材；打样仅一条整单总价。逐款制版通过现有制版明细维护，不能同时重复恢复已免收的汇总版费；附加收费、优惠继续使用现有商业明细接口。已有经审批调整允许有符号金额，普通费用不能为负数。
 
 ## 计件工价管理（2026-09-16）
 
@@ -449,3 +462,17 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 - `reviewReportDisputeAction(disputeId, state, formData)`：`task:dispute:review`，仅活跃 ADMIN；处理结果 `RESOLVED` / `REJECTED`，回复 2–1000 字；已处理记录拒绝再次回复。
 - 两个 action 都返回 `{ status: 'success' | 'error', message }`；领域层重复校验权限和输入，事务写异议与工单日志。不修改报工数量、计件金额或结算记录。
 - `/worker/reports` 按当前会话账号分页查询计件报工与调整；`/worker/reports/[id]` 强制本人所有权。管理员在工单详情的生产记录区处理问题，师傅在报工明细查看回复。
+
+### 报工刷新防重（2026-09-21）
+
+扫码页面使用 `batch:N` 请求作用域；进入 `/worker/tasks/[id]` 时若地址没有合法的 `reportBatch`，页面按本人在该工序/步骤已有的报工条数（计件只数 `REPORT` 行）推导 N，并重定向到 `?reportBatch=N` 固定批次；地址栏已有的 reportBatch 只在不大于该条数时沿用（即曾推导过的批次），更大的值同样重定向到 N，避免写入后与之后推导的批次相撞。报工 action 在身份与数量验证后，将工序/步骤、当前登录人、合格/缺陷/返工数量、工单件数进度、上海日期和批次序号派生为 SHA256 标识，交给原有事务幂等校验。同一地址刷新重试复用标识；报成功后重新扫码或从列表、工单页进入得到新的批次，同量新批次照常入账；“再报一批”链接回到不带 reportBatch 的入口，由页面按最新报工条数重新推导：本批已入账得到新批次，尚未入账仍是本批（客户端不自增批次号，避免跳号后与重新进入推导的批次相撞）。命中已有报工时 action 仍返回 `status: 'success'` 且 `idempotentReplay: true`，表单提示这一批已记录、未重复计入，并指向“再报一批”。原有不带 batch 前缀的客户端请求标识仍兼容。P2024/P2028 在建单和报工 action 返回可重试错误，不暴露数据库异常。
+
+### 无计薪进度车道（2026-09-21 业主确认）
+
+`listProductionProgressForReporter`、`getProductionProgressForReporter` 与 `reportProductionProgress` 共用 `progressCraftIdsForReporter`。账号必须为在职 WORKER，岗位匹配有效自产 Craft 的 defaultWorkerType；机器岗位还须匹配 inHouseMachineTypes（有配置时）或 defaultMachineType。缺配置不默认放行。列表与直接详情将 craftId 限定在匹配集合；提交在事务内复核，不满足返回 ACCOUNT_NOT_AUTHORIZED，不能通过直接调用 Action 绕过页面限制。此规则不采用个人认领绑定，不改变计件工价或历史快照；生产打印用途权限沿用独立规则。师傅任务列表（`listWorkerTaskPage`）进度视图的计数与分页、扫码直达（`resolveWorkerWorkOrderScan` 的唯一未完成项与 `?task=`）同样只认本人车道；工单页（`getWorkerOrderDetail`）仍列出全部当前进度，工单级可见范围不变，他车道进度带 `reportable: false`，只读展示、不链接报工页。
+
+### 已删除功能的历史任务与通知（2026-09-24）
+
+- `retryDeadBackgroundJob` 以 `isRegisteredBackgroundJobType`（`BACKGROUND_JOB_TYPES`，与处理器表一一对应）判定；已删除类型 `CRON_HOURLY_PAYROLL`、`CRON_CS_SETTLE`、`CRON_CS_PERIOD_ENDING`，以及事件已不在 `NOTIFICATION_EVENTS` 的通知死信，抛 `RetiredBackgroundJobTypeError`，action 返回 `{ status: 'error', message: '该任务类型对应的功能已停用，无法重试；记录保留为运行历史' }`，历史行不改。运维页对这些行不渲染“重试”，列表只提取事件名，不把 payload 交给页面。
+- `resolveUnknownNotification` 对已删除事件（`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED`）的 `NOT_DELIVERED_RETRY` 在写入前拒绝（`RETIRED_EVENT`），action 返回“该通知事件已停用，无法重发；请核对后确认已送达或忽略”；`DELIVERED` / `IGNORED` 照常可用。同组仍有 `RETRYING` 日志（升级前已确认未送达）时，已删除事件在最后一条 UNKNOWN 收尾后**不**重新入队（2026-09-26 修复：此前会把任务改回 PENDING，处理器拒绝后这些日志永远停在 RETRYING）：同一事务内以 CAS（`id` + `deliveryKey` + `RETRYING` + `deliveryStateVersion`）把它们关闭为 `FAILED`（`IGNORED` 沿用“人工忽略：理由”，`DELIVERED` 记“人工核对：未送达；事件已停用，不再重发”），任务保持 `DEAD`、`lastErrorCode` 改为 `NotificationReplayTerminalError`（运维页不再给“去通知页处置”），审计行 `after.retiredEventClosedLogs` 逐条记录；返回值 `retiredClosedCount` 供 action 提示。通知页由服务端纯函数 `lib/notification/unknown-retry-availability.ts` 给出不可重发原因，组件据此禁用按钮。
+- 升级前已处于 `RETRYING` 的同组日志：对最后一条 `UNKNOWN` 选择“确认已送达”或“忽略”时，事件已删除则不再重新入队，这些日志在同一事务内按 CAS 关闭为 `FAILED`（确认已送达时记“人工核对：未送达；事件已停用，不再重发”，忽略时沿用忽略理由），任务保持 `DEAD`（`ec43cf66`）。

@@ -333,7 +333,7 @@ async function readPdfOrderIds(db, minImageBytes, limit) {
 
 function buildChecks(snapshotData, limits, prefix, databaseTarget) {
   const loadUsers = snapshotData.loadUsersByRole;
-  const salesCs = (loadUsers.SALES ?? 0) + (loadUsers.CUSTOMER_SERVICE ?? 0);
+  const salesCs = loadUsers.SALES ?? 0;
   const heavyFresh = snapshotData.workerHeartbeats.find(
     (heartbeat) => heartbeat.queue === 'HEAVY',
   )?.fresh ?? 0;
@@ -363,7 +363,7 @@ function buildChecks(snapshotData, limits, prefix, databaseTarget) {
     check('orders', '历史工单数', snapshotData.orders, snapshotData.orders >= limits.minOrders),
     check('pdf-orders', `图片≥${limits.minImageBytes}字节的不同工单`, snapshotData.printableOrders.atLeastTargetImageBytes, snapshotData.printableOrders.atLeastTargetImageBytes >= limits.minPdfOrders),
     check('average-items', '可打印工单平均款式数', snapshotData.printableOrders.averageItems, snapshotData.printableOrders.averageItems >= limits.minAverageItems),
-    check('sales-cs-users', `${prefix} 销售/客服账号`, salesCs, salesCs >= limits.minSalesCsUsers),
+    check('sales-cs-users', `${prefix} 销售账号`, salesCs, salesCs >= limits.minSalesCsUsers),
     check('admin-users', `${prefix} 主管账号`, loadUsers.ADMIN ?? 0, (loadUsers.ADMIN ?? 0) >= limits.minAdminUsers),
     check('worker-users', `${prefix} 师傅账号`, loadUsers.WORKER ?? 0, (loadUsers.WORKER ?? 0) >= limits.minWorkerUsers),
     check('salary-workers', '工资数据覆盖人数', snapshotData.salary.workers, snapshotData.salary.workers >= limits.minSalaryWorkers),

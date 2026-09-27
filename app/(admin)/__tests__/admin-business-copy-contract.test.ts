@@ -36,7 +36,7 @@ describe('admin business copy contract', () => {
     expect(salary).not.toContain('hint="每位客服一条 IN_PROGRESS"');
     expect(salary).not.toContain('hint="periodEnd 已过"');
     expect(hourly).not.toContain('师傅 id（选填）');
-    expect(hourly).not.toContain('PACKER / CLEANER / COOK');
+    expect(hourly).not.toContain('重算');
   });
 
   it('采购取消确认直接陈述业务前置条件', () => {

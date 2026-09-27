@@ -41,7 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
   confirmMock.mockResolvedValue({ status: 'CONFIRMED' });
-  generateMock.mockResolvedValue({ period: '2026-08', generated: [{ id: 'bill-1' }] });
+  generateMock.mockResolvedValue({ period: '2026-08', errors: [], generated: [{ id: 'bill-1' }] });
   markPaidMock.mockResolvedValue({
     billId: 'bill-1',
     status: 'PAID',
@@ -197,4 +197,10 @@ describe('agent monthly bill actions', () => {
       { id: 'admin-1', role: Role.ADMIN },
     );
   });
+});
+
+it('shows partial billing failures instead of a success receipt', async () => {
+  generateMock.mockResolvedValue({ period: '2026-08', generated: [], errors: [{ agentUserId: 'agent', message: '工单 GD-1：结算金额不一致' }] });
+  const form = new FormData(); form.set('period', '2026-08');
+  await expect(generateAgentMonthlyBillsAction(null, form)).resolves.toMatchObject({ status: 'error', message: expect.stringContaining('GD-1') });
 });

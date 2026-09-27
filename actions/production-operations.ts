@@ -1,5 +1,7 @@
 'use server';
 
+import { DATABASE_BUSY_MESSAGE, isDatabaseBusyError } from '@/lib/database-errors';
+import { reportIdempotencyKey } from '@/lib/production/report-idempotency';
 import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -62,7 +64,13 @@ export async function reportProductionOperationAction(
   _previous: ReportProductionOperationActionResult | null,
   formData: FormData,
 ): Promise<ReportProductionOperationActionResult> {
-  const actor = await requirePermission('task:report');
+  let actor: Awaited<ReturnType<typeof requirePermission>>;
+  try {
+    actor = await requirePermission('task:report');
+  } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
+    throw error;
+  }
   const expectedRateKey = formData.get('expectedRateKey');
   const expectedPayrollRevision = formInteger(formData, 'expectedPayrollRevision');
   const completedQty = formInteger(formData, 'completedQty');
@@ -80,7 +88,7 @@ export async function reportProductionOperationAction(
     defectQty === null ||
     reworkQty === null ||
     workOrderProgressQuantity === null ||
-    typeof idempotencyKey !== 'string'
+    (typeof idempotencyKey !== 'string' || (idempotencyKey.startsWith('batch:') && !/^batch:(0|[1-9]\d{0,8})$/.test(idempotencyKey)))
   ) {
     return { status: 'invalid', message: '报工数量或请求标识不合法' };
   }
@@ -95,7 +103,7 @@ export async function reportProductionOperationAction(
         defectQty,
         reworkQty,
         workOrderProgressQuantity,
-        idempotencyKey,
+        idempotencyKey: reportIdempotencyKey({ key: idempotencyKey, kind: 'operation', targetId: operationId, reporterId: actor.id, completedQty, defectQty, reworkQty, workOrderProgressQuantity }),
       },
       actor,
     );
@@ -114,6 +122,7 @@ export async function reportProductionOperationAction(
       idempotentReplay: result.idempotentReplay,
     };
   } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
     if (error instanceof OperationReportingError) {
       return { status: 'error', message: error.message };
     }
@@ -130,7 +139,13 @@ export async function claimProductionOperationAction(
   _previous: ClaimProductionOperationActionResult | null,
   formData: FormData,
 ): Promise<ClaimProductionOperationActionResult> {
-  const actor = await requirePermission('task:report');
+  let actor: Awaited<ReturnType<typeof requirePermission>>;
+  try {
+    actor = await requirePermission('task:report');
+  } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
+    throw error;
+  }
   const idempotencyKey = formData.get('idempotencyKey');
   if (typeof idempotencyKey !== 'string') {
     return { status: 'invalid', message: '扫码认领请求标识不合法' };
@@ -150,6 +165,7 @@ export async function claimProductionOperationAction(
       idempotentReplay: result.idempotentReplay,
     };
   } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
     if (error instanceof WorkOrderProgressError) {
       return { status: 'error', message: error.message };
     }
@@ -163,7 +179,13 @@ export async function reportProductionProgressAction(
   _previous: ReportProductionProgressActionResult | null,
   formData: FormData,
 ): Promise<ReportProductionProgressActionResult> {
-  const actor = await requirePermission('task:report');
+  let actor: Awaited<ReturnType<typeof requirePermission>>;
+  try {
+    actor = await requirePermission('task:report');
+  } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
+    throw error;
+  }
   const completedQty = formInteger(formData, 'completedQty');
   const defectQty = formInteger(formData, 'defectQty');
   const reworkQty = formInteger(formData, 'reworkQty');
@@ -172,7 +194,7 @@ export async function reportProductionProgressAction(
     completedQty === null ||
     defectQty === null ||
     reworkQty === null ||
-    typeof idempotencyKey !== 'string'
+    (typeof idempotencyKey !== 'string' || (idempotencyKey.startsWith('batch:') && !/^batch:(0|[1-9]\d{0,8})$/.test(idempotencyKey)))
   ) {
     return { status: 'invalid', message: '报工数量或请求标识不合法' };
   }
@@ -184,7 +206,7 @@ export async function reportProductionProgressAction(
         completedQty,
         defectQty,
         reworkQty,
-        idempotencyKey,
+        idempotencyKey: reportIdempotencyKey({ key: idempotencyKey, kind: 'progress', targetId: progressStepId, reporterId: actor.id, completedQty, defectQty, reworkQty }),
       },
       actor,
     );
@@ -201,6 +223,7 @@ export async function reportProductionProgressAction(
       idempotentReplay: result.idempotentReplay,
     };
   } catch (error) {
+    if (isDatabaseBusyError(error)) return { status: 'error', message: DATABASE_BUSY_MESSAGE };
     if (error instanceof ProgressReportingError) {
       return { status: 'error', message: error.message };
     }

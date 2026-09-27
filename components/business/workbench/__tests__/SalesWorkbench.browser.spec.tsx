@@ -1,3 +1,4 @@
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import type { ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -58,17 +59,20 @@ const success: WorkbenchQuoteResult = {
 };
 let host: HTMLDivElement;
 let root: Root;
-beforeEach(() => {
+beforeEach(async () => {
+  await commands.setReducedMotion(false);
+  expect(matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(false);
   vi.clearAllMocks();
   mocks.quote.mockResolvedValue(success);
   document.documentElement.lang = 'zh-CN';
   host = document.createElement('div');
   host.dataset.testid = 'workbench-fixture';
-  host.className = 'p-4';
+  host.className = 'admin-viewport p-4';
   document.body.append(host);
   root = createRoot(host);
 });
-afterEach(() => {
+afterEach(async () => {
+  await commands.setReducedMotion(false);
   flushSync(() => root.unmount());
   host.remove();
   document.documentElement.classList.remove('dark');
@@ -120,12 +124,14 @@ describe('sales workbench responsive gates', () => {
         await page.viewport(width!, height!);
         document.documentElement.classList.toggle('dark', theme === 'dark');
         render();
+        await waitForStableLayout(host);
         for (const name of ['报价计算', '纸张与规格', '话术应对']) {
           await page.getByRole('button', { name, exact: true }).click();
           if (name === '话术应对')
             await userEvent.click(
               page.getByText('太贵了，能不能优惠点', { exact: true }),
             );
+          await waitForStableLayout(host);
           geometry(width!);
           expect(
             await commands.checkShellAccessibility(
@@ -167,44 +173,40 @@ it('keeps sales knowledge usable without the catalog', async () => {
   await expect.element(page.getByText('17 个应对场景')).toBeVisible();
 });
 
-it('filters every category, opens and closes all 17 scenarios and copies each exact reply', async () => {
+it.each([...new Set(SALES_SCENARIOS.map(item => item.category))])('filters %s, opens and closes every scenario and copies each exact reply', async category => {
   render();
   await page.getByRole('button', { name: '话术应对', exact: true }).click();
   const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
   try {
-    for (const category of new Set(
-      SALES_SCENARIOS.map((item) => item.category),
+    await page.getByRole('button', { name: category, exact: true }).click();
+    await expect
+      .element(
+        page.getByText(
+          `${SALES_SCENARIOS.filter((item) => item.category === category).length} 个应对场景`,
+        ),
+      )
+      .toBeVisible();
+    for (const item of SALES_SCENARIOS.filter(
+      (item) => item.category === category,
     )) {
-      await page.getByRole('button', { name: category, exact: true }).click();
+      await page.getByText(item.title, { exact: true }).click();
       await expect
-        .element(
-          page.getByText(
-            `${SALES_SCENARIOS.filter((item) => item.category === category).length} 个应对场景`,
-          ),
-        )
+        .element(page.getByText(item.concern, { exact: true }))
         .toBeVisible();
-      for (const item of SALES_SCENARIOS.filter(
-        (item) => item.category === category,
-      )) {
-        await page.getByText(item.title, { exact: true }).click();
-        await expect
-          .element(page.getByText(item.concern, { exact: true }))
-          .toBeVisible();
-        await expect
-          .element(page.getByText(item.approach, { exact: true }))
-          .toBeVisible();
-        await expect
-          .element(page.getByText(item.avoid, { exact: true }))
-          .toBeVisible();
-        await page
-          .getByRole('button', { name: `复制话术：${item.title}`, exact: true })
-          .click();
-        expect(write).toHaveBeenLastCalledWith(item.reply);
-        await page.getByText(item.title, { exact: true }).click();
-        await expect
-          .element(page.getByText(item.reply, { exact: true }))
-          .not.toBeVisible();
-      }
+      await expect
+        .element(page.getByText(item.approach, { exact: true }))
+        .toBeVisible();
+      await expect
+        .element(page.getByText(item.avoid, { exact: true }))
+        .toBeVisible();
+      await page
+        .getByRole('button', { name: `复制话术：${item.title}`, exact: true })
+        .click();
+      expect(write).toHaveBeenLastCalledWith(item.reply);
+      await page.getByText(item.title, { exact: true }).click();
+      await expect
+        .element(page.getByText(item.reply, { exact: true }))
+        .not.toBeVisible();
     }
     await page.getByRole('button', { name: '全部', exact: true }).click();
     await expect.element(page.getByText('17 个应对场景')).toBeVisible();
@@ -437,4 +439,14 @@ it('resolves duplicated products only after explicit selection and never silentl
     .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.quantity)
     .toBe(500);
   expect(mocks.quote.mock.calls.at(-1)?.[0].item.productId).toBe('custom2');
+});
+
+it('also supports reduced-motion without making it the normal-animation test prerequisite', async () => {
+  await commands.setReducedMotion(true);
+  await page.viewport(393, 852);
+  render();
+  await page.getByRole('button', { name: '话术应对', exact: true }).click();
+  await waitForStableLayout(host);
+  geometry(393);
+  await expect.element(page.getByText('17 个应对场景')).toBeVisible();
 });

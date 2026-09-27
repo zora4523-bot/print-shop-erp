@@ -28,6 +28,7 @@ import {
   type ExternalOrderPaperKey,
   type ExternalOrderCatalogProduct,
 } from '@/lib/order/order-item-catalog';
+import { paperDisplayRank } from '@/lib/rules/paper-label';
 
 export function createBlankItem(
   crafts: readonly PricingCraftIdentity[],
@@ -71,7 +72,7 @@ export function createBlankItem(
   };
 }
 
-export function resolveExternalOrderCraftIds(
+function resolveExternalOrderCraftIds(
   item: CreateOrderInput['items'][number],
   crafts: readonly PricingCraftIdentity[],
 ): string[] {
@@ -102,13 +103,20 @@ export function normalizeExternalOrderItem(args: {
   resetPaper?: boolean;
   resetSpecification?: boolean;
   preserveCustomSize?: boolean;
+  /**
+   * Keep the caller's item name. The create form lets people name each design
+   * (DECISIONS 2026-09-26); 打样 and the workbench still take the generated name.
+   */
+  preserveName?: boolean;
 }): CreateOrderInput['items'][number] {
   const route = args.item.pricingRoute;
-  const routePapers = externalOrderPapersForRoute(
+  // Fallback picks follow the owner's paper order (DECISIONS 2026-09-23), so adding
+  // papers to the catalog cannot silently change the default. Stable sort.
+  const routePapers = [...externalOrderPapersForRoute(
     args.products,
     route,
     args.paperMaterials,
-  );
+  )].sort((left, right) => paperDisplayRank(left.label) - paperDisplayRank(right.label));
   const specifications = externalOrderSpecificationsForRoute(
     args.products,
     route,
@@ -238,12 +246,14 @@ export function normalizeExternalOrderItem(args: {
   const routeLabel = ORDER_PRICING_ROUTE_LABELS[route];
   const next: CreateOrderInput['items'][number] = {
     ...args.item,
-    name: externalOrderStyleName({
-      routeLabel,
-      paperLabel: paper.label,
-      weight,
-      specification,
-    }),
+    name: args.preserveName
+      ? args.item.name
+      : externalOrderStyleName({
+          routeLabel,
+          paperLabel: paper.label,
+          weight,
+          specification,
+        }),
     productId: route === OrderItemPricingRoute.STOCK_BLANK ? null : catalogProduct?.id ?? null,
     pricingRoute: route,
     productStructure: externalOrderProductStructure(specification),
@@ -274,6 +284,22 @@ export function normalizeExternalOrderItem(args: {
     priceOverrideReason: null,
   };
   return { ...next, crafts: resolveExternalOrderCraftIds(next, args.crafts) };
+}
+
+/**
+ * 打样沿用系统生成的款名：建单页的设计款名称改由建单人填写（DECISIONS 2026-09-26），
+ * 打样与寄样品保持原规则，因此从建单页带过来的款式在打样时重新取生成名。
+ */
+export function withGeneratedStyleName(
+  item: CreateOrderInput['items'][number],
+  crafts: readonly PricingCraftIdentity[],
+  products: readonly ExternalOrderCatalogProduct[],
+  paperMaterials?: readonly ExternalOrderPaperMaterial[],
+): CreateOrderInput['items'][number] {
+  const generated = normalizeExternalOrderItem({
+    item, crafts, products, paperMaterials, preserveCustomSize: true,
+  }).name;
+  return generated && generated !== item.name ? { ...item, name: generated } : item;
 }
 
 export function createExternalOrderItem(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankItem } from '../order-item-configuration';
-import { designFileQueues, designItemIndexes, orderDesignGroups } from '../design-groups';
+import { designFileQueues, designItemIndexes, findDuplicateDesignNames, orderDesignGroups } from '../design-groups';
 import { createOrderSchema } from '@/lib/auth/schemas';
 import { buildExternalCreateOrderPayload } from '../external-create-order-payload';
 import { parseExternalCreateOrderCommand } from '../external-create-order-command';
@@ -46,6 +46,43 @@ describe('order design grouping', () => {
     input.items[1].paperWeightGsm = 230;
     expect(createOrderSchema.safeParse(input).success).toBe(false);
     input.items[1].designGroupKey = null;
+    input.items[1].name = '设计 B';
     expect(createOrderSchema.safeParse(input).success).toBe(true);
+  });
+  it('reports each colliding design once at its first row in the create schema', () => {
+    const input = order();
+    input.items.push({ ...first, designGroupKey: '6f1c2b8e-3a4d-4e5f-9a0b-1c2d3e4f5a6b', fig: 3 }, { ...other, fig: 4, name: '设计 a' });
+    const result = createOrderSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues.filter((issue) => issue.path.at(-1) === 'name');
+    expect(issues.map((issue) => [issue.path, issue.message])).toEqual([
+      [['items', 2, 'name'], '设计款名称不能重复：设计 A'],
+      [['items', 3, 'name'], '设计款名称不能重复：设计 a'],
+    ]);
+  });
+});
+
+describe('design name uniqueness', () => {
+  const otherKey = '6f1c2b8e-3a4d-4e5f-9a0b-1c2d3e4f5a6b';
+  it('lets specification rows of one design share (or keep differing) names', () => {
+    expect(findDuplicateDesignNames([first, second])).toEqual([]);
+    expect(findDuplicateDesignNames([first, { ...second, name: '旧草稿行名' }])).toEqual([]);
+  });
+  it('rejects two designs with the same name at the later design\'s first row', () => {
+    const later = { ...first, designGroupKey: otherKey, fig: 3 };
+    expect(findDuplicateDesignNames([first, second, other, later, { ...later, fig: 4 }])).toEqual([{ index: 3, name: '设计 A' }]);
+  });
+  it('treats whitespace and letter-case variants as the same name', () => {
+    const lower = { ...first, designGroupKey: otherKey, name: '  设计 a ' };
+    expect(findDuplicateDesignNames([first, lower])).toEqual([{ index: 1, name: '设计 a' }]);
+    expect(findDuplicateDesignNames([{ ...first, name: 'Fu' }, { ...lower, name: 'FU' }])).toEqual([{ index: 1, name: 'FU' }]);
+  });
+  it('counts every legacy keyless row as its own design', () => {
+    const legacy = { ...other, name: '福字款' };
+    expect(findDuplicateDesignNames([legacy, { ...legacy, fig: 2 }, { ...legacy, fig: 3 }])).toEqual([{ index: 1, name: '福字款' }, { index: 2, name: '福字款' }]);
+    expect(findDuplicateDesignNames([legacy, { ...legacy, name: '寿字款' }])).toEqual([]);
+  });
+  it('ignores empty names, leaving them to the required-name rule', () => {
+    expect(findDuplicateDesignNames([{ ...other, name: '' }, { ...other, name: '  ' }, { ...first, name: '' }])).toEqual([]);
   });
 });

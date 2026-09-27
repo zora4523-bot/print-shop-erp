@@ -61,7 +61,7 @@
 | S1 | `pg_bigm` | 中文短词搜索 | 红包、烫金、佛山、张三等短中文关键词 | migration 可建 extension + index |
 | S1 | `citext` | 大小写不敏感唯一 | `User.username`、`Material.code`、future `Product.code` | migration + 数据冲突预检 |
 | S1 | `pg_stat_statements` | SQL 性能观测 | Dashboard、搜索、账单列表慢查询 | Pigsty 集群配置 |
-| S1 | `pg_cron` | 定时任务 | 6 个 `/api/cron/*` endpoint 调度 | Pigsty 集群配置 |
+| S1 | `pg_cron` | 定时任务 | 原计划调度 `/api/cron/*`；2026-08-22 起 HTTP 调度已退役（`20260822102000_retire_database_http_scheduler`），现行 7 个端点只由系统 crontab 调用 | Pigsty 集群配置 |
 | S1 | `pg_net` | PG 发 HTTP 请求 | 配合 `pg_cron` 调 Next cron endpoint | Pigsty 集群配置 |
 | S2 | `pg_jsonschema` | JSONB 结构校验 | `PriceAdjustment.triggerCondition`、future product attributes | hand-written SQL migration |
 | S2 | `btree_gist` | 区间排他约束 | `PriceTier` 有效期、数量档防重叠 | hand-written SQL migration |
@@ -125,7 +125,7 @@ Pigsty 中存在数据库认证、安全或 JWT 相关扩展，但它们不适�
 - 中文短词能搜到商品/工单。
 - 手机号、快递号、订单号可搜索。
 - 空查询保留现有列表行为。
-- 不改变现有权限 scope：销售/客服仍只能搜自己的工单。
+- 不改变现有权限 scope：销售仍只能搜自己的工单（客服角色 2026-09-24 已删除）。
 - 搜索结果按精确命中、前缀命中、包含命中、拼音/简拼命中的顺序优先展示，避免精确订单号/编码被历史排序压到后面。
 - `/owner/pigsty` 能看到工单/商品搜索 readiness；必需扩展或索引缺失时报告 blocker。
 - 上线前可直接复制页面里的 EXPLAIN SQL 在生产库检查计划，避免搜索路径退化成全表扫描。
@@ -244,6 +244,7 @@ Pigsty 中存在数据库认证、安全或 JWT 相关扩展，但它们不适�
 范围：
 
 - 新增 `app_ops.sensitive_column_policy`，登记当前 ERP 的敏感列：账号密码 hash、员工手机号、工单客户/收货信息、薪资、账单金额、价格规则、企业微信 webhook 和通知正文。
+- 策略按字符串登记，删列 / 删表不会级联清理：删除列或表的迁移必须同时清理对应策略（2026-09-24 删除时薪空闲打包工资列与客服工资表后，由 `20260924150000_prune_removed_sensitive_column_policies` 删除遗留的 10 条），否则 `security_extension_readiness` 报 `sensitive_policy_references_missing_columns`。
 - 新增 `app_ops.sensitive_column_readiness`，为可用 `anon` 动态脱敏的文本列生成 `SECURITY LABEL FOR anon ... MASKED WITH FUNCTION ...` 建议 SQL。
 - 薪资和账单金额先走 `manual_export_redact`，不在 migration 中生成随机金额；这些金额是 finance/payroll-of-record，演示库导出时显式替换，生产库由应用权限和审计保护。
 - 新增 `app_ops.security_audit_table_readiness`，按敏感列汇总出表级 `pgaudit.role` 授权 SQL，便于只审计高敏表，不开启全库 `ALL`。
@@ -260,6 +261,8 @@ Pigsty 中存在数据库认证、安全或 JWT 相关扩展，但它们不适�
 - 审计只覆盖账号、订单、薪资、账单、价格、通知等高敏表，默认 `pgaudit.log_parameter = off`，避免日志记录过多业务正文。
 
 ### PR-10：调度与观测
+
+> 历史记录：本节的数据库内 HTTP 调度已于 2026-08-22 退役（`20260822102000_retire_database_http_scheduler` 删除 ERP job 与 GUC，并把 `cron_http_job_candidate` 全部置为未启用）；现行调度只用系统 crontab + `deploy/run-cron.sh`，端点 7 个（2026-09-24 删除 `hourly-payroll`、`cs-settle`、`cs-period-ending`）。下文登记的 job 清单只代表当时状态。
 
 目标：把已存在的 6 个 `/api/cron/*` endpoint 和关键慢查询诊断纳入 Pigsty 运维面。
 

@@ -30,6 +30,8 @@ const {
       findUniqueOrThrow: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
     },
     craft: { findMany: vi.fn() },
     orderShipment: { create: vi.fn() },
@@ -232,10 +234,12 @@ describe('createReworkOrder', () => {
       .mockResolvedValueOnce({
         id: 'rework-1',
         orderNo: 'GD-260731-001',
-        customerRef: '客户 A',
+        customerRef: null,
         totalAmount: '0.00',
         isUrgent: true,
+        settlementType: OrderSettlementType.NO_CHARGE,
         submitter: { displayName: '管理员' },
+        sourceOrder: { submitter: { displayName: '原单销售' } },
       });
 
     const now = new Date('2026-07-31T09:00:00+08:00');
@@ -263,7 +267,14 @@ describe('createReworkOrder', () => {
       settledFee: null,
       submittedAt: now,
       receiverAddress: '佛山市主地址',
+      // 客户名称/简称已退役（业主 2026-09-27）：原单即便存有客户，重做单也不再沿用。
+      customerPartyId: null,
+      customerRef: null,
     });
+    const serialized = JSON.stringify(data, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value);
+    expect(serialized).not.toContain('客户 A');
+    expect(serialized).not.toContain('customer-1');
     expect(data.items.create[0]).toMatchObject({
       name: '大号红包',
       quantity: 120,
@@ -404,16 +415,23 @@ describe('createReworkOrder', () => {
       }),
       { dedupeKey: 'notification:ORDER_SUBMITTED:rework-1' },
     );
+    // 重做单由管理员提交、免费结算；急单通知点名的是原单的外部销售。
     expect(notifyMock).toHaveBeenCalledWith(
       'URGENT_ORDER',
       {
         orderId: 'rework-1',
         orderNo: 'GD-260731-001',
         submitterName: '管理员',
-        customerRef: '客户 A',
+        externalSalesName: '原单销售',
+        customerRef: null,
       },
       { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
     );
+    expect(dbMock.order.findUnique.mock.calls.at(-1)![0].select).toMatchObject({
+      settlementType: true,
+      submitter: { select: { displayName: true } },
+      sourceOrder: { select: { submitter: { select: { displayName: true } } } },
+    });
     expect(notifyMock).toHaveBeenCalledTimes(2);
     for (const [, payload] of notifyMock.mock.calls) {
       expect(payload).not.toHaveProperty('totalAmount');
@@ -576,10 +594,12 @@ describe('createReworkOrder', () => {
     dbMock.order.findUniqueOrThrow.mockResolvedValueOnce({
       id: 'rework-1',
       orderNo: 'GD-260731-001',
-      customerRef: '客户 A',
+      customerRef: null,
       totalAmount: '0.00',
       isUrgent: true,
+      settlementType: OrderSettlementType.NO_CHARGE,
       submitter: { displayName: '管理员' },
+      sourceOrder: { submitter: { displayName: '原单销售' } },
     });
 
     await createReworkOrder(validInput, ownerActor);
@@ -595,10 +615,39 @@ describe('createReworkOrder', () => {
       2,
       dbMock,
       'URGENT_ORDER',
-      expect.objectContaining({ orderId: 'rework-1' }),
+      {
+        orderId: 'rework-1',
+        orderNo: 'GD-260731-001',
+        submitterName: '管理员',
+        externalSalesName: '原单销售',
+        customerRef: null,
+      },
       { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
     );
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to 未填 when the rework source has no external salesperson', async () => {
+    modeMock.mockReturnValue('durable');
+    dbMock.order.findUnique.mockResolvedValueOnce(sourceOrder);
+    dbMock.order.findUniqueOrThrow.mockResolvedValueOnce({
+      id: 'rework-1',
+      orderNo: 'GD-260731-001',
+      customerRef: null,
+      isUrgent: true,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      submitter: { displayName: '管理员' },
+      sourceOrder: null,
+    });
+
+    await createReworkOrder(validInput, ownerActor);
+
+    expect(enqueueNotificationMock).toHaveBeenCalledWith(
+      dbMock,
+      'URGENT_ORDER',
+      expect.objectContaining({ submitterName: '管理员', externalSalesName: '未填' }),
+      { dedupeKey: 'notification:URGENT_ORDER:rework-1' },
+    );
   });
 
   it('propagates an urgent outbox failure so the owning transaction can roll back', async () => {
@@ -642,6 +691,41 @@ describe('createReworkOrder', () => {
       createReworkOrder(validInput, ownerActor),
     ).rejects.toBeInstanceOf(ReworkOrderError);
     expect(dbMock.order.create).not.toHaveBeenCalled();
+  });
+
+  it('逐地址发货后已结算的原单可以发起重做，且不改写原单应收', async () => {
+    dbMock.order.findUnique
+      .mockResolvedValueOnce({
+        ...sourceOrder,
+        status: OrderStatus.SETTLED,
+        settledFee: '1280.00',
+        settledAt: new Date('2026-09-20T08:00:00Z'),
+      })
+      .mockResolvedValueOnce({
+        id: 'rework-1',
+        orderNo: 'GD-260922-001',
+        customerRef: '客户 A',
+        totalAmount: '0.00',
+        isUrgent: true,
+        submitter: { displayName: '管理员' },
+      });
+
+    await expect(
+      createReworkOrder(validInput, ownerActor, new Date('2026-09-22T09:00:00+08:00')),
+    ).resolves.toEqual({ id: 'rework-1', orderNo: 'GD-260731-001' });
+    expect(dbMock.order.create.mock.calls[0]![0].data).toMatchObject({
+      kind: OrderKind.REWORK,
+      sourceOrderId: 'source-1',
+      billingMode: OrderBillingMode.NO_CHARGE,
+      settlementType: OrderSettlementType.NO_CHARGE,
+      totalAmount: '0.00',
+      settledFee: null,
+    });
+    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(dbMock.order.updateMany).not.toHaveBeenCalled();
+    expect(dbMock.orderLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ orderId: 'source-1', action: 'CREATE_REWORK' }),
+    });
   });
 
   it('rejects nested rework and directs the owner back to the original order', async () => {

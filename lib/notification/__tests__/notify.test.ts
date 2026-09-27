@@ -336,6 +336,75 @@ describe('notify', () => {
     expect(data.sentAt).toBeInstanceOf(Date);
   });
 
+  it('部署前入队的逾期载荷缺 externalSalesName → 按工单补上，新模板不漏出占位符', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_OVERDUE',
+      channelIds: ['c1'],
+      messageTemplate: '工单：{orderNo}\n外部销售：{externalSalesName}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/x', isActive: true },
+    ]);
+    dbMock.order.findUnique.mockResolvedValueOnce({
+      settlementType: 'NO_CHARGE',
+      submitter: { displayName: '管理员' },
+      sourceOrder: { submitter: { displayName: '桂林' } },
+    });
+
+    await notify(
+      'ORDER_OVERDUE',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        customerRef: '未填',
+        promisedDate: '2026/09/20',
+        daysOverdue: 2,
+        status: '生产中',
+      } as unknown as NotificationPayloadFor<'ORDER_OVERDUE'>,
+      { mockMode: true },
+    );
+
+    expect(dbMock.order.findUnique).toHaveBeenCalledWith({
+      where: { id: 'o1' },
+      select: expect.objectContaining({ settlementType: true }),
+    });
+    expect(dbMock.notificationLog.create.mock.calls[0][0].data.messageContent).toBe(
+      '工单：O-1\n外部销售：桂林',
+    );
+  });
+
+  it('载荷已带 externalSalesName → 不回查工单', async () => {
+    dbMock.notificationRule.findUnique.mockResolvedValue({
+      eventType: 'ORDER_OVERDUE',
+      channelIds: ['c1'],
+      messageTemplate: '外部销售：{externalSalesName}',
+      isActive: true,
+    });
+    dbMock.notificationChannel.findMany.mockResolvedValue([
+      { id: 'c1', webhookUrl: 'https://qy/x', isActive: true },
+    ]);
+
+    await notify(
+      'ORDER_OVERDUE',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        externalSalesName: '未填',
+        customerRef: '未填',
+        promisedDate: '2026/09/20',
+        daysOverdue: 2,
+        status: '生产中',
+      },
+      { mockMode: true },
+    );
+
+    expect(dbMock.order.findUnique).not.toHaveBeenCalled();
+    expect(dbMock.notificationLog.create.mock.calls[0][0].data.messageContent).toBe(
+      '外部销售：未填',
+    );
+  });
+
   it('多 channel → 每 channel 一条 log', async () => {
     dbMock.notificationRule.findUnique.mockResolvedValue({
       eventType: 'URGENT_ORDER',
@@ -354,6 +423,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { webhookSender: okSender, mockMode: false },
@@ -395,6 +465,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { webhookSender, smartBotSender, mockMode: false },
@@ -442,6 +513,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { smartBotSender, mockMode: false },
@@ -484,6 +556,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         submitterName: '张三',
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       {
@@ -534,6 +607,7 @@ describe('notify', () => {
           orderId: 'o1',
           orderNo: 'O-1',
           workOrderVersion: 2,
+          externalSalesName: '外销甲',
           customerRef: null,
         },
         { webhookSender: okSender, mockMode: false },
@@ -571,6 +645,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         workOrderVersion: 2,
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       { webhookSender: okSender, mockMode: false },
@@ -636,6 +711,7 @@ describe('notify', () => {
             orderId: 'o1',
             orderNo: 'O-1',
             workOrderVersion: 2,
+            externalSalesName: '外销甲',
             customerRef: null,
           },
           {
@@ -699,6 +775,7 @@ describe('notify', () => {
             orderId: 'o1',
             orderNo: 'O-1',
             workOrderVersion: 2,
+            externalSalesName: '外销甲',
             customerRef: null,
           },
           {
@@ -760,6 +837,7 @@ describe('notify', () => {
             orderId: 'o1',
             orderNo: 'O-1',
             workOrderVersion: 2,
+            externalSalesName: '外销甲',
             customerRef: null,
           },
           {
@@ -830,6 +908,7 @@ describe('notify', () => {
         orderId: 'o1',
         orderNo: 'O-1',
         workOrderVersion: 2,
+        externalSalesName: '外销甲',
         customerRef: null,
       },
       {
@@ -879,6 +958,7 @@ describe('notify', () => {
           orderId: 'o1',
           orderNo: 'O-1',
           workOrderVersion: 2,
+          externalSalesName: '外销甲',
           customerRef: null,
         },
         { webhookSender: okSender, mockMode: false },
@@ -964,37 +1044,6 @@ describe('notify', () => {
     expect(where.isActive).toBeUndefined();
   });
 
-  it('CS_PERIOD_ENDING + legacy 多 channel → 运行时 cap 到 1 + console.warn（Codex round 115 high）', async () => {
-    const warnSpy = vi
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined);
-    dbMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'CS_PERIOD_ENDING',
-      channelIds: ['c1', 'c2', 'c3'],
-      messageTemplate: 'x',
-      isActive: true,
-    });
-    dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
-      { id: 'c2', webhookUrl: 'https://qy/2', isActive: true },
-      { id: 'c3', webhookUrl: 'https://qy/3', isActive: true },
-    ]);
-    await notify(
-      'CS_PERIOD_ENDING',
-      { periodId: 'p1', csName: '张', daysLeft: 3, totalSales: '100,000.00' },
-      { webhookSender: okSender, mockMode: false },
-    );
-    // 只发 1 个 channel（cap）
-    expect(okSender).toHaveBeenCalledTimes(1);
-    expect(dbMock.notificationLog.create).toHaveBeenCalledTimes(1);
-    expect(dbMock.notificationLog.create.mock.calls[0][0].data.channelId).toBe('c1');
-    // console.warn 留 ops 信号
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('CS_PERIOD privacy cap'),
-    );
-    warnSpy.mockRestore();
-  });
-
   it('rule.channelIds 含重复 id → 仅发一次（Codex round 117 medium 防回归 + round 118：不误报 stale）', async () => {
     const warnSpy = vi
       .spyOn(console, 'warn')
@@ -1037,61 +1086,34 @@ describe('notify', () => {
     warnSpy.mockRestore();
   });
 
-  it('CS_PERIOD privacy cap 按 rule.channelIds 顺序选第 1 个，不被 PG `IN()` 乱序影响（Codex round 116 high）', async () => {
-    const warnSpy = vi
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined);
-    // rule 里 owner-group 在前，sales-group 在后——owner 期望优先发
-    // owner-group。
+  it('按 rule.channelIds 顺序投递，不被 PG `IN()` 乱序影响（Codex round 116 high）', async () => {
     dbMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'CS_PERIOD_SETTLED',
+      eventType: 'ORDER_SUBMITTED',
       channelIds: ['owner-group', 'sales-group'],
       messageTemplate: 'x',
       isActive: true,
     });
-    // 但 PG 返回顺序乱了（sales-group 在前）—— 模拟 IN(...) 不保证顺序。
+    // PG 返回顺序乱了（sales-group 在前）—— 模拟 IN(...) 不保证顺序。
     dbMock.notificationChannel.findMany.mockResolvedValue([
       { id: 'sales-group', webhookUrl: 'https://qy/sales', isActive: true },
       { id: 'owner-group', webhookUrl: 'https://qy/owner', isActive: true },
     ]);
     await notify(
-      'CS_PERIOD_SETTLED',
-      { settledCount: 1, csName: '张', totalSales: '10,000', commission: '300' },
+      'ORDER_SUBMITTED',
+      {
+        orderId: 'o1',
+        orderNo: 'O-1',
+        submitterName: '张三',
+        customerRef: null,
+        totalAmount: '0',
+        urgentMark: '',
+      },
       { webhookSender: okSender, mockMode: false },
     );
-    // **必须发到 owner-group**（rule.channelIds[0]），不能是 sales-group
-    expect(dbMock.notificationLog.create.mock.calls[0][0].data.channelId).toBe(
-      'owner-group',
-    );
-    expect(okSender).toHaveBeenCalledTimes(1);
-    // sender 第一个参数（webhook URL）也应该是 owner 的，不是 sales 的
-    expect(okSender).toHaveBeenCalledWith('https://qy/owner', expect.any(String));
-    warnSpy.mockRestore();
-  });
-
-  it('CS_PERIOD_SETTLED + 单 channel → 不 cap 不 warn', async () => {
-    const warnSpy = vi
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined);
-    dbMock.notificationRule.findUnique.mockResolvedValue({
-      eventType: 'CS_PERIOD_SETTLED',
-      channelIds: ['c1'],
-      messageTemplate: 'x',
-      isActive: true,
-    });
-    dbMock.notificationChannel.findMany.mockResolvedValue([
-      { id: 'c1', webhookUrl: 'https://qy/1', isActive: true },
-    ]);
-    await notify(
-      'CS_PERIOD_SETTLED',
-      { settledCount: 1, csName: '张', totalSales: '10,000.00', commission: '300.00' },
-      { webhookSender: okSender, mockMode: false },
-    );
-    expect(okSender).toHaveBeenCalledTimes(1);
-    expect(warnSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('CS_PERIOD privacy cap'),
-    );
-    warnSpy.mockRestore();
+    expect(
+      dbMock.notificationLog.create.mock.calls.map((call) => call[0].data.channelId),
+    ).toEqual(['owner-group', 'sales-group']);
+    expect(okSender).toHaveBeenNthCalledWith(1, 'https://qy/owner', expect.any(String));
   });
 
   it('其他事件 ORDER_SUBMITTED + 多 channel → 不 cap', async () => {

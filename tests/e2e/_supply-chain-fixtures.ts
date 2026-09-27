@@ -94,7 +94,7 @@ export async function seedOutsourcePrerequisites() {
     // styles and write PACKING/completedAt itself after the second receipt.
     await db.query(
       `INSERT INTO "Order" (id,"orderNo","submitterId","submitterRole","createdById","settlementType",status,"workOrderVersion","requiresOutsource","customName","customerRef","submittedAt","createdAt","updatedAt")
-       VALUES ($1,$2,$3,'ADMIN',$3,'FACTORY_DIRECT','RELEASED',1,TRUE,'外协回归工单','外协回归客户',NOW(),NOW(),NOW())`,
+       VALUES ($1,$2,$3,'SALES',$3,'EXTERNAL_SALES','RELEASED',1,TRUE,'外协回归工单','外协回归客户',NOW(),NOW(),NOW())`,
       [orderId, orderNo, actor.rows[0]!.id],
     );
     for (const [index, itemId] of itemIds.entries()) {

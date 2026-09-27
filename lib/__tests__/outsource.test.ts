@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  OrderSettlementType,
   OrderStatus,
   OutsourceStatus,
   Role,
@@ -948,6 +949,9 @@ describe('markOutsourceReceived', () => {
       workOrderVersion: 1,
       orderNo: 'O-OUT',
       customerRef: '苹果福',
+      settlementType: OrderSettlementType.EXTERNAL_SALES,
+      submitter: { displayName: '外销甲' },
+      sourceOrder: null,
     });
 
     const result = await markOutsourceReceived(
@@ -970,6 +974,9 @@ describe('markOutsourceReceived', () => {
         workOrderVersion: true,
         orderNo: true,
         customerRef: true,
+        settlementType: true,
+        submitter: { select: { displayName: true } },
+        sourceOrder: { select: { submitter: { select: { displayName: true } } } },
         completedAt: true,
       },
     });
@@ -979,6 +986,7 @@ describe('markOutsourceReceived', () => {
         orderId: 'order-1',
         orderNo: 'O-OUT',
         workOrderVersion: 1,
+        externalSalesName: '外销甲',
         customerRef: '苹果福',
       },
       { dedupeKey: 'notification:ORDER_COMPLETED:order-1' },

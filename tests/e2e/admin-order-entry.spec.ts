@@ -23,7 +23,7 @@ test.describe("admin order entry", () => {
     const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
     const ownerId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const recipient = page.getByRole("combobox", {
-      name: "关联外部销售（选填）",
+      name: "关联外部销售（必填）",
     });
     await expect(recipient).toBeVisible();
     await expect(page.getByLabel("客户名称/简称", { exact: true })).toHaveCount(
@@ -166,7 +166,7 @@ test.describe("admin order entry", () => {
     expect(errors).toEqual([]);
   });
 
-  test("unassigned admin orders remain factory direct and mixed bags validate the total", async ({
+  test("admin must choose an external salesperson and mixed bags validate the total", async ({
     page,
   }) => {
     await login(page, {
@@ -174,11 +174,20 @@ test.describe("admin order entry", () => {
       username: E2E_USERS.owner!.username,
       password: E2E_PASSWORD,
     });
+    const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
+    const recipient = page.getByRole("combobox", {
+      name: "关联外部销售（必填）",
+    });
+    await expect(recipient).toHaveValue("");
     await page
       .getByRole("textbox", { name: "工单名称", exact: true })
-      .fill(`工厂直单 ${Date.now()}`);
+      .fill(`管理员代建 ${Date.now()}`);
     // 分层建单（64c9a350）没有「复制当前」：「＋ 增加设计款」同样复制当前款并切过去。
     await page.getByRole("button", { name: "＋ 增加设计款", exact: true }).click();
+    // 业主 2026-09-26：新增设计款的名称留空、须手动填写，且与第 1 款不重名。
+    const secondDesignName = page.getByRole("textbox", { name: "设计款名称", exact: true });
+    await expect(secondDesignName).toHaveValue("");
+    await secondDesignName.fill("第二设计款");
     await page
       .getByRole("group", { name: "包装方式", exact: true })
       .getByRole("button", { name: "混装", exact: true })
@@ -186,23 +195,30 @@ test.describe("admin order entry", () => {
     await expect(
       page.getByText("每包数量不能超过 12 个，请调整包装数量").first(),
     ).toBeVisible();
-    await page
-      .getByRole("spinbutton", { name: "每包数量", exact: true })
-      .fill("6");
-    await page
-      .getByRole("tablist", { name: "设计款", exact: true })
-      .getByRole("tab")
-      .first()
-      .click();
-    await page
-      .getByRole("spinbutton", { name: "每包数量", exact: true })
-      .fill("6");
+    // 混装组的每个规格在整单包装区各占一行。
+    const packs = page.getByRole("spinbutton", { name: "每包数量", exact: true });
+    await expect(packs).toHaveCount(2);
+    await packs.nth(0).fill("6");
+    await packs.nth(1).fill("6");
     await expect(
       page.getByText("每包数量不能超过 12 个，请调整包装数量"),
     ).toHaveCount(0);
     await page
       .getByRole("textbox", { name: "收货地址", exact: true })
       .fill("张先生 13800138000 广东省佛山市南海区测试路1号");
+    // 业主 2026-09-24：管理员建单必须归属一个外部销售，未选择时就地拦截。
+    await expect(
+      page.getByRole("button", { name: "保存草稿", exact: true }),
+    ).toBeEnabled({ timeout: 20_000 });
+    await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+    await expect(recipient).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("请选择关联外部销售").first()).toBeVisible();
+    // 保存草稿只拦外部销售：焦点落在销售下拉，不亮出提交阶段才要求的设计图等校验。
+    await expect(recipient).toBeFocused();
+    await expect(page.getByText(/请上传设计图/)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/orders\/new/);
+    await recipient.selectOption(salesId);
+    await expect(recipient).toHaveAttribute("aria-invalid", "false");
     await expect(
       page.getByRole("button", { name: "保存草稿", exact: true }),
     ).toBeEnabled({ timeout: 20_000 });
@@ -213,11 +229,13 @@ test.describe("admin order entry", () => {
     await db.connect();
     try {
       const result = await db.query(
-        'SELECT "settlementType", "customerRef", "customerPartyId" FROM "Order" WHERE id=$1',
+        'SELECT "submitterId", "submitterRole", "settlementType", "customerRef", "customerPartyId" FROM "Order" WHERE id=$1',
         [id],
       );
       expect(result.rows[0]).toEqual({
-        settlementType: "FACTORY_DIRECT",
+        submitterId: salesId,
+        submitterRole: "SALES",
+        settlementType: "EXTERNAL_SALES",
         customerRef: null,
         customerPartyId: null,
       });

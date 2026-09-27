@@ -3,7 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   assessDeployJobsGate,
   deployJobsGateFailureMessage,
@@ -180,10 +180,44 @@ function ensureNodeModules() {
   }
 }
 
+// Read-only: invalid concurrent indexes cannot arbitrate ON CONFLICT.
+export async function checkInvalidIndexes(client) {
+  const { rows } = await client.query(`
+    SELECT n.nspname AS schema_name, c.relname AS index_name
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE NOT i.indisvalid
+    ORDER BY n.nspname, c.relname
+  `);
+  if (rows.length) {
+    throw new Error(`invalid indexes: ${rows.map((row) =>
+      `${row.schema_name}.${row.index_name}${row.index_name === 'NotificationLog_deliveryKey_channelId_key' ? ' (notification dedupe dependency)' : ''}`,
+    ).join(', ')}`);
+  }
+}
+
+async function checkDatabaseIndexes() {
+  info('checking all database indexes are valid');
+  if (dryRun) return;
+  // Match Prisma CLI dotenv loading without overriding operator environment.
+  await import('dotenv/config');
+  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
+  const { Client } = await import('pg');
+  const client = new Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 10_000, query_timeout: 10_000 });
+  try {
+    await client.connect();
+    await checkInvalidIndexes(client);
+  } finally {
+    await client.end();
+  }
+}
+
 async function main() {
   ensureNodeModules();
   run('prisma validate', localBin('prisma'), ['validate']);
   run('prisma migrate status', localBin('prisma'), ['migrate', 'status']);
+  await checkDatabaseIndexes();
 
   if (runSeed) {
     run('prisma db seed', localBin('prisma'), ['db', 'seed']);
@@ -210,6 +244,8 @@ async function main() {
   info('completed');
 }
 
-main().catch((err) => {
-  fail(err instanceof Error ? err.message : String(err));
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((err) => {
+    fail(err instanceof Error ? err.message : String(err));
+  });
+}

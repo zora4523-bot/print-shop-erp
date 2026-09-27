@@ -17,7 +17,7 @@ const PRICING_REASON_MESSAGES: Record<CreateOrderManualReasonCode, string> = {
     '所选规格和纸张暂无局部烫金价格，请选择其他组合或联系管理员核价',
   PARTIAL_TEN_THOUSAND_ENVELOPE: '万元封局部烫金需要管理员单独核价',
   FULL_ICE_WHITE_ADMIN_PRICING:
-    '冰白纸专版烫金由管理员手动核价，请提交工单后等待核价',
+    '冰白珠光纸专版烫金由管理员手动核价，请提交工单后等待核价',
   FULL_PRICE_NOT_FOUND: '所选数量暂无专版烫金价格，请联系管理员核价',
   FULL_PAPER_SURCHARGE_NOT_FOUND:
     '所选纸张暂无专版烫金价格，请选择其他纸张或联系管理员核价',
@@ -34,6 +34,8 @@ const PRICING_REASON_MESSAGES: Record<CreateOrderManualReasonCode, string> = {
   PRINT_FINISHING_PRICE_NOT_FOUND: '所选彩印工艺暂无完整价格，请联系管理员核价',
   PRINT_FOIL_PRICE_NOT_FOUND:
     '所选彩印加烫金组合暂无完整价格，请联系管理员核价',
+  PRINT_NON_FLAT_FOIL: '彩印浮雕、激凸需要管理员核价',
+  PRINT_BACK_SIDE_FOIL: '彩印反面烫金需要管理员核价',
   PRINT_FOIL_MANUAL_PRICE_INCLUDES_PLATE:
     '彩印加烫金需核对包含制版费的整款报价',
 };

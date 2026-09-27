@@ -48,21 +48,26 @@ describe('editable-field lists (SPEC §3.6 — 仅改收货信息/备注)', () =
   it('SHIPPING_EDITABLE_FIELDS is a subset of FULL_EDITABLE_FIELDS', () => {
     // The shipping-only subset must never contain a field the full set
     // doesn't, otherwise a status-specific edit could touch something
-    // we don't otherwise allow (e.g. customerRef once production has
+    // we don't otherwise allow (e.g. the order name once production has
     // started).
     for (const f of SHIPPING_EDITABLE_FIELDS) {
       expect(FULL_EDITABLE_FIELDS as readonly string[]).toContain(f);
     }
   });
 
-  it('excludes customerRef and isUrgent from the shipping subset', () => {
-    // These two are the discriminators between the two sets; if they
-    // leak into SHIPPING_ONLY, schedulers / operators can change a
-    // customer code or flip urgent mid-production, which SPEC §3.6
-    // explicitly forbids.
-    expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('customerRef');
+  it('excludes customName and isUrgent from the shipping subset', () => {
+    // These are the discriminators between the two sets; if they leak into
+    // SHIPPING_ONLY, operators can rename the order or flip urgent
+    // mid-production, which SPEC §3.6 explicitly forbids.
     expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('customName');
     expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain('isUrgent');
+  });
+
+  it('never lets an edit change the retired customer fields (业主 2026-09-27)', () => {
+    for (const field of ['customerRef', 'customerPartyId']) {
+      expect(FULL_EDITABLE_FIELDS as readonly string[]).not.toContain(field);
+      expect(SHIPPING_EDITABLE_FIELDS as readonly string[]).not.toContain(field);
+    }
   });
 
   it('allows the custom name while a draft is fully editable', () => {

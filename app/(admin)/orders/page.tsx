@@ -8,7 +8,6 @@ import { ErrorBoundary, PageHeader } from '@/components/ui-business';
 import { OrdersListContent } from './_components/OrdersListContent';
 import {
   AdminOrdersWorkspaceSkeleton,
-  OrdersListContentSkeleton,
   SalesOrdersListContentSkeleton,
 } from './_components/OrdersListContentSkeleton';
 
@@ -22,10 +21,7 @@ type PageProps = {
 
 export default async function OrdersListPage({ searchParams }: PageProps) {
   const { user } = await requireSession();
-  const canCreate =
-    user.role === Role.SALES ||
-    user.role === Role.CUSTOMER_SERVICE ||
-    user.role === Role.ADMIN;
+  const canCreate = user.role === Role.SALES || user.role === Role.ADMIN;
   return (
     <div className="space-y-6">
       {user.role !== Role.ADMIN ? (
@@ -49,10 +45,8 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
           fallback={
             user.role === Role.ADMIN ? (
               <AdminOrdersWorkspaceSkeleton />
-            ) : user.role === Role.SALES ? (
-              <SalesOrdersListContentSkeleton />
             ) : (
-              <OrdersListContentSkeleton />
+              <SalesOrdersListContentSkeleton />
             )
           }
         >

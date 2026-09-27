@@ -111,7 +111,6 @@ function mount(
           isExternalSales: true,
           initial: {
             customName: '迎春红包',
-            customerRef: '老客户',
             packageRequirement: '',
             remark: '',
             promisedDate: '2026-10-01',

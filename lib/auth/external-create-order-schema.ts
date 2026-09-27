@@ -86,17 +86,8 @@ export const externalCreateOrderStyleSchema = z
       });
     }
 
-    if (
-      style.craft === 'PRINT' &&
-      style.printFoilMode === 'FULL' &&
-      style.backColors.length > 0
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['backColors'],
-        message: '彩印叠加专版烫金只允许正面',
-      });
-    }
+    // 彩印反面烫金（叠加局部或专版烫金）是合法事实，由计价引擎转人工核价
+    // （DECISIONS 2026-08-27），schema 不提前拒绝。
 
     if (
       style.craft !== 'PRINT' &&
@@ -114,8 +105,10 @@ const externalCreateOrderFactsObject = z
   .object({
     clientSubmissionId: z.string().uuid('提交标识无效'),
     customName: trimmedRequired('工单名称', 100),
-    customerPartyId: optionalTrimmed(64),
-    customerRef: optionalTrimmed(64),
+    // 客户名称/简称与关联客户已退役（业主 2026-09-27）。严格 schema 仍接受这两个
+    // key，免得旧客户端被 strict 拒绝；toCanonicalFacts 不再传入，值不校验、不产生效果。
+    customerPartyId: z.string().nullable().optional(),
+    customerRef: z.string().nullable().optional(),
     receiverName: trimmedRequired('收件人', 64),
     receiverPhone: trimmedRequired('联系电话', 32),
     receiverAddress: trimmedRequired('收件地址', 256),

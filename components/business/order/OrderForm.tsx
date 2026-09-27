@@ -1,13 +1,26 @@
 'use client';
 
-import { changeCreatePackagingMode, createPackagingGroupIndex, appendCreatePackagingGroup } from '@/lib/order/create-packaging-selection';
+import {
+  appendCreatePackagingGroup, applyOrderPackagingMixing, applyOrderPackagingType, applySpecPackagingType,
+  createPackagingGroupIndex, createPackagingRows, orderPackagingSelection, summarizeCreatePackaging,
+} from '@/lib/order/create-packaging-selection';
+import type { OrderPackagingView } from './order-form-b/OrderPackagingSection';
 import { parsePastedReceiverAddress, pastedTextareaValue } from '@/lib/order/receiver-address-paste';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 // Tests and older callers import the parser from here.
 export { parsePastedReceiverAddress } from '@/lib/order/receiver-address-paste';
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import type { OrderEditorSnapshot, OrderCreationEditor, OrderCreationLifecycle, SampleOrderEditorSnapshot } from './order-creation-editor';
 import { orderDesignGroups, designItemIndexes, designFileQueues } from '@/lib/order/design-groups';
+import {
+  DESIGN_NAME_MAX_LENGTH,
+  designNameIssueSummary,
+  designNameIssues,
+  followingDesignName,
+  hasOnlyDesignNameErrors,
+  unifyDesignNames,
+} from './order-form-design-names';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '@/lib/order/limits';
 import { OrderSampleEntry, prepareSampleOrderEntry, useSampleOrderEntry } from './OrderSampleEntry';
 import { OrderCreateFeeDetails } from './OrderCreateFeeDetails';
@@ -18,6 +31,8 @@ import {
   packagingBoxType,
   packagingUnit,
   packagingShipmentQuantities,
+  type PackagingBoxType,
+  type PackagingType,
 } from '@/lib/order/packaging-mode';
 import { AdminCreatePriceFields } from './AdminCreatePriceFields';
 import { adminCreatePriceFactsKey, calculateAdminCreatePrice, sumCreateKnownAmounts, adminPackagingPriceFactsKey, calculateAdminPackagingPrice } from '@/lib/order/admin-create-price';
@@ -27,19 +42,19 @@ import { ActionNotice } from '@/components/ui-business';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { orderItemSelectionUpdate, type OrderItemSelectionChange } from '@/lib/order/order-item-selection';
 import { OrderItemProductField } from './order-form-b/OrderItemFields';
-import { FieldError } from './order-form-b/OrderFieldPrimitives';
+import { FieldError, FieldLabel } from './order-form-b/OrderFieldPrimitives';
 import { externalOrderCatalogCandidates } from '@/lib/order/order-item-catalog';
 import { orderItemFieldOptions } from './order-item-field-options';
 import {
   createBlankItem,
   createExternalOrderItem,
   normalizeExternalOrderItem,
-  resolveExternalOrderCraftIds,
 } from '@/lib/order/order-item-configuration';
 
 import { externalShipmentContactIssues } from '@/lib/order/external-shipment-contact';
 
 import {
+  type BaseSyntheticEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -55,6 +70,7 @@ import {
   useFieldArray,
   useWatch,
   type Control,
+  type FieldErrors,
   type SubmitHandler,
 } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -78,15 +94,12 @@ import {
 } from '@/generated/prisma/enums';
 import { createOrderAction, submitOrderAction } from '@/actions/order';
 import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';
-import { quoteInternalCreateOrderAction } from '@/actions/create-order-quote';
 import type { CreateOrderMutationResult } from '@/actions/order.types';
 import type { CreateOrderPackagingQuotePreview } from '@/lib/order/create-order-quote-presentation';
 import type {
   CreateOrderItemQuotePreview,
   CreateOrderQuoteResult,
-  InternalCreateOrderQuoteResult,
 } from '@/lib/order/create-order-quote-service';
-import type { CustomerPartyOption } from '@/lib/party';
 import { externalPriceRuleDisplayName } from '@/lib/price/external-price-display';
 import {
   type ExternalOrderChargeQuote,
@@ -142,7 +155,7 @@ import {
 } from '@/lib/order/pricing-route';
 import { calculateCreateOrderBagCount } from '@/lib/order/create-order-packaging';
 import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
-import { ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
+import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE, ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
 import {
   shouldProtectOrderFormLeave,
@@ -210,10 +223,8 @@ export type OrderFormProps = {
   workbenchTransferId?: string;
   crafts: readonly CraftOption[];
   products: readonly ProductOption[];
-  customers?: readonly CustomerPartyOption[];
+  /** Present only for administrators, who must pick the external salesperson. */
   externalSalesAccounts?: readonly ExternalSalesAccountOption[];
-  settlementLabel: string;
-  settlementType: OrderSettlementType;
   externalCreateOrderOptions?: ExternalCreateOrderOptions;
   initialExternalPriceSnapshot?: ExternalCreateOrderPriceSnapshot;
   draftScope: string;
@@ -240,12 +251,6 @@ type PackagingQuoteViewState = {
 type ExternalCreateOrderQuoteViewState = {
   inputKey: string;
   result?: CreateOrderQuoteResult;
-  error?: string;
-};
-
-type InternalCreateOrderQuoteViewState = {
-  inputKey: string;
-  result?: InternalCreateOrderQuoteResult;
   error?: string;
 };
 
@@ -351,29 +356,6 @@ export function removeOrderItemRelations({
         ? defaultPackagingGroups(remainingItemCount)
         : nextGroups,
   };
-}
-
-/**
- * Keep only genuinely additional production steps from the previous value and
- * replace every route-owned craft with the facts derived from the current
- * structured selections. This also cleans stale route crafts from recovered
- * local drafts and from PARTIAL/FULL/PRINT route switches.
- */
-export function resolveInternalOrderCraftIds(
-  item: CreateOrderInput['items'][number],
-  crafts: readonly CraftOption[],
-): string[] {
-  const craftById = new Map(crafts.map((craft) => [craft.id, craft]));
-  const additionalIds = item.crafts.filter((id) => {
-    const craft = craftById.get(id);
-    return craft ? isAdditionalOrderCraft(craft) : false;
-  });
-  return [
-    ...new Set([
-      ...resolveExternalOrderCraftIds(item, crafts),
-      ...additionalIds,
-    ]),
-  ];
 }
 
 function compactDecimal(value: string): string {
@@ -586,15 +568,6 @@ function orderItemQuoteFacts(
   };
 }
 
-function internalOrderItemQuoteFacts(
-  item: CreateOrderInput['items'][number],
-): NonNullable<QuoteFacts> {
-  return {
-    ...orderItemQuoteFacts(item),
-    manualQuoteReason: item.manualQuoteReason,
-  };
-}
-
 function formatLocalDraftTime(savedAt: string): string {
   const date = new Date(savedAt);
   if (Number.isNaN(date.getTime())) return '时间未知';
@@ -620,108 +593,52 @@ function UrgentOrderField({
       control={control}
       name="isUrgent"
       render={({ field }) => (
+        // 与左侧“承诺交期”同一结构：标签行 + 44px 控件行，勾选框与日期输入框对齐。
         <label
           htmlFor="isUrgent"
           data-slot="urgent-order-field"
-          className="flex min-h-16 min-w-0 cursor-pointer items-center gap-2 self-end rounded-xl border bg-background py-2 pr-2 pl-3 transition-colors hover:bg-muted/50 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+          className="grid min-w-0 cursor-pointer gap-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
         >
           <span id="urgent-order-accessible-label" className="sr-only">
             急单（提交后会推送至排产群）
           </span>
-          <span className="min-w-0 flex-1">
-            <span
-              data-slot="urgent-order-title"
-              className="block text-sm font-semibold"
-            >
-              急单
+          <span
+            data-slot="urgent-order-title"
+            className="text-sm leading-none font-medium"
+          >
+            急单
+          </span>
+          <span className="flex min-w-0 items-center gap-1">
+            {/* 44px 触控目标里的 20px 勾选框与标题左对齐 */}
+            <span className="-ml-3 shrink-0">
+              <Checkbox
+                id="isUrgent"
+                name={field.name}
+                checked={field.value ?? false}
+                disabled={disabled}
+                inputRef={field.ref}
+                aria-labelledby="urgent-order-accessible-label"
+                onBlur={field.onBlur}
+                onCheckedChange={field.onChange}
+              />
             </span>
             <span
               data-slot="urgent-order-description"
-              className="mt-0.5 block text-xs leading-5 text-muted-foreground"
+              className="min-w-0 text-xs leading-4 text-muted-foreground"
             >
               提交后会推送至排产群
             </span>
           </span>
-          <Checkbox
-            id="isUrgent"
-            name={field.name}
-            checked={field.value ?? false}
-            disabled={disabled}
-            inputRef={field.ref}
-            aria-labelledby="urgent-order-accessible-label"
-            onBlur={field.onBlur}
-            onCheckedChange={field.onChange}
-          />
         </label>
       )}
     />
   );
 }
 
-function InternalAdditionalCraftChoices({
-  options,
-  selectedIds,
-  disabled,
-  onToggle,
-}: {
-  options: readonly CraftOption[];
-  selectedIds: readonly string[];
-  disabled: boolean;
-  onToggle: (craftId: string, checked: boolean) => void;
-}) {
-  return (
-    <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 @min-[560px]:grid-cols-2">
-      {options.map((craft) => (
-        <label
-          key={craft.id}
-          className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border pr-3 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
-        >
-          <Checkbox
-            checked={selectedIds.includes(craft.id)}
-            disabled={disabled}
-            aria-label={`${craft.name}${craft.isOutsource ? ' · 外协' : ''}${craft.isLowFrequency ? ' · 低频' : ''}`}
-            onCheckedChange={(checked) => onToggle(craft.id, checked)}
-          />
-          <span className="min-w-0">
-            {craft.name}
-            {craft.isOutsource ? ' · 外协' : ''}
-            {craft.isLowFrequency ? ' · 低频' : ''}
-          </span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function internalQuoteRequestReady(
-  items: CreateOrderInput['items'],
-  groups: CreateOrderInput['packagingGroups'],
-  missingLaminationIndex: number,
-): boolean {
-  return missingLaminationIndex < 0 &&
-    items.length > 0 &&
-    items.every(
-      (item) =>
-        (Boolean(item.manualQuoteReason?.trim()) ||
-          ((Boolean(item.productId) || (item.pricingRoute === OrderItemPricingRoute.STOCK_BLANK && Boolean(item.paperType && item.specification))) && item.crafts.length > 0)) &&
-        Number.isSafeInteger(item.quantity) &&
-        item.quantity >= 1,
-    ) &&
-    groups.length > 0 &&
-    groups.every(
-      (group) =>
-        Number.isSafeInteger(group.actualBagCount) &&
-        (group.mode === OrderPackagingMode.UNPACKED ? group.actualBagCount === 0 : group.actualBagCount >= 1),
-    );
-}
-
 export function OrderForm({
   crafts,
   products,
-  customers = [],
   externalSalesAccounts,
-  settlementLabel: defaultSettlementLabel,
-  settlementType,
   externalCreateOrderOptions,
   initialExternalPriceSnapshot,
   draftScope,
@@ -743,8 +660,10 @@ export function OrderForm({
     if (!value) { sampleEditorRef.current = undefined; setRestoredSample(undefined); }
     persistSamplePurpose(value);
   }
-  const isExternalSalesActor = settlementType === OrderSettlementType.EXTERNAL_SALES;
+  // 业主 2026-09-24：所有工单都按外部销售结算。销售本人建单；管理员
+  // （持有 externalSalesAccounts）代建时必须选择外部销售。
   const canAssignExternalSales = externalSalesAccounts !== undefined;
+  const isExternalSalesActor = !canAssignExternalSales;
   const router = useRouter();
   const initialItem = useMemo(() => {
     const firstFoil = externalCreateOrderOptions?.foilColors[0]?.name;
@@ -752,9 +671,10 @@ export function OrderForm({
       crafts, products, externalCreateOrderOptions?.papers ?? [], firstFoil,
     );
     item.designGroupKey = globalThis.crypto.randomUUID();
-    if (!isExternalSalesActor) return item;
     return {
       ...item,
+      // 设计款名称由建单人填写（DECISIONS 2026-09-26）：单款默认跟随工单名称。
+      name: '',
       frontFoilColors: firstFoil ? [firstFoil] : [],
       backFoilColors: [],
       foilColors: firstFoil ? [firstFoil] : [],
@@ -766,7 +686,6 @@ export function OrderForm({
     externalCreateOrderOptions?.foilColors,
     externalCreateOrderOptions?.papers,
     products,
-    isExternalSalesActor,
   ]);
   const [clientSubmissionId] = useState(() => submissionId ?? globalThis.crypto.randomUUID());
   const form = useForm<CreateOrderInput>({
@@ -791,6 +710,8 @@ export function OrderForm({
     handleSubmit,
     formState: { errors, isDirty, dirtyFields },
     setValue,
+    setError,
+    clearErrors,
     getValues,
     reset,
   } = form;
@@ -807,17 +728,7 @@ export function OrderForm({
     name: 'packagingGroups',
   });
   const watchedCustomName = useWatch({ control, name: 'customName' });
-  const watchedCustomerRef = useWatch({ control, name: 'customerRef' });
-  const watchedExternalSalesUserId = useWatch({
-    control,
-    name: 'externalSalesUserId',
-  });
-  const usesExternalSalesPricing =
-    isExternalSalesActor ||
-    (canAssignExternalSales && Boolean(watchedExternalSalesUserId));
-  const settlementLabel = usesExternalSalesPricing
-    ? ORDER_SETTLEMENT_LABELS.EXTERNAL_SALES
-    : defaultSettlementLabel;
+  const settlementLabel = ORDER_SETTLEMENT_LABELS.EXTERNAL_SALES;
   const watchedPromisedDate = useWatch({ control, name: 'promisedDate' });
   const watchedReceiverAddress = useWatch({
     control,
@@ -853,7 +764,6 @@ export function OrderForm({
   } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
-  const [quoting, startQuote] = useTransition();
   const [externalQuoteQuoting, startExternalQuote] = useTransition();
   const [quoteViews, setQuoteViews] = useState<Record<string, QuoteViewState>>(
     {},
@@ -864,10 +774,13 @@ export function OrderForm({
     useState<PackagingQuoteViewState | null>(null);
   const [externalOrderQuote, setExternalOrderQuote] =
     useState<ExternalCreateOrderQuoteViewState | null>(null);
-  const [internalOrderQuote, setInternalOrderQuote] =
-    useState<InternalCreateOrderQuoteViewState | null>(null);
   const [submissionValidationVisible, setSubmissionValidationVisible] =
     useState(false);
+  // 保存草稿只因设计款名称被拦时，只提示设计款名称与外部销售，不打开提交阶段校验。
+  const [designNameValidationVisible, setDesignNameValidationVisible] =
+    useState(false);
+  // 本次编辑中各设计款是否手动命名（按设计款分组键）；没有记录时按值推断。
+  const handNamedDesignsRef = useRef(new Map<string, boolean>());
   const [errorFocusRequest, setErrorFocusRequest] = useState(0);
   const [errorFocusMessage, setErrorFocusMessage] = useState<string>();
   const [externalInputRevision, setExternalInputRevision] = useState(0);
@@ -897,7 +810,6 @@ export function OrderForm({
   >(null);
   const [localDraftError, setLocalDraftError] = useState<string | null>(null);
   const externalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
-  const internalQuoteRequestGate = useRef(createOrderQuoteRequestGate());
   const itemFieldIdsRef = useRef<string[]>([]);
   const nextItemFigRef = useRef(initialEditor ? resolveNextOrderItemFig(initialEditor.values) : 2);
   const [transferReady, setTransferReady] = useState(!workbenchTransferId);
@@ -955,7 +867,7 @@ export function OrderForm({
     localDraftReady,
     submitting,
     uploading,
-    quoting: quoting || externalQuoteQuoting,
+    quoting: externalQuoteQuoting,
     logisticsQuoting: externalQuoteQuoting,
   });
   const orderFormControlsDisabled =
@@ -1017,13 +929,18 @@ export function OrderForm({
   }, [itemsArray.fields]);
 
   useEffect(() => {
-    if (!usesExternalSalesPricing || !pendingLocalDraft || !transferReady) return;
+    // 只有外部销售账号自动恢复；管理员（代建）须在恢复/放弃提示里明确选择，
+    // 该提示同时说明图片和 CDR 文件不会保存在本地草稿中。
+    if (!isExternalSalesActor || !pendingLocalDraft || !transferReady) return;
     const timer = window.setTimeout(() => {
       nextItemFigRef.current = resolveNextOrderItemFig(
         pendingLocalDraft.values,
       );
+      const restored = pendingLocalDraft.values as unknown as CreateOrderInput;
+      handNamedDesignsRef.current.clear();
       reset({
-        ...(pendingLocalDraft.values as unknown as CreateOrderInput),
+        ...restored,
+        items: unifyDesignNames(restored.items),
         clientSubmissionId,
       });
       setQuoteViews({});
@@ -1037,7 +954,7 @@ export function OrderForm({
       setLocalDraftError(null);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [clientSubmissionId, pendingLocalDraft, reset, usesExternalSalesPricing, transferReady]);
+  }, [clientSubmissionId, isExternalSalesActor, pendingLocalDraft, reset, transferReady]);
 
   useEffect(() => {
     if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {
@@ -1173,7 +1090,7 @@ export function OrderForm({
       lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderNo, intent: draft.intent });
       if (lifecycle?.retainResult && draft.intent !== 'fees') {
         setPendingSubmission(null);
-      } else if (usesExternalSalesPricing && draft.intent === 'submit') {
+      } else if (draft.intent === 'submit') {
         setSubmittedOrder({
           orderId: draft.orderId,
           orderNo: draft.orderNo,
@@ -1218,9 +1135,14 @@ export function OrderForm({
       ]);
     if (facts(normalized) !== facts(requested))
       return '产品资料已变更，请返回工作台重新选择';
-    const values = initialOrderFormValues(clientSubmissionId, normalized);
+    const values = initialOrderFormValues(clientSubmissionId, {
+      ...normalized,
+      name: '',
+      designGroupKey: globalThis.crypto.randomUUID(),
+    });
     if (!persistLocalDraftValues(values))
       return '报价条件保存失败，请释放浏览器存储空间后返回工作台重试';
+    handNamedDesignsRef.current.clear();
     reset(values);
     setLocalDraftDecisionComplete(true);
     setTransferReady(true);
@@ -1232,26 +1154,17 @@ export function OrderForm({
     nextItemFigRef.current = resolveNextOrderItemFig(
       pendingLocalDraft.values,
     );
-    const restoredValues = {
-      ...(pendingLocalDraft.values as unknown as CreateOrderInput),
+    const restored = pendingLocalDraft.values as unknown as CreateOrderInput;
+    handNamedDesignsRef.current.clear();
+    reset({
+      ...restored,
+      items: unifyDesignNames(restored.items),
       clientSubmissionId,
-    };
-    reset(
-      usesExternalSalesPricing
-        ? restoredValues
-        : {
-            ...restoredValues,
-            items: restoredValues.items.map((item) => ({
-              ...item,
-              crafts: resolveInternalOrderCraftIds(item, crafts),
-            })),
-          },
-    );
+    });
     setQuoteViews({});
     setLogisticsQuote(null);
     setPackagingQuote(null);
     setExternalOrderQuote(null);
-    setInternalOrderQuote(null);
     setPendingDesigns({});
     setExpandedItem(0);
     setLastLocalDraftSavedAt(pendingLocalDraft.savedAt);
@@ -1295,21 +1208,13 @@ export function OrderForm({
     startSubmit(async () => {
       const submittedData: CreateOrderInput = {
         ...data,
-        ...(canAssignExternalSales
-          ? { customerPartyId: null, customerRef: null }
-          : {}),
         packagingGroups: data.packagingGroups.map((group) => group.mode === OrderPackagingMode.UNPACKED ? { ...group, adminPrice: undefined } : group),
         items: data.items.map((item) => ({
           ...item,
           plateGroupId: null,
           pricingGroup: null,
-          crafts: usesExternalSalesPricing
-            ? item.crafts
-            : resolveInternalOrderCraftIds(item, crafts),
           // Automatic amounts remain server-owned; explicit adminPrice is separately authorized.
-          manualQuoteReason: usesExternalSalesPricing
-            ? null
-            : item.manualQuoteReason,
+          manualQuoteReason: null,
           unitPrice: null,
           fixedFee: null,
           suggestedSubtotal: null,
@@ -1337,14 +1242,9 @@ export function OrderForm({
       const result = await runCreateOrderAction(() =>
         createOrderAction(
           null,
-          usesExternalSalesPricing && !canAssignExternalSales
-            ? {
-                ...buildExternalCreateOrderPayload(submittedData),
-                ...(canAssignExternalSales
-                  ? { externalSalesUserId: submittedData.externalSalesUserId }
-                  : {}),
-              }
-            : submittedData,
+          canAssignExternalSales
+            ? submittedData
+            : buildExternalCreateOrderPayload(submittedData),
         ),
       );
       setState(result);
@@ -1414,10 +1314,8 @@ export function OrderForm({
     // key or programmatic submits while an authoritative quote is in flight.
     if (
       createdDraft ||
-      quoting ||
       externalQuoteQuoting ||
-      externalQuoteNeedsRefresh ||
-      internalQuoteNeedsRefresh
+      externalQuoteNeedsRefresh
     ) {
       return;
     }
@@ -1430,6 +1328,14 @@ export function OrderForm({
     const intent: OrderCreationIntent =
       submitter?.value === 'fees' && canAssignExternalSales ? 'fees' : submitter?.value === 'submit' ? 'submit' : 'draft';
 
+    if (canAssignExternalSales && !data.externalSalesUserId?.trim()) {
+      setError('externalSalesUserId', { type: 'required', message: ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE });
+      // 与费用栏一致：保存草稿只拦外部销售，不亮出提交阶段才要求的名称、收货、设计图等校验。
+      if (intent !== 'draft') setSubmissionValidationVisible(true);
+      setErrorFocusMessage(ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE);
+      setErrorFocusRequest((current) => current + 1);
+      return;
+    }
     if (adminPriceGaps.length) {
       setSubmissionValidationVisible(true);
       setErrorFocusMessage(adminPriceGaps[0].label);
@@ -1439,9 +1345,7 @@ export function OrderForm({
     if (intent !== 'draft') {
       setSubmissionValidationVisible(true);
       setErrorFocusMessage(undefined);
-      const issues = usesExternalSalesPricing
-        ? externalSubmissionIssues(data, fieldIds, queueSnapshot)
-        : formGaps.map((gap) => gap.label);
+      const issues = externalSubmissionIssues(data, fieldIds, queueSnapshot);
       if (issues.length > 0) {
         setErrorFocusRequest((current) => current + 1);
         return;
@@ -1456,11 +1360,30 @@ export function OrderForm({
     persistOrder(data, fieldIds, queueSnapshot, intent);
   };
 
-  const onInvalid = () => {
+  const onInvalid = (invalid: FieldErrors<CreateOrderInput>, event?: BaseSyntheticEvent) => {
+    setPendingSubmission(null);
+    const submitter = (event?.nativeEvent as SubmitEvent | undefined)
+      ?.submitter as HTMLButtonElement | null | undefined;
+    if (submitter?.value === 'draft' && hasOnlyDesignNameErrors(invalid)) {
+      // 与草稿的外部销售拦截一致：只提示外部销售与设计款名称，不亮出提交阶段校验。
+      setDesignNameValidationVisible(true);
+      const salespersonMissing =
+        canAssignExternalSales && !getValues('externalSalesUserId')?.trim();
+      if (salespersonMissing) {
+        setError('externalSalesUserId', { type: 'required', message: ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE });
+      }
+      const firstNameIssue = designNameIssues(getValues('items'))[0];
+      setErrorFocusMessage(
+        salespersonMissing
+          ? ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE
+          : firstNameIssue ? designNameIssueSummary(firstNameIssue) : undefined,
+      );
+      setErrorFocusRequest((current) => current + 1);
+      return;
+    }
     setErrorFocusMessage(undefined);
     setSubmissionValidationVisible(true);
     setErrorFocusRequest((current) => current + 1);
-    setPendingSubmission(null);
   };
 
   function updatePendingDesigns(fieldId: string, images: PendingDesignImage[]) {
@@ -1476,14 +1399,18 @@ export function OrderForm({
     });
   }
 
+  function changeExternalSales(externalSalesUserId: string | null) {
+    setValue('externalSalesUserId', externalSalesUserId, { shouldDirty: true });
+    if (externalSalesUserId) clearErrors('externalSalesUserId');
+    invalidateStructuralQuotes();
+  }
+
   function invalidateStructuralQuotes() {
     invalidateOrderQuoteRequests(externalQuoteRequestGate.current);
-    invalidateOrderQuoteRequests(internalQuoteRequestGate.current);
     setQuoteViews({});
     setLogisticsQuote(null);
     setPackagingQuote(null);
     setExternalOrderQuote(null);
-    setInternalOrderQuote(null);
     setPendingSubmission(null);
   }
 
@@ -1513,6 +1440,12 @@ export function OrderForm({
       { shouldDirty: true, shouldValidate: true },
     );
     itemsArray.remove(index);
+    // 回到单个设计款时，未手动命名的设计款重新跟随工单名称。
+    const following = syncSingleDesignName(getValues('customName'), getValues('customName'));
+    const persistedItems = following
+      ? remainingItems.map((item, itemIndex) =>
+          following.indexes.includes(itemIndex) ? { ...item, name: following.name } : item)
+      : remainingItems;
     setExpandedItem((current) => {
       if (current > index) return current - 1;
       if (current === index) {
@@ -1529,7 +1462,7 @@ export function OrderForm({
     invalidateStructuralQuotes();
     persistLocalDraftValues({
       ...getValues(),
-      items: remainingItems,
+      items: persistedItems,
       additionalShipments: relations.additionalShipments,
       packagingGroups: relations.packagingGroups,
     });
@@ -1543,6 +1476,11 @@ export function OrderForm({
       ? source.designGroupKey ?? globalThis.crypto.randomUUID()
       : globalThis.crypto.randomUUID();
     if (sameDesign) {
+      if (!source.designGroupKey) {
+        // 无分组键的设计款（历史 / 工作台转入）在此获得键，手动命名记录随之迁移。
+        const recorded = handNamedDesignsRef.current.get(`legacy:${index}`);
+        if (recorded !== undefined) handNamedDesignsRef.current.set(designGroupKey, recorded);
+      }
       source.designGroupKey = designGroupKey;
       setValue(`items.${index}.designGroupKey`, designGroupKey, { shouldDirty: true });
       currentItems[index] = source;
@@ -1567,11 +1505,8 @@ export function OrderForm({
       designGroupKey,
       adminPrice: undefined,
       fig: nextItemFigRef.current,
-      name: sameDesign || usesExternalSalesPricing
-        ? source.name
-        : source.name?.trim()
-          ? `${source.name.slice(0, 61)} 副本`
-          : '',
+      // 新增设计款须手动命名；同一设计款的规格共用名称。
+      name: sameDesign ? source.name : '',
     };
     nextItemFigRef.current += 1;
     setValue('nextItemFig', nextItemFigRef.current, { shouldDirty: true });
@@ -1604,6 +1539,7 @@ export function OrderForm({
         paperMaterials: externalCreateOrderOptions?.papers,
         ...options,
         preserveCustomSize: options.preserveCustomSize ?? true,
+        preserveName: true,
       }),
       { shouldDirty: true, shouldValidate: true },
     );
@@ -1617,69 +1553,14 @@ export function OrderForm({
       resetPaper?: boolean;
       resetSpecification?: boolean;
       preserveCustomSize?: boolean;
-      internalMaterialChange?:
-        | 'route'
-        | 'paper'
-        | 'weight'
-        | 'specification';
     } = {},
   ) {
-    if (usesExternalSalesPricing) {
-      const externalOptions = {
-        paperKey: options.paperKey,
-        resetPaper: options.resetPaper,
-        resetSpecification: options.resetSpecification,
-        preserveCustomSize: options.preserveCustomSize,
-      };
-      commitExternalItem(index, item, externalOptions);
-      return;
-    }
-
-    const current = getValues(`items.${index}`);
-    const {
-      internalMaterialChange = null,
-      ...normalizationOptions
-    } = options;
-    const normalized = normalizeExternalOrderItem({
-      item,
-      crafts,
-      products,
-      paperMaterials: externalCreateOrderOptions?.papers,
-      ...normalizationOptions,
-      preserveCustomSize: normalizationOptions.preserveCustomSize ?? true,
+    commitExternalItem(index, item, {
+      paperKey: options.paperKey,
+      resetPaper: options.resetPaper,
+      resetSpecification: options.resetSpecification,
+      preserveCustomSize: options.preserveCustomSize,
     });
-    setValue(
-      `items.${index}`,
-      {
-        ...normalized,
-        name: current.name,
-        // Catalog facts are an atomic selection; mixing old paper/spec fields
-        // with a newly resolved product causes the server to reject the quote.
-        ...(internalMaterialChange === null ? {
-          productId: current.productId,
-          productStructure: current.productStructure,
-          specification: current.specification,
-          paperType: current.paperType,
-          paperWeightGsm: current.paperWeightGsm,
-          actualWidthMm: current.actualWidthMm,
-          actualHeightMm: current.actualHeightMm,
-        } : {}),
-        crafts: resolveInternalOrderCraftIds(
-          { ...normalized, crafts: current.crafts },
-          crafts,
-        ),
-        artworkVersion: current.artworkVersion,
-        plateGroupId: null,
-        pricingGroup: null,
-        manualQuoteReason: current.manualQuoteReason,
-        unitPrice: null,
-        fixedFee: null,
-        suggestedSubtotal: null,
-        priceOverrideReason: null,
-        remark: current.remark,
-      },
-      { shouldDirty: true, shouldValidate: true },
-    );
   }
 
   function applyItemSelection(index: number, change: OrderItemSelectionChange) {
@@ -1700,9 +1581,36 @@ export function OrderForm({
     }
   }
   function changeDesignText(index: number, field: 'name' | 'artworkVersion', value: string) {
-    for (const member of designItemIndexes(getValues('items'), index)) {
+    const items = getValues('items');
+    if (field === 'name') {
+      // 输入非空名称即视为手动命名，清空则恢复跟随工单名称。
+      const design = orderDesignGroups(items).find((group) => group.indexes.includes(index));
+      if (design) handNamedDesignsRef.current.set(design.key, Boolean(value.trim()));
+    }
+    for (const member of designItemIndexes(items, index)) {
       setValue(`items.${member}.${field}`, value, { shouldDirty: true, shouldValidate: true });
     }
+  }
+  /** 单个且未手动命名的设计款跟随工单名称（DECISIONS 2026-09-26）。 */
+  function syncSingleDesignName(
+    orderName: string | null | undefined,
+    orderNameForInference: string | null | undefined,
+  ) {
+    const items = getValues('items');
+    const following = followingDesignName(
+      items, orderName, orderNameForInference,
+      (key) => handNamedDesignsRef.current.get(key),
+    );
+    if (!following) return null;
+    handNamedDesignsRef.current.set(following.key, false);
+    for (const index of following.indexes) {
+      if (items[index]?.name === following.name) continue;
+      setValue(`items.${index}.name`, following.name, {
+        shouldDirty: true,
+        shouldValidate: form.getFieldState(`items.${index}.name`).invalid,
+      });
+    }
+    return following;
   }
 
   function changeItemSelection(index: number, change: OrderItemSelectionChange) {
@@ -1761,15 +1669,25 @@ export function OrderForm({
     value: 'NONE' | 'PARTIAL' | 'FULL',
   ) => changeItemSelection(index, { type: 'printFoil', value });
 
-  function changeExternalPackagingMode(mode: OrderPackagingMode) {
-    const items = getValues('items');
-    const groups = getValues('packagingGroups');
-    const next = changeCreatePackagingMode(groups, items.length, expandedItem, mode);
-    items.forEach((_, index) => {
+  function commitPackagingGroups(next: CreateOrderInput['packagingGroups']) {
+    getValues('items').forEach((_, index) => {
       const group = next[createPackagingGroupIndex(next, index)];
       setValue(`items.${index}.pack`, group?.mode === OrderPackagingMode.UNPACKED ? null : group?.itemUnitsPerBag[index] ?? null, { shouldDirty: true });
     });
     setValue('packagingGroups', next, { shouldDirty: true, shouldValidate: true });
+  }
+
+  /** 整单包装区：itemIndex 缺省时统一作用于全部规格（DECISIONS 2026-09-23）。 */
+  function changePackagingType(type: PackagingType, box: PackagingBoxType, itemIndex?: number) {
+    const groups = getValues('packagingGroups');
+    const itemCount = getValues('items').length;
+    commitPackagingGroups(itemIndex === undefined
+      ? applyOrderPackagingType(groups, itemCount, type, box)
+      : applySpecPackagingType(groups, itemCount, itemIndex, type, box));
+  }
+
+  function changePackagingMixing(mixed: boolean) {
+    commitPackagingGroups(applyOrderPackagingMixing(getValues('packagingGroups'), getValues('items').length, mixed));
   }
 
   function changeExternalUnitsPerBag(index: number, unitsPerBag: number) {
@@ -1867,7 +1785,7 @@ export function OrderForm({
     .map((item) => quoteFactsKey(item, watchedItems.length))
     .join('|');
   useEffect(() => {
-    if (!usesExternalSalesPricing || !localDraftReady || createdDraft) return;
+    if (!localDraftReady || createdDraft) return;
     watchedItems.forEach((item, index) => {
       const normalized = normalizeExternalOrderItem({
         item,
@@ -1877,6 +1795,7 @@ export function OrderForm({
         resetPaper: !item.paperType,
         resetSpecification: !item.specification,
         preserveCustomSize: true,
+        preserveName: true,
       });
       if (JSON.stringify(normalized) !== JSON.stringify(item)) {
         setValue(`items.${index}`, normalized, {
@@ -1900,7 +1819,6 @@ export function OrderForm({
     externalCreateOrderOptions?.papers,
     externalCreateOrderOptions?.foilColors,
     setValue,
-    usesExternalSalesPricing,
     watchedItems,
     watchedPackagingGroups.length,
   ]);
@@ -1996,160 +1914,6 @@ export function OrderForm({
   };
   const currentLogisticsInputKey = JSON.stringify(currentLogisticsProjection);
 
-  const currentInternalQuoteFactsKey = compactOrderQuoteFactsKey({
-    itemFacts: watchedItems.map((item) =>
-      quoteFactsKey(item, watchedItems.length),
-    ),
-    packaging: currentPackagingInputKey,
-    logistics: currentLogisticsInputKey,
-    openedPriceVersion: null,
-  });
-  const currentInternalQuoteInput = useCallback(() => {
-    const values = getValues();
-    const packaging = currentPackagingQuoteInput();
-    // Same logistics facts as the external preview: the submit finalizer
-    // recomputes them and compares the handshake token.
-    const logistics = currentLogisticsQuoteInput();
-    return {
-      factsKey: compactOrderQuoteFactsKey({
-        itemFacts: values.items.map((item) =>
-          quoteFactsKey(item, values.items.length),
-        ),
-        packaging: JSON.stringify(packaging),
-        logistics: JSON.stringify(logistics),
-        openedPriceVersion: null,
-      }),
-      settlementType,
-      items: values.items.map(internalOrderItemQuoteFacts),
-      orderItemCount: values.items.length,
-      packagingGroups: packaging.groups,
-      logistics,
-    };
-  }, [currentLogisticsQuoteInput, currentPackagingQuoteInput, getValues, settlementType]);
-  const currentInternalQuoteRequestReady = internalQuoteRequestReady(
-    watchedItems, watchedPackagingGroups, missingLaminationIndex,
-  );
-
-  const internalQuoteNeedsRefresh =
-    !usesExternalSalesPricing &&
-    currentInternalQuoteRequestReady &&
-    !(internalOrderQuote?.inputKey === currentInternalQuoteFactsKey &&
-      (internalOrderQuote.result || internalOrderQuote.error));
-
-  useEffect(() => {
-    if (
-      usesExternalSalesPricing ||
-      !localDraftReady ||
-      createdDraft ||
-      submitting ||
-      uploading ||
-      !currentInternalQuoteRequestReady ||
-      internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
-    ) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const input = currentInternalQuoteInput();
-      if (input.factsKey !== currentInternalQuoteFactsKey) return;
-      const requestId = beginOrderQuoteRequest(
-        internalQuoteRequestGate.current,
-      );
-      const fieldIds = [...itemFieldIdsRef.current];
-      const packagingInputKey = JSON.stringify({
-        groups: input.packagingGroups,
-      });
-      const logisticsInputKey = JSON.stringify(input.logistics);
-      setInternalOrderQuote({ inputKey: input.factsKey });
-      startQuote(async () => {
-        // Transport failures must use the same stale-response gate and retry UI
-        // as domain errors, rather than escaping the transition to error.tsx.
-        const response = await quoteInternalCreateOrderAction(input).catch(() => ({
-          status: 'error' as const,
-          message: '自动核价请求失败，请检查网络后点击重新报价',
-        }));
-        if (
-          !isCurrentOrderQuoteResponse({
-            gate: internalQuoteRequestGate.current,
-            requestId,
-            inputKey: input.factsKey,
-            currentInputKey: currentInternalQuoteInput().factsKey,
-            fieldIds,
-            currentFieldIds: itemFieldIdsRef.current,
-          })
-        ) {
-          return;
-        }
-        if (
-          response.status === 'success' &&
-          response.quote.factsKey === input.factsKey
-        ) {
-          setQuoteViews(
-            Object.fromEntries(
-              fieldIds.map((fieldId, index) => [
-                fieldId,
-                {
-                  inputKey: quoteFactsKey(
-                    input.items[index],
-                    input.orderItemCount,
-                  ),
-                  result: response.quote.items[index],
-                },
-              ]),
-            ),
-          );
-          setPackagingQuote({
-            inputKey: packagingInputKey,
-            result: response.quote.packaging,
-          });
-          setLogisticsQuote({
-            inputKey: logisticsInputKey,
-            result: response.quote.logistics,
-          });
-          setInternalOrderQuote({
-            inputKey: input.factsKey,
-            result: response.quote,
-          });
-          return;
-        }
-        const error =
-          response.status === 'error'
-            ? response.message
-            : response.status === 'invalid'
-              ? Object.values(response.fieldErrors).flat().join('；')
-              : '报价响应与当前工单不一致，请重试';
-        setQuoteViews(
-          Object.fromEntries(
-            fieldIds.map((fieldId, index) => [
-              fieldId,
-              {
-                inputKey: quoteFactsKey(
-                  input.items[index],
-                  input.orderItemCount,
-                ),
-                error,
-              },
-            ]),
-          ),
-        );
-        setPackagingQuote({ inputKey: packagingInputKey, error });
-        setLogisticsQuote({ inputKey: logisticsInputKey, error });
-        setInternalOrderQuote({ inputKey: input.factsKey, error });
-      });
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [
-    createdDraft,
-    currentInternalQuoteFactsKey,
-    currentInternalQuoteInput,
-    currentLogisticsInputKey,
-    currentInternalQuoteRequestReady,
-    internalOrderQuote?.inputKey,
-    localDraftReady,
-    startQuote,
-    submitting,
-    uploading,
-    usesExternalSalesPricing,
-  ]);
   const currentLogisticsQuoteReady = currentLogisticsProjection.shipments.every(
     (shipment) => shipment.itemQuantity > 0,
   );
@@ -2220,13 +1984,11 @@ export function OrderForm({
       (externalOrderQuote.result || externalOrderQuote.error),
   );
   const externalQuoteNeedsRefresh =
-    usesExternalSalesPricing &&
     currentExternalQuoteRequestReady &&
     !externalQuoteHasCurrentResponse;
 
   useEffect(() => {
     if (
-      !usesExternalSalesPricing ||
       !localDraftReady ||
       createdDraft ||
       submitting ||
@@ -2337,7 +2099,6 @@ export function OrderForm({
     startExternalQuote,
     submitting,
     uploading,
-    usesExternalSalesPricing,
   ]);
   // RHF renders client-side field errors next to their controls. The server
   // can still reject backend-only facts such as a disabled product/craft;
@@ -2345,7 +2106,7 @@ export function OrderForm({
   const serverFieldErrors =
     state?.status === 'invalid' ? state.fieldErrors : undefined;
   const serverGeneralError = state?.status === 'error' ? state.message : null;
-  const { adminPriceFacts, adminPackagingFacts, adminPrices, adminPackagingPrices, hasAdminPrices } = adminCreatePricingState(watchedItems, watchedPackagingGroups, watchedShipments, canAssignExternalSales, usesExternalSalesPricing, crafts);
+  const { adminPriceFacts, adminPackagingFacts, adminPrices, adminPackagingPrices, hasAdminPrices } = adminCreatePricingState(watchedItems, watchedPackagingGroups, watchedShipments, canAssignExternalSales);
 
   const itemGapInputs = watchedItems.map((item, index) => {
     const fieldId = itemsArray.fields[index]?.id;
@@ -2354,9 +2115,7 @@ export function OrderForm({
     let quoteStatus: OrderFormQuoteStatus = 'missing';
     if (
       fieldId &&
-      (usesExternalSalesPricing
-        ? externalQuoteQuoting
-        : quoting)
+      externalQuoteQuoting
     ) {
       quoteStatus = 'loading';
     } else if (view?.inputKey !== undefined && view.inputKey !== currentKey) {
@@ -2397,12 +2156,10 @@ export function OrderForm({
     })),
   ];
   const formGaps = collectOrderFormGaps({
-    customerRef: watchedCustomerRef,
-    requiresCustomerRef: !canAssignExternalSales,
     promisedDate: watchedPromisedDate,
     items: itemGapInputs,
     shipping: {
-      usesExternalSalesPricing,
+      usesExternalSalesPricing: true,
       isSfCollect: watchedIsSfCollect,
       shipments: shipmentGapInputs,
     },
@@ -2411,7 +2168,7 @@ export function OrderForm({
     ...adminPrices.flatMap((value, index) => value?.error ? [{ label: `款式 #${index + 1}：${value.error}`, fieldId: `items.${index}.adminPrice.amount`, itemIndex: index }] : []),
     ...adminPackagingPrices.flatMap((value, index) => value?.error ? [{ label: `包装组 ${index + 1}：${value.error}`, fieldId: `packagingGroups.${index}.adminPrice.amount`, itemIndex: watchedPackagingGroups[index].itemUnitsPerBag.findIndex((units) => units > 0) }] : []),
   ];
-  const orderFormBGaps = [...(usesExternalSalesPricing ? [] : formGaps), ...adminPriceGaps].map((gap) => gap.label);
+  const orderFormBGaps = adminPriceGaps.map((gap) => gap.label);
   const totalQuantity = watchedItems.reduce(
     (sum, item) => sum + (Number.isFinite(item.quantity) ? item.quantity : 0),
     0,
@@ -2424,8 +2181,6 @@ export function OrderForm({
       view?.inputKey === quoteFactsKey(watchedItems[index], watchedItems.length);
     const result = current ? view?.result : undefined;
     const manualPrice = adminPrices[index]?.price;
-    const manualPricingRequested =
-      !manualPrice && !usesExternalSalesPricing && Boolean(item.manualQuoteReason?.trim());
     return {
       key: fieldId,
       design: { key: watchedItems[index]?.designGroupKey ?? fieldId,
@@ -2436,13 +2191,13 @@ export function OrderForm({
         ORDER_PRICING_ROUTE_LABELS[
           watchedItems[index]?.pricingRoute ?? OrderItemPricingRoute.STOCK_BLANK
         ],
-      status: manualPricingRequested ? 'incomplete' : item.quoteStatus,
+      status: item.quoteStatus,
       amount: manualPrice?.subtotal ?? (
-        !manualPricingRequested && item.quoteStatus === 'complete'
+        item.quoteStatus === 'complete'
           ? (result?.suggestedSubtotal ?? null)
           : null),
       components:
-        !manualPrice && !manualPricingRequested && item.quoteStatus === 'complete'
+        !manualPrice && item.quoteStatus === 'complete'
             ? (result?.components ?? []).map((component) => ({
                 label: externalQuoteComponentLabel(
                   watchedItems[index] ?? item,
@@ -2453,9 +2208,7 @@ export function OrderForm({
             : [],
       pricingSource: manualPrice ? 'ADMIN' as const : 'AUTO' as const,
       message: manualPrice ? '人工定价' :
-        manualPricingRequested
-          ? `配置外项目：${item.manualQuoteReason?.trim()}`
-          : item.quoteStatus === 'error'
+        item.quoteStatus === 'error'
           ? view?.error
           : item.quoteStatus === 'incomplete'
             ? result?.errors.join('；')
@@ -2473,7 +2226,7 @@ export function OrderForm({
     primaryLogisticsShipment?.shipping.basis.billableWeightKg;
   // Every billing settlement quotes delivery from the published logistics book.
   const railLogistics = {
-        status: (usesExternalSalesPricing ? externalQuoteQuoting : quoting)
+        status: externalQuoteQuoting
           ? ('loading' as const)
           : !logisticsQuote
             ? ('missing' as const)
@@ -2508,7 +2261,7 @@ export function OrderForm({
     ? undefined
     : packagingQuote?.result;
   const railPackaging: ExternalSalesPackagingQuote = {
-    status: (usesExternalSalesPricing ? externalQuoteQuoting : quoting)
+    status: externalQuoteQuoting
       ? 'loading'
       : !packagingQuote
         ? 'missing'
@@ -2538,13 +2291,7 @@ export function OrderForm({
     externalOrderQuote?.inputKey === currentExternalQuoteFactsKey
       ? externalOrderQuote.result
       : undefined;
-  const currentInternalOrderQuote =
-    internalOrderQuote?.inputKey === currentInternalQuoteFactsKey
-      ? internalOrderQuote.result
-      : undefined;
-  const currentCreateOrderQuote = usesExternalSalesPricing
-    ? currentExternalOrderQuote
-    : currentInternalOrderQuote;
+  const currentCreateOrderQuote = currentExternalOrderQuote;
   const displayedKnownTotal = hasAdminPrices ? sumCreateKnownAmounts([
     ...railQuoteItems.map((item) => item.status === 'complete' ? item.amount : null),
     ...watchedPackagingGroups.map((_, index) => adminPackagingPrices[index]
@@ -2605,10 +2352,11 @@ export function OrderForm({
           item.pricingRoute === OrderItemPricingRoute.COLOR_PRINT
             ? `彩印${item.lamination !== OrderLamination.NONE ? ` · 覆${LAMINATION_LABELS[item.lamination]}` : ''}${item.frontFoilColors.length > 0 ? ` · ${item.hasLocalFoil ? '局部烫金' : '专版烫金'} ${foilSummary}` : ''}`
             : `烫金 ${foilSummary}${item.foilTechnique === OrderFoilTechnique.RELIEF ? ' · 浮雕' : item.foilTechnique === OrderFoilTechnique.RAISED ? ' · 激凸' : ''}`;
+        // The signed quote keeps the engine's wording; only the rail shows current paper names.
         const manualQuoteReasons =
           quote?.status === 'complete'
             ? []
-            : [quote?.message || '当前参数需由工厂核价'];
+            : [paperDisplayLabel(quote?.message || '当前参数需由工厂核价')];
         return {
           id: fieldId,
           number: item.fig ?? index + 1,
@@ -2620,7 +2368,7 @@ export function OrderForm({
               : undefined,
           specification,
           dimensions,
-          materialSummary: `${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]} · ${paper?.label ?? item.paperType ?? '未选纸张'} ${item.paperWeightGsm ?? '—'}g`,
+          materialSummary: `${ORDER_PRICING_ROUTE_LABELS[item.pricingRoute]} · ${paper?.label ?? (item.paperType ? paperDisplayLabel(item.paperType) : '未选纸张')} ${item.paperWeightGsm ?? '—'}g`,
           specificationWarning:
             item.actualWidthMm === null
               ? '自定义尺寸 · 需工厂核价'
@@ -2697,7 +2445,6 @@ export function OrderForm({
   // 这一帧 watchedItems[expandedItem] 为 undefined；凡按下标取当前款的渲染都要经此别名守卫，
   // 否则管理员人工定价区会抛 TypeError 把整页送进错误边界（PR #19 CI 首次暴露）。
   const expandedWatchedItem = watchedItems[expandedItem];
-  const internalAdditionalCraftOptions = additionalOrderCraftOptions(crafts);
   const {
     activeExternalPaper,
     externalPaperOptions,
@@ -2709,21 +2456,39 @@ export function OrderForm({
     products,
     externalCreateOrderOptions,
   );
-  const activePackagingGroupIndex = createPackagingGroupIndex(watchedPackagingGroups, expandedItem);
-  const activePackagingGroup = watchedPackagingGroups[activePackagingGroupIndex];
-  const activePackagingBagCount = activePackagingGroup
-    ? calculateCreateOrderBagCount({
-        mode: activePackagingGroup.mode,
-        itemQuantities: watchedItems.map((item) => item.quantity),
-        itemUnitsPerBag: activePackagingGroup.itemUnitsPerBag,
-        shipmentQuantities: packagingShipments,
-      })
-    : null;
+  const packagingRows = createPackagingRows({
+    groups: watchedPackagingGroups,
+    itemQuantities: watchedItems.map((item) => item.quantity),
+    shipmentQuantities: packagingShipments,
+  });
+  const packagingRowLabel = (index: number) =>
+    `设计款 ${designGroups.findIndex((group) => group.indexes.includes(index)) + 1} · ${watchedItems[index]?.specification || '待选规格'}`;
+  const packagingView: OrderPackagingView = {
+    rows: packagingRows.map((row, index) => ({
+      label: packagingRowLabel(index),
+      quantity: watchedItems[index]?.quantity ?? 0,
+      mode: row.mode,
+      unitsPerBag: row.unitsPerBag,
+      bagCount: row.bagCount,
+      error: row.error,
+    })),
+    selection: orderPackagingSelection(watchedPackagingGroups, watchedItems.length),
+    summary: summarizeCreatePackaging({
+      rows: packagingRows,
+      itemQuantities: watchedItems.map((item) => item.quantity),
+      designCount: designGroups.length,
+    }),
+  };
   const externalLocalIssues = submissionValidationVisible
-    ? usesExternalSalesPricing
-      ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), selectedDesignQueues)
-      : orderFormBGaps
+    ? externalSubmissionIssues(getValues(), itemsArray.fields.map((field) => field.id), selectedDesignQueues)
     : [];
+  // 缺名只在尝试保存/提交后提示；超长与重名随输随提示。
+  const shownDesignNameIssues = designNameIssues(watchedItems).filter(
+    (issue) => submissionValidationVisible || designNameValidationVisible || issue.kind !== 'missing',
+  );
+  const activeDesignNameIssue = shownDesignNameIssues.find((issue) =>
+    designItemIndexes(watchedItems, expandedItem).includes(issue.index),
+  );
   const externalItemErrors: OrderFormBErrors['items'] =
     watchedItems.map((item, index) => {
       const fieldId = itemsArray.fields[index]?.id;
@@ -2745,7 +2510,7 @@ export function OrderForm({
         quantity:
           quantityMessage,
         designImage:
-          usesExternalSalesPricing && submissionValidationVisible && !hasImage
+          submissionValidationVisible && !hasImage
             ? '请上传设计图'
             : undefined,
       };
@@ -2766,8 +2531,8 @@ export function OrderForm({
     : [];
   const externalRHFOrderIssues = submissionValidationVisible
     ? [
+        errors.externalSalesUserId?.message ?? null,
         errors.promisedDate?.message ? `承诺交期：${errors.promisedDate.message}` : null,
-        errors.customerRef?.message ? `产品客户：${errors.customerRef.message}` : null,
         errors.remark?.message ? `工单备注：${errors.remark.message}` : null,
         errors.customName?.message
           ? `工单名称：${errors.customName.message}`
@@ -2784,11 +2549,24 @@ export function OrderForm({
       ].filter((message): message is string => Boolean(message))
     : [];
   const externalFieldErrors: OrderFormBErrors = {
-    targets: Object.fromEntries([...formGaps, ...adminPriceGaps].map((gap) => [gap.label, { fieldId: gap.fieldId, itemIndex: gap.itemIndex }])),
+    designs: Object.fromEntries(shownDesignNameIssues.map((issue) => [issue.index, issue.message])),
+    targets: {
+      ...Object.fromEntries([...formGaps, ...adminPriceGaps].map((gap) => [gap.label, { fieldId: gap.fieldId, itemIndex: gap.itemIndex }])),
+      ...Object.fromEntries(shownDesignNameIssues.map((issue) => [
+        designNameIssueSummary(issue), { fieldId: `items.${issue.index}.name`, itemIndex: issue.index },
+      ])),
+      [ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE]: { fieldId: 'externalSalesUserId' },
+    },
     summary: [
       ...new Set([
         ...externalLocalIssues,
         ...externalRHFOrderIssues,
+        ...(designNameValidationVisible && errors.externalSalesUserId?.message
+          ? [errors.externalSalesUserId.message]
+          : []),
+        ...(submissionValidationVisible || designNameValidationVisible
+          ? shownDesignNameIssues.map(designNameIssueSummary)
+          : []),
         ...externalRHFItemIssues,
         ...(serverGeneralError ? [serverGeneralError] : []),
         ...(serverFieldErrors
@@ -2803,44 +2581,37 @@ export function OrderForm({
     ],
     customName:
       errors.customName?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('customName')?.trim()
         ? '工单名称必填'
         : undefined),
     receiverName:
       errors.receiverName?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('receiverName')?.trim()
         ? '收件人必填'
         : undefined),
     receiverPhone:
       errors.receiverPhone?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('receiverPhone')?.trim()
         ? '收货电话必填'
         : undefined),
     receiverAddress:
       errors.receiverAddress?.message ??
-      (usesExternalSalesPricing &&
-      submissionValidationVisible &&
+      (submissionValidationVisible &&
       !getValues('receiverAddress')?.trim()
         ? '收货地址必填'
         : undefined),
-    packaging:
-      activePackagingBagCount && !activePackagingBagCount.complete
-        ? activePackagingBagCount.errors.join('；')
-        : undefined,
     items: externalItemErrors,
   };
   if (samplePurpose && externalCreateOrderOptions) {
     return <OrderSampleEntry editorSnapshot={restoredSample} onEditorSnapshot={captureSampleEditor} lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
-      initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute} />;
+      initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute}
+      externalSalesAccounts={externalSalesAccounts} onExternalSalesChange={changeExternalSales} />;
   }
-  if (usesExternalSalesPricing && submittedOrder) {
+  if (submittedOrder) {
     return (
       <OrderSubmissionSuccess
         orderNumber={submittedOrder.orderNo}
@@ -2932,10 +2703,10 @@ export function OrderForm({
           <OrderFormB
             title="新建工单"
             settlementLabel={settlementLabel}
-            customNameRequired={usesExternalSalesPricing}
-            designImageRequired={usesExternalSalesPricing}
-            receiverNameRequired={usesExternalSalesPricing}
-            receiverPhoneRequired={usesExternalSalesPricing}
+            customNameRequired
+            designImageRequired
+            receiverNameRequired
+            receiverPhoneRequired
             values={{
               customName: watchedCustomName ?? '',
               receiverName: watchedReceiverName ?? '',
@@ -2947,17 +2718,20 @@ export function OrderForm({
               !isExternalSalesActor ? (
                 <div
                   data-slot="order-form-order-extras"
-                  className="mt-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2"
+                  className="mt-4 grid min-w-0 grid-cols-1 gap-3.5"
                 >
                   {canAssignExternalSales ? (
-                    <div className="@min-[560px]:col-span-2">
+                    <div>
                       <Label htmlFor="externalSalesUserId">
-                        关联外部销售（选填）
+                        关联外部销售（必填）
                       </Label>
                       <select
                         id="externalSalesUserId"
                         className={`${selectClass} mt-2`}
+                        required
+                        aria-required="true"
                         aria-invalid={Boolean(errors.externalSalesUserId)}
+                        aria-describedby="externalSalesUserId-hint"
                         {...register('externalSalesUserId', {
                           setValueAs: (value) => (value === '' ? null : value),
                         })}
@@ -2967,125 +2741,95 @@ export function OrderForm({
                             event.target.value || null,
                             { shouldDirty: true, shouldValidate: true },
                           );
+                          if (event.target.value) clearErrors('externalSalesUserId');
                           invalidateStructuralQuotes();
                         }}
                       >
-                        <option value="">工厂直接业务</option>
+                        <option value="">请选择外部销售</option>
                         {externalSalesAccounts.map((account) => (
                           <option key={account.id} value={account.id}>
                             {account.displayName} · {account.username}
                           </option>
                         ))}
                       </select>
-                      <FieldError reservedLines={1}>
+                      <FieldError
+                        id="externalSalesUserId-hint"
+                        reservedLines={1}
+                        hint="工单归属所选外部销售并按外部销售结算。"
+                      >
                         {errors.externalSalesUserId?.message}
                       </FieldError>
                     </div>
-                  ) : (
-                    <>
-                      <div>
-                        <Label htmlFor="customerPartyId">关联客户（选填）</Label>
-                        <select
-                          id="customerPartyId"
-                          className={`${selectClass} mt-2`}
-                          {...register('customerPartyId', {
-                            setValueAs: (value) => (value === '' ? null : value),
-                            onChange: (event) => {
-                              const customer = customers.find(
-                                (candidate) => candidate.id === event.target.value,
-                              );
-                              if (!customer) return;
-                              setValue(
-                                'customerRef',
-                                customer.shortName ?? customer.name,
-                                { shouldDirty: true, shouldValidate: true },
-                              );
-                              if (!getValues('receiverName') && customer.receiverName) {
-                                setValue('receiverName', customer.receiverName, {
-                                  shouldDirty: true,
-                                });
-                              }
-                              if (!getValues('receiverPhone') && customer.receiverPhone) {
-                                setValue('receiverPhone', customer.receiverPhone, {
-                                  shouldDirty: true,
-                                });
-                              }
-                              if (!getValues('receiverAddress') && customer.receiverAddress) {
-                                setValue('receiverAddress', customer.receiverAddress, {
-                                  shouldDirty: true,
-                                  shouldValidate: true,
-                                });
-                              }
-                            },
-                          })}
-                        >
-                          <option value="">— 临时客户 / 仅填写简称 —</option>
-                          {customers.map((customer) => (
-                            <option key={customer.id} value={customer.id}>
-                              {customer.code} · {customer.shortName ?? customer.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <Label htmlFor="customerRef">客户名称/简称</Label>
-                        <Input
-                          id="customerRef"
-                          className="mt-2 h-10"
-                          aria-invalid={Boolean(errors.customerRef)}
-                          {...register('customerRef')}
-                        />
-                        <FieldError reservedLines={1}>
-                          {errors.customerRef?.message}
-                        </FieldError>
-                      </div>
-                    </>
-                  )}
-                  <div>
-                    <Label htmlFor="promisedDate">承诺交期</Label>
-                    <Input
-                      id="promisedDate"
-                      type="date"
-                      className="mt-2 h-10"
-                      aria-invalid={Boolean(errors.promisedDate)}
-                      {...register('promisedDate')}
+                  ) : null}
+                  {/* 交期只需放下一个日期，固定窄列；急单并排在右侧，不再单独占一整行。 */}
+                  <div
+                    data-slot="order-form-schedule"
+                    className="grid min-w-0 grid-cols-[minmax(0,11rem)_minmax(0,1fr)] items-start gap-3.5"
+                  >
+                    <div className="min-w-0">
+                      <Label htmlFor="promisedDate">承诺交期</Label>
+                      <Input
+                        id="promisedDate"
+                        type="date"
+                        className="mt-2 h-10"
+                        aria-invalid={Boolean(errors.promisedDate)}
+                        {...register('promisedDate')}
+                      />
+                      <FieldError reservedLines={1}>
+                        {errors.promisedDate?.message as string | undefined}
+                      </FieldError>
+                    </div>
+                    <UrgentOrderField
+                      control={control}
+                      disabled={orderFormControlsDisabled}
                     />
-                    <FieldError reservedLines={1}>
-                      {errors.promisedDate?.message as string | undefined}
-                    </FieldError>
                   </div>
-                  <UrgentOrderField
-                    control={control}
-                    disabled={orderFormControlsDisabled}
-                  />
                 </div>
               ) : undefined
             }
             materialExtras={
               <>
-                {!isExternalSalesActor ? (
-                  <div className="mb-5 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.name`}>设计款名称</Label>
-                      <Input
-                        id={`items.${expandedItem}.name`}
-                        className="mt-2 h-10"
-                        aria-invalid={Boolean(errors.items?.[expandedItem]?.name)}
-                        {...register(`items.${expandedItem}.name`, { onChange: (event) => changeDesignText(expandedItem, 'name', event.target.value) })}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor={`items.${expandedItem}.artworkVersion`}>
+                <div
+                  className={`mb-5 grid min-w-0 gap-3.5 ${isExternalSalesActor ? 'grid-cols-1' : 'grid-cols-[minmax(0,1fr)_minmax(0,8rem)]'}`}
+                >
+                  {/* 设计款名称由建单人填写（DECISIONS 2026-09-26）：单款默认跟随工单名称，
+                      新增设计款须手动命名，同一工单内不重名；同一设计款的规格共用名称。 */}
+                  <div>
+                    <FieldLabel htmlFor={`items.${expandedItem}.name`} required>
+                      设计款名称
+                    </FieldLabel>
+                    <Input
+                      // 同一个输入框在各设计款 / 规格间复用；按行重挂载，RHF 才会写入该行的值，
+                      // 否则切换后显示上一款的文字，失焦时还会写回当前行。
+                      key={itemsArray.fields[expandedItem]?.id}
+                      id={`items.${expandedItem}.name`}
+                      className="h-10"
+                      maxLength={DESIGN_NAME_MAX_LENGTH}
+                      placeholder="如：福字款"
+                      aria-required="true"
+                      aria-invalid={Boolean(activeDesignNameIssue)}
+                      aria-describedby={activeDesignNameIssue ? `items.${expandedItem}.name-error` : undefined}
+                      {...register(`items.${expandedItem}.name`, { onChange: (event) => changeDesignText(expandedItem, 'name', event.target.value) })}
+                    />
+                    <FieldError id={`items.${expandedItem}.name-error`} reservedLines={1}>
+                      {activeDesignNameIssue?.message}
+                    </FieldError>
+                  </div>
+                  {!isExternalSalesActor ? (
+                    <div className="min-w-0">
+                      {/* 稿件版本是次要信息，窄列放在设计款名称右侧 */}
+                      <FieldLabel htmlFor={`items.${expandedItem}.artworkVersion`}>
                         稿件版本
-                      </Label>
+                      </FieldLabel>
                       <Input
+                        key={itemsArray.fields[expandedItem]?.id}
                         id={`items.${expandedItem}.artworkVersion`}
-                        className="mt-2 h-10"
+                        className="h-10"
                         {...register(`items.${expandedItem}.artworkVersion`, { onChange: (event) => changeDesignText(expandedItem, 'artworkVersion', event.target.value) })}
                       />
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
                 <OrderItemProductField
                   value={activeExternalItem.productId}
                   products={externalOrderCatalogCandidates(
@@ -3104,7 +2848,7 @@ export function OrderForm({
                 />
               </>
             }
-            pricingExtras={canAssignExternalSales || !usesExternalSalesPricing || quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <>
+            pricingExtras={canAssignExternalSales || quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <>
               {canAssignExternalSales && expandedWatchedItem ? <AdminCreatePriceFields
                 divided={false}
                 amountId={`items.${expandedItem}.adminPrice.amount`}
@@ -3115,80 +2859,15 @@ export function OrderForm({
                 error={adminPrices[expandedItem]?.error}
                 onChange={(price) => setValue(`items.${expandedItem}.adminPrice`, price, { shouldDirty: true, shouldValidate: true })}
               /> : null}
-              {quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <div className="mt-3"><Button type="button" variant="outline" disabled={orderFormControlsDisabled || quoting || externalQuoteQuoting} onClick={() => { setInternalOrderQuote(null); setExternalOrderQuote(null); }}>重新报价</Button></div> : null}
-              {!usesExternalSalesPricing ? (
-                <section
-                  aria-label="内部生产信息"
-                  className="mt-6 space-y-4"
-                >
-                  <h3 className="text-sm font-semibold">其他要求</h3>
-                  <div className="grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-                    <div className="@min-[560px]:col-span-2">
-                      <Label htmlFor={`items.${expandedItem}.manualQuoteReason`}>
-                        需人工核价的要求（选填）
-                      </Label>
-                      <Textarea
-                        id={`items.${expandedItem}.manualQuoteReason`}
-                        className="mt-2 min-h-20"
-                        placeholder="选项中没有所需纸张、规格或工艺时，请在此填写具体要求"
-                        aria-invalid={Boolean(
-                          errors.items?.[expandedItem]?.manualQuoteReason,
-                        )}
-                        {...register(`items.${expandedItem}.manualQuoteReason`)}
-                      />
-                    </div>
-                    <div className="@min-[560px]:col-span-2">
-                      <Label htmlFor={`items.${expandedItem}.remark`}>
-                        款式备注
-                      </Label>
-                      <Textarea
-                        id={`items.${expandedItem}.remark`}
-                        className="mt-2 min-h-16"
-                        placeholder="颜色、方向和工艺注意事项"
-                        {...register(`items.${expandedItem}.remark`)}
-                      />
-                    </div>
-                  </div>
-                  {internalAdditionalCraftOptions.length > 0 ? (
-                    <fieldset className="mt-5 space-y-3">
-                      <legend className="text-sm font-semibold">
-                        附加工艺（选填）
-                      </legend>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        选择额外工序。
-                      </p>
-                      <InternalAdditionalCraftChoices
-                        options={internalAdditionalCraftOptions}
-                        selectedIds={watchedItems[expandedItem]?.crafts ?? []}
-                        disabled={orderFormControlsDisabled}
-                        onToggle={(craftId, checked) => {
-                          for (const member of designItemIndexes(getValues('items'), expandedItem)) {
-                            const currentItem = getValues(`items.${member}`);
-                            const next = new Set(currentItem.crafts);
-                            if (checked) next.add(craftId);
-                            else next.delete(craftId);
-                            setValue(
-                              `items.${member}.crafts`,
-                              resolveInternalOrderCraftIds(
-                                { ...currentItem, crafts: [...next] },
-                                crafts,
-                              ),
-                              { shouldDirty: true, shouldValidate: true },
-                            );
-                          }
-                        }}
-                      />
-                    </fieldset>
-                  ) : null}
-                </section>
-              ) : null}
+              {quoteViews[itemsArray.fields[expandedItem]?.id]?.error ? <div className="mt-3"><Button type="button" variant="outline" disabled={orderFormControlsDisabled || externalQuoteQuoting} onClick={() => { setExternalOrderQuote(null); }}>重新报价</Button></div> : null}
             </> : undefined}
             packagingExtras={canAssignExternalSales ?
               <div className="space-y-3">
-                {watchedPackagingGroups.map((group, index) => index === activePackagingGroupIndex && group.mode !== OrderPackagingMode.UNPACKED ? (
+                {watchedPackagingGroups.map((group, index) => group.mode !== OrderPackagingMode.UNPACKED ? (
                   <AdminCreatePriceFields key={index} amountId={`packagingGroups.${index}.adminPrice.amount`} value={group.adminPrice} factsKey={adminPackagingFacts(group)} disabled={orderFormControlsDisabled}
                     divided={false}
                     title={`包装组 ${index + 1} 单价`} priceLabel={`包装单价（元 / ${packagingUnit(group.mode)}）`}
+                    scope={packagingRows.flatMap((row, item) => row.groupIndex === index ? [packagingRowLabel(item)] : []).join('、')}
                     note={packagingBoxType(group.mode) ? '包含盒子和装盒费用。' : ''}
                     suggestedAmount={currentPackagingResult?.groups[index]?.suggestedUnitPrice}
                     error={adminPackagingPrices[index]?.error}
@@ -3216,20 +2895,6 @@ export function OrderForm({
                   {errors.packageRequirement?.message}
                 </FieldError>
               </div>
-            }
-            shippingExtras={
-              !usesExternalSalesPricing ? (
-                <div className="mb-4 grid min-w-0 grid-cols-1 gap-3.5 @min-[560px]:grid-cols-2">
-                  <div>
-                    <Label htmlFor="expressCode">快递代码</Label>
-                    <Input
-                      id="expressCode"
-                      className="mt-2 h-10"
-                      {...register('expressCode')}
-                    />
-                  </div>
-                </div>
-              ) : undefined
             }
             footerExtras={
               <section className="space-y-3">
@@ -3312,16 +2977,16 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverName`}
-                                required={usesExternalSalesPricing}
-                                aria-invalid={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
-                                aria-describedby={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
+                                required
+                                aria-invalid={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim()}
+                                aria-describedby={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? `extra-${shipmentIndex}-receiverName-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverName`,
                                 )}
                               />
                               <FieldError id={`extra-${shipmentIndex}-receiverName-error`} reservedLines={1}>
-                                {usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? '请填写收件人' : undefined}
+                                {submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverName?.trim() ? '请填写收件人' : undefined}
                               </FieldError>
                             </div>
                             <div>
@@ -3332,16 +2997,16 @@ export function OrderForm({
                               </Label>
                               <Input
                                 id={`additionalShipments.${shipmentIndex}.receiverPhone`}
-                                required={usesExternalSalesPricing}
-                                aria-invalid={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
-                                aria-describedby={usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
+                                required
+                                aria-invalid={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim()}
+                                aria-describedby={submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? `extra-${shipmentIndex}-receiverPhone-error` : undefined}
                                 className="mt-2 h-10"
                                 {...register(
                                   `additionalShipments.${shipmentIndex}.receiverPhone`,
                                 )}
                               />
                               <FieldError id={`extra-${shipmentIndex}-receiverPhone-error`} reservedLines={1}>
-                                {usesExternalSalesPricing && submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? '请填写联系电话' : undefined}
+                                {submissionValidationVisible && !watchedShipments[shipmentIndex]?.receiverPhone?.trim() ? '请填写联系电话' : undefined}
                               </FieldError>
                             </div>
                             <div>
@@ -3427,31 +3092,14 @@ export function OrderForm({
             itemFields={itemsArray.fields}
             activeIndex={expandedItem}
             pendingDesigns={selectedDesignQueues}
-            packaging={{
-              scopeLabel: activePackagingGroup && isMixedPackaging(activePackagingGroup.mode)
-                ? `当前混装：${activePackagingGroup.itemUnitsPerBag.flatMap((units, index) => units > 0 ? [`设计款 ${designGroups.findIndex((group) => group.indexes.includes(index)) + 1} · ${watchedItems[index]?.specification || '待选规格'}`] : []).join('、')}`
-                : undefined,
-              mode:
-                activePackagingGroup?.mode ??
-                OrderPackagingMode.SINGLE_STYLE,
-              unitsPerBag:
-                activePackagingGroup?.itemUnitsPerBag[expandedItem] ?? 0,
-              bagCount:
-                activePackagingBagCount?.complete === true
-                  ? activePackagingBagCount.bagCount
-                  : null,
-              error:
-                activePackagingBagCount && !activePackagingBagCount.complete
-                  ? activePackagingBagCount.errors.join('；')
-                  : null,
-            }}
+            packaging={packagingView}
             paperOptions={externalPaperOptions}
             paperKey={activeExternalPaper?.key ?? null}
             weightOptions={externalWeightOptions}
             specificationOptions={externalSpecificationOptions}
             foilOptions={externalCreateOrderOptions ? externalFoilOptions : undefined}
             allowManualWeight={canAssignExternalSales}
-            allowCustomSize={usesExternalSalesPricing || canAssignExternalSales}
+            allowCustomSize
             disabled={
               !localDraftReady ||
               submitting ||
@@ -3463,7 +3111,7 @@ export function OrderForm({
                 ? localDraftStatusError
                 : lastLocalDraftSavedAt
                 ? `草稿已保存 ${formatLocalDraftTime(lastLocalDraftSavedAt)}`
-                : initialExternalPriceSnapshot && usesExternalSalesPricing
+                : initialExternalPriceSnapshot
                   ? `加工 v${initialExternalPriceSnapshot.processing.version} / 物流 v${initialExternalPriceSnapshot.logistics.version} · 草稿未保存`
                   : '草稿未保存'
             }
@@ -3476,7 +3124,7 @@ export function OrderForm({
                 quoteItems={railQuoteItems}
                 packaging={railPackaging}
                 logistics={railLogistics}
-                usesExternalSalesPricing={usesExternalSalesPricing}
+                usesExternalSalesPricing
                 allowSaveDraft={!isExternalSalesActor}
                 settlementLabel={settlementLabel}
                 knownTotal={displayedKnownTotal}
@@ -3485,8 +3133,6 @@ export function OrderForm({
                 gaps={orderFormBGaps}
                 busy={
                   pendingState.busy ||
-                  quoting ||
-                  internalQuoteNeedsRefresh ||
                   externalQuoteQuoting ||
                   externalQuoteNeedsRefresh ||
                   Boolean(createdDraft)
@@ -3527,6 +3173,7 @@ export function OrderForm({
               if (field) removeItem(index, field.id);
             }}
             onCustomNameChange={(value) => {
+              syncSingleDesignName(value, getValues('customName'));
               setValue('customName', value, {
                 shouldDirty: true,
               });
@@ -3584,10 +3231,9 @@ export function OrderForm({
                 shouldValidate: true,
               });
             }}
-            onPackagingModeChange={changeExternalPackagingMode}
-            onUnitsPerBagChange={(units) =>
-              changeExternalUnitsPerBag(expandedItem, units)
-            }
+            onPackagingTypeChange={changePackagingType}
+            onPackagingMixingChange={changePackagingMixing}
+            onUnitsPerBagChange={changeExternalUnitsPerBag}
             onPendingDesignsChange={(images) => {
               const field = itemsArray.fields[expandedItem];
               if (field) updatePendingDesigns(field.id, images);
@@ -3663,7 +3309,7 @@ export function OrderForm({
           />
         )}
       </fieldset>
-      {createdDraft && (!usesExternalSalesPricing || createdDraft.intent === 'draft') ? (
+      {createdDraft && createdDraft.intent === 'draft' ? (
         <section
           className={
             uploadError
@@ -3725,7 +3371,7 @@ export function OrderForm({
           }))}
           feeDetails={<OrderCreateFeeDetails
             quoteItems={railQuoteItems} packaging={railPackaging} logistics={railLogistics}
-            usesExternalSalesPricing={usesExternalSalesPricing} plateFee={currentCreateOrderQuote?.plateFee}
+            usesExternalSalesPricing plateFee={currentCreateOrderQuote?.plateFee}
           />}
           totalLabel={
             submitQuoteChange
@@ -3739,7 +3385,7 @@ export function OrderForm({
           }
           totalNote={uploadError ?? serverGeneralError ?? orderCreateFeeSummary({
             quoteItems: railQuoteItems, packaging: railPackaging, logistics: railLogistics,
-            usesExternalSalesPricing, totalSemantics: displayedTotalSemantics,
+            usesExternalSalesPricing: true, totalSemantics: displayedTotalSemantics,
             plateFee: currentCreateOrderQuote?.plateFee,
           }).totalNote ?? undefined}
           confirmLabel={
@@ -3826,8 +3472,6 @@ function initialOrderFormValues(clientSubmissionId: string, initialItem: ReturnT
       clientSubmissionId,
       nextItemFig: 2,
       customName: null,
-      customerPartyId: null,
-      customerRef: null,
       receiverName: null,
       receiverPhone: null,
       receiverAddress: null,
@@ -3853,17 +3497,9 @@ function adminCreatePricingState(
   watchedPackagingGroups: CreateOrderInput['packagingGroups'],
   watchedShipments: CreateOrderInput['additionalShipments'],
   canAssignExternalSales: boolean,
-  usesExternalSalesPricing: boolean,
-  crafts: readonly CraftOption[],
 ) {
   function adminPriceFacts(item: CreateOrderInput['items'][number]) {
-    return adminCreatePriceFactsKey({
-      ...item,
-      manualQuoteReason: usesExternalSalesPricing ? null : item.manualQuoteReason,
-      crafts: usesExternalSalesPricing
-        ? item.crafts
-        : resolveInternalOrderCraftIds(item, crafts),
-    });
+    return adminCreatePriceFactsKey({ ...item, manualQuoteReason: null });
   }
   const adminPrices = watchedItems.map((item) => {
     if (!canAssignExternalSales || !item.adminPrice) return null;

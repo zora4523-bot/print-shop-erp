@@ -27,12 +27,11 @@ test.beforeAll(async () => {
   await withDb(async (db) => {
     const accounts = await db.query<{ id: string; username: string; role: string }>(
       'SELECT id, username::text, role::text FROM "User" WHERE username = ANY($1::citext[])',
-      [[E2E_USERS.owner!.username, E2E_USERS.customerService!.username, E2E_USERS.sales!.username]],
+      [[E2E_USERS.owner!.username, E2E_USERS.sales!.username]],
     );
     const owner = accounts.rows.find((account) => account.username === E2E_USERS.owner!.username)!;
-    const cs = accounts.rows.find((account) => account.username === E2E_USERS.customerService!.username)!;
     const sales = accounts.rows.find((account) => account.username === E2E_USERS.sales!.username)!;
-    expect(owner && cs && sales, '独立数据库应具备角色测试账号').toBeTruthy();
+    expect(owner && sales, '独立数据库应具备角色测试账号').toBeTruthy();
     await db.query('BEGIN');
     try {
       await db.query(
@@ -42,15 +41,16 @@ test.beforeAll(async () => {
         [disabledUserId, owner.id],
       );
       for (const kind of cases) {
-        const submitter = kind === 'current' ? cs : kind === 'sales-own' ? sales : owner;
+        // 收费工单都归属外部销售（业主 2026-09-24）；打印权限与提交人无关。
+        const submitter = sales;
         const id = orderId(kind);
         const itemId = `${id}-item`;
         await db.query(
           `INSERT INTO "Order" (
              id, "orderNo", "submitterId", "submitterRole", "createdById", "settlementType",
              status, "workOrderVersion", "customName", "customerRef", "createdAt", "updatedAt"
-           ) VALUES ($1,$2,$3,$4::"Role",$3,$6::"OrderSettlementType",$5::"OrderStatus",$7,'打印权限回归','权限测试客户',NOW(),NOW())`,
-          [id, orderNo(kind), submitter.id, submitter.role, kind === 'draft' ? 'SUBMITTED' : 'RELEASED', submitter.role === 'SALES' ? 'EXTERNAL_SALES' : submitter.role === 'CUSTOMER_SERVICE' ? 'INTERNAL_SALES' : 'FACTORY_DIRECT', kind === 'old-version' ? 1 : 2],
+           ) VALUES ($1,$2,$3,'SALES'::"Role",$3,'EXTERNAL_SALES'::"OrderSettlementType",$4::"OrderStatus",$5,'打印权限回归','权限测试客户',NOW(),NOW())`,
+          [id, orderNo(kind), submitter.id, kind === 'draft' ? 'SUBMITTED' : 'RELEASED', kind === 'old-version' ? 1 : 2],
         );
         await db.query(
           `INSERT INTO "OrderItem" (
@@ -168,12 +168,6 @@ test('其它固定岗位可读取公共进度，但不会因此获得仅含局�
 test('销售即使是录单人也不可读取生产工单标题、正文或 PDF', async ({ page }) => {
   await login(page, { from: `/print/orders/${orderId('sales-own')}`, username: E2E_USERS.sales!.username, password: E2E_PASSWORD });
   await expectDenied(page, 'sales-own');
-});
-
-test('客服可打印本人提交工单，其他人的标题、正文和 PDF 保持不可见', async ({ page }) => {
-  await login(page, { from: `/print/orders/${orderId('current')}`, username: E2E_USERS.customerService!.username, password: E2E_PASSWORD });
-  await expectAllowed(page, 'current');
-  await expectDenied(page, 'other-lane');
 });
 
 test('已有登录令牌的账号停用后不能继续下载 PDF', async ({ page }) => {

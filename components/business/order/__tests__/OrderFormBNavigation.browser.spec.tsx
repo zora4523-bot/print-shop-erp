@@ -5,7 +5,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
 import { Button } from '@/components/ui/button';
+import type { OrderPackagingMode } from '@/generated/prisma/enums';
 import { createOrderSchema } from '@/lib/auth/schemas';
+import {
+  applyOrderPackagingMixing, applyOrderPackagingType, applySpecPackagingType, createPackagingGroupIndex,
+  createPackagingRows, orderPackagingSelection, summarizeCreatePackaging,
+} from '@/lib/order/create-packaging-selection';
+import { packagingBoxType, packagingModeFor, packagingType } from '@/lib/order/packaging-mode';
 import { OrderFormB, type OrderFormBProps } from '../order-form-b/ExternalSalesOrderFormB';
 
 vi.mock('next/link', () => ({ default: (props: ComponentProps<'a'>) => <a {...props} /> }));
@@ -26,11 +32,20 @@ const baseItem = createOrderSchema.shape.items.element.parse({
   productId: 'product', pricingRoute: 'STOCK_BLANK', remark: null,
   hasLocalFoil: true, foilTechnique: 'FLAT', foilColors: ['亚金'], frontFoilColors: ['亚金'],
 });
+/** One specification, packed on its own — the whole-order section's simplest state. */
+function packagingView(mode: OrderPackagingMode = 'SINGLE_STYLE', unitsPerBag = 10, quantity = 1000, error: string | null = null): OrderFormBProps['packaging'] {
+  const unpacked = packagingType(mode) === 'UNPACKED';
+  return {
+    rows: [{ label: '设计款 1 · 大号封', quantity, mode, unitsPerBag, bagCount: unpacked ? 0 : Math.ceil(quantity / unitsPerBag), error }],
+    selection: { type: packagingType(mode), box: packagingBoxType(mode), mixing: unpacked ? null : 'SINGLE_STYLE' },
+    summary: `合计 ${quantity} 个 · 1 个设计款 / 1 个规格`,
+  };
+}
 const baseProps: Omit<OrderFormBProps, 'items' | 'itemFields' | 'activeIndex' | 'onActiveIndexChange' | 'onRemove'> = {
   values: { customName: '测试工单', receiverName: '', receiverPhone: '', receiverAddress: '', isSfCollect: false },
   pendingDesigns: {},
-  packaging: { mode: 'SINGLE_STYLE', unitsPerBag: 10, bagCount: 100 },
-  paperOptions: [{ value: 'pearl', label: '珠光艳闪', texture: 'matte-red' }],
+  packaging: packagingView(),
+  paperOptions: [{ value: 'pearl', label: '艳红珠光纸' }],
   paperKey: 'pearl', weightOptions: [{ value: 160 }],
   specificationOptions: [{ value: '大号封', label: '大号封' }],
   savedLabel: '草稿已保存 11:26:30', rail: <div>费用明细</div>,
@@ -38,7 +53,7 @@ const baseProps: Omit<OrderFormBProps, 'items' | 'itemFields' | 'activeIndex' | 
   onPaperChange: noop, onWeightChange: noop, onSpecificationChange: noop,
   onFoilSidesChange: noop, onBackFoilToggle: noop, onFoilTechniqueChange: noop,
   onCustomSizeChange: noop, onPrintFoilModeChange: noop, onLaminationChange: noop,
-  onQuantityChange: noop, onPackagingModeChange: noop, onUnitsPerBagChange: noop,
+  onQuantityChange: noop, onPackagingTypeChange: noop, onPackagingMixingChange: noop, onUnitsPerBagChange: noop,
   onPendingDesignsChange: noop, onReceiverAddressChange: noop,
   onReceiverNameChange: noop, onReceiverPhoneChange: noop, onSfCollectChange: noop,
 };
@@ -77,9 +92,12 @@ function QuoteRefreshFixture() {
     itemFields={[{ id: 'item-1' }]} activeIndex={0}
     onActiveIndexChange={noop} onRemove={noop}
     fieldErrors={{ summary: quoteFailed ? ['报价失败：请调整包装数量并重新核价'] : [] }}
-    packaging={{ mode: 'SINGLE_STYLE', unitsPerBag, bagCount: Math.ceil(quantity / unitsPerBag) }}
+    packaging={packagingView('SINGLE_STYLE', unitsPerBag, quantity)}
+    // Packaging now sits after the design card; like the real page, order notes follow it,
+    // so removing the summary below cannot clamp the scroll position while editing.
+    footerExtras={<section><label htmlFor="test-remark">工单备注（选填）</label><textarea id="test-remark" className="mt-2 min-h-24 w-full" /></section>}
     onQuantityChange={(value) => { setQuantity(value); setQuoteFailed(false); }}
-    onUnitsPerBagChange={(value) => { setUnitsPerBag(value); setQuoteFailed(false); }}
+    onUnitsPerBagChange={(_, value) => { setUnitsPerBag(value); setQuoteFailed(false); }}
   />;
 }
 function FieldFeedbackFixture() {
@@ -92,7 +110,7 @@ function FieldFeedbackFixture() {
   return <OrderFormB {...baseProps}
     values={values} items={[baseItem]} itemFields={[{ id: 'item-1' }]}
     activeIndex={0} onActiveIndexChange={noop} onRemove={noop}
-    packaging={{ ...baseProps.packaging, error: invalid ? '每包数量不能超过 12 个，请调整包装数量' : null }}
+    packaging={packagingView('SINGLE_STYLE', 10, 1000, invalid ? '每包数量不能超过 12 个，请调整包装数量' : null)}
     fieldErrors={invalid ? {
       customName: '工单名称必填', receiverName: '请填写收件人', receiverPhone: '请填写收货电话',
       receiverAddress: '请填写收货地址', items: [{ quantity: '数量必须大于 0', designImage: '请上传设计图' }],
@@ -284,15 +302,16 @@ for (const theme of ['light', 'dark']) for (const width of [393, 768, 1280]) {
     const nextLabel = host.querySelector('label[for="test-pack-note"]')!;
     expect(nextLabel.getBoundingClientRect().top).toBeGreaterThanOrEqual(note.getBoundingClientRect().bottom + 19);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-    expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
+    expect(await commands.checkShellAccessibility('section[aria-label="包装"]')).toEqual([]);
   });
 }
 
 function PackagingTypesFixture() {
-  const [mode, setMode] = useState<OrderFormBProps['packaging']['mode']>('SINGLE_STYLE');
+  const [mode, setMode] = useState<OrderPackagingMode>('SINGLE_STYLE');
   return <OrderFormB {...baseProps} items={[baseItem]} itemFields={[{id: 'item-1'}]} activeIndex={0}
-    onActiveIndexChange={noop} onRemove={noop} onPackagingModeChange={setMode}
-    packaging={{mode, unitsPerBag: mode === 'BOX_TACTILE' ? 8 : 10, bagCount: mode === 'UNPACKED' ? 0 : 100}} />;
+    onActiveIndexChange={noop} onRemove={noop}
+    onPackagingTypeChange={(type, box) => setMode(packagingModeFor(type, false, box))}
+    packaging={packagingView(mode, mode === 'BOX_TACTILE' ? 8 : 10)} />;
 }
 for (const theme of ['light', 'dark']) for (const [width, height] of [
   [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
@@ -312,7 +331,7 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
     expect(field.max).toBe('8');
     field.value = '9'; expect(field.validity.rangeOverflow).toBe(true);
     field.value = '8'; expect(field.validity.valid).toBe(true);
-    const section = host.querySelector('section[aria-label="数量与包装"]')!;
+    const section = host.querySelector('section[aria-label="包装"]')!;
     for (const button of section.querySelectorAll('button')) {
       const rect = button.getBoundingClientRect();
       expect(rect.height).toBeGreaterThanOrEqual(44);
@@ -320,7 +339,7 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
       expect(rect.right).toBeLessThanOrEqual(width);
     }
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-    expect(await commands.checkShellAccessibility('section[aria-label="数量与包装"]')).toEqual([]);
+    expect(await commands.checkShellAccessibility('section[aria-label="包装"]')).toEqual([]);
   });
 }
 
@@ -388,6 +407,12 @@ for (const theme of ['light', 'dark']) for (const width of [375, 393, 768, 1024,
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const remove = host.querySelector('button[aria-label="移除第 1 款 CDR 文件 front.cdr"]')!;
     expect(remove.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    // 上传框保持紧凑，已选文件紧跟其下（错误提示位排在列表之后）。
+    const dropBox = drop.getBoundingClientRect();
+    expect(dropBox.height).toBeLessThanOrEqual(96);
+    const firstFile = remove.closest('li')!.parentElement!.firstElementChild!.getBoundingClientRect();
+    expect(firstFile.top - dropBox.bottom).toBeGreaterThanOrEqual(0);
+    expect(firstFile.top - dropBox.bottom).toBeLessThanOrEqual(12);
     expect(await commands.checkShellAccessibility('[data-testid="navigation-fixture"]')).toEqual([]);
   });
 }
@@ -413,3 +438,89 @@ it('long fee rail stays scrollable in document flow and short rail can stick', a
   await expect.poll(() => getComputedStyle(rail).position).toBe('sticky');
   expect(rail.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
 });
+
+type Groups = Parameters<typeof orderPackagingSelection>[0];
+function WholeOrderPackagingFixture() {
+  const items = [
+    { ...baseItem, fig: 1, designGroupKey: 'design-a', quantity: 1000 },
+    { ...baseItem, fig: 2, designGroupKey: 'design-a', specification: '方形', quantity: 500 },
+    { ...baseItem, fig: 3, designGroupKey: 'design-b', quantity: 1500 },
+  ];
+  const quantities = items.map((item) => item.quantity);
+  const [groups, setGroups] = useState<Groups>(() => items.map((_, index) => ({
+    name: null, mode: 'SINGLE_STYLE', actualBagCount: 1, itemUnitsPerBag: items.map((__, item) => item === index ? 10 : 0),
+  })));
+  const rows = createPackagingRows({ groups, itemQuantities: quantities });
+  return <OrderFormB {...baseProps}
+    items={items} itemFields={items.map((item) => ({ id: `item-${item.fig}` }))} activeIndex={0}
+    onActiveIndexChange={noop} onRemove={noop} onAddSpecification={noop}
+    packaging={{
+      rows: rows.map((row, index) => ({
+        ...row, quantity: quantities[index],
+        label: `设计款 ${index < 2 ? 1 : 2} · ${items[index].specification}`,
+      })),
+      selection: orderPackagingSelection(groups, items.length),
+      summary: summarizeCreatePackaging({ rows, itemQuantities: quantities, designCount: 2 }),
+    }}
+    onPackagingTypeChange={(type, box, index) => setGroups((current) => index === undefined
+      ? applyOrderPackagingType(current, items.length, type, box)
+      : applySpecPackagingType(current, items.length, index, type, box))}
+    onPackagingMixingChange={(mixed) => setGroups((current) => applyOrderPackagingMixing(current, items.length, mixed))}
+    onUnitsPerBagChange={(index, value) => setGroups((current) => {
+      const target = createPackagingGroupIndex(current, index);
+      return current.map((group, candidate) => candidate === target
+        ? { ...group, itemUnitsPerBag: group.itemUnitsPerBag.map((units, item) => item === index ? value : units) }
+        : group);
+    })}
+  />;
+}
+for (const theme of ['light', 'dark']) for (const [width, height] of [[375, 667], [1280, 800]]) {
+  it(`whole-order packaging ${width}x${height} ${theme}: outside design tabs, per-spec override, shared type and mixing`, async () => {
+    await page.viewport(width, height);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    flushSync(() => root.render(<WholeOrderPackagingFixture />));
+    await layoutReady();
+    // 包装在设计款卡片之外，规格面板里不再有包装输入。
+    expect(host.querySelector('[data-slot="order-design-section"] section[aria-label="包装"]')).toBeNull();
+    expect(host.querySelector('[data-slot="order-specification-section"] input[id$="-units-per-bag"]')).toBeNull();
+    const section = host.querySelector<HTMLElement>('[data-slot="order-packaging-section"] section[aria-label="包装"]')!;
+    expect(section.textContent).toContain('合计 3,000 个 · 2 个设计款 / 3 个规格 · 300 包');
+    await expect.element(page.getByRole('spinbutton', { name: '每包数量', exact: true }).nth(2)).toBeVisible();
+
+    // 单个规格单独改装盒：整单类型变为「不一致」，其他规格不动。
+    await page.getByRole('combobox', { name: '包装类型', exact: true }).nth(1).selectOptions('BOX_TACTILE');
+    await expect.element(page.getByRole('spinbutton', { name: '每盒数量', exact: true })).toHaveValue(8);
+    expect(host.querySelector('[id$="-1-packaging-message"]')!.textContent).toBe('共 63 盒');
+    expect(host.querySelector('[id$="-0-packaging-message"]')!.textContent).toBe('共 100 包');
+    await expect.element(page.getByRole('button', { name: '入袋', exact: true })).toHaveAttribute('aria-pressed', 'false');
+    expect(section.textContent).toContain('各规格包装类型不同');
+    expect(section.textContent).toContain('250 包 + 63 盒');
+
+    // 顶部类型统一作用于全部规格。
+    await page.getByRole('button', { name: '入袋', exact: true }).click();
+    await expect.element(page.getByRole('button', { name: '入袋', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect.element(page.getByRole('spinbutton', { name: '每盒数量', exact: true })).not.toBeInTheDocument();
+
+    // 混装覆盖全部规格；一包合计超过 12 个时每行都提示，调整后得到同一包数。
+    await page.getByRole('button', { name: '混装', exact: true }).click();
+    await expect.element(page.getByRole('button', { name: '混装', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(host.querySelectorAll('select[id$="-packaging-choice"]').length).toBe(0);
+    expect(host.querySelector('[id$="-2-units-per-bag"]')!.getAttribute('aria-invalid')).toBe('true');
+    for (const [index, units] of [[0, '4'], [1, '2'], [2, '6']] as const) {
+      await page.getByRole('spinbutton', { name: '每包数量', exact: true }).nth(index).fill(units);
+    }
+    await layoutReady();
+    for (const index of [0, 1, 2]) {
+      expect(host.querySelector(`[id$="-${index}-packaging-message"]`)!.textContent).toBe('共 250 包（混装组）');
+    }
+    expect(section.textContent).toContain('3 个规格 · 250 包');
+
+    for (const control of section.querySelectorAll('button, select')) {
+      const rect = control.getBoundingClientRect();
+      expect(rect.height).toBeGreaterThanOrEqual(44);
+      expect(rect.right).toBeLessThanOrEqual(width);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('[data-slot="order-packaging-section"]')).toEqual([]);
+  });
+}

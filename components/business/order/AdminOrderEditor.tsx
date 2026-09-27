@@ -63,6 +63,7 @@ import {
   type OrderChangeCatalogProduct,
 } from '@/lib/order/change-request-catalog-identity';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import {
   previewAdminOrderEditAction,
   saveAdminOrderEditAction,
@@ -162,7 +163,6 @@ function formValues(data: FormData): Record<string, string> {
 }
 const fieldNames: Record<string, string> = {
   customName: '工单名称',
-  customerRef: '客户简称',
   externalSalesUserId: '关联外部销售',
   remark: '工单备注',
   packageRequirement: '包装补充说明',
@@ -1128,7 +1128,7 @@ function DraftItemSection({
         </EditorField>
         <EditorField label="纸张">
           <div className="flex min-h-11 items-center rounded-md border bg-muted/30 px-3 text-sm">
-            {source.paperType ? externalPriceBusinessText(source.paperType) : '未记录'}{' '}
+            {source.paperType ? paperDisplayLabel(externalPriceBusinessText(source.paperType)) : '未记录'}{' '}
             {source.paperWeightGsm &&
             !new RegExp(`${source.paperWeightGsm}\\s*g`, 'i').test(source.paperType ?? '')
               ? `${source.paperWeightGsm}g`

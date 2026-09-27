@@ -27,11 +27,10 @@ import {
   type WorkOrderProgressProjection,
 } from '../production/work-order-progress-query';
 import { selectOrderCustomerFee } from './customer-fee';
-import {
-  buildOrderWhere,
-  MISSING_ORDER_CUSTOMER_FILTER_VALUE,
-} from './list-query';
+import { buildOrderWhere } from './list-query';
 import { promisedDaysLeft } from './promised-date';
+import { shippedShipmentViolation } from './change-request-shipment-guard';
+import { canConfirmOrderPrinted } from './print-eligibility';
 import {
   type FactoryConfirmationPriceDiff,
 } from './change-request';
@@ -83,7 +82,6 @@ export type AdminOrderWorkspaceRow = {
   workOrderVersion: number;
   customName: string | null;
   remark?: string | null;
-  customer: { id: string | null; name: string; filterValue: string };
   submitter: { id: string; name: string };
   status: OrderStatus;
   statusSummary: string | null;
@@ -159,6 +157,8 @@ export type AdminOrderWorkspaceRow = {
     type: 'MODIFY' | 'CANCEL';
     reason: string;
     summary?: string | null;
+    /** 已有地址发货时批准会被服务端拒绝（只能驳回）；界面据此隐藏批准入口。 */
+    approvalBlockedReason?: string | null;
     createdAt: string;
   } | null;
   printPending: boolean;
@@ -231,7 +231,7 @@ export function resolveAdminPrintFacts(input: {
     printPending: printable && (Boolean(pendingRequest) || !hasPrinted),
     pendingPrintJobId: pendingRequest?.id ?? null,
     canCreatePrint: printable && !pendingRequest,
-    canMarkPrinted: Boolean(pendingRequest),
+    canMarkPrinted: Boolean(pendingRequest) && canConfirmOrderPrinted(input.status),
   };
 }
 
@@ -302,7 +302,6 @@ const adminOrderSelect = {
   updatedAt: true,
   customName: true,
   remark: true,
-  customerRef: true,
   status: true,
   isUrgent: true,
   totalAmount: true,
@@ -317,7 +316,6 @@ const adminOrderSelect = {
   pricingStatus: true,
   trackingNo: true,
   submitter: { select: { id: true, displayName: true } },
-  customerParty: { select: { id: true, name: true, shortName: true } },
   _count: { select: { shipments: true } },
   stars: { select: { userId: true } },
   items: {
@@ -380,11 +378,10 @@ const adminOrderSelect = {
       bill: { select: { id: true, period: true, status: true } },
     },
   },
+  // 最多 10 个地址；同时供运单号展示与「已有地址发货」闸口使用。
   shipments: {
-    where: { trackingNo: { not: null } },
     orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
-    take: 1,
-    select: { trackingNo: true },
+    select: { trackingNo: true, status: true },
   },
   workflowDecisions: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -830,18 +827,16 @@ function mapAdminOrderRow(
       outsource.status === OutsourceStatus.SENT ||
       outsource.status === OutsourceStatus.IN_PROGRESS,
   );
-  const customerName =
-    row.customerParty?.shortName?.trim() ||
-    row.customerParty?.name.trim() ||
-    row.customerRef?.trim() ||
-    '未填客户';
-  const customerMissing =
-    row.customerParty === null && !row.customerRef?.trim();
   const firstClaimedAt = progress?.firstClaimedAt ?? null;
   const stagnant = isProductionStagnant({
     status: row.status,
     scheduledAt: row.scheduledAt,
     firstClaimedAt,
+    // 扫码认领只能落在当前代次待开工/进行中的工序或进度步骤上；寄样单、改单后全部
+    // 承接完成的新代次没有可认领对象，不算停滞（审计 L-13）。
+    claimable: row.purpose !== 'SAMPLE_SHIPMENT' &&
+      [...currentProductionOperations, ...currentProductionProgressSteps].some((unit) =>
+        unit.status === ProductionOperationStatus.PENDING || unit.status === ProductionOperationStatus.IN_PROGRESS),
     now,
     stagnationDays,
   });
@@ -866,15 +861,6 @@ function mapAdminOrderRow(
     workOrderVersion: row.workOrderVersion,
     customName: row.customName,
     remark: row.remark,
-    customer: {
-      id: row.customerParty?.id ?? null,
-      name: customerName,
-      filterValue: customerMissing
-        ? MISSING_ORDER_CUSTOMER_FILTER_VALUE
-        : row.customerParty
-          ? customerName
-          : row.customerRef!,
-    },
     submitter: { id: row.submitter.id, name: row.submitter.displayName },
     status: row.status,
     statusSummary: statusSummary(
@@ -927,13 +913,21 @@ function mapAdminOrderRow(
           summary: pendingChange.type === 'MODIFY'
             ? summarizeAdminOrderChange(pendingChange.proposedChanges, row.items)
             : null,
+          approvalBlockedReason: shippedShipmentViolation({
+            phase: 'REVIEW',
+            isCancellation: pendingChange.type === 'CANCEL',
+            itemChangeCount: proposedItemChangeCount(pendingChange.proposedChanges),
+            shipments: row.shipments,
+          }),
           createdAt: pendingChange.createdAt.toISOString(),
         }
       : null,
     printPending,
     pendingPrintJobId,
     trackingNo:
-      row.shipments[0]?.trackingNo?.trim() || row.trackingNo?.trim() || null,
+      row.shipments.find((shipment) => shipment.trackingNo !== null)?.trackingNo?.trim() ||
+      row.trackingNo?.trim() ||
+      null,
     progress: {
       orderTotal: progress?.orderTotal ?? String(
         row.items.reduce((sum, item) => sum + item.quantity, 0),
@@ -958,6 +952,11 @@ function mapAdminOrderRow(
 }
 
 /** Project only validated business facts; malformed or legacy payloads keep the request reason. */
+function proposedItemChangeCount(proposedChanges: unknown): number {
+  if (!proposedChanges || typeof proposedChanges !== 'object' || !('items' in proposedChanges)) return 0;
+  return Array.isArray(proposedChanges.items) ? proposedChanges.items.length : 0;
+}
+
 export function summarizeAdminOrderChange(
   proposedChanges: unknown,
   items: readonly Pick<AdminOrderWorkspaceRow['items'][number], 'id' | 'sequence' | 'quantity' | 'name' | 'specification'>[],
@@ -1063,10 +1062,11 @@ function isProductionStagnant(input: {
   status: OrderStatus;
   scheduledAt: Date | null;
   firstClaimedAt: Date | null;
+  claimable: boolean;
   now: Date;
   stagnationDays: number;
 }): boolean {
-  if (input.firstClaimedAt || !input.scheduledAt) return false;
+  if (input.firstClaimedAt || !input.scheduledAt || !input.claimable) return false;
   if (
     input.status !== OrderStatus.RELEASED &&
     input.status !== OrderStatus.FOILING &&

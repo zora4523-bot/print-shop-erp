@@ -16,6 +16,8 @@ import {
   type BackgroundJobHandlers,
 } from '../lib/background-jobs/worker';
 import { db } from '../lib/db';
+import { databasePoolConfig, assertWorkerPoolCapacity } from '../lib/database-session';
+import { SENTRY_SCRUB_HOOKS } from '../lib/observability/sentry-scrub';
 
 export async function runBackgroundWorkerProcess(): Promise<void> {
   try {
@@ -36,6 +38,8 @@ async function main(): Promise<void> {
     process.env.BACKGROUND_JOB_QUEUE ??
       process.argv.find((arg) => arg.startsWith('--queue='))?.slice(8),
   );
+  const concurrency = intEnv(queue === BackgroundJobQueue.HEAVY ? 'HEAVY_WORKER_CONCURRENCY' : 'LIGHT_WORKER_CONCURRENCY', queue === BackgroundJobQueue.HEAVY ? 1 : 2, 1, 8);
+  assertWorkerPoolCapacity(databasePoolConfig(process.env.DATABASE_URL!, { role: 'worker' }).max!, concurrency);
   const handlers = await loadBackgroundJobHandlers(queue);
   const smartBotConnector =
     queue === BackgroundJobQueue.LIGHT
@@ -62,6 +66,9 @@ async function main(): Promise<void> {
       environment: process.env.NODE_ENV || 'development',
       sendDefaultPii: false,
       tracesSampleRate: 0.05,
+      // Same scrubbers as the Web runtime: outgoing fetch breadcrumbs and
+      // sampled client spans carry full URLs (legacy webhook ?key=…).
+      ...SENTRY_SCRUB_HOOKS,
     });
   }
 
@@ -138,14 +145,7 @@ async function main(): Promise<void> {
       queue,
       workerId,
       handlers,
-      concurrency: intEnv(
-        queue === BackgroundJobQueue.HEAVY
-          ? 'HEAVY_WORKER_CONCURRENCY'
-          : 'LIGHT_WORKER_CONCURRENCY',
-        queue === BackgroundJobQueue.HEAVY ? 1 : 2,
-        1,
-        8,
-      ),
+      concurrency,
       pollIntervalMs: intEnv('BACKGROUND_JOB_POLL_MS', 1_000, 100, 60_000),
       leaseMs: intEnv(
         'BACKGROUND_JOB_LEASE_MS',

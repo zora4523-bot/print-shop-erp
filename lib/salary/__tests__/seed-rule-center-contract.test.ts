@@ -49,16 +49,7 @@ describe('seed.ts 规则中心数据保护', () => {
       (match) => match[1],
     );
 
-    expect(keys).toEqual([
-      'CS_BASE_SALARY',
-      'CS_PERIOD_LENGTH',
-      'CS_TIERS',
-      'CLEANER_HOURLY',
-      'COOK_SPARE_HOURLY',
-      'OT_MULTIPLIER',
-      'WORK_HOURS',
-      'COOK_MONTHLY',
-    ]);
+    expect(keys).toEqual(['WORK_HOURS']);
   });
 
   it('薪资默认规则按完整历史补缺，不只查当前 open 版本', () => {
