@@ -333,7 +333,8 @@ export async function previewPieceworkPriceBookPublication(
   const highest = !book ? await db.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } }) : null;
   const existingDraft = !book ? await db.pieceworkPriceBook.findFirst({ where: { workerId: null, status: 'DRAFT' } }) : null;
   if (existingDraft) issues.push('已有调价草稿，请先处理该草稿');
-  if (!book && (!latest || manifest.priceBookVersion !== (highest?.version ?? 0) + 1 || latest.status !== 'PUBLISHED')) issues.push('新版本必须紧接当前已发布版本');
+  if (!book && !latest) issues.push('当前没有已发布统一工价，请在工价页新建草稿发布');
+  else if (!book && manifest.priceBookVersion !== (highest?.version ?? 0) + 1) issues.push('新版本必须使用下一可用版本号');
   if (book?.workerId) throw new PieceworkPriceBookAdminError('个人工价请在师傅账号中维护');
   if (book?.status === 'CANCELLED') issues.push('该调价计划已取消，请新建调价草稿');
   if (book?.status === PieceworkPriceBookStatus.PUBLISHED) {
@@ -438,7 +439,8 @@ export async function publishPieceworkPriceBook(
       if (existingDraft) throw new PieceworkPriceBookAdminError('已有调价草稿，请先处理该草稿');
       const latest = await tx.pieceworkPriceBook.findFirst({ where: { workerId: null, status: 'PUBLISHED' }, orderBy: { version: 'desc' } });
       const highest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } });
-      if (!latest || latest.status !== 'PUBLISHED' || (highest?.version ?? 0) + 1 !== input.manifest.priceBookVersion || latest.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
+      if (!latest) throw new PieceworkPriceBookAdminError('当前没有已发布统一工价，请在工价页新建草稿发布');
+      if ((highest?.version ?? 0) + 1 !== input.manifest.priceBookVersion || latest.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
         throw new PieceworkPriceBookAdminError('当前工价版本已变化，请重新预览');
       }
       book = await tx.pieceworkPriceBook.create({

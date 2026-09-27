@@ -98,6 +98,21 @@ postgres.sequential('piecework cancellation · real isolated PostgreSQL', () => 
   });
   afterAll(() => vi.unstubAllEnvs());
 
+  it('can use both reference indexes for the exact cancellation and publication predicate', async () => {
+    const c = await client();
+    try {
+      await c.query('BEGIN');
+      // A small fixture may legitimately prefer a scan; this tests index
+      // eligibility, not a production planner cost or timing assumption.
+      await c.query('SET LOCAL enable_seqscan = off');
+      const result = await c.query(`EXPLAIN (FORMAT JSON) SELECT id FROM "ProductionReport" WHERE "priceBookId"=$1 OR snapshot #>> '{payroll,policyBookId}'=$1 LIMIT 1`, [randomUUID()]);
+      const plan = JSON.stringify(result.rows);
+      expect(plan).toContain('ProductionReport_policyBookId_idx');
+      expect(plan).toContain('BitmapOr');
+      expect(plan).not.toContain('Seq Scan');
+    } finally { await c.query('ROLLBACK'); await c.end(); }
+  });
+
   it('cancels only the middle version, preserves its evidence and successor, replays once', async () => {
     const f = await fixture(); const x = await input(f.workerId, f.s.id);
     const first = await cancelPieceworkSchedule(x, actor);

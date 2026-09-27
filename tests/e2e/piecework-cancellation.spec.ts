@@ -48,6 +48,9 @@ async function cancel(page: Page, book: Book) {
   await review.getByLabel('取消原因（2 至 500 字）').fill('取消误填的调价计划');
   await review.getByRole('button', { name: '取消调价计划', exact: true }).click();
   await expect(card(page, book).locator('summary')).toContainText('已取消');
+  await expect(region(page).getByRole('status')).toContainText('调价计划已取消');
+  await expect(card(page, book).locator('summary')).toBeFocused();
+  await expect(card(page, book)).toHaveAttribute('open', '');
 }
 async function report(page: Page) {
   const form = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
@@ -98,6 +101,9 @@ test('个人调价按单版取消、保留草稿和后继、重复请求只记�
     const requestPromise = page.waitForRequest((request) => request.method() === 'POST' && Boolean(request.headers()['next-action']));
     await review.getByRole('button', { name: '取消调价计划', exact: true }).click(); const request = await requestPromise;
     await expect(card(page, s).locator('summary')).toContainText('已取消');
+    await expect(region(page).getByRole('status')).toContainText('调价计划已取消');
+    await expect(card(page, s).locator('summary')).toBeFocused();
+    await expect(card(page, s).getByRole('link', { name: '继续编辑调价草稿' })).toBeVisible();
     const replay = await page.request.fetch(request, { headers: detachedActionHeaders(request) }); expect(replay.status()).toBe(200); expect(await replay.text()).toContain('此前已取消'); await replay.dispose();
     expect((await c.query('SELECT * FROM "PieceworkPriceBook" WHERE id=$1', [n.id])).rows[0]).toEqual(n);
     expect((await c.query('SELECT * FROM "PieceworkPriceBook" WHERE id=$1', [draft.id])).rows[0]).toEqual(draft);

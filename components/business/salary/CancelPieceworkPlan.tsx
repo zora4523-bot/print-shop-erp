@@ -10,16 +10,18 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ActionNotice, PendingButton } from '@/components/ui-business';
 
-export function CancelPieceworkPlan({ workerId, targetId }: { workerId: string | null; targetId: string }) {
+export function CancelPieceworkPlan({ workerId, targetId, hasDraft = false, onSuccess }: { workerId: string | null; targetId: string; hasDraft?: boolean; onSuccess?: (message: string) => void }) {
   const id = useId();
   const [review, setReview] = useState<PieceworkCancellationReview | null>(null);
   const [clientRequestId, setClientRequestId] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, startReview] = useTransition();
-  const [state, action, pending] = useActionState(async (_previous: (PieceworkActionResult & { requestId: string }) | null, form: FormData) => ({
-    ...await cancelPieceworkPlanAction(null, form), requestId: String(form.get('clientRequestId')),
-  }), null);
+  const [state, action, pending] = useActionState(async (_previous: (PieceworkActionResult & { requestId: string }) | null, form: FormData) => {
+    const result = await cancelPieceworkPlanAction(null, form);
+    if (result.status === 'success') onSuccess?.(result.message);
+    return { ...result, requestId: String(form.get('clientRequestId')) };
+  }, null);
   const currentError = state?.status === 'error' && state.requestId === clientRequestId ? state.message : null;
   function prepare() {
     startReview(async () => {
@@ -35,7 +37,7 @@ export function CancelPieceworkPlan({ workerId, targetId }: { workerId: string |
       <p className="text-sm">原生效时段：{formatDateTimeShanghai(new Date(review.target.effectiveFrom))} 起{review.target.effectiveTo ? `，至 ${formatDateTimeShanghai(new Date(review.target.effectiveTo))}` : ''}</p>
       <p className="text-sm">{review.predecessor ? `恢复第 ${review.predecessor.version} 版工价，其结束时间从 ${formatDateTimeShanghai(new Date(review.target.effectiveFrom))} 调整为${review.target.effectiveTo ? ` ${formatDateTimeShanghai(new Date(review.target.effectiveTo))}` : '未设结束时间'}` : workerId ? '该时段恢复使用统一工价；如当时尚未配置统一工价，将无法报工' : '取消后该时段无法报工，请新建调价草稿并发布工价'}</p>
       {review.successor ? <p className="text-sm">第 {review.successor.version} 版仍按原计划于 {formatDateTimeShanghai(new Date(review.successor.effectiveFrom))} 生效。新工价只能安排在其后；如需提前调整，请先核对后续计划。</p> : null}
-      <p className="text-sm">已有工资保持不变，现有调价草稿继续保留。</p>
+      <p className="text-sm">已有工资保持不变。{hasDraft && '现有调价草稿继续保留。'}</p>
       <input type="hidden" name="review" value={JSON.stringify(review)} />
       <input type="hidden" name="clientRequestId" value={clientRequestId} />
       <Label htmlFor={`${id}-reason`}>取消原因（2 至 500 字）</Label>

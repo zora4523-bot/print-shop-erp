@@ -3,7 +3,7 @@ import { DEFAULT_FOIL_WAGES } from '@/lib/salary/foil-wage';
 
 import Link from 'next/link';
 import { CancelPieceworkPlan } from './CancelPieceworkPlan';
-import { useActionState, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import Decimal from 'decimal.js';
 import { formatUnitPrice } from '@/lib/format/unit-price';
 import { mutatePersonalPieceworkAction } from '@/actions/owner-personal-piecework';
@@ -44,6 +44,12 @@ export function PieceworkPriceBookForm({ books, now, personal, cancellationEnabl
   const previous = books.find((book) => book.status === 'PUBLISHED' && book.effectiveFrom <= comparisonAt && (!book.effectiveTo || book.effectiveTo > comparisonAt));
   const template = books.find((book) => book.status === 'PUBLISHED');
   const [state, action, pending] = useActionState<PieceworkActionResult | null, FormData>(mutate, null);
+  const [cancelled, setCancelled] = useState<{ id: string; message: string; previousResult: PieceworkActionResult | null } | null>(null);
+  if (cancelled && state !== cancelled.previousResult) setCancelled(null);
+  const summaries = useRef(new Map<string, HTMLElement>());
+  useEffect(() => {
+    if (cancelled && books.some((book) => book.id === cancelled.id && book.status === 'CANCELLED')) summaries.current.get(cancelled.id)?.focus();
+  }, [books, cancelled]);
   return <section className="space-y-5 rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="piecework-heading">
     <h2 id="piecework-heading" className="font-semibold">计件工价</h2>
     <div className="space-y-1 text-sm text-muted-foreground">
@@ -51,13 +57,14 @@ export function PieceworkPriceBookForm({ books, now, personal, cancellationEnabl
       <p>小单 ≤1000 个：小单工资 × 次数，含装版。大单 ≥1001 个：数量 × 计件单价 × 次数 ＋ 装版费 × 次数。</p>
       <p>局部按过版次数；专版按颜色数，不按正反面翻倍。</p>
     </div>
-    {state && <div role={state.status === 'error' ? 'alert' : undefined}><FormMessage fieldId="piecework-result" tone={state.status}>{state.message}</FormMessage></div>}
+    {state && !cancelled && <div role={state.status === 'error' ? 'alert' : undefined}><FormMessage fieldId="piecework-result" tone={state.status}>{state.message}</FormMessage></div>}
+    {cancelled && <FormMessage fieldId="piecework-cancellation-result" tone="success">{cancelled.message}</FormMessage>}
     {!draft && canEdit && template && template.effectiveFrom > now && <p className="text-sm">新草稿将沿用待生效的第 {template.version} 版工价；其计划时间为 {formatDateTimeShanghai(new Date(template.effectiveFrom))}。</p>}
     {!draft && canEdit && <form aria-busy={pending} action={action}><Button type="submit" name="intent" value="create" disabled={pending}>{pending ? '创建中…' : '新建调价草稿'}</Button></form>}
     {draft && canEdit && <DraftEditor unifiedReference={unifiedReference} personal={Boolean(personal)} fields={fields} key={`${draft.version}:${draft.updatedAt}`} draft={draft} previous={previous} action={action} pending={pending} fieldErrors={state?.fieldErrors} />}
     <div className="space-y-3">
-      {books.filter((b) => b.status !== 'DRAFT').map((book) => <Disclosure key={book.version} className="rounded-lg border p-3" open={['当前生效', '待生效'].includes(stateLabel(book, now))}>
-        <DisclosureSummary className="flex-wrap gap-2">第 {book.version} 版 <Badge variant="outline">{stateLabel(book, now)}</Badge> · {formatDateTimeShanghai(new Date(book.effectiveFrom))}</DisclosureSummary>
+      {books.filter((b) => b.status !== 'DRAFT').map((book) => <Disclosure key={book.version} className="rounded-lg border p-3" open={cancelled?.id === book.id || ['当前生效', '待生效'].includes(stateLabel(book, now))}>
+        <DisclosureSummary ref={(node) => { if (node) summaries.current.set(book.id, node); else summaries.current.delete(book.id); }} className="flex-wrap gap-2">第 {book.version} 版 <Badge variant="outline">{stateLabel(book, now)}</Badge> · {formatDateTimeShanghai(new Date(book.effectiveFrom))}</DisclosureSummary>
         {personal && <p className="mt-3 text-sm">{book.useUnifiedRates ? '使用统一工价' : '使用个人工价'}</p>}
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">
           {(book.useUnifiedRates ? [] : allFields.filter((f) => (!personal || book.rules.some((r) => r.unit === f.unit)) && (!('column' in f) || rateFor(book, f) !== ''))).map((field) => <div key={field.key}><dt className="text-sm text-muted-foreground">{field.label}</dt><dd>{rateFor(book, field) || '未配置'} {rateFor(book, field) && field.unitLabel}</dd></div>)}
@@ -65,8 +72,8 @@ export function PieceworkPriceBookForm({ books, now, personal, cancellationEnabl
         {!personal && <p className="mt-3 break-words text-sm">调价依据：{book.sourceName}</p>}
         <p className="break-words text-sm">调整说明：{book.publishNote}</p>
         {book.status === 'CANCELLED' && <p className="mt-3 break-words text-sm">取消原因：{book.cancelReason}{book.cancelledAt ? ` · ${formatDateTimeShanghai(new Date(book.cancelledAt))}` : ''}</p>}
-        {book.status === 'CANCELLED' && draft && <Link className="inline-flex min-h-11 items-center text-sm underline" href="#piecework-draft">继续编辑调价草稿</Link>}
-        {cancellationEnabled && book.status === 'PUBLISHED' && book.effectiveFrom > now && <CancelPieceworkPlan workerId={personal?.workerId ?? null} targetId={book.id} />}
+        {book.status === 'CANCELLED' && draft && canEdit && <Link className="inline-flex min-h-11 items-center text-sm underline" href="#piecework-draft">继续编辑调价草稿</Link>}
+        {cancellationEnabled && book.status === 'PUBLISHED' && book.effectiveFrom > now && <CancelPieceworkPlan workerId={personal?.workerId ?? null} targetId={book.id} hasDraft={Boolean(draft)} onSuccess={(message) => setCancelled({ id: book.id, message, previousResult: state })} />}
       </Disclosure>)}
     </div>
   </section>;

@@ -32,10 +32,14 @@ async function readReview(tx: Prisma.TransactionClient, workerId: string | null,
   if (!target || target.workerId !== workerId) throw new PieceworkPriceBookAdminError('调价计划不属于当前账号或统一工价，请重新打开对应页面');
   if (target.status !== 'PUBLISHED' || !target.effectiveFrom) throw new PieceworkPriceBookAdminError('该调价计划已取消或尚未发布，请重新核对');
   assertFuturePieceworkCancellation(target.effectiveFrom, await databaseClockNow(tx));
-  const referenced = await tx.productionReport.findFirst({ where: { OR: [
-    { priceBookId: target.id }, { snapshot: { path: ['payroll', 'policyBookId'], equals: target.id } },
-  ] }, select: { id: true } });
-  if (referenced) throw new PieceworkPriceBookAdminError('该工价已有报工记录，不能取消；请新建调价草稿');
+  // Keep the JSON expression identical to the database guard and its partial
+  // index; Prisma's JSON equality uses a different jsonb expression.
+  const referenced = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM "ProductionReport"
+    WHERE "priceBookId" = ${target.id} OR snapshot #>> '{payroll,policyBookId}' = ${target.id}
+    LIMIT 1
+  `;
+  if (referenced.length) throw new PieceworkPriceBookAdminError('该工价已有报工记录，不能取消；请新建调价草稿');
   const [predecessor, successor] = await Promise.all([
     tx.pieceworkPriceBook.findFirst({ where: { workerId, status: 'PUBLISHED', effectiveFrom: { lt: target.effectiveFrom } }, orderBy: { effectiveFrom: 'desc' } }),
     tx.pieceworkPriceBook.findFirst({ where: { workerId, status: 'PUBLISHED', effectiveFrom: { gt: target.effectiveFrom } }, orderBy: { effectiveFrom: 'asc' } }),

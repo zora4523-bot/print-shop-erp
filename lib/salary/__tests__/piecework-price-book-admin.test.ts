@@ -412,3 +412,15 @@ it('does not bypass an existing unified draft when a manifest requests another v
   await expect(publishPieceworkPriceBookV1({ manifest: next, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('已有调价草稿');
   expect(dbMock.pieceworkPriceBook.create).not.toHaveBeenCalled();
 });
+
+it('directs CLI recovery to the price page when all unified publications were cancelled', async () => {
+  dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
+  dbMock.pieceworkPriceBook.findFirst.mockImplementation(({ where }) => Promise.resolve(where ? null : { ...draftBook(), status: 'CANCELLED' }));
+  const next = manifest({ priceBookVersion: 2 });
+  const message = '当前没有已发布统一工价，请在工价页新建草稿发布';
+  const preview = await previewPieceworkPriceBookV1Publication(next, sourceSha256);
+  expect(preview.readyToPublish).toBe(false);
+  expect(preview.issues).toContain(message);
+  await expect(publishPieceworkPriceBookV1({ manifest: next, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow(message);
+  expect(dbMock.pieceworkPriceBook.create).not.toHaveBeenCalled();
+});
