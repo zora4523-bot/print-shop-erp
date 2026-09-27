@@ -7,14 +7,22 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-09-28 取消未来计件调价计划
+
+`reviewPieceworkCancellationAction(workerId, targetId)` 与 `cancelPieceworkPlanAction(previous, form)` 均要求 `salary:rule:manage` 和 `PIECEWORK_SCHEDULE_CANCEL_ENABLED=true`。领域再次检查当前启用管理员；个人范围须匹配目标工价的 workerId，但已停用师傅的错误未来计划仍可取消。
+
+复核返回目标、前版、后继的 ID、版本、原起止时间和 updatedAt；执行表单提交该 review、UUID clientRequestId 与 2～500 字 reason。服务端重新读取并比较，过时复核须重新核对。仅允许未生效、无直接报工或个人政策引用的 PUBLISHED 目标转为 CANCELLED；取消中间版保留后继，前版接到目标原结束时间，取消尾版恢复前版无结束时间。没有个人前版则使用统一工价，没有统一前版则该时段无法报工，绝不补零价。
+
+相同管理员、请求键及相同事实重试返回“该调价计划此前已取消”；改原因或对象拒绝。取消记录、状态、前版区间与审计在同一事务提交。已有草稿不删除、不覆盖、不自动发布。取消所有未来计划后可以立即发布纠正价；仍有未来计划时仅能在最后计划之后追加，页面说明其时间。新草稿优先返回已有草稿，否则复制该范围最新未取消发布版，版本号取全局最大值加一（包括取消版本）。旧标签页发布已取消版得到明确业务错误。
+
 ## 2026-09-27 仓库维护
 
-`maintainWarehouseAction` 接收 kind（warehouse/location）、id、operation（rename/disable/restore）、expectedUpdatedAt 及改名时的 name。入口与领域均要求当前启用的 warehouse:manage 账号；编码、所属仓库和默认标记不可变。相同结果的重试不重复审计；其他旧版本提交拒绝并提示刷新。库存逐条非零时拒绝停用，默认对象不能停用，恢复父仓不改变子库位各自状态。
+`maintainWarehouseAction` 接收 kind（warehouse/location）、id、operation（rename/disable/restore）、expectedUpdatedAt 及改名时的 name。入口与领域均要求当前启用的 warehouse:manage 账号；编码、所属仓库和默认标记不可变。相同结果的重试不重复审计；其他旧版本提交拒绝并提示刷新。库存逐条非零时拒绝停用，默认对象不能停用，恢复父仓不改变子库位各自状态；恢复库位前必须先恢复所属仓库，等待配置锁后仍重新核对父状态。
 
 
 ## 2026-09-27 采购/BOM 录入恢复
 
-`createPurchaseOrderAction`、`createBomAction` 新表单提交 `draftId` 与 `clientRequestId`（UUID，必须成对）。服务端从当前会话取得 actor，按 actor / 表单类型 / 请求键串行核对；同键同规范化事实返回原实体并显示“该录入此前已创建”，同键异内容拒绝。旧表单两键均缺失时保留兼容，但不提供自动恢复去重承诺。BOM 行数明确限制为 1～20。
+`createPurchaseOrderAction`、`createBomAction` 新表单提交 `draftId` 与 `clientRequestId`（UUID，必须成对）。服务端从当前会话取得 actor，按 actor / 表单类型 / 请求键串行核对；取得请求锁后复核当前账号启用状态和对应创建权限（含重放与状态查询）；同键同规范化事实返回原实体并显示“该录入此前已创建”，同键异内容拒绝。旧表单两键均缺失时保留兼容，但不提供自动恢复去重承诺。BOM 行数明确限制为 1～20。
 
 `getFormCreationStatusAction({kind,draftId,clientRequestId,payload?})` 使用对应创建权限和同一事务锁，返回 `not-created` 或 `created`（授权实体详情地址、业务差异）。查询超时不意味着创建失败，客户端只允许沿用原键续填重试；明确“另建一单”才换键。详情回执 `createdDraft` / `creationRequest` 必须经服务器核对 actor、类型、draftId 和实体，才清理浏览器草稿。
 
@@ -430,7 +438,7 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 发布与草稿编辑共用事务锁；扫码报工在取价及写入期间取得共享锁。报工锁顺序为既有
 工单/工序/身份锁 → 工价共享锁 → 报工日/人员日锁；发布不取得报工日或工序锁。
-已发布版本只能创建后续版本调整，重复发布不重复记审计或改变生效时间。
+已生效版本只能创建后续版本调整，重复发布不重复记审计或改变生效时间；尚未生效版本的单版取消例外见上方 2026-09-28 契约。
 
 ### 2026-09-16：管理员调整局部工序计薪次数
 

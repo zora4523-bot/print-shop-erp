@@ -65,7 +65,7 @@ export async function ensurePieceworkPriceBookV1PlaceholderInTx(
   }
 
   // 发布版是历史事实；seed 只读取状态，绝不重建草稿或改价。
-  if (existing.status === PieceworkPriceBookStatus.PUBLISHED) {
+  if (existing.status !== PieceworkPriceBookStatus.DRAFT) {
     return {
       bookId: existing.id,
       status: existing.status,

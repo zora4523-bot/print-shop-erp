@@ -1,3 +1,4 @@
+import { pieceworkScheduleCancellationEnabled } from '@/lib/salary/piecework-cancellation';
 import { PieceworkPriceBookForm } from '@/components/business/salary/PieceworkPriceBookForm';
 import { listPieceworkAdminBooks } from '@/lib/salary/piecework-admin';
 import { listPersonalPieceworkBooks } from '@/lib/salary/personal-piecework-admin';
@@ -81,7 +82,7 @@ export default async function EditAccountPage({ params, searchParams }: PageProp
         />
       </section>
 
-      {account.role === 'WORKER' && <PieceworkPriceBookForm books={personalBooks} now={new Date().toISOString()} personal={{ workerId: id, lane, canEdit: Boolean(lane), unifiedBooks }} />}
+      {account.role === 'WORKER' && <PieceworkPriceBookForm cancellationEnabled={pieceworkScheduleCancellationEnabled()} books={personalBooks} now={new Date().toISOString()} personal={{ workerId: id, lane, canEdit: Boolean(lane), unifiedBooks }} />}
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-2 text-base font-semibold">重置密码</h2>

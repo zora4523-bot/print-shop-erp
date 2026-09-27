@@ -39,6 +39,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
     // These are isolated test processes, including when Next uses production
     // build/start. They never represent a live notification/worker acceptance.
     NOTIFICATION_MOCK_MODE: 'true',
+    PIECEWORK_SCHEDULE_CANCEL_ENABLED: 'true',
     WECOM_SMART_BOT_ID: 'e2e-only-smart-bot',
     WECOM_SMART_BOT_SECRET: 'e2e-only-smart-bot-secret',
     CDR_BUNDLE_MOCK_MODE: 'true',

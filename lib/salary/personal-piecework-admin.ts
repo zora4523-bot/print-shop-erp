@@ -1,3 +1,4 @@
+import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { foilFeeData } from './foil-wage-admin';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -30,8 +31,9 @@ async function lockPersonal(tx: Prisma.TransactionClient, workerId: string, acto
 export async function createPersonalPieceworkDraft(workerId: string, actor: AuditActor) {
   return db.$transaction(async (tx) => {
     const { admin, lane } = await lockPersonal(tx, workerId, actor);
-    const previous = await tx.pieceworkPriceBook.findFirst({ where: { workerId }, include, orderBy: { version: 'desc' } });
-    if (previous?.status === 'DRAFT') return projectPieceworkBook(previous);
+    const draft = await tx.pieceworkPriceBook.findFirst({ where: { workerId, status: 'DRAFT' }, include });
+    if (draft) return projectPieceworkBook(draft);
+    const previous = await tx.pieceworkPriceBook.findFirst({ where: { workerId, status: 'PUBLISHED' }, include, orderBy: { version: 'desc' } });
     const latest = await tx.pieceworkPriceBook.findFirst({ orderBy: { version: 'desc' } });
     if (!latest) throw new PieceworkPriceBookAdminError('请先初始化统一工价');
     const book = await tx.pieceworkPriceBook.create({ data: {
@@ -79,6 +81,7 @@ export async function publishPersonalPieceworkDraft(input: { workerId: string; v
   return db.$transaction(async (tx) => {
     const { admin, lane } = await lockPersonal(tx, input.workerId, actor);
     const book = await tx.pieceworkPriceBook.findUnique({ where: { version: input.version }, include });
+    if (book?.workerId === input.workerId && book.status === 'CANCELLED') throw new PieceworkPriceBookAdminError('该调价计划已取消，请新建调价草稿');
     if (book?.workerId === input.workerId && book.status === 'PUBLISHED') {
       const audit = await tx.businessAuditLog.findFirst({ where: { entityType: 'PieceworkPriceBook', entityId: book.id, action: 'PUBLISH_VERSION' }, select: { before: true } });
       const before = audit?.before;
@@ -91,7 +94,7 @@ export async function publishPersonalPieceworkDraft(input: { workerId: string; v
     if (effectiveFrom < now) throw new PieceworkPriceBookAdminError('生效时间已过，请修改后重新保存');
     const previous = await tx.pieceworkPriceBook.findFirst({ where: { workerId: input.workerId, status: 'PUBLISHED', effectiveTo: null }, orderBy: { version: 'desc' } });
     if (previous) {
-      if (previous.effectiveFrom! >= effectiveFrom || previous.version >= book.version) throw new PieceworkPriceBookAdminError('生效时间须晚于该账号上一版工价');
+      if (previous.effectiveFrom! >= effectiveFrom || previous.version >= book.version) throw new PieceworkPriceBookAdminError(`仍有 ${formatDateTimeShanghai(previous.effectiveFrom)} 生效的调价计划，请在下方查看；新工价只能安排在其后`);
       await tx.pieceworkPriceBook.update({ where: { id: previous.id }, data: { effectiveTo: effectiveFrom } });
     }
     const sourceName = book.sourceName?.trim() || '管理员账号工价设置';

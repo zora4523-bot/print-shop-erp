@@ -60,11 +60,16 @@ export async function listOrderWages(orderId: string, actor: AuditActor) {
 export async function reviewOrderWages(raw: z.infer<typeof wageReviewSchema>, actor: AuditActor) {
   const input = wageReviewSchema.parse(raw);
   return db.$transaction(async (tx) => {
-    const admin = await assertActivePieceworkAdmin(tx, actor);
+    await assertActivePieceworkAdmin(tx, actor);
     const locator = await tx.productionOperation.findUnique({ where: { id: input.operationId }, select: { orderId: true } });
     if (!locator) throw new WageReviewError('工序不存在，请刷新工单');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(locator.orderId)}))`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${operationLockKey(input.operationId)}))`;
+    // Match live reporting: publication precedes every reporting-day lock.
+    // The INSERT trigger also takes publication; taking it only there would
+    // invert this order when a cancellation/publisher is queued in between.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext('print-shop-erp:piecework-price-book:publish'))`;
+    const admin = await assertActivePieceworkAdmin(tx, actor);
     await tx.$queryRaw`SELECT id FROM "ProductionOperation" WHERE id=${input.operationId} FOR UPDATE`;
     const operation = await tx.productionOperation.findUniqueOrThrow({ where: { id: input.operationId }, include });
     const current = summarize(operation);
