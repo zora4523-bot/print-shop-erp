@@ -15,9 +15,13 @@ applies_to: repository source at last_verified
 
 相同管理员、请求键及相同事实重试返回“该调价计划此前已取消”；改原因或对象拒绝。取消记录、状态、前版区间与审计在同一事务提交。已有草稿不删除、不覆盖、不自动发布。取消所有未来计划后可以立即发布纠正价；仍有未来计划时仅能在最后计划之后追加，页面说明其时间。新草稿优先返回已有草稿，否则复制该范围最新未取消发布版，版本号取全局最大值加一（包括取消版本）。旧标签页发布已取消版得到明确业务错误。
 
+取消成功或重放在工价区显示成功状态，刚取消的卡片保持展开，焦点返回其标题；仅存在草稿时说明草稿保留，只有可编辑账号显示继续编辑入口。CLI 在没有已发布统一工价且清单不对应现有草稿时，预览与执行都引导到工价页新建草稿发布，不绕过版本复核自举。
+
 ## 2026-09-27 仓库维护
 
 `maintainWarehouseAction` 接收 kind（warehouse/location）、id、operation（rename/disable/restore）、expectedUpdatedAt 及改名时的 name。入口与领域均要求当前启用的 warehouse:manage 账号；编码、所属仓库和默认标记不可变。相同结果的重试不重复审计；其他旧版本提交拒绝并提示刷新。库存逐条非零时拒绝停用，默认对象不能停用，恢复父仓不改变子库位各自状态；恢复库位前必须先恢复所属仓库，等待配置锁后仍重新核对父状态。
+
+配置写入在取锁前设置事务内 3 秒锁等待上限，超时回滚并提示“仓库正在处理出入库，请稍后重试”。盘点可选行只包含启用仓库下的启用库位；旧页面提交会指明已停用仓库/库位，并要求移除该行或恢复后重试。
 
 
 ## 2026-09-27 采购/BOM 录入恢复
@@ -25,6 +29,8 @@ applies_to: repository source at last_verified
 `createPurchaseOrderAction`、`createBomAction` 新表单提交 `draftId` 与 `clientRequestId`（UUID，必须成对）。服务端从当前会话取得 actor，按 actor / 表单类型 / 请求键串行核对；取得请求锁后复核当前账号启用状态和对应创建权限（含重放与状态查询）；同键同规范化事实返回原实体并显示“该录入此前已创建”，同键异内容拒绝。旧表单两键均缺失时保留兼容，但不提供自动恢复去重承诺。BOM 行数明确限制为 1～20。
 
 `getFormCreationStatusAction({kind,draftId,clientRequestId,payload?})` 使用对应创建权限和同一事务锁，返回 `not-created` 或 `created`（授权实体详情地址、业务差异）。查询超时不意味着创建失败，客户端只允许沿用原键续填重试；明确“另建一单”才换键。详情回执 `createdDraft` / `creationRequest` 必须经服务器核对 actor、类型、draftId 和实体，才清理浏览器草稿。
+
+同键内容冲突的错误结果附 `creationConflict: true`，页面自动重新核对原请求；查询不可用时保留当前输入与“重新核对”，未知状态不提供另建。提交等待期间不能切换录入身份；明确另建后，旧请求的错误和字段提示不再显示。表单仍直接绑定原 Server Action，无 JavaScript 时可原生提交并通过返回列表重新新建。
 
 补资料只接收 `form_origin`、`form_draftId`、`form_nonce`、`form_entityType`、`form_target`；来源限定 `purchase-new` / `bom-new`，目的地由固定映射产生。成功额外返回 `form_entityId`。`resolveSupplementAction` 重新核对来源及资料权限、启用状态、供应商类型和分类适用性。采购补供应商不接受 CUSTOMER 类型。协议不接收任意返回 URL，身份标识不是授权凭证；供应商独立新建的原有受限 `returnTo` 保持兼容。
 
