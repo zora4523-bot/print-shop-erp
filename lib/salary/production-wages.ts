@@ -13,7 +13,7 @@ export const productionWageSchema = z.object({
   jobId: z.string().min(1), requestKey: z.string().min(8).max(100), reason: z.string().trim().min(1).max(500),
   allocations: z.array(z.object({ workerId: z.string().min(1), amount: z.string().regex(/^\d{1,10}(\.\d{1,2})?$/), expectedRevision: z.number().int().min(-1) }).strict()).min(1).max(20),
 }).strict();
-export type ProductionWageInput = z.infer<typeof productionWageSchema>;
+type ProductionWageInput = z.infer<typeof productionWageSchema>;
 /** Final amounts, never extra whole amounts on top of an automatic wage. */
 export async function allocateProductionWages(raw: ProductionWageInput, actor: ProductionActor) {
   const input = productionWageSchema.parse(raw);

@@ -11,7 +11,7 @@ import { registerProductionCompletion, completionSchema } from '@/lib/production
 import { allocateProductionWages, productionWageSchema } from '@/lib/salary/production-wages';
 import { reviewProductionFact, factReviewSchema } from '@/lib/production/fact-review';
 
-export type ProductionActionState = { ok: boolean; message: string } | null;
+type ProductionActionState = { ok: boolean; message: string } | null;
 function refreshProduction(orderIds: string[]) {
   revalidatePath('/orders');
   revalidatePath('/orders/production');

@@ -4,12 +4,13 @@ import type { Prisma } from '@/generated/prisma/client';
 import { deriveProductionOperationPlan } from './operation-materializer';
 import { deriveProductionProgressPlan } from './progress-materializer';
 
-export const dispatchOrderInclude = {
+const dispatchOrderInclude = {
   items: { orderBy: { sequence: 'asc' as const }, include: { designs: true } },
   shipments: { include: { lines: true } },
   packagingGroups: { include: { lines: true } },
 } satisfies Prisma.OrderInclude;
-export type DispatchOrder = Prisma.OrderGetPayload<{ include: typeof dispatchOrderInclude }>;
+export { dispatchOrderInclude };
+type DispatchOrder = Prisma.OrderGetPayload<{ include: typeof dispatchOrderInclude }>;
 export type DispatchTarget = {
   key: string; label: string; operationType: 'PARTIAL' | 'FULL' | null;
   craftId: string | null; itemIds: string[]; quantity: string; fingerprint: string;

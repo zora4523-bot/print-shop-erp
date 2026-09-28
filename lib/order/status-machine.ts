@@ -107,7 +107,7 @@ export const ORDER_TRANSITIONS = {
 // every status write to go through this function so the transition table
 // is the single source of truth. Never write `data: { status: 'XXX' }`
 // directly in a Prisma update.
-export type ProductionReopenEvidence = { remainingAssignedProduction: true };
+type ProductionReopenEvidence = { remainingAssignedProduction: true };
 
 export function transitionOrder(from: OrderStatus, to: OrderStatus, evidence?: ProductionReopenEvidence): OrderStatus {
   if (!canTransitionOrder(from, to, evidence)) {

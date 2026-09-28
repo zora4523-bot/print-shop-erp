@@ -27,7 +27,7 @@ export const bomDraftSchema = z.object({
     rowId: z.uuid(), materialId: id, quantity: numberText, remark,
   }).strict()).min(1).max(20),
 }).strict().refine((value) => new Set(value.rows.map((row) => row.rowId)).size === value.rows.length);
-export type PurchaseDraft = z.infer<typeof purchaseDraftSchema>;
+type PurchaseDraft = z.infer<typeof purchaseDraftSchema>;
 export type BomDraft = z.infer<typeof bomDraftSchema>;
 export type FormDraftPayload = PurchaseDraft | BomDraft;
 
@@ -63,7 +63,7 @@ const envelope = z.object({
   savedAt: z.number().int().nonnegative(),
   supplement: supplementSchema.nullable(),
 });
-export const storedDraftSchema = z.discriminatedUnion('kind', [
+const storedDraftSchema = z.discriminatedUnion('kind', [
   envelope.extend({ kind: z.literal('purchase-new'), payload: purchaseDraftSchema }),
   envelope.extend({ kind: z.literal('bom-new'), payload: bomDraftSchema }),
 ]);

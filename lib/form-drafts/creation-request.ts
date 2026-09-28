@@ -9,7 +9,7 @@ export class FormCreationError extends Error {
   constructor(message: string, readonly creationConflict = false) { super(message); }
 }
 export type CreationRequest = CreationIdentity & { actorId: string };
-export const creationKind = (kind: FormKind) => kind === 'purchase-new' ? 'PURCHASE' as const : 'BOM' as const;
+const creationKind = (kind: FormKind) => kind === 'purchase-new' ? 'PURCHASE' as const : 'BOM' as const;
 export const creationLockKey = (kind: FormKind, request: CreationRequest) => `form-create:${request.actorId}:${creationKind(kind)}:${request.clientRequestId}`;
 
 export function creationPayloadHash(facts: Prisma.InputJsonObject) {

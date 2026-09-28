@@ -5,7 +5,7 @@ import { bomCreationFacts, purchaseCreationFacts } from './creation-facts';
 import { creationPayloadHash } from './creation-request';
 import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 
-export function draftCreationFacts(kind: FormKind, raw: unknown) {
+function draftCreationFacts(kind: FormKind, raw: unknown) {
   if (kind === 'purchase-new') {
     const payload = purchaseDraftSchema.safeParse(raw);
     if (!payload.success) return null;
@@ -24,7 +24,7 @@ const labels: Record<string, string> = {
   blankSpecificationKey: '规格', name: '用料清单名称', version: '版本号', baseQuantity: '基准产量', items: '物料行',
 };
 const targetLabels: Record<string, string> = { BLANK: '空白封纸张与规格', PRODUCT: '其他产品', CATEGORY: '产品结构分类' };
-export type CreationDifference = { label: string; before: string; after: string };
+type CreationDifference = { label: string; before: string; after: string };
 
 /** Authorized caller only. Resolve display names freshly, never include them in the hash. */
 export async function describeCreationDifferences(kind: FormKind, previous: unknown, payloadHash: string, raw: unknown): Promise<CreationDifference[]> {

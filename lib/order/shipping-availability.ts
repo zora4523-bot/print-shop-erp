@@ -12,7 +12,7 @@ export type OrderShippingAvailabilityInput = {
   hasPendingChange: boolean;
 };
 
-export type OrderShippingBlocker = 'STATUS' | 'CHANGE' | 'PRICING' | 'OUTSOURCE' | 'PRODUCTION' | 'ADDRESS';
+type OrderShippingBlocker = 'STATUS' | 'CHANGE' | 'PRICING' | 'OUTSOURCE' | 'PRODUCTION' | 'ADDRESS';
 
 /** Shared presentation facts. Actual writes still enforce their transactional guards. */
 export function orderShippingBlocker(input: OrderShippingAvailabilityInput): OrderShippingBlocker | null {

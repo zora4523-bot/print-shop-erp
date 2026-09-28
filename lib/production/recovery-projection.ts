@@ -4,7 +4,7 @@ import { currentDispatchTargets } from './dispatch-targets';
 import { revisionProductionQuantities } from './revision-jobs';
 
 /** Only verified unproduced successors can have their remaining demand corrected. */
-export async function reconcileRecoveredProductionInTx(tx: Prisma.TransactionClient, orderId: string, sources: Array<ProductionScope & { workOrderVersion: number }>, actorId: string) {
+async function reconcileRecoveredProductionInTx(tx: Prisma.TransactionClient, orderId: string, sources: Array<ProductionScope & { workOrderVersion: number }>, actorId: string) {
   const sourceVersion = Math.min(...sources.map(source => source.workOrderVersion));
   const { order, targets } = await currentDispatchTargets(tx, orderId);
   if (order.workOrderVersion <= sourceVersion || !['RELEASED', 'FOILING', 'PACKING', 'ON_HOLD'].includes(order.status)) return;

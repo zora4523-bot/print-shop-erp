@@ -18,7 +18,7 @@ export const dispatchSchema = z.object({
     assignments: z.record(z.string(), z.string().min(1)),
   }).strict()).min(1).max(20),
 }).strict();
-export type DispatchInput = z.infer<typeof dispatchSchema>;
+type DispatchInput = z.infer<typeof dispatchSchema>;
 export async function assertProductionAdmin(tx: Prisma.TransactionClient, actor: ProductionActor) {
   const account = await tx.user.findUnique({ where: { id: actor.id }, select: { role: true, isActive: true } });
   if (actor.role !== 'ADMIN' || account?.role !== 'ADMIN' || !account.isActive) throw new Error('无权操作，请使用有效的管理员账号');

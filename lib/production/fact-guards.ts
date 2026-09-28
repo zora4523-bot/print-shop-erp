@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@/generated/prisma/client';
 
-export const UNRESOLVED_FACT_STATUSES = ['OPEN', 'CONFLICT'];
+const UNRESOLVED_FACT_STATUSES = ['OPEN', 'CONFLICT'];
 
 /** A submitted request and an unverified missing registration are both obligations. */
 export async function assertProductionFactsReadyForChange(tx: Prisma.TransactionClient, orderId: string, knownOrder?: { simpleProduction: boolean; workOrderVersion: number }, metadataOnly = false) {

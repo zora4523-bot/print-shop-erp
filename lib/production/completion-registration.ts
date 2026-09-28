@@ -31,9 +31,9 @@ export const completionSchema = z.object({
   reviewRevision: z.number().int().nonnegative().optional(),
   itemQuantities: z.record(z.string(), z.string().regex(/^(0|[1-9]\d{0,9})$/)).optional(),
 }).strict();
-export type CompletionInput = z.infer<typeof completionSchema>;
+type CompletionInput = z.infer<typeof completionSchema>;
 
-export async function lockProductionFactDay(tx: Prisma.TransactionClient, workerId: string, day: string) {
+async function lockProductionFactDay(tx: Prisma.TransactionClient, workerId: string, day: string) {
   const workDate = parseStrictYmd(day);
   if (!workDate) throw new Error('生产日期无效，请填写实际生产日期');
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkReportingDayGateLockKey(day)}))`;
