@@ -81,26 +81,35 @@ test.describe('administrator workspace', () => {
 
   test('warehouse maintenance controls pass focused light and dark gates', async ({ page }, testInfo) => {
     const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库作业台', prepareGateState: async (page) => {
-      await page.getByText('仓库与库位设置', { exact: true }).click();
-      await page.getByText('改名', { exact: true }).first().click();
-      await expect(page.getByRole('button', { name: '保存名称', exact: true }).first()).toBeVisible();
+      const disclosure = page.locator('#admin-main').getByText('仓库与库位设置', { exact: true });
+      await disclosure.click();
+      const settings = disclosure.locator('..');
+      await settings.getByText('改名', { exact: true }).first().click();
+      await expect(settings.getByRole('button', { name: '保存名称', exact: true }).first()).toBeVisible();
     } }];
     await checkRoutes(page, testInfo, routes, 'light');
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
   test('purchase and BOM recovery controls pass focused light and dark gates', async ({ page }, testInfo) => {
+    let draftsPrepared = false;
     const routes: AdminRoute[] = [
       { name: 'recovery-purchase', path: '/owner/purchases/new', readyHeading: '新建采购单', prepareGateState: async (page) => {
         const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
-        if (await resume.count()) await resume.click();
+        if (draftsPrepared) {
+          await resume.click();
+          await expect(page.getByLabel('采购数量', { exact: true })).toHaveValue('123');
+        }
         await page.getByLabel('采购数量', { exact: true }).fill('123');
         await page.reload();
         await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
       } },
       { name: 'recovery-bom', path: '/owner/boms/new', readyHeading: '新建 BOM', prepareGateState: async (page) => {
         const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
-        if (await resume.count()) await resume.click();
+        if (draftsPrepared) {
+          await resume.click();
+          await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue('待补物料的用料清单');
+        }
         await page.getByLabel('BOM 名称', { exact: true }).fill('待补物料的用料清单');
         await page.reload();
         await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
@@ -110,6 +119,7 @@ test.describe('administrator workspace', () => {
       { name: 'recovery-category', path: '/owner/rules/product-categories/new', readyHeading: '新建产品结构分类' },
     ];
     await checkRoutes(page, testInfo, routes, 'light');
+    draftsPrepared = true;
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
@@ -988,8 +998,11 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
       await expect(fees.getByText(title, { exact: true })).toBeVisible();
     }
     // This legacy fixture has only a historical total, no fabricated stage snapshots.
-    await expect(fees.getByText('历史金额', { exact: true })).toBeVisible();
-    await expect(fees.getByText('¥ 646,172.57', { exact: true })).toBeVisible();
+    const currentAmount = fees.locator('[data-slot="current-order-amount"]');
+    await expect(currentAmount).toBeVisible();
+    await expect(currentAmount.locator('..')).toContainText('历史金额');
+    await expect(currentAmount).toHaveText('¥ 646,172.57');
+    await expect(currentAmount.locator('..').getByText('不含快递费，含耗材费', { exact: true })).toBeVisible();
     await expect(fees.getByText('当前', { exact: true })).toHaveCount(0);
     await expect(fees.getByText('—', { exact: true })).toHaveCount(3);
     for (const hint of ['尚未形成报价', '费用核定后显示', '结算后显示']) {

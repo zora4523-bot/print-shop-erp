@@ -449,8 +449,9 @@ test('纸张身份冲突只标记未估算，工单详情仍可读取', async ({
       try {
         const response = await ui.goto(`/orders/${orderId}`);
         expect(response?.status()).toBe(200);
-        const disclosure = ui.locator('summary:visible').filter({ hasText: /^生产、用料与计件记录$/ });
-        const details = disclosure.locator('..');
+        const details = ui.locator('#admin-main #detail-production-records');
+        const disclosure = details.locator(':scope > summary');
+        await expect(disclosure.getByRole('heading', { name: '生产、用料与计件记录', exact: true })).toBeVisible();
         await expect(details).toHaveAttribute('open', '');
         if (width <= 768) {
           const box = await disclosure.boundingBox();

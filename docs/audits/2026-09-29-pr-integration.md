@@ -61,3 +61,21 @@ scope: PR 29 合并前验证
 重新构建 `.next-release` 后，在独立浏览器库运行 `pnpm exec playwright test --config=playwright.compat.config.ts tests/e2e/order-create.spec.ts --grep 'ADMIN 创建' --workers=1 --max-failures=1`，显式使用受控 3120 端口、fixture 账号与 `E2E_PREBUILT=1`：desktop-chromium、desktop-webkit、ios-webkit、android-chromium 四项全部通过，0 跳过/失败/flaky，全局 errors 为空（55.9 秒）。目标 eslint、`pnpm typecheck`、release build 均通过，未更新任何打印或截图基线。
 
 另外新建空库 `erp_e2e_pr_merge_1790618288701`，完整应用 179 条迁移、seed、执行与 CI 相同的 `test:e2e:prepare`，然后在匹配且已确认的隔离库运行全量 Vitest+coverage：720 文件通过、3 文件跳过；7,827 用例通过、0 失败、46 既有跳过（103.65 秒）。覆盖率 86.21 / 80.21 / 91.47 / 88.59%，全部门槛通过。逐项核对结构化报告确认四组此前遗漏的测试实际通过 20 / 6 / 38 / 23，共 87 项，零失败及跳过。证据为 `fresh-ci-migrate.log`、`fresh-ci-prepare.log`、`fresh-ci-unit.log/json`；迁移后的首个 seed 命令曾因临时日志路径拼写错误未执行，修正路径后才依次完成 seed、prepare 与测试，未跳过前置。
+
+## 界面改版后的整批 E2E 与草稿流程核对
+
+远端候选 `0576a773` 的 unit 作业已通过。下载 `review-unit-504bc8394c7e9800260394bf8be5f41d963420b4` 并核对 `unit-tests.json`：7,827 通过、0 失败、46 跳过；仓库维护 / 创建幂等 / 生产登记 / 工价取消四组 PostgreSQL 测试分别实际通过 20 / 6 / 38 / 23，零跳过。不是只以 CI 绿色推定写入测试被执行。
+
+完整 E2E 还暴露未随改版同步的定位与操作步骤：
+
+- 费用标签内部增加了到付说明，原精确全文“历史金额”不再匹配。通过既有 `current-order-amount` 定位金额，核对其可见性、精确数值 `¥ 646,172.57`、相邻的历史金额标签和“到付不含快递费、含耗材费”说明；保留三个缺失阶段的 `—`、提示及不伪造当前金额断言。该 fixture 的金额语义与产品逻辑未改动。
+- 生产记录的 summary 增加了展开/收起提示，原全文正则不再匹配。改用既有 `detail-production-records` 锚点和直接 summary，并单独验证精确标题。保留六视口下的触控/键盘折叠、44px、纸张身份冲突提示、不将未估算显示为 0 张、页面错误、明暗主题、溢出与 axe 检查。
+- 采购 smoke 的模糊“供应商”标签同时匹配新侧栏入口和表单 select。改用精确命名的 combobox，保留选项内容、选择及值校验；没有用 `.first()` 隐藏歧义。
+- 主数据维护测试沿用了无草稿时的路径和重访步骤。采购失败后核对仍在新建页且保留原 `draft` 标识；BOM 因旧版本启用而拒绝创建后，停用旧版本、普通重访并点击“继续上次录入”，验证原请求标识、目标产品、名称、版本、物料及数量全部恢复，再创建第二版。保留停用过滤、历史快照、唯一启用版本及持久化数据断言，不绕过恢复提示或禁用状态。
+- 两个管理端用例首跑失败、重试通过：仓库维护文字定位误匹配流式渲染期间的两个 summary，收紧到 `#admin-main` 及对应设置容器；恢复测试在 hydration 前通过瞬时 `count()` 错判没有恢复入口，暗色重访按亮色阶段已准备的草稿明确等待并点击继续，同时核对恢复值。不扩大超时，也不依赖重试掩盖失败。
+
+费用定位调整先在独立浏览器库与真实 release server 上运行 `admin-responsive.spec.ts --grep 'critical routes pass'` 的全部六视口明暗主题：12 通过、0 失败/跳过/flaky，全局 errors 为空（482.1 秒）；报告为 `admin-critical-six.log/json`。随后显式保留原金额可见性断言，与其余两处 E2E 定位一并复验；最终候选与完整 CI 结果见 PR Checks。
+
+最终金额可见性、生产折叠和采购 smoke 组合复验 6 项通过（169.4 秒），涵盖 375/1280 明暗主题及纸张冲突自身的六视口检查；主数据维护整文件 4 项通过（23.1 秒）。两份 Playwright JSON 均为 0 失败/跳过/flaky、全局 errors 为空，分别保存在 `e2e-locator-final.json` 与 `e2e-master-data-final.json`。目标 eslint、类型检查通过。
+
+两处偶发问题另用真实 release server，在 375/1280 下执行 `--grep 'warehouse maintenance controls|purchase and BOM recovery controls' --repeat-each=2 --workers=1 --max-failures=1`：8 通过、0 失败/跳过/flaky，全局 errors 为空（1.9 分钟），每项内部均覆盖明暗主题；证据为 `e2e-flaky-locators-final.log/json`。上述修正仅涉及四个测试文件和本记录，不修改生产逻辑、迁移、数据隔离守卫、测试超时或任何截图基线。
