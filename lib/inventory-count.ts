@@ -66,6 +66,7 @@ export async function listInventoryCountMaterials(
       safetyStock: true,
       isActive: true,
       locationStocks: {
+        where: { location: { isActive: true, warehouse: { isActive: true } } },
         select: {
           id: true,
           currentStock: true,

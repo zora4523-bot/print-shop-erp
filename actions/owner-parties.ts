@@ -1,5 +1,9 @@
 'use server';
 
+import { authorizedSupplement } from '@/lib/form-drafts/authorized-supplement';
+import { supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { FORM_PATHS } from '@/lib/form-drafts/model';
+
 import { redirect } from 'next/navigation';
 import { appendReceipt } from '@/lib/admin/receipt';
 import {
@@ -63,8 +67,13 @@ export async function createPartyAction(
 ): Promise<PartyMutationResult> {
   await requirePermission('party:manage');
 
+  const supplement = await authorizedSupplement(formData, 'SUPPLIER');
+
   const parsed = createPartySchema.safeParse(normalizePartyFormInput(formData));
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
+  if (supplement && parsed.data.type === 'CUSTOMER') {
+    return { status: 'invalid', fieldErrors: { type: ['采购只能使用供应商或客户/供应商，请调整类型'] } };
+  }
 
   let createdId: string;
   try {
@@ -79,9 +88,10 @@ export async function createPartyAction(
   }
 
   revalidatePartyPaths(createdId);
+  if (supplement) revalidatePaths([FORM_PATHS[supplement.origin]]);
   redirect(
     appendReceipt(
-      purchaseReturnPath(formData, createdId) ?? `/owner/parties/${createdId}`,
+      supplement ? supplementReturnHref(supplement, createdId) : purchaseReturnPath(formData, createdId) ?? `/owner/parties/${createdId}`,
       { created: '1' },
     ),
   );

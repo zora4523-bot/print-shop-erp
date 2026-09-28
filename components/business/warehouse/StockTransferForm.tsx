@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useCallback, useMemo, useState } from 'react';
+import { useActionState, useCallback, useMemo, useRef, useState } from 'react';
 import type { MutationResult } from '@/lib/admin/action-helpers';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
@@ -64,10 +64,12 @@ export function StockTransferForm({
   locationStocks,
   initialIdempotencyKey,
 }: Props) {
+  const allowReset = useRef(false);
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const submitTransfer = useCallback(
     async (prev: MutationResult | null, formData: FormData) => {
       const result = await action(prev, formData);
+      allowReset.current = result.status === 'success';
       if (result.status === 'success') {
         setIdempotencyKey(window.crypto.randomUUID());
       }
@@ -106,6 +108,7 @@ export function StockTransferForm({
     <form
       id="stock-transfer-form"
       action={formAction}
+      onReset={(event) => { if (!allowReset.current) event.preventDefault(); }}
       aria-busy={pending}
       className="space-y-4"
       noValidate
@@ -147,6 +150,7 @@ export function StockTransferForm({
             disabled={pending || locations.length === 0}
           >
             <option value="">请选择来源库位</option>
+            {sourceLocationId && !locations.some((location) => location.id === sourceLocationId) ? <option value={sourceLocationId}>原库位已停用，请重新选择</option> : null}
             {locations.map((location) => (
               <option key={location.id} value={location.id}>
                 {location.warehouseName} / {location.name}
@@ -172,6 +176,7 @@ export function StockTransferForm({
             disabled={pending || locations.length === 0}
           >
             <option value="">请选择目标库位</option>
+            {destinationLocationId && !locations.some((location) => location.id === destinationLocationId) ? <option value={destinationLocationId}>原库位已停用，请重新选择</option> : null}
             {locations.map((location) => (
               <option
                 key={location.id}

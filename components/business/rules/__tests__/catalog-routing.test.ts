@@ -12,7 +12,7 @@ const CANONICAL_RULE_ROUTES = [
   ['app/(admin)/owner/rules/product-categories/items/new/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/product-categories/items/[id]/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/product-categories/page.tsx', '/catalog/'],
-  ['app/(admin)/owner/rules/product-categories/new/page.tsx', '/catalog/'],
+  ['app/(admin-forms)/owner/rules/product-categories/new/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/product-categories/[id]/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/crafts/page.tsx', '/catalog/'],
   ['app/(admin)/owner/rules/crafts/new/page.tsx', '/catalog/'],
@@ -144,7 +144,7 @@ describe('rule-center feature routing', () => {
       'utf8',
     );
     const newMaterialPage = readFileSync(
-      join(ROOT, 'app/(admin)/owner/materials/new/page.tsx'),
+      join(ROOT, 'app/(admin-forms)/owner/materials/new/page.tsx'),
       'utf8',
     );
     const materialDetailPage = readFileSync(

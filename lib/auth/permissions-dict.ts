@@ -26,6 +26,7 @@ export const PERMISSIONS = {
   'order:price:confirm':        [Role.ADMIN],
 
   // 新生产工序与历史任务异议
+  'production:manage':          [Role.ADMIN],
   'task:report':                [Role.WORKER],
   'task:dispute:create':        [Role.WORKER],
   'task:dispute:review':        [Role.ADMIN],

@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import { requirePermission } from '@/lib/auth/permissions';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
-import { Badge } from '@/components/ui/badge';
 import {
   RULE_CENTER_SIDEBAR_ITEMS,
   type RuleCenterEffect,
@@ -37,7 +36,7 @@ const RULE_GROUPS = [
   {
     label: '员工薪酬规则',
     description:
-      '维护标准工时与加班起点版本。工序计件工价不在这里配置。',
+      '维护计件工价、标准工时与加班起点',
     effect: 'effective-dated',
     icon: Users,
   },
@@ -118,21 +117,6 @@ export default async function RuleCenterPage() {
           );
         })}
       </div>
-
-      <section
-        aria-labelledby="piecework-price-boundary"
-        className="rounded-xl border border-dashed bg-muted/20 p-4 sm:p-5"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 id="piecework-price-boundary" className="font-semibold">
-            工序计件工价
-          </h2>
-          <Badge variant="outline">按工序计件</Badge>
-        </div>
-        <p className="mt-2 max-w-4xl text-sm leading-6 text-muted-foreground">
-          <Link href="/owner/rules/employee-pay" className="underline underline-offset-4">维护计件工价</Link>
-        </p>
-      </section>
     </div>
   );
 }

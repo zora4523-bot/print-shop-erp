@@ -1,0 +1,42 @@
+import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
+import { requirePermission } from '@/lib/auth/permissions';
+import { UnauthorizedError } from '@/lib/auth/errors';
+import { ActionNotice } from '@/components/ui-business';
+import { db } from '@/lib/db';
+import { currentDispatchTargets } from '@/lib/production/dispatch-targets';
+import { operationTypeForReporterAccount } from '@/lib/production/reporter-operation-lane';
+import { progressCraftIdsForReporter } from '@/lib/production/progress-reporter-lane';
+import { ProductionDispatchForm } from '@/components/business/production/ProductionDispatchForm';
+
+export const metadata = { title: '安排生产师傅' };
+export default async function ProductionDispatchPage({ searchParams }: { searchParams: Promise<{ ids?: string }> }) {
+  const actor = await requirePermission('production:manage').catch((error: unknown) => { if (error instanceof UnauthorizedError) return null; throw error; });
+  if (!actor || actor.role !== 'ADMIN') return <div className="space-y-4"><h1 className="text-xl font-semibold">安排生产师傅</h1><ActionNotice tone="warning" title="仅管理员可安排生产，请联系管理员。" /><Link href="/orders" className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>返回工单列表</Link></div>;
+  const ids = [...new Set(((await searchParams).ids ?? '').split(',').filter(Boolean))];
+  if (!ids.length || ids.length > 20) return <div className="space-y-4"><h1 className="text-xl font-semibold">安排生产师傅</h1><p>请在工单列表选择 1–20 张工单。</p><Link href="/orders" className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>返回工单列表</Link></div>;
+  const workers = await db.user.findMany({ where: { role: 'WORKER', isActive: true, workerType: { not: 'PACKER' } }, orderBy: { displayName: 'asc' } });
+  const workerCrafts = new Map<string, string[]>();
+  for (const worker of workers) workerCrafts.set(worker.id, await progressCraftIdsForReporter(db, worker));
+  const rows = [];
+  for (const id of ids) {
+    const { order, targets } = await currentDispatchTargets(db, id);
+    const jobs = await db.productionJob.findMany({ where: { orderId: id, workOrderVersion: order.workOrderVersion } });
+    rows.push({ id, name: order.customName || order.orderNo, revision: order.revision, version: order.workOrderVersion,
+      tasks: targets.map(target => {
+        const job = jobs.find(job => job.sourceKey === target.key);
+        const options = workers.filter(worker => target.operationType
+          ? operationTypeForReporterAccount(worker) === target.operationType
+          : workerCrafts.get(worker.id)?.includes(target.craftId!))
+          .map(worker => ({ id: worker.id, name: worker.displayName }));
+        if (job && !options.some(worker => worker.id === job.workerId)) {
+          options.push({ id: job.workerId, name: `${job.workerName}（原生产师傅）` });
+        }
+        return {
+        key: target.key, label: target.label, quantity: job?.plannedQty.toString() ?? target.quantity, workerId: job?.workerId ?? '', locked: !!job && job.status !== 'PENDING',
+        options,
+      }; }),
+    });
+  }
+  return <div className="min-w-0 space-y-5"><header><h1 className="text-xl font-semibold">安排生产师傅</h1><p className="text-sm text-muted-foreground">已选择 {rows.length} 张工单</p></header><ProductionDispatchForm orders={rows} actorId={actor.id} /></div>;
+}

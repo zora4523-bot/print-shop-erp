@@ -31,6 +31,8 @@ import type { EnqueueClient } from './background-jobs/repository';
 // 是单测里的 dbMock**——那正是我们要的：mock 缺哪个 model，测试当场报错，
 // 而不是静默放行。不要为了「让测试过」给 dbMock 加万能 Proxy。
 export type ProductionCompletionTx = {
+  orderChangeRequest: { count: (args: { where: unknown }) => Promise<number> };
+  productionFactReview: { count: (args: { where: unknown }) => Promise<number> };
   order: {
     findUnique: (args: {
       where: { id: string };
@@ -39,6 +41,7 @@ export type ProductionCompletionTx = {
       id: string;
       status: OrderStatus;
       requiresOutsource?: boolean;
+      simpleProduction?: boolean;
       workOrderVersion: number;
       orderNo: string;
       customerRef: string | null;
@@ -159,6 +162,7 @@ export async function maybeCompleteProductionOrder(
   orderId: string,
   actorId: string,
   now: Date,
+  carryCompletedAt?: Date | null,
 ): Promise<ProductionCompletionOutcome> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
@@ -166,6 +170,7 @@ export async function maybeCompleteProductionOrder(
       id: true,
       status: true,
       requiresOutsource: true,
+      simpleProduction: true,
       workOrderVersion: true,
       orderNo: true,
       customerRef: true,
@@ -174,11 +179,16 @@ export async function maybeCompleteProductionOrder(
     },
   });
   if (!order) return notApplicable();
+  if (order.simpleProduction) {
+    if (await tx.orderChangeRequest.count({ where: { orderId, status: 'PENDING' } })) return blocked('INTERNAL_TASKS');
+    if (await tx.productionFactReview.count({ where: { job: { orderId }, status: { in: ['OPEN', 'CONFLICT'] } } })) return blocked('INTERNAL_TASKS');
+  }
   if (order.status === OrderStatus.COMPLETED) return notApplicable();
   const isLegacyCompletionState =
     order.status === OrderStatus.SCHEDULING ||
     order.status === OrderStatus.IN_PRODUCTION;
   const isCanonicalProductionState =
+    (order.simpleProduction && !!carryCompletedAt && order.status === OrderStatus.ON_HOLD) ||
     order.status === OrderStatus.RELEASED ||
     order.status === OrderStatus.FOILING ||
     order.status === OrderStatus.PACKING;
@@ -195,7 +205,7 @@ export async function maybeCompleteProductionOrder(
   }
 
   const operations = await tx.productionOperation.findMany({
-    where: { orderId, workOrderVersion: order.workOrderVersion },
+    where: { orderId, workOrderVersion: order.workOrderVersion, ...(order.simpleProduction ? { operationType: { not: 'PACKING' } } : {}) },
     select: { id: true, status: true },
   });
   // A valid canonical generation may contain only no-pay progress steps (for
@@ -319,6 +329,15 @@ export async function maybeCompleteProductionOrder(
   // 覆盖缺口结构化返回给收货 UI。否则 INTERNAL_TASKS 早退会吞掉唯一个
   // 只有此刻最容易修复的履约缺口，直到最后一个内部任务报工才暴露。
   if (!internalReady) return blocked('INTERNAL_TASKS');
+
+  // Repricing an already fulfilled order is not another production event.
+  // This runs after the same internal/outsource/fact gates, including on hold.
+  if (order.simpleProduction && carryCompletedAt) {
+    const status = order.status === OrderStatus.ON_HOLD ? order.status : OrderStatus.PACKING;
+    if (status !== order.status) transitionOrder(order.status, status);
+    await tx.order.update({ where: { id: orderId }, data: { status, completedAt: carryCompletedAt } });
+    return { ...notApplicable(), orderStatus: status };
+  }
 
   if (isLegacyCompletionState) {
     transitionOrder(order.status, OrderStatus.COMPLETED);

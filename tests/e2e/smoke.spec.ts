@@ -422,7 +422,7 @@ test.describe('automation smoke', () => {
 
     await page.goto('/owner/purchases/new');
     await expect(page.getByRole('heading', { name: '新建采购单' })).toBeVisible();
-    const supplierSelect = page.getByLabel('供应商');
+    const supplierSelect = page.getByRole('combobox', { name: '供应商', exact: true });
     await expect(supplierSelect).toBeVisible();
     await expect(supplierSelect).toContainText(fixture.supplierPartyCode);
     await supplierSelect.selectOption(fixture.supplierPartyId);

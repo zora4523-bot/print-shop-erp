@@ -1,3 +1,4 @@
+import { orderShippingAvailability } from './shipping-availability';
 import { inspectOrderProductionReadinessInTx } from './production-readiness';
 import 'server-only';
 import { adminOrderCraftTags, type AdminOrderCraftTag } from './admin-list-presentation';
@@ -85,6 +86,10 @@ export type AdminOrderWorkspaceRow = {
   submitter: { id: string; name: string };
   status: OrderStatus;
   statusSummary: string | null;
+  productionOwners?: string[];
+  productionReviews?: Array<{ id: string; label: string; workerName: string; version: number }>;
+  pendingProductionWages?: boolean;
+  simpleProduction?: boolean;
   isUrgent: boolean;
   isStarred: boolean;
   createdAt: string;
@@ -244,7 +249,7 @@ async function loadAdminWorkspaceCounts(
   // Interactive transactions share one database connection. Promise.all does
   // not parallelize its SQL: group by the bounded status enum instead of
   // scanning the same filtered orders once for every queue and signal.
-  const [allGroups, changeGroups, print, pendingPricing, overdue, dueToday] =
+  const [allGroups, changeGroups, print, pendingPricing, overdue, dueToday, pendingQuantity] =
     await Promise.all([
       tx.order.groupBy({ by: ['status'], where: baseWhere, _count: { _all: true } }),
       tx.order.groupBy({
@@ -256,6 +261,7 @@ async function loadAdminWorkspaceCounts(
       tx.order.count({ where: andWhere(baseWhere, adminManualPricingWhere()) }),
       tx.order.count({ where: andWhere(baseWhere, adminSignalWhere('overdue', now)) }),
       tx.order.count({ where: andWhere(baseWhere, adminSignalWhere('due-today', now)) }),
+      tx.order.count({ where: andWhere(baseWhere, adminSignalWhere('pending-quantity', now)) }),
     ]);
   const allByStatus = new Map(allGroups.map((group) => [group.status, group._count._all]));
   const changeByStatus = new Map(changeGroups.map((group) => [group.status, group._count._all]));
@@ -280,6 +286,7 @@ async function loadAdminWorkspaceCounts(
       all: allGroups.reduce((sum, group) => sum + group._count._all, 0),
     },
     signals: {
+      'pending-quantity': pendingQuantity,
       'pending-confirmation': countStatuses(FACTORY_CONFIRMATION_PENDING_STATUSES),
       'pending-pricing': pendingPricing,
       'pending-release': (allByStatus.get(OrderStatus.CONFIRMED) ?? 0) - (changeByStatus.get(OrderStatus.CONFIRMED) ?? 0),
@@ -388,8 +395,10 @@ const adminOrderSelect = {
     take: 1,
     select: { reasonCode: true, reasonNote: true, toStatus: true },
   },
+  simpleProduction: true,
+  productionJobs: { select: { id: true, label: true, status: true, factReview: { select: { status: true } }, workerName: true, workOrderVersion: true, wages: { select: { amount: true } } } },
   productionOperations: {
-    select: { workOrderVersion: true, status: true },
+    select: { workOrderVersion: true, status: true, operationType: true },
   },
   productionProgressSteps: {
     select: { workOrderVersion: true, status: true },
@@ -433,15 +442,12 @@ type AdminOrderCapabilityFacts = {
 export function resolveAdminOrderShipDisabledReason(
   input: Pick<AdminOrderCapabilityFacts, 'status' | 'pricingPending' | 'hasShipment' | 'hasLiveOutsource' | 'hasIncompleteProduction' | 'hasPendingChange'>,
 ): string | null {
-  if (input.status !== OrderStatus.PACKING && input.status !== OrderStatus.COMPLETED) {
-    return '当前工单状态不支持发货';
-  }
-  if (input.hasPendingChange) return '存在待审批申请，请先处理变更';
-  if (input.pricingPending) return '费用尚未核定，请先完成核价';
-  if (input.hasLiveOutsource) return '外协尚未收回，请先核对外协进度';
-  if (input.hasIncompleteProduction) return '生产工序尚未完成，请先核对报工';
-  if (!input.hasShipment) return '尚未填写配送信息，请先补齐配送';
-  return null;
+  return orderShippingAvailability({
+    ...input,
+    isAdministrator: true,
+    isPricingPending: input.pricingPending,
+    incompleteProductionCount: input.hasIncompleteProduction ? 1 : 0,
+  }).disabledReason;
 }
 
 export function resolveAdminOrderCapabilities(input: AdminOrderCapabilityFacts): AdminOrderWorkspaceRow['capabilities'] {
@@ -496,7 +502,7 @@ export async function loadAdminOrderWorkspace(
         id: { in: currentPrintOrderIds },
       };
       const selectedQueueWhere =
-        query.queue === 'print'
+        query.signal === 'pending-quantity' ? {} : query.queue === 'print'
           ? currentPrintWhere
           : adminQueueWhere(query.queue);
       const resultWhere = andWhere(
@@ -799,7 +805,7 @@ function mapAdminOrderRow(
     manualPricingPending: manualPricing,
   });
   const currentProductionOperations = row.productionOperations.filter(
-    (operation) => operation.workOrderVersion === row.workOrderVersion,
+    (operation) => operation.workOrderVersion === row.workOrderVersion && (!row.simpleProduction || operation.operationType !== 'PACKING'),
   );
   const currentProductionProgressSteps = row.productionProgressSteps.filter(
     (step) => step.workOrderVersion === row.workOrderVersion,
@@ -853,6 +859,11 @@ function mapAdminOrderRow(
     printFacts,
   };
   return {
+    simpleProduction: row.simpleProduction,
+    productionOwners: [...new Set((row.productionJobs ?? []).filter(job => job.workOrderVersion === row.workOrderVersion).map(job => job.workerName))],
+    productionReviews: (row.productionJobs ?? []).filter(job => job.status === 'REQUESTED' || (job.factReview && ['OPEN', 'CONFLICT'].includes(job.factReview.status)))
+      .map(job => ({ id: job.id, label: job.label, workerName: job.workerName, version: job.workOrderVersion })),
+    pendingProductionWages: (row.productionJobs ?? []).some(job => job.wages.some(wage => wage.amount === null)),
     id: row.id,
     orderNo: row.orderNo,
     purpose: row.purpose,

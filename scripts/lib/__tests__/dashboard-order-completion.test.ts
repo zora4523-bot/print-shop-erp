@@ -23,6 +23,7 @@ function shell(
   overrides: Partial<CompletionOrder> = {},
 ): CompletionOrder {
   return {
+    simpleProduction: false,
     id: `e2e-dash-${runId}-sub-${suffix}`,
     orderNo: `E2E-DASH-${runId}-SUB-${suffix.toUpperCase()}`,
     submitterId: ownerId,

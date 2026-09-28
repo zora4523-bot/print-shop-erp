@@ -1,3 +1,4 @@
+vi.mock('@/components/business/production/WorkerCompletionDetail', () => ({ WorkerCompletionDetail: () => null }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import {
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   progressForm: vi.fn(),
   defaultBatch: vi.fn(),
 }));
-vi.mock('@/lib/db', () => ({ db: {} }));
+vi.mock('@/lib/db', () => ({ db: { productionJob: { findFirst: vi.fn().mockResolvedValue(null) } } }));
 vi.mock('@/lib/production/report-batch', () => ({ defaultReportBatch: mocks.defaultBatch }));
 vi.mock('@/lib/auth/session', () => ({ requireSession: mocks.session }));
 vi.mock('next/navigation', () => ({

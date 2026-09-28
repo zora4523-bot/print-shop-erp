@@ -1059,6 +1059,7 @@ export async function getAdminBillDetail(id: string) {
                   },
                 },
               },
+              productionJobs: { select: { wages: { select: { amount: true } } } },
               productionOperations: {
                 select: {
                   reports: {
@@ -1083,6 +1084,7 @@ export async function getAdminBillDetail(id: string) {
                       },
                     },
                   },
+                  productionJobs: { select: { wages: { select: { amount: true } } } },
                   productionOperations: {
                     select: {
                       reports: {

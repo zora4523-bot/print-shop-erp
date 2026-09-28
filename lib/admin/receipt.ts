@@ -15,6 +15,11 @@
 export const RECEIPT_KEYS = [
   /** 新建成功；值通常是 '1'，列表页可用它区分对象（如 'channel' / 'rule'） */
   'created',
+  /** Draft cleanup requires a server-verified actor/kind/entity receipt. */
+  'createdDraft',
+  'creationRequest',
+  /** Existing creation returned for a retry; never announce a second new order. */
+  'creationReplayed',
   /** 编辑保存成功；值同上 */
   'updated',
   /** 账单已出账 */

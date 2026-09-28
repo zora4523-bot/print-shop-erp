@@ -22,11 +22,13 @@ export const adminOrderEditSchema = z.object({
     previewOrderChangeRequestPricingSchema.shape.pendingChargeResolutions,
   expectedQuoteToken: z.string().max(256).nullable().optional(),
   expectedPriceRevision: z.number().int().nonnegative().optional(),
+  expectedProductionFactsToken: z.string().regex(/^[a-f\d]{64}$/).optional(),
 });
 
 export type AdminOrderEditInput = z.input<typeof adminOrderEditSchema>;
 export type AdminOrderEditCommand = z.output<typeof adminOrderEditSchema>;
 export type AdminOrderEditPreview = {
+  productionFactsToken?: string;
   oldTotal: string;
   newTotal: string | null;
   quoteToken: string | null;

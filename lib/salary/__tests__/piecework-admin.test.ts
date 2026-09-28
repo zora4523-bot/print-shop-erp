@@ -64,7 +64,7 @@ describe('计件工价后台', () => {
     expect(mocks.tx.pieceworkPriceBook.create).not.toHaveBeenCalled();
   });
   it('creates the immediate successor with copied rates', async () => {
-    mocks.tx.pieceworkPriceBook.findFirst.mockResolvedValue({ ...book, status: 'PUBLISHED' });
+    mocks.tx.pieceworkPriceBook.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ ...book, status: 'PUBLISHED' }).mockResolvedValueOnce({ version: 1 });
     mocks.tx.pieceworkPriceBook.findFirstOrThrow.mockResolvedValue({ ...book, version: 2 });
     await createPieceworkDraft(actor);
     expect(mocks.tx.pieceworkPriceBook.create).toHaveBeenCalledWith({ data: expect.objectContaining({ version: 2 }) });

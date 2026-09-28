@@ -182,6 +182,7 @@ test('客户及供应商维护、停用过滤和已创建采购快照保持一�
     await stale.getByLabel('供应商', { exact: true }).selectOption(supplierId);
     await stale.getByRole('combobox', { name: '物料', exact: true }).selectOption(paperId);
     await stale.getByLabel('采购数量', { exact: true }).fill('5');
+    const staleDraftId = await stale.locator('input[name="draftId"]').inputValue();
     await page.goto(`/owner/parties/${supplierId}`);
     await page.getByLabel('名称', { exact: true }).fill(`已改名供应商${actor.suffix}`);
     await page.getByRole('button', { name: '保存修改', exact: true }).click();
@@ -194,7 +195,8 @@ test('客户及供应商维护、停用过滤和已创建采购快照保持一�
     await expect.poll(() => readPartyState(supplierId)).toMatchObject({ party: { isActive: false } });
     await stale.getByRole('button', { name: '创建采购单', exact: true }).click();
     await expect(stale.getByText('供应商已停用', { exact: true })).toBeVisible();
-    await expect(stale).toHaveURL(/\/owner\/purchases\/new$/);
+    await expect(stale).toHaveURL((url) =>
+      url.pathname === '/owner/purchases/new' && url.searchParams.get('draft') === staleDraftId);
     await page.goto('/owner/purchases/new');
     await expect(page.locator(`#supplierPartyId option[value="${supplierId}"]`)).toHaveCount(0);
     expect(await readPurchaseSupplierSnapshot(purchaseId)).toEqual(purchaseSnapshot);
@@ -273,13 +275,21 @@ test('类别、纸张、非空白封产品与 BOM 按不可变边界维护，停
   const initialBom = (await readBomVersions(productId))[0];
   expect(initialBom).toMatchObject({ id: bom1, version: 1, baseQuantity: 10, isActive: true, items: [{ materialId: paperId, quantity: '12.5000', remark: '隔离验收用料' }] });
   await fillBom(page, productId, paperId, `验收用料${actor.suffix}第二版`, 2);
+  const pendingRequestId = await page.locator('input[name="clientRequestId"]').inputValue();
   await page.getByRole('button', { name: '创建 BOM', exact: true }).click();
   await expect(page.locator('main')).toContainText('该产品已有启用 BOM');
   expect(await readBomVersions(productId)).toEqual([initialBom]);
   await page.goto(`/owner/boms/${bom1}`);
   await confirmState(page, '停用BOM');
   await expect.poll(() => readBomVersions(productId)).toMatchObject([{ isActive: false }]);
-  await fillBom(page, productId, paperId, `验收用料${actor.suffix}第二版`, 2);
+  await page.goto('/owner/boms/new');
+  await page.getByRole('button', { name: '继续上次录入', exact: true }).click();
+  await expect(page.locator('input[name="clientRequestId"]')).toHaveValue(pendingRequestId);
+  await expect(page.getByLabel('其他产品', { exact: true })).toHaveValue(productId);
+  await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue(`验收用料${actor.suffix}第二版`);
+  await expect(page.getByLabel('版本号', { exact: true })).toHaveValue('2');
+  await expect(page.locator('select[name="items.0.materialId"]')).toHaveValue(paperId);
+  await expect(page.locator('input[name="items.0.quantity"]')).toHaveValue('13.2500');
   await page.getByRole('button', { name: '创建 BOM', exact: true }).click();
   const bom2 = await createdId(page, '/owner/boms');
   const versions = await readBomVersions(productId);

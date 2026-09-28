@@ -104,6 +104,7 @@ export type PrintPackagingGroup = {
 };
 
 export type PrintOrder = {
+  simpleProduction?: boolean;
   id: string;
   orderNo: string;
   workOrderVersion: number;

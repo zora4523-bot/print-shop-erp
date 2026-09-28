@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FormCreationError } from '@/lib/form-drafts/creation-request';
 
 const {
   permissionsMock,
@@ -33,6 +34,7 @@ vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
 
 import {
+  createPurchaseOrderAction,
   cancelPurchaseOrderAction,
   cancelPurchaseReceiptAction,
 } from '../owner-purchases';
@@ -59,6 +61,14 @@ beforeEach(() => {
   purchaseMock.createPurchaseOrder.mockReset();
   purchaseMock.createPurchaseReceipt.mockReset();
   revalidatePathMock.mockReset();
+});
+
+it('returns a structured creation conflict for recovery without changing the native action contract', async () => {
+  purchaseMock.createPurchaseOrder.mockRejectedValue(new FormCreationError('当前内容不同，请核对原单据', true));
+  const form = new FormData();
+  for (const [key, value] of Object.entries({ supplierPartyId: 'supplier', materialId: 'material', quantity: '124', unitCost: '2.5', draftId: '11111111-1111-4111-8111-111111111111', clientRequestId: '22222222-2222-4222-8222-222222222222' })) form.set(key, value);
+  expect(await createPurchaseOrderAction(null, form)).toEqual({ status: 'error', message: '当前内容不同，请核对原单据', creationConflict: true });
+  expect(revalidatePathMock).not.toHaveBeenCalled();
 });
 
 describe('cancelPurchaseReceiptAction', () => {

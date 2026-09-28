@@ -1,3 +1,4 @@
+import { SettledProductionWages } from '@/components/business/salary/ProductionWageRecords';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -88,7 +89,7 @@ export default async function PieceworkSettlementDetailPage({
         <Summary label="报工金额" value={formatMoney(settlement.reportAmount)} />
         <Summary label="调整" value={formatMoney(settlement.adjustmentAmount)} />
         <Summary label="应发" value={formatMoney(settlement.payableAmount)} strong />
-        <Summary label="明细数" value={`${settlement.items.length} 条`} />
+        <Summary label="明细数" value={`${settlement.items.length + settlement.productionWages.length} 条`} />
         <Summary
           label={settlement.paidAt ? '发放时间' : '锁定时间'}
           value={
@@ -101,6 +102,7 @@ export default async function PieceworkSettlementDetailPage({
         />
       </section>
 
+      <SettledProductionWages wages={settlement.productionWages} admin />
       {settlement.status === PieceworkSettlementStatus.LOCKED ? (
         <section className="rounded-xl border bg-card p-4 shadow-sm">
           <MarkPieceworkSettlementPaidForm

@@ -1,6 +1,9 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { emptyBomDraft, type FormDraftContext, type BomDraft } from '@/lib/form-drafts/model';
+import { useFormDraft } from '@/components/business/form-drafts/useFormDraft';
+import { DraftIdentityFields, DraftNotice, SupplementLink } from '@/components/business/form-drafts/FormDraftControls';
 import type { BomMutationResult } from '@/actions/owner-boms.types';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PendingLink } from '@/components/ui-business';
@@ -35,6 +38,8 @@ type Props = {
     prev: BomMutationResult | null,
     fd: FormData,
   ) => Promise<BomMutationResult>;
+  draftContext: FormDraftContext;
+  initialRowId: string;
   papers: Array<{ id: string; name: string; specification: string | null }>;
   products: BomProductOption[];
   categories: BomCategoryOption[];
@@ -44,15 +49,25 @@ type Props = {
 const selectClass =
   'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
-export function BomForm({ action, products, categories, materials, papers }: Props) {
-  const [state, formAction, pending] = useActionState<
-    BomMutationResult | null,
-    FormData
-  >(action, null);
-  const [rows, setRows] = useState([{ key: 0 }]);
-  const [targetType, setTargetType] = useState<'PRODUCT' | 'CATEGORY' | 'BLANK'>('BLANK');
-  const errs = state?.status === 'invalid' ? state.fieldErrors : {};
-  const error = state?.status === 'error' ? state.message : null;
+export function BomForm({ action, products, categories, materials, papers, draftContext, initialRowId }: Props) {
+  const [state, formAction, pending] = useActionState<BomMutationResult | null, FormData>(action, null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const draft = useFormDraft(draftContext, emptyBomDraft(initialRowId), formRef);
+  const [feedback, setFeedback] = useState({ result: state, requestId: draft.identity.clientRequestId });
+  if (feedback.result !== state) setFeedback({ result: state, requestId: draft.identity.clientRequestId });
+  const currentState = feedback.requestId === draft.identity.clientRequestId ? state : null;
+  // Keep the original Server Action bound for native submissions without JS.
+  const recheckCreation = useEffectEvent(() => draft.retry());
+  useEffect(() => {
+    if (state?.status === 'error' && state.creationConflict) void recheckCreation();
+  }, [state]);
+  const { payload } = draft;
+  const { rows, targetType } = payload;
+  const disabled = pending || draft.editingBlocked;
+  const change = <K extends keyof BomDraft>(key: K, value: BomDraft[K]) => draft.update((current) => ({ ...current, [key]: value }));
+  const changeRow = (rowId: string, key: 'materialId' | 'quantity' | 'remark', value: string) => draft.update((current) => ({ ...current, rows: current.rows.map((row) => row.rowId === rowId ? { ...row, [key]: value } : row) }));
+  const errs = currentState?.status === 'invalid' ? currentState.fieldErrors : {};
+  const error = currentState?.status === 'error' ? currentState.message : null;
   const missingProducts = products.length === 0;
   const missingCategories = categories.length === 0;
   const missingMaterials = materials.length === 0;
@@ -60,7 +75,9 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
     targetType === 'BLANK' ? papers.length === 0 : targetType === 'PRODUCT' ? missingProducts : missingCategories;
 
   return (
-    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
+    <form ref={formRef} action={formAction} aria-busy={pending} className="space-y-5" noValidate>
+      <DraftIdentityFields identity={draft.identity} />
+      <DraftNotice draft={draft} disabled={pending} />
       <input type="hidden" name="itemCount" value={rows.length} />
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -72,9 +89,9 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
             className={selectClass}
             value={targetType}
             onChange={(event) =>
-              setTargetType(event.target.value as 'PRODUCT' | 'CATEGORY' | 'BLANK')
+              change('targetType', event.target.value as BomDraft['targetType'])
             }
-            disabled={pending}
+            disabled={disabled}
           >
             <option value="BLANK">空白封纸张与规格</option>
             <option value="PRODUCT">其他产品</option>
@@ -86,8 +103,10 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
         </div>
         <TextField
           id="name"
+          value={payload.name}
+          onChange={(value) => change('name', value)}
           label="BOM 名称"
-          disabled={pending}
+          disabled={disabled}
           error={errs.name?.[0]}
         />
       </div>
@@ -101,8 +120,9 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
             id="productId"
             name="productId"
             className={selectClass}
-            defaultValue=""
-            disabled={pending || targetType !== 'PRODUCT' || missingProducts}
+            value={payload.productId}
+            onChange={(event) => change('productId', event.target.value)}
+            disabled={disabled || targetType !== 'PRODUCT' || missingProducts}
           >
             <option value="">请选择其他产品</option>
             {products.map((product) => (
@@ -121,20 +141,15 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="categoryNodeId">产品结构分类</Label>
-            <PendingLink
-              href={`${RULE_CENTER_HREFS.productCategories}/new`}
-              pending={pending}
-              className="text-xs text-primary hover:underline"
-            >
-              新建分类
-            </PendingLink>
+            <SupplementLink href={`${RULE_CENTER_HREFS.productCategories}/new`} disabled={pending || draft.blocked || targetType !== 'CATEGORY'} onSupplement={() => draft.supplement('CATEGORY', 'categoryNodeId')}>新建分类</SupplementLink>
           </div>
           <select
             id="categoryNodeId"
             name="categoryNodeId"
             className={selectClass}
-            defaultValue=""
-            disabled={pending || targetType !== 'CATEGORY' || missingCategories}
+            value={payload.categoryNodeId}
+            onChange={(event) => change('categoryNodeId', event.target.value)}
+            disabled={disabled || targetType !== 'CATEGORY' || missingCategories}
           >
             <option value="">请选择分类</option>
             {categories.map((category) => (
@@ -153,7 +168,7 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="blankPaperMaterialId">纸张</Label>
-            <select id="blankPaperMaterialId" name="blankPaperMaterialId" className={selectClass} disabled={pending} defaultValue="">
+            <select id="blankPaperMaterialId" name="blankPaperMaterialId" className={selectClass} disabled={disabled} value={payload.blankPaperMaterialId} onChange={(event) => change('blankPaperMaterialId', event.target.value)}>
               <option value="">请选择纸张</option>
               {papers.map((paper) => <option key={paper.id} value={paper.id}>{externalPriceBusinessText(paper.name)} {externalPriceBusinessText(paper.specification ?? '')}</option>)}
             </select>
@@ -161,7 +176,7 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
           </div>
           <div className="space-y-2">
             <Label htmlFor="blankSpecificationKey">规格</Label>
-            <select id="blankSpecificationKey" name="blankSpecificationKey" className={selectClass} disabled={pending} defaultValue="">
+            <select id="blankSpecificationKey" name="blankSpecificationKey" className={selectClass} disabled={disabled} value={payload.blankSpecificationKey} onChange={(event) => change('blankSpecificationKey', event.target.value)}>
               <option value="">请选择规格</option>
               {BLANK_SPECIFICATIONS.map((spec) => <option key={spec.key} value={spec.key}>{spec.specification}</option>)}
             </select>
@@ -181,16 +196,18 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
       <div className="grid gap-4 md:grid-cols-2">
         <TextField
           id="version"
+          value={payload.version}
+          onChange={(value) => change('version', value)}
           label="版本号"
-          defaultValue="1"
-          disabled={pending}
+          disabled={disabled}
           error={errs.version?.[0]}
         />
         <TextField
           id="baseQuantity"
+          value={payload.baseQuantity}
+          onChange={(value) => change('baseQuantity', value)}
           label="基准产量"
-          defaultValue="1"
-          disabled={pending}
+          disabled={disabled}
           error={errs.baseQuantity?.[0]}
         />
       </div>
@@ -201,13 +218,8 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
           <Button
             type="button"
             variant="outline"
-            disabled={pending || rows.length >= 20}
-            onClick={() =>
-              setRows((current) => [
-                ...current,
-                { key: Math.max(...current.map((row) => row.key)) + 1 },
-              ])
-            }
+            disabled={disabled || rows.length >= 20}
+            onClick={() => draft.update((current) => ({ ...current, rows: [...current.rows, { rowId: crypto.randomUUID(), materialId: '', quantity: '', remark: '' }] }))}
           >
             添加物料
           </Button>
@@ -217,7 +229,7 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
         ) : null}
         <div className="space-y-3">
           {rows.map((row, index) => (
-            <div key={row.key} className="rounded-lg border p-4">
+            <div key={row.rowId} className="rounded-lg border p-4">
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">#{index + 1}</span>
                 {rows.length > 1 ? (
@@ -225,9 +237,9 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={pending}
+                    disabled={disabled}
                     onClick={() =>
-                      setRows((current) => current.filter((item) => item.key !== row.key))
+                      draft.update((current) => ({ ...current, rows: current.rows.filter((item) => item.rowId !== row.rowId) }))
                     }
                   >
                     删除
@@ -238,22 +250,15 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <Label htmlFor={`items.${index}.materialId`}>物料</Label>
-                    {index === 0 ? (
-                      <PendingLink
-                        href="/owner/materials/new"
-                        pending={pending}
-                        className="text-xs text-primary hover:underline"
-                      >
-                        新建物料
-                      </PendingLink>
-                    ) : null}
+                    <SupplementLink href="/owner/materials/new" disabled={pending || draft.blocked} onSupplement={() => draft.supplement('MATERIAL', `row:${row.rowId}`)}>新建物料</SupplementLink>
                   </div>
                   <select
                     id={`items.${index}.materialId`}
                     name={`items.${index}.materialId`}
                     className={selectClass}
-                    defaultValue=""
-                    disabled={pending || missingMaterials}
+                    value={row.materialId}
+                    onChange={(event) => changeRow(row.rowId, 'materialId', event.target.value)}
+                    disabled={disabled || missingMaterials}
                   >
                     <option value="">请选择物料</option>
                     {materials.map((material) => (
@@ -267,14 +272,18 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
                 <TextField
                   id={`items.${index}.quantity`}
                   name={`items.${index}.quantity`}
+                  value={row.quantity}
+                  onChange={(value) => changeRow(row.rowId, 'quantity', value)}
                   label="用量"
-                  disabled={pending}
+                  disabled={disabled}
                 />
                 <TextField
                   id={`items.${index}.remark`}
                   name={`items.${index}.remark`}
+                  value={row.remark}
+                  onChange={(value) => changeRow(row.rowId, 'remark', value)}
                   label="备注"
-                  disabled={pending}
+                  disabled={disabled}
                 />
               </div>
             </div>
@@ -295,7 +304,7 @@ export function BomForm({ action, products, categories, materials, papers }: Pro
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="submit" disabled={pending || missingTarget || missingMaterials}>
+        <Button type="submit" disabled={pending || draft.blocked || missingTarget || missingMaterials}>
           {pending ? '提交中…' : '创建 BOM'}
         </Button>
         <PendingLink
@@ -315,14 +324,16 @@ function TextField({
   name = id,
   label,
   error,
-  defaultValue,
+  value,
+  onChange,
   disabled,
 }: {
   id: string;
   name?: string;
   label: string;
   error?: string | undefined;
-  defaultValue?: string;
+  value: string;
+  onChange: (value: string) => void;
   disabled?: boolean;
 }) {
   return (
@@ -331,7 +342,8 @@ function TextField({
       <Input
         id={id}
         name={name}
-        defaultValue={defaultValue}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
         aria-invalid={Boolean(error)}
       />

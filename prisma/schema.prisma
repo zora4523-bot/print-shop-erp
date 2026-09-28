@@ -53,78 +53,85 @@ enum PartyType {
 }
 
 model User {
-  id                  String          @id @default(cuid())
-  username            String          @unique @db.Citext
+  productionJobs      ProductionJob[]
+  productionWages     ProductionWage[]
+  id                  String           @id @default(cuid())
+  username            String           @unique @db.Citext
   password            String // bcrypt哈希
   role                Role
   workerType          WorkerType? // 仅 role=WORKER 时有值
   machineType         MachineType? // 仅 workerType=MACHINE 时有值；主机型/默认机型
-  machineCapabilities MachineType[]   @default([]) // 开机师傅实际可操作的全部机型
+  machineCapabilities MachineType[]    @default([]) // 开机师傅实际可操作的全部机型
   displayName         String
   phone               String?
   avatar              String?
-  isActive            Boolean         @default(true)
+  isActive            Boolean          @default(true)
   employmentType      EmploymentType?
-  employmentStartDate DateTime?       @db.Date
-  employmentEndDate   DateTime?       @db.Date
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  employmentStartDate DateTime?        @db.Date
+  employmentEndDate   DateTime?        @db.Date
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  formCreationRequests FormCreationRequest[]
 
   // 关系
-  submittedOrders             Order[]                       @relation("OrderSubmitter")
-  createdOrders               Order[]                       @relation("OrderCreator")
-  assignedTasks               ProductionTask[]
-  orderLogs                   OrderLog[]
-  dailyWorkerSalaries         DailyWorkerSalary[]
-  hourlyPayrolls              HourlyWorkerPayroll[]
-  attendanceRecords           Attendance[]                  @relation("AttendanceWorker")
-  attendanceCreated           Attendance[]                  @relation("AttendanceCreator")
-  bills                       Bill[]
-  designBundles               DesignBundle[]
-  orderExports                OrderExport[]
-  agentMonthlyBillExports     AgentMonthlyBillExport[]
-  materialTxs                 MaterialTransaction[]
-  purchaseReceipts            PurchaseReceipt[]
-  stockTransfers              StockTransfer[]
-  inventoryCounts             InventoryCount[]
-  businessAuditLogs           BusinessAuditLog[]
-  workerSalaryRules           WorkerMachineSalaryRule[]     @relation("WorkerMachineSalaryRuleWorker")
-  craftCapabilities           WorkerCraftCapability[]
-  createdSalaryRules          WorkerMachineSalaryRule[]     @relation("WorkerMachineSalaryRuleCreator")
-  salaryAdjustments           SalaryAdjustment[]            @relation("SalaryAdjustmentCreator")
-  requestedOrderChanges       OrderChangeRequest[]          @relation("OrderChangeRequester")
-  reviewedOrderChanges        OrderChangeRequest[]          @relation("OrderChangeReviewer")
-  recordedBillPayments        BillPayment[]                 @relation("BillPaymentRecorder")
-  createdOrderCosts           OrderCostEntry[]              @relation("OrderCostCreator")
-  createdOutsourceOrders      OutsourceOrder[]              @relation("OutsourceOrderCreator")
-  outsourceAmountChanges      OutsourceAmountChange[]       @relation("OutsourceAmountChanger")
-  recordedOutsourcePayments   OutsourcePayment[]            @relation("OutsourcePaymentRecorder")
-  createdCustomerCharges      OrderCustomerCharge[]         @relation("OrderCustomerChargeCreator")
-  finalizedCustomerCharges    OrderCustomerCharge[]         @relation("OrderCustomerChargeFinalizer")
-  createdPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailCreator")
-  removedPlateDetails         OrderItemPlateDetail[]        @relation("OrderItemPlateDetailRemover")
-  resolvedReportDisputes      ProductionReportDispute[]     @relation("ReportDisputeResolver")
-  raisedTaskDisputes          ProductionTaskDispute[]       @relation("ProductionTaskDisputeWorker")
-  resolvedTaskDisputes        ProductionTaskDispute[]       @relation("ProductionTaskDisputeResolver")
-  confirmedOrderPricing       Order[]                       @relation("OrderPricingConfirmer")
-  createdPricingRevisions     OrderPricingRevision[]        @relation("OrderPricingRevisionCreator")
-  personalPieceworkBooks      PieceworkPriceBook[]          @relation("PersonalPieceworkOwner")
-  publishedPieceworkBooks     PieceworkPriceBook[]          @relation("PieceworkPriceBookPublisher")
-  adjustedProductionReports   ProductionReport[]            @relation("ProductionReportAdjuster")
-  productionReports           ProductionReport[]            @relation("ProductionReportReporter")
-  productionProgressReports   ProductionProgressReport[]    @relation("ProductionProgressReportReporter")
-  productionWorkOrderProgress ProductionWorkOrderProgress[] @relation("ProductionWorkOrderProgressReporter")
-  productionScanClaims        ProductionScanClaim[]         @relation("ProductionScanClaimReporter")
-  pieceworkSettlements        PieceworkSettlement[]         @relation("PieceworkSettlementReporter")
-  orderStars                  UserOrderStar[]
-  createdOrderPrintJobs       OrderPrintJob[]               @relation("OrderPrintJobCreator")
-  printedOrderPrintJobs       OrderPrintJob[]               @relation("OrderPrintJobPrinter")
-  agentMonthlyBills           AgentMonthlyBill[]            @relation("AgentMonthlyBillAgent")
-  confirmedAgentBills         AgentMonthlyBill[]            @relation("AgentMonthlyBillConfirmer")
-  paidAgentBills              AgentMonthlyBill[]            @relation("AgentMonthlyBillPayer")
-  createdAgentBillCredits     AgentMonthlyBillCredit[]      @relation("AgentMonthlyBillCreditCreator")
-  recordedAgentBillReceipts   AgentMonthlyBillReceipt[]     @relation("AgentMonthlyBillReceiptRecorder")
-  orderWorkflowDecisions      OrderWorkflowDecision[]
+  submittedOrders                Order[]                       @relation("OrderSubmitter")
+  createdOrders                  Order[]                       @relation("OrderCreator")
+  assignedTasks                  ProductionTask[]
+  orderLogs                      OrderLog[]
+  dailyWorkerSalaries            DailyWorkerSalary[]
+  hourlyPayrolls                 HourlyWorkerPayroll[]
+  attendanceRecords              Attendance[]                  @relation("AttendanceWorker")
+  attendanceCreated              Attendance[]                  @relation("AttendanceCreator")
+  bills                          Bill[]
+  designBundles                  DesignBundle[]
+  orderExports                   OrderExport[]
+  agentMonthlyBillExports        AgentMonthlyBillExport[]
+  materialTxs                    MaterialTransaction[]
+  purchaseReceipts               PurchaseReceipt[]
+  stockTransfers                 StockTransfer[]
+  inventoryCounts                InventoryCount[]
+  businessAuditLogs              BusinessAuditLog[]
+  workerSalaryRules              WorkerMachineSalaryRule[]     @relation("WorkerMachineSalaryRuleWorker")
+  craftCapabilities              WorkerCraftCapability[]
+  createdSalaryRules             WorkerMachineSalaryRule[]     @relation("WorkerMachineSalaryRuleCreator")
+  salaryAdjustments              SalaryAdjustment[]            @relation("SalaryAdjustmentCreator")
+  requestedOrderChanges          OrderChangeRequest[]          @relation("OrderChangeRequester")
+  reviewedOrderChanges           OrderChangeRequest[]          @relation("OrderChangeReviewer")
+  recordedBillPayments           BillPayment[]                 @relation("BillPaymentRecorder")
+  createdOrderCosts              OrderCostEntry[]              @relation("OrderCostCreator")
+  createdOutsourceOrders         OutsourceOrder[]              @relation("OutsourceOrderCreator")
+  outsourceAmountChanges         OutsourceAmountChange[]       @relation("OutsourceAmountChanger")
+  recordedOutsourcePayments      OutsourcePayment[]            @relation("OutsourcePaymentRecorder")
+  createdCustomerCharges         OrderCustomerCharge[]         @relation("OrderCustomerChargeCreator")
+  finalizedCustomerCharges       OrderCustomerCharge[]         @relation("OrderCustomerChargeFinalizer")
+  createdPlateDetails            OrderItemPlateDetail[]        @relation("OrderItemPlateDetailCreator")
+  removedPlateDetails            OrderItemPlateDetail[]        @relation("OrderItemPlateDetailRemover")
+  resolvedReportDisputes         ProductionReportDispute[]     @relation("ReportDisputeResolver")
+  raisedTaskDisputes             ProductionTaskDispute[]       @relation("ProductionTaskDisputeWorker")
+  resolvedTaskDisputes           ProductionTaskDispute[]       @relation("ProductionTaskDisputeResolver")
+  confirmedOrderPricing          Order[]                       @relation("OrderPricingConfirmer")
+  createdPricingRevisions        OrderPricingRevision[]        @relation("OrderPricingRevisionCreator")
+  personalPieceworkBooks         PieceworkPriceBook[]          @relation("PersonalPieceworkOwner")
+  publishedPieceworkBooks        PieceworkPriceBook[]          @relation("PieceworkPriceBookPublisher")
+  cancelledPieceworkBooks        PieceworkPriceBook[]          @relation("PieceworkPriceBookCanceller")
+  pieceworkCancellations         PieceworkCancellation[]       @relation("PieceworkCancellationActor")
+  personalPieceworkCancellations PieceworkCancellation[]       @relation("PieceworkCancellationScope")
+  adjustedProductionReports      ProductionReport[]            @relation("ProductionReportAdjuster")
+  productionReports              ProductionReport[]            @relation("ProductionReportReporter")
+  productionProgressReports      ProductionProgressReport[]    @relation("ProductionProgressReportReporter")
+  productionWorkOrderProgress    ProductionWorkOrderProgress[] @relation("ProductionWorkOrderProgressReporter")
+  productionScanClaims           ProductionScanClaim[]         @relation("ProductionScanClaimReporter")
+  pieceworkSettlements           PieceworkSettlement[]         @relation("PieceworkSettlementReporter")
+  orderStars                     UserOrderStar[]
+  createdOrderPrintJobs          OrderPrintJob[]               @relation("OrderPrintJobCreator")
+  printedOrderPrintJobs          OrderPrintJob[]               @relation("OrderPrintJobPrinter")
+  agentMonthlyBills              AgentMonthlyBill[]            @relation("AgentMonthlyBillAgent")
+  confirmedAgentBills            AgentMonthlyBill[]            @relation("AgentMonthlyBillConfirmer")
+  paidAgentBills                 AgentMonthlyBill[]            @relation("AgentMonthlyBillPayer")
+  createdAgentBillCredits        AgentMonthlyBillCredit[]      @relation("AgentMonthlyBillCreditCreator")
+  recordedAgentBillReceipts      AgentMonthlyBillReceipt[]     @relation("AgentMonthlyBillReceiptRecorder")
+  orderWorkflowDecisions         OrderWorkflowDecision[]
 
   @@index([role])
   @@index([workerType])
@@ -401,6 +408,8 @@ enum ReworkCause {
 }
 
 model Order {
+  simpleProduction          Boolean                     @default(false)
+  productionJobs            ProductionJob[]
   id                        String                      @id @default(cuid())
   orderNo                   String                      @unique // GD-YYMMDD-XXX; historical formats remain valid
   submitterId               String
@@ -1006,6 +1015,7 @@ enum PieceworkRateUnit {
 enum PieceworkPriceBookStatus {
   DRAFT
   PUBLISHED
+  CANCELLED
 }
 
 enum ProductionOperationStatus {
@@ -1045,7 +1055,7 @@ enum PieceworkSettlementStatus {
 }
 
 // 对内工价簿独立版本化。DRAFT 可编辑金额、拟生效时间和说明，PUBLISHED 一旦发布后
-// 由数据库触发器禁止更改/删除；绝不复用 CustomerPriceBook。
+// 由数据库触发器保护；只允许原子取消尚未生效的单版并恢复前版窗口，CANCELLED 为终态。
 model PieceworkPriceBook {
   workerId        String?
   useUnifiedRates Boolean                  @default(false)
@@ -1065,6 +1075,16 @@ model PieceworkPriceBook {
   createdAt       DateTime                 @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime                 @updatedAt @db.Timestamptz(3)
 
+  cancelledAt              DateTime?               @db.Timestamptz(3)
+  cancelledById            String?
+  cancelReason             String?                 @db.Text
+  cancellationId           String?                 @unique
+  cancelledBy              User?                   @relation("PieceworkPriceBookCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+  cancellation             PieceworkCancellation?  @relation("PieceworkCancellationReceipt", fields: [cancellationId], references: [id], onDelete: Restrict)
+  cancellationTarget       PieceworkCancellation?  @relation("PieceworkCancellationTarget")
+  cancellationPredecessors PieceworkCancellation[] @relation("PieceworkCancellationPredecessor")
+  cancellationSuccessors   PieceworkCancellation[] @relation("PieceworkCancellationSuccessor")
+
   publishedBy User?                @relation("PieceworkPriceBookPublisher", fields: [publishedById], references: [id], onDelete: Restrict)
   rules       PieceworkPriceRule[]
   reports     ProductionReport[]
@@ -1073,6 +1093,41 @@ model PieceworkPriceBook {
   @@index([publishedById])
   @@index([sourceSha256])
   @@index([workerId, status, effectiveFrom])
+}
+
+// Immutable cancellation facts. The transaction ID prevents reusing an old
+// cancellation to extend a predecessor again after a later publication.
+model PieceworkCancellation {
+  id                     String    @id @default(cuid())
+  clientRequestId        String    @db.Uuid
+  actorId                String
+  workerId               String?
+  targetBookId           String    @unique
+  targetEffectiveFrom    DateTime  @db.Timestamptz(3)
+  targetEffectiveTo      DateTime? @db.Timestamptz(3)
+  targetUpdatedAt        DateTime  @db.Timestamptz(3)
+  predecessorBookId      String?
+  predecessorPreviousTo  DateTime? @db.Timestamptz(3)
+  predecessorNewTo       DateTime? @db.Timestamptz(3)
+  predecessorUpdatedAt   DateTime? @db.Timestamptz(3)
+  successorBookId        String?
+  successorEffectiveFrom DateTime? @db.Timestamptz(3)
+  successorEffectiveTo   DateTime? @db.Timestamptz(3)
+  successorUpdatedAt     DateTime? @db.Timestamptz(3)
+  reason                 String    @db.Text
+  requestHash            String    @db.VarChar(64)
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
+  createdTransactionId   BigInt    @default(dbgenerated("txid_current()"))
+
+  actor           User                @relation("PieceworkCancellationActor", fields: [actorId], references: [id], onDelete: Restrict)
+  worker          User?               @relation("PieceworkCancellationScope", fields: [workerId], references: [id], onDelete: Restrict)
+  targetBook      PieceworkPriceBook  @relation("PieceworkCancellationTarget", fields: [targetBookId], references: [id], onDelete: Restrict)
+  predecessorBook PieceworkPriceBook? @relation("PieceworkCancellationPredecessor", fields: [predecessorBookId], references: [id], onDelete: Restrict)
+  successorBook   PieceworkPriceBook? @relation("PieceworkCancellationSuccessor", fields: [successorBookId], references: [id], onDelete: Restrict)
+  cancelledBook   PieceworkPriceBook? @relation("PieceworkCancellationReceipt")
+
+  @@unique([actorId, clientRequestId])
+  @@index([workerId, createdAt])
 }
 
 model PieceworkPriceRule {
@@ -1095,6 +1150,7 @@ model PieceworkPriceRule {
 // 生产工序只记业务类型和计划数，不记工人或机型。来源行只用于
 // 追溯数量事实，不参与工价键的选择。
 model ProductionOperation {
+  productionJob               ProductionJob?
   id                          String                    @id @default(cuid())
   orderId                     String
   workOrderVersion            Int                       @default(1)
@@ -1239,6 +1295,7 @@ model ProductionScanClaim {
 // 三类计件工序之外的内制工艺只保留生产进度，不存人员/机型/
 // 工价。工艺编码和名称在投产时冻结，字典后续改名不改变历史。
 model ProductionProgressStep {
+  productionJob       ProductionJob?
   id                  String                    @id @default(cuid())
   orderId             String
   workOrderVersion    Int                       @default(1)
@@ -1286,6 +1343,7 @@ model ProductionProgressReport {
 
 // 新 ledger 拥有独立结算边界，不与 DailyWorkerSalaryItem 相加或共用键。
 model PieceworkSettlement {
+  productionWages  ProductionWage[]
   id               String                    @id @default(cuid())
   reporterId       String
   workDate         DateTime                  @db.Date
@@ -1872,17 +1930,18 @@ model OrderCustomerCharge {
 // ============================================================
 
 model BillOfMaterial {
+  creationRequest       FormCreationRequest?
   blankPaperMaterialId  String?
   blankSpecificationKey String?
-  id                    String   @id @default(cuid())
+  id                    String               @id @default(cuid())
   productId             String?
   categoryNodeId        String?
   name                  String
-  version               Int      @default(1)
-  baseQuantity          Int      @default(1)
-  isActive              Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  version               Int                  @default(1)
+  baseQuantity          Int                  @default(1)
+  isActive              Boolean              @default(true)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   product            Product?             @relation(fields: [productId], references: [id], onDelete: Restrict)
   categoryNode       ProductCategoryNode? @relation(fields: [categoryNodeId], references: [id], onDelete: Restrict)
@@ -2145,16 +2204,17 @@ enum PurchaseReceiptStatus {
 }
 
 model PurchaseOrder {
-  id              String              @id @default(cuid())
-  purchaseNo      String              @unique
+  creationRequest FormCreationRequest?
+  id              String               @id @default(cuid())
+  purchaseNo      String               @unique
   supplierPartyId String?
   supplierCode    String
   supplierName    String
-  status          PurchaseOrderStatus @default(ORDERED)
+  status          PurchaseOrderStatus  @default(ORDERED)
   expectedDate    DateTime?
   remark          String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   supplierParty Party?              @relation("PurchaseOrderSupplierParty", fields: [supplierPartyId], references: [id], onDelete: SetNull)
   items         PurchaseOrderItem[]
@@ -2928,4 +2988,128 @@ model ProductionReportDispute {
   @@index([reportId, createdAt(sort: Desc)])
   @@index([status, createdAt])
   @@index([resolvedById])
+}
+
+// Parent form creation receipts are retained to resolve lost responses safely.
+enum FormCreationKind {
+  PURCHASE
+  BOM
+}
+
+model FormCreationRequest {
+  id                String           @id @default(cuid())
+  actorId           String
+  kind              FormCreationKind
+  clientRequestId   String           @db.Uuid
+  draftId           String           @db.Uuid
+  payloadHash       String           @db.VarChar(64)
+  normalizedPayload Json
+  purchaseOrderId   String?          @unique
+  billOfMaterialId  String?          @unique
+  createdAt         DateTime         @default(now())
+  actor             User             @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  purchaseOrder     PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  billOfMaterial    BillOfMaterial?  @relation(fields: [billOfMaterialId], references: [id], onDelete: Restrict)
+
+  @@unique([actorId, kind, clientRequestId])
+  @@index([actorId, kind, draftId])
+}
+
+// Single-owner completion workflow. Historical operation/report ledgers remain intact.
+model ProductionDispatchBatch {
+  id          String   @id
+  requestHash String   @db.VarChar(64)
+  actorId     String
+  result      Json
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model ProductionJob {
+  id               String                  @id @default(cuid())
+  orderId          String
+  workOrderVersion Int
+  operationId      String?                 @unique
+  progressStepId   String?                 @unique
+  workerId         String
+  workerName       String
+  label            String
+  sourceKey        String
+  plannedQty       Decimal                 @db.Decimal(14, 3)
+  completedQty     Decimal?                @db.Decimal(14, 3)
+  requestedQty     Decimal?                @db.Decimal(14, 3)
+  requestReason    String?
+  requestedAt      DateTime?               @db.Timestamptz(3)
+  status           String                  @default("PENDING")
+  manualPricing    Boolean                 @default(false)
+  revision         Int                     @default(0)
+  snapshot         Json
+  completedAt      DateTime?               @db.Timestamptz(3)
+  workDate         DateTime?               @db.Date
+  recordedById     String?
+  recordSource     String?
+  createdAt        DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                @updatedAt @db.Timestamptz(3)
+  order            Order                   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  worker           User                    @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  operation        ProductionOperation?    @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  progressStep     ProductionProgressStep? @relation(fields: [progressStepId], references: [id], onDelete: Restrict)
+  wages            ProductionWage[]
+  factReview       ProductionFactReview?
+
+  @@unique([orderId, workOrderVersion, sourceKey])
+  @@index([orderId, workOrderVersion, status])
+  @@index([workerId, status, createdAt])
+}
+
+// One durable verification obligation per production event. Closing a fact review
+// does not erase either the production fact or an unpaid historical wage.
+model ProductionFactReview {
+  id           String        @id @default(cuid())
+  jobId        String        @unique
+  jobRevision  Int
+  status       String        @default("OPEN")
+  periodStart  DateTime      @db.Date
+  periodEnd    DateTime      @db.Date
+  reason       String
+  evidence     Json
+  revision     Int           @default(0)
+  createdById  String
+  resolvedById String?
+  resolvedAt   DateTime?     @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
+  job          ProductionJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@index([status, periodStart, periodEnd])
+}
+
+// Mutable amount is a projection of append-only entries; null means awaiting pricing.
+model ProductionWage {
+  id           String                @id @default(cuid())
+  jobId        String
+  workerId     String
+  workDate     DateTime              @db.Date
+  amount       Decimal?              @db.Decimal(14, 2)
+  revision     Int                   @default(0)
+  snapshot     Json
+  settlementId String?
+  job          ProductionJob         @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  worker       User                  @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  settlement   PieceworkSettlement?  @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  entries      ProductionWageEntry[]
+
+  @@unique([jobId, workerId, workDate])
+  @@index([workerId, workDate, settlementId])
+}
+
+model ProductionWageEntry {
+  id         String         @id @default(cuid())
+  wageId     String
+  amount     Decimal        @db.Decimal(14, 2)
+  actorId    String
+  reason     String
+  requestKey String         @unique
+  snapshot   Json
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  wage       ProductionWage @relation(fields: [wageId], references: [id], onDelete: Restrict)
 }

@@ -88,7 +88,7 @@ export function orderDetailAmounts(order: DetailOrder) {
   const selectedFee = 'totalAmount' in order ? selectOrderCustomerFee(order) : null;
   const incomplete = !hasConfirmedFee && (fields.quotedFeeCompleteness === 'EXCLUDES_MANUAL_ITEMS' ||
     processingAmount === null || order.customerCharges.some((charge) => charge.status !== 'WAIVED' && charge.amount === null));
-  const feeSource = unquotedDraft || (incomplete && isAwaitingFactoryConfirmation(order.status))
+  const feeSource: 'PENDING' | 'INCOMPLETE' | NonNullable<typeof selectedFee>['source'] = unquotedDraft || (incomplete && isAwaitingFactoryConfirmation(order.status))
     ? 'PENDING' : incomplete ? 'INCOMPLETE' : selectedFee?.source ?? 'PENDING';
   return {
     pricingStatus, feeSource,

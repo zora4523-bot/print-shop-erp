@@ -244,7 +244,7 @@ export async function listParties(opts: {
 
 export async function listPartiesPage(opts: {
   q?: string | null;
-  type?: PartyType | null;
+  type?: PartyType | 'suppliers' | null;
   page: number;
   pageSize: number;
   sort: PartyListSortKey;
@@ -252,7 +252,9 @@ export async function listPartiesPage(opts: {
 }): Promise<PaginatedResult<PartySummary>> {
   const query = normalizeSearchQuery(opts.q);
   const filters = compact([
-    opts.type ? { type: opts.type } : undefined,
+    opts.type === 'suppliers'
+      ? { type: { in: [PartyType.SUPPLIER, PartyType.BOTH] } }
+      : opts.type ? { type: opts.type } : undefined,
     partySearchFilter(query),
   ]);
   const where: Prisma.PartyWhereInput | undefined = filters.length

@@ -10,7 +10,8 @@ import {
   type FormEvent,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { PendingLink } from '@/components/ui-business';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -113,7 +114,7 @@ export function CreateOutsourceForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} aria-busy={pending} className="space-y-6">
+    <form onSubmit={handleSubmit} aria-busy={pending} className="admin-wrap-anywhere min-w-0 space-y-6">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <section className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">
@@ -124,7 +125,7 @@ export function CreateOutsourceForm({
         ) : (
           <ul className="space-y-2">
             {items.map((it) => (
-              <li key={it.id} className="flex items-center gap-3 text-sm">
+              <li key={it.id} className="flex min-w-0 items-center gap-3 text-sm">
                 <Checkbox
                   id={`item-${it.id}`}
                   checked={!!selected[it.id]}
@@ -137,7 +138,7 @@ export function CreateOutsourceForm({
                     }))
                   }
                 />
-                <Label htmlFor={`item-${it.id}`} className="flex-1">
+                <Label htmlFor={`item-${it.id}`} className="block min-w-0 flex-1 leading-relaxed">
                   #{it.sequence} · {externalPriceBusinessText(it.name)} · 数量{' '}
                   {it.quantity.toLocaleString()}
                 </Label>
@@ -230,19 +231,20 @@ export function CreateOutsourceForm({
         </p>
       ) : null}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           type="submit"
           disabled={pending || chosenIds.length === 0 || supplierName === ''}
         >
           {pending ? '提交中…' : '创建外协单'}
         </Button>
-        <a
+        <PendingLink
+          pending={pending}
           href={`/orders/${orderId}`}
-          className="text-sm text-muted-foreground underline"
+          className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}
         >
           返回工单详情
-        </a>
+        </PendingLink>
       </div>
     </form>
   );

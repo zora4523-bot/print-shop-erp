@@ -7,6 +7,19 @@ applies_to: repository source at last_verified
 
 # 系统架构
 
+## 2026-09-28 单负责人生产与工资边界
+
+`actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用事务内下发；`completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。
+
+生产人、操作人、工资受益人是不同事实。生产归属在排单时确定，协作受益人仅出现在管理员提成核定入口。新旧报工写入口互斥，统一日结/导出读取两种账本；新增事实不伪装成历史报告。管理专用异步 ProductionJobPanel 不传入销售模型，师傅工资按当前会话受益人读取。
+
+
+## 2026-09-27 录入页恢复边界
+
+采购、BOM、供应商、物料及产品结构分类的五个新建页位于 `app/(admin-forms)/owner/`，URL 保持不变。该路由组复用管理端外壳和 OwnerLayout 的服务端授权，分类页继续复用规则工作区布局；不继承管理端 `loading.tsx`，避免禁用 JavaScript 时流式占位无法切换为可提交表单。其他管理路由保留原加载行为。
+
+`components/business/form-drafts` 与 `lib/form-drafts` 只服务采购/BOM 录入，不替换工单已有草稿。服务器提供 actor 与每次登录独立的 `draftSessionScope`；浏览器按身份和表单类型隔离 sessionStorage，有限时间与容量保存白名单字段。BroadcastChannel 仅用于提示活跃标签页冲突，服务器创建记录承担实际去重保证。认证外壳负责清理非当前用户、过期或失去权限的暂存；登录页和原生登出不依赖草稿清理。
+
 本文描述当前仓库可从代码验证的系统结构。业务规则以
 [SPEC-v1.2.md](./SPEC-v1.2.md) 为准；历史决策及其原因见
 [DECISIONS.md](./DECISIONS.md)。当本文与代码不一致时，先以代码保护数据，再在同一变更中修正文档。

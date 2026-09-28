@@ -74,10 +74,18 @@ const STOCK_TRANSACTION_FIELDS: Record<
 };
 
 export function StockTransactionForm({ action, unit, locationOptions, initialIdempotencyKey }: Props) {
+  const [locationId, setLocationId] = useState('');
+  const [direction, setDirection] = useState<'IN' | 'OUT'>('IN');
+  const [reasonType, setReasonType] = useState<'PRODUCTION_USE' | 'RETURN' | 'OTHER'>('RETURN');
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
   const submitMovement = useCallback(async (prev: MaterialMutationResult | null, formData: FormData) => {
     const result = await action(prev, formData);
-    if (result.status === 'success') setIdempotencyKey(window.crypto.randomUUID());
+    if (result.status === 'success') {
+      setLocationId('');
+      setDirection('IN');
+      setReasonType('RETURN');
+      setIdempotencyKey(window.crypto.randomUUID());
+    }
     return result;
   }, [action]);
   const [state, formAction, pending] = useActionState<
@@ -108,8 +116,6 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
       try { formRef.current?.reset(); } finally { allowResetRef.current = false; }
     }
   }, [state]);
-  const [direction, setDirection] = useState<'IN' | 'OUT'>('IN');
-  const [reasonType, setReasonType] = useState<'PRODUCTION_USE' | 'RETURN' | 'OTHER'>('RETURN');
   const reasonOptions = TX_REASON_OPTIONS.filter((option) =>
     direction === 'IN'
       ? option.value === 'RETURN' || option.value === 'OTHER'
@@ -231,10 +237,12 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
             ? formMessageA11yProps('locationId', 'error')
             : {})}
           className={selectClass}
-          defaultValue=""
+          value={locationId}
+          onChange={(event) => setLocationId(event.target.value)}
           disabled={pending}
         >
           <option value="">默认库位</option>
+          {locationId && !locationOptions.some((option) => option.id === locationId) ? <option value={locationId}>原库位已停用，请重新选择</option> : null}
           {locationOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.warehouseName} / {option.name}

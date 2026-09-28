@@ -151,7 +151,7 @@ function AdminDecisionActions({
         </Button>
       ) : null}
       {order.capabilities.hold ? (
-        <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => openMode('hold')}>
+        <Button type="button" size="sm" variant="ghost" className="order-last" disabled={pending} onClick={() => openMode('hold')}>
           暂停
         </Button>
       ) : null}
@@ -189,7 +189,7 @@ function AdminDecisionActions({
         </Button>
       ) : null}
       {order.capabilities.markPrinted ? (
-        <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('MARK_PRINTED')}>
+        <Button type="button" size="sm" variant={order.capabilities.release ? 'outline' : 'default'} disabled={pending} onClick={() => runOneBatch('MARK_PRINTED')}>
           确认已打印
         </Button>
       ) : null}
@@ -551,6 +551,7 @@ function submitAdminOrderDecision({
         producedQty: parsedProduced,
         expectedPriceRevision: settlementPreview.priceRevision,
         expectedQuoteToken: settlementPreview.quoteToken,
+        expectedProductionFactsToken: settlementPreview.productionFactsToken,
         settleFee: settleFee.trim(),
         ...(settleFeeAdjustmentReason.trim()
           ? {
@@ -574,16 +575,19 @@ function submitAdminOrderDecision({
 export function AdminOrderDecisionPanel({
   order,
   compact = false,
+  hideHeading = false,
 }: {
   order: AdminOrderWorkspaceRow;
   compact?: boolean;
+  hideHeading?: boolean;
 }) {
-  return <AdminOrderDecisionSession key={order.id} order={order} compact={compact} />;
+  return <AdminOrderDecisionSession key={order.id} order={order} compact={compact} hideHeading={hideHeading} />;
 }
 
-function AdminOrderDecisionSession({ order, compact }: {
+function AdminOrderDecisionSession({ order, compact, hideHeading }: {
   order: AdminOrderWorkspaceRow;
   compact: boolean;
+  hideHeading: boolean;
 }) {
   const [receipt, setReceipt] = useState<DecisionReceipt | null>(null);
   const onCompleted = useCallback((text: string, tone: DecisionReceipt['tone'] = 'success') => {
@@ -594,6 +598,7 @@ function AdminOrderDecisionSession({ order, compact }: {
       key={`${order.revision}:${order.workOrderVersion}:${order.pendingChangeRequest?.id ?? ''}`}
       order={order}
       compact={compact}
+      hideHeading={hideHeading}
       onCompleted={onCompleted}
       clearReceipt={() => setReceipt(null)}
     />
@@ -601,9 +606,10 @@ function AdminOrderDecisionSession({ order, compact }: {
   </>;
 }
 
-function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearReceipt }: {
+function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onCompleted, clearReceipt }: {
   order: AdminOrderWorkspaceRow;
   compact: boolean;
+  hideHeading: boolean;
   onCompleted: (text: string, tone?: DecisionReceipt['tone']) => void;
   clearReceipt: () => void;
 }) {
@@ -812,7 +818,7 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
 
   return (
     <DecisionPanelSection {...{
-      compact, order, awaitingConfirmation, settlementBlockedByMissingFee,
+      compact, hideHeading, order, awaitingConfirmation, settlementBlockedByMissingFee,
       pending, onCompleted, openMode, run,
       runOneBatch, mode, reasonCode, figs,
       producedQty, settlementPreview, settlementPreviewQuantity, settleFee,
@@ -826,6 +832,7 @@ function AdminOrderDecisionPanelContent({ order, compact, onCompleted, clearRece
 
 type RenderDecisionPanelOptions = {
   compact: boolean;
+  hideHeading: boolean;
   order: AdminOrderWorkspaceRow;
   awaitingConfirmation: boolean;
   settlementBlockedByMissingFee: boolean;
@@ -863,6 +870,7 @@ type RenderDecisionPanelOptions = {
 
 function DecisionPanelSection({
   compact,
+  hideHeading,
   order,
   awaitingConfirmation,
   settlementBlockedByMissingFee,
@@ -902,7 +910,7 @@ function DecisionPanelSection({
       aria-labelledby="admin-order-decision-title"
       className="mb-6 rounded-xl border border-foreground/15 bg-muted/20 p-3"
     >
-      <h3 id="admin-order-decision-title" className="text-sm font-semibold">
+      <h3 id="admin-order-decision-title" className={hideHeading ? 'sr-only' : 'text-sm font-semibold'}>
         {compact ? '待你处理' : '工厂裁决'}
       </h3>
       <div data-slot={compact ? 'admin-order-decision-card' : undefined}>

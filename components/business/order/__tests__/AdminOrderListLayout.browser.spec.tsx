@@ -82,7 +82,7 @@ function renderWorkspace(orders: AdminOrderWorkspaceRow[] = [{
     selectedExportRequestKey="test-export"
     data={{ rows: orders, total: orders.length, page: 1, pageSize: 20, pageCount: 1,
       summary: { orderCount: 1, totalQuantity: 2000, effectiveFee: '1234.50', manualPricingCount: 0, incompleteFeeExcludedCount: 0, legacyFeeExcludedCount: 0 },
-      counts: { queues: { todo: 1, print: 0, production: 0, shipped: 0, done: 0, all: 1 }, signals: { 'pending-confirmation': 1, 'pending-pricing': 0, 'pending-change': 0, 'pending-release': 0, 'on-hold': 0, overdue: 0, 'due-today': 0 } },
+      counts: { queues: { todo: 1, print: 0, production: 0, shipped: 0, done: 0, all: 1 }, signals: { 'pending-quantity': 0, 'pending-confirmation': 1, 'pending-pricing': 0, 'pending-change': 0, 'pending-release': 0, 'on-hold': 0, overdue: 0, 'due-today': 0 } },
     }}
   />));
 }

@@ -11,6 +11,8 @@ verification_scope: scripts, CI and test configuration sections at sections_veri
 
 计件工价发布入口 `pnpm piecework:publish` 支持版本递增及按盒费率；默认只读，旧 `piecework:publish-v1` 兼容保留。正式配置填写和发布参数见 [工价发布步骤](./docs/管理员建单定价与装盒修复-20260913.md#员工按盒工价发布)。专项数据库回归需显式设置 `ERP_PRICING_REPAIR_DB_TEST=1`，仅连接准备过包装 E2E fixture 的独立测试库。
 
+若唯一的未来统一工价已取消，且没有现有草稿，CLI 会提示到 `/owner/rules/employee-pay` 新建草稿发布；不以取消版本充当当前发布修订，不复用旧编号。发布与取消前向迁移须在同一停写维护窗口切换所有运行进程，见 [部署指南](docs/部署指南.md#未来计件调价取消开关2026-09-28)。
+
 本次核对范围为 `package.json`、CI、Vitest、Playwright 和 smoke 配置；不代表生产环境已验证。
 改动需要哪些检查以 [CONTRIBUTING.md](./CONTRIBUTING.md#测试要求) 为准，本文维护可执行命令与环境前置。
 
@@ -147,6 +149,8 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 
 [Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 备份脚本 / 完整 lint / typecheck、死代码候选增量门禁，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部六视口及六视口 dev fixtures；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
 
+2026-09-29 补齐 `unit` 的隔离前置：fresh 链验证后的 `erp_e2e_ci` 单独 seed，并通过现有 `test:e2e:prepare` 发布仅用于测试的工价和目录 fixture；Vitest 进程显式使用 `DATABASE_URL="$E2E_DATABASE_URL"`，与确认的 E2E 库一致。仓库维护、表单创建幂等、工价取消、排单完工四组 PostgreSQL 套件必须实际执行；合并时核对 JSON 报告，不把前置不足导致的 skip 计作通过。覆盖率门槛保持不变。
+
 现有打印像素基线仅有 Darwin 版，独立的 [Print (Darwin) 工作流](./.github/workflows/print-darwin.yml) 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`；macOS 按 10 倍计费，因此只在打印相关路径变动或手动 `workflow_dispatch` 时运行。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。每个作业每次都上传 `.review/`（审计与各套件 JSON，用于分析耗时），覆盖率、报告、截图和 trace 只在失败时上传；均启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。CI 下 Playwright trace 为 `on-first-retry`。
 
 2026-09-11 PR #16 前两轮远端执行分别暴露了导入文案扫描、全仓按钮 AST 扫描的 5 秒超时。这两项集成扫描使用独立的 20 秒执行上限，扫描范围及全部语义断言保持。Darwin 仍有 13 项字体截图差异：CI PDF 出现额外 Helvetica 回退，对齐系统语言偏好未消除差异，该尝试已撤回。截图基线与比较阈值未改，CI 专用基线须先取得业务确认，修正结果以最新 PR checks 为准。
@@ -253,3 +257,7 @@ L-14（从未下发却提前写入的 `scheduledAt`）。`--database=<库名>` �
 `--apply --actor=<活跃管理员>` 才写入，并在锁内、写入前把逐行原状态与 `payrollReviewRequired` 记进
 OrderLog 与 BusinessAuditLog 的 before。生产执行步骤（dry-run → 业主核对 → `--apply`）只维护在
 [部署指南](./docs/部署指南.md#卡住--写脏的历史生产数据清理2026-09-24)。本地验证只在一次性隔离库上写入。
+
+## 生产事实核对与恢复（2026-09-28）
+
+重做未下发、数量申请被旧版取消、工资日期已结算或历史生产不明时，按 [生产事实恢复手册](docs/生产事实恢复手册.md) 先只读扫描，再逐单据证处理。不要通过换日期、改负责人、删除申请或解锁原账绕过守卫。

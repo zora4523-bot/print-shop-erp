@@ -127,6 +127,12 @@ describe('transitionOrder', () => {
 });
 
 describe('canTransitionOrder spot-checks per SPEC §4.3', () => {
+  it.each([OrderStatus.PACKING, OrderStatus.FOILING])('only reopens %s with verified remaining assigned production', from => {
+    expect(canTransitionOrder(from, OrderStatus.RELEASED)).toBe(false);
+    expect(transitionOrder(from, OrderStatus.RELEASED, { remainingAssignedProduction: true })).toBe(OrderStatus.RELEASED);
+    expect(() => transitionOrder(OrderStatus.CANCELLED, OrderStatus.RELEASED, { remainingAssignedProduction: true })).toThrow();
+    expect(() => transitionOrder(OrderStatus.SHIPPED, OrderStatus.RELEASED, { remainingAssignedProduction: true })).toThrow();
+  });
   it.each([
     [OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, true],
     [OrderStatus.DRAFT, OrderStatus.SUBMITTED, true],

@@ -18,6 +18,7 @@ export const ADMIN_ORDER_QUEUES = [
 export type AdminOrderQueue = (typeof ADMIN_ORDER_QUEUES)[number];
 
 export const ADMIN_ORDER_SIGNALS = [
+  'pending-quantity',
   'pending-confirmation',
   'pending-pricing',
   'pending-release',
@@ -35,6 +36,7 @@ export type AdminOrderWorkspaceQuery = {
   signal?: AdminOrderSignal;
   starred: boolean;
   unbilled: boolean;
+  pendingWages?: boolean;
 };
 
 export type AdminOrderWorkspaceParseResult = {
@@ -111,10 +113,11 @@ export function parseAdminOrderWorkspaceQuery(
         scrollY: undefined,
         view: undefined,
       },
-      queue,
+      queue: signal === 'pending-quantity' ? 'all' : queue,
       ...(signal ? { signal } : {}),
       starred,
       unbilled,
+      ...(firstValue(params.pendingWages) === 'yes' ? { pendingWages: true } : {}),
     },
     issues,
   };
@@ -142,6 +145,7 @@ export function serializeAdminOrderWorkspaceQuery(
     signal: query.signal,
     starred: query.starred ? 'yes' : undefined,
     unbilled: query.unbilled ? 'yes' : undefined,
+    ...(query.pendingWages ? { pendingWages: 'yes' } : {}),
   };
 }
 

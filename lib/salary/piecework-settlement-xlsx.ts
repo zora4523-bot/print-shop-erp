@@ -55,6 +55,7 @@ export async function loadPieceworkSettlementExportData(
       lockedAt: true,
       paidAt: true,
       reporter: { select: { displayName: true, username: true } },
+      productionWages: { include: { job: { select: { label: true, completedQty: true, completedAt: true, order: { select: { orderNo: true, customName: true } } } } } },
       items: {
         orderBy: [{ report: { reportedAt: 'asc' } }, { id: 'asc' }],
         select: {
@@ -184,7 +185,7 @@ export async function buildPieceworkSettlementWorkbook(
       ymd(settlement.workDate),
       settlement.reporter.displayName,
       settlement.reporter.username,
-      settlement.items.length,
+      settlement.items.length + settlement.productionWages.length,
       Number(settlement.reportAmount),
       Number(settlement.adjustmentAmount),
       Number(settlement.payableAmount),
@@ -192,6 +193,12 @@ export async function buildPieceworkSettlementWorkbook(
       shanghaiDateTime(settlement.lockedAt),
       shanghaiDateTime(settlement.paidAt),
       settlement.id,
+    ]);
+    for (const wage of settlement.productionWages) detailRows.push([
+      'PRODUCTION_WAGE', ymd(settlement.workDate), settlement.reporter.displayName,
+      wage.job.order.orderNo, wage.job.order.customName ?? '', wage.job.label, '完工提成',
+      Number(wage.job.completedQty ?? 0), '', '', '', '', '', Number(wage.amount), '', '',
+      shanghaiDateTime(wage.job.completedAt), wage.id, '完工提成记录', '',
     ]);
     for (const { report } of settlement.items) {
       detailRows.push([

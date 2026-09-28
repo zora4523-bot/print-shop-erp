@@ -57,6 +57,8 @@
     "[\"knip\",\"components/business/order/order-form-gaps.ts\",\"types\",\"OrderFormStep\"]",
     "[\"knip\",\"components/business/order/order-form-local-draft.ts\",\"exports\",\"sanitizeOrderFormDraftValues\"]",
     "[\"knip\",\"components/business/order/order-form-local-draft.ts\",\"types\",\"JsonObject\"]",
+    "[\"knip\",\"components/business/order/order-shipping-availability.ts\",\"exports\",\"buildShipOrderShipmentInputs\"]",
+    "[\"knip\",\"components/business/order/order-shipping-availability.ts\",\"types\",\"OrderShippingAvailabilityInput\"]",
     "[\"knip\",\"components/business/order/use-admin-order-leave-guard.ts\",\"exports\",\"isDifferentOrderEditorPage\"]",
     "[\"knip\",\"components/business/outsource/CreateOutsourceForm.tsx\",\"types\",\"OutsourceFormItem\"]",
     "[\"knip\",\"components/business/outsource/OutsourcePaymentForm.tsx\",\"exports\",\"outsourcePaymentImpactItems\"]",

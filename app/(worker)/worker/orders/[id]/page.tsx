@@ -1,3 +1,4 @@
+import { WorkerProductionJobs } from '@/components/business/production/WorkerProductionJobs';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
@@ -22,7 +23,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { WorkerOrderTaskList } from '@/components/business/production/WorkerOrderTaskList';
 import { productionOperationPassCount } from '@/lib/production/operation-quantity';
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ productionPage?: string }> };
 
 const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
   [PieceworkOperationType.PARTIAL]: '局部烫金',
@@ -49,7 +50,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   return { title: order ? `${order.orderNo} · 我的工单` : '工单不存在' };
 }
 
-export default async function WorkerOrderDetailPage({ params }: PageProps) {
+export default async function WorkerOrderDetailPage({ params, searchParams }: PageProps) {
+  const query = await searchParams;
   const user = await requirePermission('order:view:self');
   const { id } = await params;
   const order = await getWorkerOrderPageData(id, user.id, user.role);
@@ -85,7 +87,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      <WorkerOrderTaskList
+      {order.simpleProduction ? <WorkerProductionJobs actor={user} orderId={id} page={query?.productionPage} /> : <WorkerOrderTaskList
         reporterName={user.displayName}
         laneLabel={order.productionOperations[0]
           ? OPERATION_LABELS[order.productionOperations[0].operationType]
@@ -150,7 +152,7 @@ export default async function WorkerOrderDetailPage({ params }: PageProps) {
             readOnly: !step.reportable,
           };
         })}
-      />
+      />}
 
       <div className="space-y-3">
         {order.items.map((item) => (

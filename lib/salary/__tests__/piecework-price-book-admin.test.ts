@@ -334,7 +334,7 @@ describe('box wage publication and successor versions', () => {
   });
   it('previews a new version without writing and binds the current published revision', async () => {
     dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
-    dbMock.pieceworkPriceBook.findFirst.mockResolvedValue({ ...draftBook(), status: 'PUBLISHED' });
+    dbMock.pieceworkPriceBook.findFirst.mockImplementation(({ where }) => Promise.resolve(where?.status === 'DRAFT' ? null : { ...draftBook(), status: 'PUBLISHED' }));
     const preview = await previewPieceworkPriceBookV1Publication(boxed(), sourceSha256);
     expect(preview).toMatchObject({ readyToPublish: true, bookId: null, draftUpdatedAt: draftUpdatedAt.toISOString() });
     expect(dbMock.pieceworkPriceBook.create).not.toHaveBeenCalled();
@@ -343,7 +343,7 @@ describe('box wage publication and successor versions', () => {
     const previous = { ...draftBook(), status: 'PUBLISHED', effectiveFrom: now };
     const next = { ...draftBook(), id: 'piecework-v2', version: 2, rules: boxed().rules.map((rule, index) => ({ ...rule, id: `rule-${index}`, amount: null })) };
     dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
-    dbMock.pieceworkPriceBook.findFirst.mockResolvedValue(previous);
+    dbMock.pieceworkPriceBook.findFirst.mockImplementation(({ where }) => Promise.resolve(where?.status === 'DRAFT' ? null : previous));
     dbMock.pieceworkPriceBook.create.mockResolvedValue(next);
     const receipt = await publishPieceworkPriceBookV1({ manifest: boxed(), actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
     expect(receipt).toMatchObject({ version: 2, outcome: 'PUBLISHED' });
@@ -360,7 +360,7 @@ describe('box wage publication and successor versions', () => {
   });
   it('rejects stale successors, duplicate box rules without requiring a bag rule', async () => {
     dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
-    dbMock.pieceworkPriceBook.findFirst.mockResolvedValue({ ...draftBook(), version: 2, status: 'PUBLISHED' });
+    dbMock.pieceworkPriceBook.findFirst.mockImplementation(({ where }) => Promise.resolve(where?.status === 'DRAFT' ? null : { ...draftBook(), version: 2, status: 'PUBLISHED' }));
     await expect(publishPieceworkPriceBookV1({ manifest: boxed(), actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('版本已变化');
     const duplicate = boxed(); duplicate.rules[2] = duplicate.rules[3];
     await expect(publishPieceworkPriceBookV1({ manifest: duplicate, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('重复规则');
@@ -401,4 +401,26 @@ it('publishes foil-only draft while packing rates are deferred', async () => {
   const result = await publishPieceworkPriceBookV1({ manifest: foil, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now);
   expect(result.rules).toHaveLength(2);
   expect(result.rules.map((rule) => rule.operationType).sort()).toEqual(['FULL', 'PARTIAL']);
+});
+
+
+it('does not bypass an existing unified draft when a manifest requests another version', async () => {
+  dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
+  dbMock.pieceworkPriceBook.findFirst.mockImplementation(({ where }) => Promise.resolve(where?.status === 'DRAFT' ? draftBook() : { ...draftBook(), status: 'PUBLISHED' }));
+  const next = manifest({ priceBookVersion: 2 });
+  expect((await previewPieceworkPriceBookV1Publication(next, sourceSha256)).issues).toContain('已有调价草稿，请先处理该草稿');
+  await expect(publishPieceworkPriceBookV1({ manifest: next, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow('已有调价草稿');
+  expect(dbMock.pieceworkPriceBook.create).not.toHaveBeenCalled();
+});
+
+it('directs CLI recovery to the price page when all unified publications were cancelled', async () => {
+  dbMock.pieceworkPriceBook.findUnique.mockResolvedValue(null);
+  dbMock.pieceworkPriceBook.findFirst.mockImplementation(({ where }) => Promise.resolve(where ? null : { ...draftBook(), status: 'CANCELLED' }));
+  const next = manifest({ priceBookVersion: 2 });
+  const message = '当前没有已发布统一工价，请在工价页新建草稿发布';
+  const preview = await previewPieceworkPriceBookV1Publication(next, sourceSha256);
+  expect(preview.readyToPublish).toBe(false);
+  expect(preview.issues).toContain(message);
+  await expect(publishPieceworkPriceBookV1({ manifest: next, actor, sourceSha256, expectedDraftUpdatedAt: draftUpdatedAt }, now)).rejects.toThrow(message);
+  expect(dbMock.pieceworkPriceBook.create).not.toHaveBeenCalled();
 });

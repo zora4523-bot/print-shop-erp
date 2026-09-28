@@ -173,6 +173,7 @@ export type OrderFormBProps = {
   onAddSpecification?: () => void;
   onDuplicate: (index: number) => void;
   onRemove: (index: number) => void;
+  onRemoveDesign?: (index: number) => void;
   onCustomNameChange: (value: string) => void;
   onPurposeChange?: (value: 'SAMPLE_SHIPMENT' | 'PROOF') => void;
   onRouteChange: (value: OrderItemPricingRoute) => void;
@@ -534,6 +535,7 @@ export function OrderFormB({
   onDuplicate,
   onRemove,
   onCustomNameChange,
+  onRemoveDesign,
   onRouteChange,
   onPurposeChange,
   onPaperChange,
@@ -580,7 +582,7 @@ export function OrderFormB({
     null,
   );
   const { rootRef, handledErrorFocusRequestRef, issueFocusTimerRef, removeButtonRef,
-    styleNavRef, restoreDeleteFocusRef, cancelIssueFocus } = useOrderFormFocus(itemFields.length);
+    styleNavRef, specificationNavRef, removeSpecificationRef, restoreDeleteFocusRef, cancelIssueFocus } = useOrderFormFocus(itemFields.length);
 
   const parsedReceiver = parseExternalReceiverDisplay(values.receiverAddress);
   const receiverPhoneInitialValue =
@@ -778,7 +780,7 @@ export function OrderFormB({
             className="min-h-11 rounded-lg px-3 py-1.5 text-sm font-semibold text-destructive hover:bg-destructive/5 hover:text-destructive"
             onClick={() => {
               cancelIssueFocus();
-              restoreDeleteFocusRef.current = true;
+              restoreDeleteFocusRef.current = 'design';
               onRemove(safeActiveIndex);
             }}
           >
@@ -880,14 +882,19 @@ export function OrderFormB({
           </div>
           <div data-slot="order-design-section" className={onAddSpecification ? 'min-w-0 rounded-xl border bg-card' : undefined}>
           {onAddSpecification ? <div className="space-y-3 rounded-t-xl bg-muted/30 px-4 pt-4 @min-[560px]:px-5">
-            <div className="flex flex-wrap items-start gap-2">
+            <div role="group" aria-label="设计款操作" className="flex flex-wrap items-start gap-2">
+              <Button type="button" variant="outline" className="min-h-11" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER}
+                onClick={() => { cancelIssueFocus(); onAdd(); }}>＋ 增加设计款</Button>
+              {groups.length > 1 && onRemoveDesign ? <Button type="button" variant="destructive" className="min-h-11 bg-background hover:bg-destructive/5 dark:bg-background dark:hover:bg-destructive/5" ref={removeButtonRef}
+                disabled={disabled} onClick={() => {
+                  cancelIssueFocus(); restoreDeleteFocusRef.current = 'design'; onRemoveDesign(safeActiveIndex);
+                }}>删除设计款</Button> : null}
+            </div>
               <EditorTabs ref={styleNavRef} id={`${uid}-design`} label="设计款" variant="folder" disabled={disabled}
                 tabs={groups.map((group, index) => ({ value: itemFields[group.indexes[0]].id,
                   label: `设计款 ${index + 1}${group.indexes.some((member) => fieldErrors?.items?.[member]) || fieldErrors?.designs?.[group.indexes[0]] ? ' · 待完善' : ''}` }))}
                 value={itemFields[activeGroup?.indexes[0] ?? safeActiveIndex].id}
                 onChange={(value) => { cancelIssueFocus(); onActiveIndexChange(itemFields.findIndex((entry) => entry.id === value)); }} />
-              <Button type="button" variant="outline" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加设计款</Button>
-            </div>
             {items.length >= MAX_ORDER_ITEMS_PER_ORDER ? <p className="text-sm text-muted-foreground">每张工单最多 {MAX_ORDER_ITEMS_PER_ORDER} 个规格明细。</p> : null}
           </div> : null}
           <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-design-panel`}
@@ -934,10 +941,10 @@ export function OrderFormB({
           <div data-slot="order-specification-section" className={onAddSpecification ? 'space-y-5 rounded-xl bg-muted/50 p-3 @min-[560px]:p-4' : undefined}>
           {onAddSpecification ? <OrderSpecificationTabs id={`${uid}-spec`}
             indexes={activeGroup?.indexes ?? []} items={items} itemFields={itemFields}
-            activeIndex={safeActiveIndex} errors={fieldErrors} disabled={disabled} removeRef={removeButtonRef}
+            activeIndex={safeActiveIndex} errors={fieldErrors} disabled={disabled} removeRef={removeSpecificationRef} navRef={specificationNavRef}
             onSelect={(index) => { cancelIssueFocus(); onActiveIndexChange(index); }}
             onAdd={onAddSpecification}
-            onRemove={() => { cancelIssueFocus(); restoreDeleteFocusRef.current = true; onRemove(safeActiveIndex); }}
+            onRemove={() => { cancelIssueFocus(); restoreDeleteFocusRef.current = 'specification'; onRemove(safeActiveIndex); }}
           /> : null}
           <div role={onAddSpecification ? 'tabpanel' : undefined} id={`${uid}-spec-panel`}
             className={onAddSpecification ? 'space-y-5' : undefined}
@@ -1088,8 +1095,10 @@ function useOrderFormFocus(itemCount: number) {
   const handledErrorFocusRequestRef = useRef(0);
   const issueFocusTimerRef = useRef<number | null>(null);
   const removeButtonRef = useRef<HTMLButtonElement>(null);
+  const removeSpecificationRef = useRef<HTMLButtonElement>(null);
   const styleNavRef = useRef<HTMLDivElement>(null);
-  const restoreDeleteFocusRef = useRef(false);
+  const specificationNavRef = useRef<HTMLDivElement>(null);
+  const restoreDeleteFocusRef = useRef<'design' | 'specification' | null>(null);
 
   const cancelIssueFocus = useCallback(() => {
     if (issueFocusTimerRef.current !== null) {
@@ -1102,15 +1111,16 @@ function useOrderFormFocus(itemCount: number) {
 
   useLayoutEffect(() => {
     if (!restoreDeleteFocusRef.current) return;
-    restoreDeleteFocusRef.current = false;
+    const specification = restoreDeleteFocusRef.current === 'specification';
+    restoreDeleteFocusRef.current = null;
     const target =
-      removeButtonRef.current ??
-      styleNavRef.current?.querySelector<HTMLButtonElement>(
+      (specification ? removeSpecificationRef.current : removeButtonRef.current) ??
+      (specification ? specificationNavRef.current : styleNavRef.current)?.querySelector<HTMLButtonElement>(
         '[aria-selected="true"], [aria-pressed="true"]',
       );
     target?.focus({ preventScroll: true });
   }, [itemCount]);
 
-  return { rootRef, handledErrorFocusRequestRef, issueFocusTimerRef, removeButtonRef,
-    styleNavRef, restoreDeleteFocusRef, cancelIssueFocus };
+  return { rootRef, handledErrorFocusRequestRef, issueFocusTimerRef, removeButtonRef, removeSpecificationRef,
+    styleNavRef, specificationNavRef, restoreDeleteFocusRef, cancelIssueFocus };
 }

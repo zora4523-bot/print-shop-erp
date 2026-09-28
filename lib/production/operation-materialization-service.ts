@@ -1,3 +1,4 @@
+import { inheritProductionJobsInTx, inheritReworkProductionJobsInTx } from './revision-jobs';
 import type { Prisma } from '../../generated/prisma/client';
 import Decimal from 'decimal.js';
 import { operationCarryoverKey, planOperationCarryovers, sumCarriedQuantity } from './version-carryover';
@@ -40,6 +41,8 @@ export class ProductionOperationMaterializationError extends Error {
 }
 
 const ORDER_FACTS_SELECT = {
+  simpleProduction: true,
+  sourceOrderId: true,
   purpose: true,
   id: true,
   orderNo: true,
@@ -234,6 +237,23 @@ export type ActivateProductionOperationsResult = {
   idempotentReplay: boolean;
 };
 
+async function activateSampleShipmentInTx(
+  tx: Prisma.TransactionClient,
+  order: MaterializationOrder,
+  actorId: string,
+  at?: Date,
+): Promise<ActivateProductionOperationsResult> {
+  const orderId = order.id;
+  if (order.status !== OrderStatus.CONFIRMED && order.status !== OrderStatus.RELEASED && order.status !== OrderStatus.PACKING) throw new ProductionOperationMaterializationError('ORDER_STATUS_NOT_ACTIVATABLE', '请先完成寄样工单核价');
+  if (order.productionOperations.some(operation => operation.workOrderVersion === order.workOrderVersion) || order.productionProgressSteps.some(step => step.workOrderVersion === order.workOrderVersion)) throw new ProductionOperationMaterializationError('EXISTING_OPERATION_MISMATCH', '寄样工单存在生产记录，请核对工单');
+  if (order.status === OrderStatus.CONFIRMED) transitionOrder(order.status, OrderStatus.RELEASED);
+  if (order.status !== OrderStatus.PACKING) transitionOrder(OrderStatus.RELEASED, OrderStatus.PACKING);
+  if (order.status === OrderStatus.PACKING) return { orderId, orderStatus: OrderStatus.PACKING, operationIds: [], operationsCreated: 0, progressStepIds: [], progressStepsCreated: 0, idempotentReplay: true };
+  await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.PACKING, scheduledAt: at ?? new Date(), revision: { increment: 1 } } });
+  await tx.orderLog.create({ data: { orderId, operatorId: actorId, action: 'SAMPLE_READY_TO_SHIP', remark: '寄样品已下发，待打包发货' } });
+  return { orderId, orderStatus: OrderStatus.PACKING, operationIds: [], operationsCreated: 0, progressStepIds: [], progressStepsCreated: 0, idempotentReplay: false };
+}
+
 /**
  * Transactional cutover entry for newly submitted chargeable orders and
  * explicitly free rework orders. Customer pricing remains orthogonal to the
@@ -315,14 +335,7 @@ export async function activateProductionOperationsInTx(
   }
 
   if (order.purpose === 'SAMPLE_SHIPMENT') {
-    if (order.status !== OrderStatus.CONFIRMED && order.status !== OrderStatus.RELEASED && order.status !== OrderStatus.PACKING) throw new ProductionOperationMaterializationError('ORDER_STATUS_NOT_ACTIVATABLE', '请先完成寄样工单核价');
-    if (currentProductionOperations.length || currentProductionProgressSteps.length) throw new ProductionOperationMaterializationError('EXISTING_OPERATION_MISMATCH', '寄样工单存在生产记录，请核对工单');
-    if (order.status === OrderStatus.CONFIRMED) transitionOrder(order.status, OrderStatus.RELEASED);
-    if (order.status !== OrderStatus.PACKING) transitionOrder(OrderStatus.RELEASED, OrderStatus.PACKING);
-    if (order.status === OrderStatus.PACKING) return { orderId, orderStatus: OrderStatus.PACKING, operationIds: [], operationsCreated: 0, progressStepIds: [], progressStepsCreated: 0, idempotentReplay: true };
-    await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.PACKING, scheduledAt: at ?? new Date(), revision: { increment: 1 } } });
-    await tx.orderLog.create({ data: { orderId, operatorId: actor.id, action: 'SAMPLE_READY_TO_SHIP', remark: '寄样品已下发，待打包发货' } });
-    return { orderId, orderStatus: OrderStatus.PACKING, operationIds: [], operationsCreated: 0, progressStepIds: [], progressStepsCreated: 0, idempotentReplay: false };
+    return activateSampleShipmentInTx(tx, order, actor.id, at);
   }
 
   const plan = deriveProductionOperationPlan({
@@ -530,9 +543,13 @@ export async function activateProductionOperationsInTx(
     },
   });
 
+  let finalStatus: OrderStatus = targetStatus;
+  if (order.simpleProduction && options.allowVersionRematerialization) finalStatus = await inheritProductionJobsInTx(tx, orderId, actor.id) ?? targetStatus;
+  else if (order.kind === OrderKind.REWORK && order.sourceOrderId) await inheritReworkProductionJobsInTx(tx, orderId, actor.id);
+
   return {
     orderId,
-    orderStatus: targetStatus,
+    orderStatus: finalStatus,
     operationIds,
     operationsCreated: operationIds.length,
     progressStepIds,

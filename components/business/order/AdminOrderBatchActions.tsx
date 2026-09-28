@@ -7,6 +7,7 @@ import {
   useState,
   useTransition,
 } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { BatchPrintControls } from './BatchPrintControls';
 import { ChevronDown } from 'lucide-react';
@@ -191,6 +192,7 @@ export function AdminOrderBatchActions({
   return (
     <>
       <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">{controls}</div>
+      {selectedItems.length > 0 && selectedItems.length <= 20 && <Link className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium" href={`/orders/production?ids=${selectedItems.map(item => encodeURIComponent(item.id)).join(',')}`}>安排生产师傅</Link>}
       <ConfirmActionController level="L2"
         open={confirmation !== null}
         onOpenChange={(open) => { if (!open) setConfirmation(null); }}

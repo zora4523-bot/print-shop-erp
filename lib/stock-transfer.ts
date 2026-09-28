@@ -1,3 +1,4 @@
+import { acquireWarehouseStockLock } from '@/lib/warehouse-coordination';
 import Decimal from 'decimal.js';
 import { TxDirection, type Prisma } from '../generated/prisma/client';
 import type { CreateStockTransferInput } from './auth/schemas';
@@ -119,6 +120,7 @@ export async function createStockTransfer(
   }
 
   const createdId = await db.$transaction(async (tx) => {
+    await acquireWarehouseStockLock(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:stock-transfer-request:${input.idempotencyKey}`}))`;
     const existing = await tx.stockTransfer.findUnique({
       where: { idempotencyKey: input.idempotencyKey },

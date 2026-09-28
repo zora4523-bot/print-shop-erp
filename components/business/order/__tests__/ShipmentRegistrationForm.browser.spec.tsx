@@ -29,6 +29,8 @@ it('requires explicit confirmation and displays the receivable consequence', asy
   await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
   expect(mocks.save).not.toHaveBeenCalled();
   await expect.element(page.getByRole('alertdialog')).toHaveTextContent('25.00 元');
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('工单自动结算');
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('尚未收款');
   await page.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
   await vi.waitFor(() => expect(mocks.save).toHaveBeenCalled());
   expect(mocks.save.mock.calls[0][0].get('confirm')).toBe('true');
@@ -37,6 +39,13 @@ it('permits draft entry but blocks early shipment', async () => {
   render({ ...props, canConfirm: false, disabledReason: '完工后才可发货' });
   await expect.element(page.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
   await expect.element(page.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
+});
+it('explains free-order settlement without claiming a receivable will be created', async () => {
+  render({ ...props, chargeable: false });
+  await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('工单自动结算');
+  await expect.element(page.getByRole('alertdialog')).not.toHaveTextContent('生成应收');
+  expect(mocks.save).not.toHaveBeenCalled();
 });
 it('accepts a pasted image and sends the prepared photo with the draft', async () => {
   mocks.save.mockResolvedValue({ ok: false, message: '保存失败，请重试' }); render();
@@ -54,6 +63,22 @@ it('keeps previous proof links available after replacement', async () => {
   render({ ...props, shipped: true, labels: [{ id: 'new', createdAt: '2026-09-11' }, { id: 'old', createdAt: '2026-09-10' }] });
   await page.getByText('历史面单照片（1）').click();
   await expect.element(page.getByRole('link', { name: '2026-09-10' })).toHaveAttribute('href', '/api/orders/order/shipments/shipment/labels/old');
+});
+it('stacks controls in a narrow desktop column and gives tracking more room when space allows', async () => {
+  await page.viewport(1280, 800);
+  host.style.width = '360px';
+  render();
+  const tracking = host.querySelector('input')!;
+  const carrier = host.querySelector('select')!;
+  await vi.waitFor(() => {
+    expect(carrier.getBoundingClientRect().top).toBeGreaterThan(tracking.getBoundingClientRect().bottom);
+    expect(tracking.getBoundingClientRect().width).toBeGreaterThan(300);
+  });
+  host.style.width = '600px';
+  await vi.waitFor(() => {
+    expect(Math.abs(carrier.getBoundingClientRect().top - tracking.getBoundingClientRect().top)).toBeLessThan(1);
+    expect(tracking.getBoundingClientRect().width).toBeGreaterThan(carrier.getBoundingClientRect().width);
+  });
 });
 for (const [width,height] of [[375,667],[393,852],[768,1024],[1024,768],[1280,800],[1920,1080]]) for (const theme of ['light','dark']) {
   it(`${width} ${theme}: layout and accessibility`, async () => {

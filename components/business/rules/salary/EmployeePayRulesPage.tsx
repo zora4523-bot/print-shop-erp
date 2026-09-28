@@ -1,3 +1,4 @@
+import { pieceworkScheduleCancellationEnabled } from '@/lib/salary/piecework-cancellation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listSalaryRuleSettings } from '@/lib/salary/rule-admin';
 import { SalaryRuleSettingsForm } from '@/components/business/salary/SalaryRuleSettingsForm';
@@ -19,7 +20,7 @@ export default async function EmployeePayRulesPage() {
         effect="effective-dated"
         subtitle="员工工价与生效日期"
       />
-      <PieceworkPriceBookForm books={books} now={new Date().toISOString()} />
+      <PieceworkPriceBookForm cancellationEnabled={pieceworkScheduleCancellationEnabled()} books={books} now={new Date().toISOString()} />
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="font-semibold">其他薪酬规则</h2>
         <p className="mt-1 text-sm text-muted-foreground">新版本不影响已结算工资。</p>

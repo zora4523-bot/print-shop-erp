@@ -33,6 +33,8 @@ export async function resolveWorkerWorkOrderScan(
     select: {
       id: true,
       workOrderVersion: true,
+      simpleProduction: true,
+      productionJobs: { where: { workerId: actor.id, status: { not: 'CANCELLED' } }, select: { id: true, operationId: true, progressStepId: true, workOrderVersion: true, status: true } },
       productionOperations: {
         where: {
           operationType: operationType ?? { in: [] },
@@ -49,6 +51,14 @@ export async function resolveWorkerWorkOrderScan(
     },
   });
   if (!order) return null;
+  if (order.simpleProduction) {
+    const jobs = order.productionJobs.filter(job => job.workOrderVersion === order.workOrderVersion);
+    if (!jobs.length) return null;
+    const pending = jobs.filter(job => ['PENDING', 'REQUESTED'].includes(job.status));
+    return { orderId: order.id, workOrderVersion: order.workOrderVersion,
+      defaultTaskId: pending.length === 1 ? pending[0].id : null,
+      requestedTaskAllowed: requestedTaskId === undefined || jobs.some(job => [job.id, job.operationId, job.progressStepId].includes(requestedTaskId)) };
+  }
 
   const currentTasks = [
     ...order.productionOperations,

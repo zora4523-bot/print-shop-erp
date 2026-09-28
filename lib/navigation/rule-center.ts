@@ -219,7 +219,7 @@ export const RULE_CENTER_SIDEBAR_ITEMS = [
     menuParentId: 'overview',
     menuGroupLabel: '员工薪酬规则',
     label: '员工薪酬规则',
-    description: '维护标准工时与加班起点版本；工序计件工价属于独立规则域。',
+    description: '维护计件工价、标准工时与加班起点',
     impact: '员工工价与月度结算',
     effect: 'effective-dated',
     href: RULE_CENTER_HREFS.employeePay,

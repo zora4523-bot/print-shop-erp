@@ -38,6 +38,8 @@ function defaultMessage(
       return { title: `${subject}已创建` };
     case 'updated':
       return { title: `${subject}已保存` };
+    case 'creationReplayed':
+      return { title: '该录入此前已创建，现已打开原单据' };
     default:
       return null;
   }

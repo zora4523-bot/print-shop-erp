@@ -3,6 +3,7 @@ import { paginationWindow, paginatedResult, parsePositiveInt } from '@/lib/admin
 import { assertWorkerPortalActor } from '@/lib/production/worker-report-portal';
 import type { Role } from '@/generated/prisma/enums';
 import type { Prisma } from '@/generated/prisma/client';
+import { listProductionWageObligations } from '@/lib/production/wage-obligations';
 
 export async function listWorkerSettlementPage(actor: { id: string; role: Role }, input: { from?: Date; to?: Date; page?: string | string[]; status?: string }) {
   await assertWorkerPortalActor(actor);
@@ -24,8 +25,9 @@ export async function listWorkerSettlementPage(actor: { id: string; role: Role }
     const window = paginationWindow(total, parsePositiveInt(input.page, { defaultValue: 1 }), 20);
     const rows = await tx.pieceworkSettlement.findMany({ where, skip: window.skip, take: window.take,
       orderBy: [{ workDate: 'desc' }, { id: 'desc' }],
-      select: { id: true, workDate: true, status: true, reportAmount: true, adjustmentAmount: true, payableAmount: true, _count: { select: { items: true } } },
+      select: { id: true, workDate: true, status: true, reportAmount: true, adjustmentAmount: true, payableAmount: true, _count: { select: { items: true, productionWages: true } } },
     });
-    return { ...paginatedResult(rows, total, window), totalAmount: sum._sum.payableAmount?.toString() ?? '0', unpaidAmount: unpaid._sum.payableAmount?.toString() ?? '0' };
+    const productionObligations = await listProductionWageObligations(tx, { workerId: actor.id });
+    return { ...paginatedResult(rows, total, window), totalAmount: sum._sum.payableAmount?.toString() ?? '0', unpaidAmount: unpaid._sum.payableAmount?.toString() ?? '0', productionObligations };
   }, { isolationLevel: 'RepeatableRead' });
 }

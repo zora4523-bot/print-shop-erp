@@ -106,6 +106,8 @@ test('逐地址登记、面单历史与最后一票应收确认', async ({ page 
     await page.goto(`/orders/${id}`);
     const delivery = page.locator('#detail-delivery-records');
     await expect(delivery).toHaveAttribute('open', '');
+    const secondDraft = delivery.locator('li').filter({ has: page.getByRole('textbox', { name: '运单号', exact: true }) }).nth(1);
+    await secondDraft.getByRole('textbox', { name: '运单号', exact: true }).fill('SF-UNSAVED-2');
     const first = delivery.locator('li').filter({ has: page.getByRole('textbox', { name: '运单号', exact: true }) }).nth(0);
     await first.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO-TEST-1');
     await first.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('ZTO');
@@ -114,6 +116,7 @@ test('逐地址登记、面单历史与最后一票应收确认', async ({ page 
     await first.getByRole('button', { name: '保存物流资料', exact: true }).click();
     await expect.poll(async () => (await db.query('SELECT "registrationVersion" FROM "OrderShipment" WHERE id=$1', [`${id}-1`])).rows[0].registrationVersion).toBe(1);
     await expect(first.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeEnabled();
+    await expect(secondDraft.getByRole('textbox', { name: '运单号', exact: true })).toHaveValue('SF-UNSAVED-2');
     await first.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
     await expect.poll(async () => (await db.query('SELECT status FROM "OrderShipment" WHERE id=$1', [`${id}-1`])).rows[0].status).toBe('SHIPPED');
@@ -130,6 +133,10 @@ test('逐地址登记、面单历史与最后一票应收确认', async ({ page 
     expect(order.settledFee).toBe(receivable); expect(order.settledAt).not.toBeNull();
     const finalized = await db.query(`SELECT count(*)::int AS n FROM "OrderCustomerCharge" WHERE "orderId"=$1 AND status IN ('FINAL','WAIVED') AND "finalizedAt" IS NOT NULL`, [id]);
     expect(finalized.rows[0].n).toBe(SHIPMENTS.length * 2);
+    await expect(page.getByText('已结算', { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: '前往结算', exact: true })).toHaveCount(0);
+    await expect(page.getByText(/发货（.*）/)).toHaveCount(0);
+    await expect(page.getByText('当前工单状态不支持发货', { exact: true })).toHaveCount(0);
     const labels = await db.query('SELECT id FROM "OrderShipmentLabel" WHERE "shipmentId"=$1', [`${id}-1`]);
     expect(labels.rowCount).toBe(1);
     const url = `/api/orders/${id}/shipments/${id}-1/labels/${labels.rows[0].id}`;

@@ -19,6 +19,7 @@ import {
   createWarehouseLocation,
   WarehouseInvariantError,
 } from '@/lib/warehouse';
+import { maintainWarehouse, warehouseMaintenanceSchema } from '@/lib/warehouse-maintenance';
 import type { WarehouseMutationResult } from './owner-warehouses.types';
 
 const WAREHOUSE_UNIQUE_VIOLATIONS: readonly UniqueViolationMapping[] = [
@@ -45,7 +46,7 @@ export async function createWarehouseAction(
   _prev: WarehouseMutationResult | null,
   formData: FormData,
 ): Promise<WarehouseMutationResult> {
-  await requirePermission('warehouse:manage');
+  const actor = await requirePermission('warehouse:manage');
 
   const parsed = createWarehouseSchema.safeParse({
     code: getFormString(formData, 'code'),
@@ -54,7 +55,7 @@ export async function createWarehouseAction(
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 
   try {
-    await createWarehouse(parsed.data);
+    await createWarehouse(parsed.data, actor.id);
   } catch (err) {
     const unique = mapPrismaUniqueViolation(err, WAREHOUSE_UNIQUE_VIOLATIONS);
     if (unique) return unique;
@@ -71,7 +72,7 @@ export async function createWarehouseLocationAction(
   _prev: WarehouseMutationResult | null,
   formData: FormData,
 ): Promise<WarehouseMutationResult> {
-  await requirePermission('warehouse:manage');
+  const actor = await requirePermission('warehouse:manage');
 
   const parsed = createWarehouseLocationSchema.safeParse({
     warehouseId: getFormString(formData, 'warehouseId'),
@@ -81,7 +82,7 @@ export async function createWarehouseLocationAction(
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 
   try {
-    await createWarehouseLocation(parsed.data);
+    await createWarehouseLocation(parsed.data, actor.id);
   } catch (err) {
     const unique = mapPrismaUniqueViolation(err, LOCATION_UNIQUE_VIOLATIONS);
     if (unique) return unique;
@@ -98,10 +99,36 @@ function revalidateWarehousePaths() {
   revalidatePaths([
     '/owner/warehouses',
     '/owner/materials',
+    '/owner/rules/papers',
     '/foreman/materials',
     '/owner/purchases',
+    '/owner/materials/count',
+    '/foreman/materials/count',
   ]);
   revalidatePath('/owner/materials/[id]', 'page');
+  revalidatePath('/owner/rules/papers/[id]', 'page');
   revalidatePath('/foreman/materials/[id]', 'page');
   revalidatePath('/owner/purchases/[id]', 'page');
+}
+
+export async function maintainWarehouseAction(
+  _prev: WarehouseMutationResult | null,
+  formData: FormData,
+): Promise<WarehouseMutationResult> {
+  const actor = await requirePermission('warehouse:manage');
+  const parsed = warehouseMaintenanceSchema.safeParse({
+    kind: getFormString(formData, 'kind'), id: getFormString(formData, 'id'),
+    expectedUpdatedAt: getFormString(formData, 'expectedUpdatedAt'),
+    operation: getFormString(formData, 'operation'),
+    name: getFormString(formData, 'name') ?? undefined,
+  });
+  if (!parsed.success) return invalidFromIssues(parsed.error.issues);
+  try { await maintainWarehouse(parsed.data, actor.id); }
+  catch (error) {
+    const invariant = mapInvariantError(error, WarehouseInvariantError);
+    if (invariant) return invariant;
+    throw error;
+  }
+  revalidateWarehousePaths();
+  return { status: 'success', message: parsed.data.operation === 'rename' ? '名称已修改' : parsed.data.operation === 'restore' ? '已恢复使用' : '已停用' };
 }

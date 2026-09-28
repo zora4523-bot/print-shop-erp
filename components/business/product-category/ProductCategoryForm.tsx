@@ -1,5 +1,9 @@
 'use client';
 
+import type { SupplementContext } from '@/lib/form-drafts/model';
+import { supplementReturnHref } from '@/lib/form-drafts/return-context';
+import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
+
 import { useActionState } from 'react';
 import { ProductCategory } from '../../../generated/prisma/enums';
 import type { ProductCategoryNodeMutationResult } from '@/actions/owner-product-categories.types';
@@ -24,6 +28,7 @@ export type ProductCategoryRouteBase =
   typeof RULE_CENTER_HREFS.productCategories;
 
 type Props = {
+  supplement?: SupplementContext | null;
   routeBase?: ProductCategoryRouteBase;
 } &
   (
@@ -72,7 +77,9 @@ export function ProductCategoryForm(props: Props) {
   );
 
   return (
-    <form action={formAction} aria-busy={pending} className="space-y-5" noValidate>
+    <form action={formAction}
+      onReset={(event) => event.preventDefault()} aria-busy={pending} className="space-y-5" noValidate>
+      <SupplementFields context={props.supplement} />
       {props.mode === 'create' ? (
         <div className="space-y-2">
           <Label htmlFor="parentId">上级分类</Label>
@@ -157,11 +164,11 @@ export function ProductCategoryForm(props: Props) {
           {pending ? '提交中…' : props.mode === 'create' ? '创建分类' : '保存修改'}
         </Button>
         <PendingLink
-          href={routeBase}
+          href={props.supplement ? supplementReturnHref(props.supplement) : routeBase}
           pending={pending}
           className={buttonVariants({ variant: 'outline' })}
         >
-          返回列表
+          {props.supplement ? '返回原录入' : '返回列表'}
         </PendingLink>
       </div>
     </form>

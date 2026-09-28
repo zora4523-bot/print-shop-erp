@@ -1,3 +1,4 @@
+import { WarehouseMaintenance } from '@/components/business/warehouse/WarehouseMaintenance';
 import { randomUUID } from 'node:crypto';
 import { Suspense } from 'react';
 import Link from 'next/link';
@@ -315,11 +316,12 @@ async function WarehouseSettingsContent({
                   </Badge>
                 </div>
               </div>
-              <div className="grid gap-2 md:grid-cols-2">
+              <WarehouseMaintenance kind="warehouse" id={warehouse.id} name={warehouse.name} isActive={warehouse.isActive} isDefault={warehouse.isDefault} updatedAt={warehouse.updatedAt.toISOString()} />
+              <div className="mt-4 grid gap-3 xl:grid-cols-2">
                 {warehouse.locations.map((location) => (
                   <div
                     key={location.id}
-                    className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                    className="space-y-3 rounded-md border p-3 text-sm"
                   >
                     <div>
                       <div>{location.name}</div>
@@ -337,6 +339,7 @@ async function WarehouseSettingsContent({
                         {location.isActive ? '启用' : '停用'}
                       </Badge>
                     </div>
+                    <WarehouseMaintenance kind="location" id={location.id} name={location.name} isActive={location.isActive} isDefault={location.isDefault} parentActive={warehouse.isActive} updatedAt={location.updatedAt.toISOString()} />
                   </div>
                 ))}
               </div>

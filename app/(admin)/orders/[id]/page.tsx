@@ -1,3 +1,8 @@
+import { Fragment } from 'react';
+import { ProductionDeliverySummary } from '@/components/business/production/ProductionDeliverySummary';
+import { ProductionJobPanel } from '@/components/business/production/ProductionJobPanel';
+import { CreateOrderOutsourceLink } from '@/components/business/outsource/CreateOrderOutsourceLink';
+import { hasPermission } from '@/lib/auth/permissions-dict';
 import { HistoricalBlankPriceEditor } from '@/components/business/order/HistoricalBlankPriceEditor';
 import { readHistoricalBlankPriceEditor } from '@/lib/order/confirm-historical-blank-price';
 import { listOrderReportDisputes } from '@/lib/production/report-dispute';
@@ -15,6 +20,7 @@ import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
 import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { getAdminOrderDetailPresentation } from '@/lib/order/admin-detail-query';
 import { buildAdminOrderDetailModel } from '@/components/business/order/admin-order-detail-model';
 import { AdminOrderDetailView } from '@/components/business/order/AdminOrderDetailView';
@@ -44,7 +50,7 @@ import { getSession, requireSession } from '@/lib/auth/session';
 import { getOrderDetail } from '@/lib/order';
 import { getOrderTitleRef } from '@/lib/page-title/refs';
 import { orderDetailTitle } from '@/lib/page-title/titles';
-import { canAttachOutsource } from '@/lib/order/status-machine';
+import { outsourceUnavailableReason } from '@/lib/order/outsource-eligibility';
 import { canCreateReworkFromStatus } from '@/lib/order/rework-eligibility';
 import {
   canEditOrderSfCollect,
@@ -52,14 +58,15 @@ import {
   isOrderEditable,
 } from '@/lib/order/editable-fields';
 import { roleLabel } from '@/lib/auth/role-labels';
+import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import {
   actionLabel,
   formatOrderLogChanges,
 } from '@/lib/order/log-format';
 import { Badge } from '@/components/ui/badge';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice, DisabledReason, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { ActionNotice, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
@@ -72,12 +79,10 @@ import { SfCollectToggleForm } from '@/components/business/order/SfCollectToggle
 import { FulfillmentPricingReviewForm } from '@/components/business/order/FulfillmentPricingReviewForm';
 import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
 import { DesignUploadPanel } from '@/components/business/order/DesignUploadPanel';
-import { PromisedDateBadge } from '@/components/business/order/PromisedDateBadge';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { OrderMaterialUsageEstimate } from '@/components/business/bom/OrderMaterialUsageEstimate';
 import { estimateMaterialUsageForOrderItems } from '@/lib/bom';
 import {
-  formatDateInputShanghai,
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
 import { getOrderPieceworkSummary } from '@/lib/salary/daily';
@@ -113,7 +118,6 @@ import {
 } from '@/lib/order/admin-pricing-snapshot';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { PricingSnapshotBreakdown } from '@/components/business/price/PricingSnapshotBreakdown';
-import { orderDetailAmounts } from '@/lib/order/detail-amounts';
 import { OrderAmount } from '@/components/business/order/OrderAmount';
 import { orderCancelImpact } from '@/components/business/order/order-detail-timeline';
 import { listOrderTaskDisputes } from '@/lib/production/task-dispute';
@@ -126,6 +130,8 @@ import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
 import {
   orderShippingAvailability,
+  orderShippingBlocker,
+  orderShippingRecoveryHref,
 } from '@/lib/order/shipping-availability';
 import { canShowAdminDirectCancel } from '@/lib/order/direct-cancel';
 
@@ -286,12 +292,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   // 设计图增删仅 DRAFT（提交后的增删属于 A05，等业主拍板）；所有权
   // 与编辑一致。lib/order-design.ts 是真闸口，这里 UI-only。
   const canEditDesigns = order.status === OrderStatus.DRAFT && canEdit;
-  // Only foreman / owner creates outsource orders, and only on
-  // production-active states. SHIPPED is non-terminal but already
-  // out the door — no new production work attaches there.
-  // canAttachOutsource() is the canonical gate;
-  // lib/outsource.ts re-checks the same predicate.
-  const canCreateOutsource = canAttachOutsource(order.status);
+  const canManageBom = hasPermission('bom:manage', user.role);
+  const canManageOutsource = hasPermission('outsource:manage', user.role);
+  const canCreateOutsource = canManageOutsource && !outsourceUnavailableReason(order);
   const assignedWorkerNames = [
     ...new Set(
       order.items.flatMap((item) =>
@@ -304,8 +307,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const allTasks = order.items.flatMap((item) => item.tasks);
   const hasProductionOperations = productionOperations.length > 0;
   const productionUnits = hasProductionOperations
-    ? [...productionOperations, ...productionProgressSteps]
-    : allTasks;
+    ? [...productionOperations.filter(operation => !order.simpleProduction || operation.operationType !== 'PACKING'), ...productionProgressSteps]
+    : [...productionProgressSteps, ...allTasks];
   const pendingProductionCount = productionUnits.filter(
     (unit) => unit.status === 'PENDING',
   ).length;
@@ -343,8 +346,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   ).length;
   const incompleteProductionCount =
     pendingProductionCount + inProgressProductionCount;
-  const { canShip, disabledReason: shipDisabledReason } =
-    orderShippingAvailability({
+  const shippingFacts = {
       isAdministrator: canShipOrSettle,
       status: order.status,
       incompleteProductionCount,
@@ -352,7 +354,10 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       isPricingPending,
       hasShipment: order.shipments.length > 0,
       hasPendingChange: Boolean(pendingChangeRequest),
-    });
+    };
+  const { canShip, disabledReason: shipDisabledReason } = orderShippingAvailability(shippingFacts);
+  const shippingRecoveryHref = orderShippingRecoveryHref(shippingFacts);
+  const shippingBlocker = orderShippingBlocker(shippingFacts);
   const cancelImpact = orderCancelImpact({
     pendingProductionCount,
     inProgressProductionCount,
@@ -370,9 +375,13 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     priceRevision: 'priceRevision' in order && typeof order.priceRevision === 'number' ? order.priceRevision : undefined,
   });
   const inlineOperations = presentation?.workspace.inlineOperations;
+  const hasPricingDetails = Boolean(isChargeableOrder && pricingStatus) ||
+    (canAdminManageCommercialDetails && priceRevision !== null) ||
+    (canViewCommercialAmounts && order.customerCharges.length > 0);
 
   const detailSections = {
-    pricing: (<><ProductionReadinessWarning readiness={savedPricingReadiness} saved />{repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}{isChargeableOrder && pricingStatus ? (
+    readiness: (<Fragment key="readiness"><ProductionReadinessWarning readiness={savedPricingReadiness} saved />{repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}</Fragment>),
+    pricing: (<Fragment key="pricing">{isChargeableOrder && pricingStatus ? (
         <section
           id="pricing-review"
           className={
@@ -383,7 +392,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         >
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 className="text-base font-semibold">工单价格状态</h2>
+              <h3 className="text-base font-semibold">工单价格状态</h3>
               <p className="mt-1 text-sm text-muted-foreground">
                 {isPricingPending
                   ? canReviewFulfillmentPricing
@@ -445,10 +454,10 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             />
           ) : null}
         </section>
-      ) : null}</>),
-    commercial: (<>{canAdminManageCommercialDetails &&
+      ) : null}</Fragment>),
+    commercial: (<Fragment key="commercial">{canAdminManageCommercialDetails &&
       priceRevision !== null ? (
-        <OrderCommercialDetailsManager
+        <OrderCommercialDetailsManager headingLevel={3}
           orderId={order.id}
           priceRevision={priceRevision}
           allowPlateDetailMaintenance={!isPricingPending}
@@ -494,8 +503,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             };
           })}
         />
-      ) : null}</>),
-    otherActions: (<><div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
+      ) : null}</Fragment>),
+    printActions: (<Fragment key="printActions"><div className="flex min-w-0 flex-wrap items-center gap-2">
             <a
               href={`/api/orders/${order.id}/pdf?view=inline`}
               target="_blank"
@@ -513,6 +522,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             <Link href={`/print/orders/${order.id}`} prefetch={false} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               网页预览
             </Link>
+          </div></Fragment>),
+    otherActions: (<div className="flex min-w-0 flex-wrap items-center gap-2">
             {canEdit ? (
               <Link
                 href={`/orders/${order.id}/edit`}
@@ -552,34 +563,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 }))}
               />
             ) : null}
-            {canCreateOutsource ? (
-              <Link
-                href={`/foreman/outsource/new?orderId=${order.id}`}
-                className={buttonVariants({ variant: 'outline', size: 'sm' })}
-              >
-                外协
-              </Link>
-            ) : null}
+            <CreateOrderOutsourceLink orderId={order.id} status={order.status} completedAt={order.completedAt} canManage={canManageOutsource} />
             {canSubmit ? <SubmitOrderButton orderId={order.id} purpose={order.purpose} /> : null}
-            {canShipOrSettle && order.status === OrderStatus.SHIPPED ? (
-              isPricingPending ? (
-                <DisabledReason
-                  cause="prerequisite"
-                  reason="价格待管理员确认"
-                >
-                  <Button type="button" disabled size="sm">
-                    结算（价格待确认）
-                  </Button>
-                </DisabledReason>
-              ) : (
-                <Link
-                  href="#detail-delivery-records"
-                  className={buttonVariants({ size: 'sm' })}
-                >
-                  前往结算
-                </Link>
-              )
-            ) : null}
             {canShip ? (
               <Link
                 href="#shipment-registration"
@@ -587,28 +572,6 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               >
                 发货
               </Link>
-            ) : canShipOrSettle &&
-              order.status !== OrderStatus.SHIPPED &&
-              order.status !== OrderStatus.FINISHED &&
-              order.status !== OrderStatus.CANCELLED ? (
-              <DisabledReason
-                cause="prerequisite"
-                reason={shipDisabledReason ?? '当前不能发货'}
-                fixHref={
-                  hasLiveOutsource
-                    ? '/foreman/outsource'
-                    : order.uncoveredOutsourceItems.length > 0
-                      ? `/foreman/outsource/new?orderId=${order.id}`
-                      : undefined
-                }
-                fixLabel={hasLiveOutsource ? '查看外协单' : '补外协'}
-              >
-                <Button type="button" disabled size="sm">
-                  {shipDisabledReason
-                    ? `发货（${shipDisabledReason}）`
-                    : '发货'}
-                </Button>
-              </DisabledReason>
             ) : null}
             {canCancel ? (
               <>
@@ -624,21 +587,21 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 />
               </>
             ) : null}
-          </div></>),
-    basics: (<><OrderBasicSummarySection hideRemark {...{
+          </div>),
+    basics: (<Fragment key="basics"><OrderBasicSummarySection {...{
       order, hasProductionOperations, productionOperations, productionProgressSteps,
       assignedWorkerNames, canViewCommercialAmounts,
-    }} /></>),
-    payrollPass: (<>
+    }} /></Fragment>),
+    payrollPass: (<Fragment key="payrollPass">
       {['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'].includes(order.status) && productionOperations.some((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)) && <section className="space-y-3 rounded-xl border bg-card p-4 sm:p-6">
-        <h2 className="text-base font-semibold">师傅计薪次数</h2>
+        <h3 className="text-base font-semibold">师傅计薪次数</h3>
         <div className="grid gap-3 sm:grid-cols-2">{productionOperations.filter((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)).map((op) => <PayrollPassForm key={`${op.id}:${op.payrollRevision}`} operationId={op.id} revision={op.payrollRevision} passCount={op.payrollPassCount ?? productionOperationPassCount(op.operationType, op.sources)} sequences={op.sources.flatMap((s) => s.orderItem ? [s.orderItem.sequence] : [])} />)}</div>
       </section>}
-    </>),
-    customerCharges: (<>{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
+    </Fragment>),
+    customerCharges: (<Fragment key="customerCharges">{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
-            <h2 className="text-base font-semibold">对客收费明细</h2>
+            <h3 className="text-base font-semibold">对客收费明细</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               对客收费与工厂成本分开统计。
             </p>
@@ -678,7 +641,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                             charge.pricingSnapshot,
                             charge,
                           )
-                        ? '管理员已确认（待结算）'
+                        ? '已人工核对（待结算）'
                       : charge.status === 'WAIVED'
                         ? '已免收'
                         : charge.status === 'PENDING_AMOUNT'
@@ -688,11 +651,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                   <div>
-                    <dt className="text-muted-foreground">实际收费</dt>
+                    <dt className="text-muted-foreground">{charge.status === 'ESTIMATED' ? '估算收费' : charge.status === 'FINAL' ? '已确认收费' : '收费金额'}</dt>
                     <dd className="font-sans font-medium tabular-nums">
-                      {charge.amount === null
-                        ? '待定'
-                        : formatMoney(charge.amount)}
+                      <OrderAmount status={order.status} amount={charge.amount?.toString() ?? null} estimated={charge.status === 'ESTIMATED'} />
                     </dd>
                   </div>
                   <div>
@@ -744,75 +705,79 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             ))}
           </ol>
         </section>
-      ) : null}</>),
-    shipments: (<><section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      ) : null}</Fragment>),
+    shipments: (<Fragment key="shipments">{order.simpleProduction && <ProductionDeliverySummary orderId={order.id} version={order.workOrderVersion} />}<section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-semibold">
+          <h3 className="text-base font-semibold">
             发货地址（{order.shipments.length}）
-          </h2>
+          </h3>
           {order.shipments.length > 1 ? (
             <Badge variant="outline">多地址发货</Badge>
           ) : null}
         </div>
-        <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+        {order.shipments.length === 0 ? <p className="text-sm text-muted-foreground">未填写发货地址{canEdit ? <> · <Link href={`/orders/${order.id}/edit`} className="inline-flex min-h-11 items-center underline">补充配送信息</Link></> : null}</p> : null}
+        <ol className="grid min-w-0 grid-cols-1 gap-4">
           {order.shipments.map((shipment) => (
-            <li
-              key={shipment.id}
-              className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium">地址 {shipment.sequence}</span>
-                <ShipmentStatusBadge status={shipment.status} />
-              </div>
-              <p className="mt-2 text-muted-foreground">
-                {formatReceiverInfo(shipment, '未填写收货信息')}
-              </p>
-              {shipment.expressCode ? (
-                <p className="text-muted-foreground">
-                  快递代码：{shipment.expressCode}
-                </p>
-              ) : null}
-              {shipment.destinationProvince ? (
-                <p className="text-muted-foreground">
-                  计费省份：{shipment.destinationProvince}
-                </p>
-              ) : null}
-              {shipment.weightKg ? (
-                <p className="font-sans tabular-nums text-muted-foreground">
-                  发货计费重量：{String(shipment.weightKg)} kg
-                </p>
-              ) : null}
-              {shipment.trackingNo ? (
-                <p className="font-sans tabular-nums">
-                  运单号：{shipment.trackingNo}
-                </p>
-              ) : null}
-              {order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.FINISHED ? (
-                <ShipmentRegistrationForm key={`${shipment.id}:${shipment.registrationVersion}`}
-                  orderId={order.id} shipmentId={shipment.id} version={shipment.registrationVersion}
-                  revision={order.revision} editVersion={order.editVersion} workOrderVersion={order.workOrderVersion} priceRevision={priceRevision ?? 0}
-                  trackingNo={shipment.trackingNo} carrierCode={shipment.carrierCode} carrierName={shipment.carrierName}
-                  shipped={shipment.status === 'SHIPPED'} canConfirm={canShip} disabledReason={shipDisabledReason}
-                  lastPending={order.shipments.filter((row) => row.status !== 'SHIPPED').length === 1}
-                  amount={order.confirmedFee !== null ? formatMoneyPlain(order.confirmedFee) : '待核价'}
-                  labels={shipment.labels.map((label) => ({ id: label.id, createdAt: label.createdAt.toISOString() }))}
-                />
-              ) : null}
-              <p className="mt-2 text-xs text-muted-foreground">
-                {shipment.lines
-                  .map(
-                    (line) =>
-                      `#${line.orderItem.sequence} ${line.orderItem.name} × ${line.quantity}`,
-                  )
-                  .join('；') || '尚未分配款式数量'}
-              </p>
+            <li key={shipment.id} className="admin-wrap-anywhere min-w-0">
+              <Card className="min-w-0 gap-3 text-sm shadow-none">
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                  <h4 className="font-semibold">地址 {shipment.sequence}</h4>
+                  <ShipmentStatusBadge status={shipment.status} />
+                </CardHeader>
+                <CardContent className="min-w-0 space-y-3">
+                  <div className="space-y-1">
+                    {shipment.receiverName || shipment.receiverPhone ? (
+                      <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        {shipment.receiverName ? <span className="font-medium">{shipment.receiverName}</span> : null}
+                        {shipment.receiverPhone ? <span className="tabular-nums">{shipment.receiverPhone}</span> : null}
+                      </p>
+                    ) : null}
+                    {shipment.receiverAddress ? <p className="whitespace-pre-line text-muted-foreground">{shipment.receiverAddress}</p> : null}
+                    {!shipment.receiverName && !shipment.receiverPhone && !shipment.receiverAddress ? <p className="text-muted-foreground">未填写收货信息</p> : null}
+                  </div>
+                  {shipment.expressCode || shipment.destinationProvince || shipment.weightKg ? (
+                    <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {shipment.expressCode ? <div className="flex flex-wrap gap-x-1"><dt>快递代码</dt><dd>{shipment.expressCode}</dd></div> : null}
+                      {shipment.destinationProvince ? <div className="flex flex-wrap gap-x-1"><dt>计费省份</dt><dd>{shipment.destinationProvince}</dd></div> : null}
+                      {shipment.weightKg ? <div className="flex flex-wrap gap-x-1"><dt>发货计费重量</dt><dd className="tabular-nums">{String(shipment.weightKg)} kg</dd></div> : null}
+                    </dl>
+                  ) : null}
+                  {shipment.lines.length ? (
+                    <ul aria-label={`地址 ${shipment.sequence} 的款式数量`} className="space-y-2 border-t pt-3">
+                      {shipment.lines.map((line) => (
+                        <li key={line.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                          <span className="min-w-0 text-muted-foreground">#{line.orderItem.sequence} {line.orderItem.name}</span>
+                          <span className="shrink-0 font-medium tabular-nums">{line.quantity.toLocaleString('zh-CN')} 个</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="text-xs text-muted-foreground">尚未分配款式数量</p>}
+                  {shipment.trackingNo && (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.FINISHED) ? (
+                    <p className="tabular-nums">
+                      运单号：{shipment.trackingNo}
+                    </p>
+                  ) : null}
+                  {order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.FINISHED ? (
+                    <ShipmentRegistrationForm key={`${shipment.id}:${shipment.registrationVersion}`}
+                      orderId={order.id} shipmentId={shipment.id} version={shipment.registrationVersion}
+                      revision={order.revision} editVersion={order.editVersion} workOrderVersion={order.workOrderVersion} priceRevision={priceRevision ?? 0}
+                      trackingNo={shipment.trackingNo} carrierCode={shipment.carrierCode} carrierName={shipment.carrierName}
+                      shipped={shipment.status === 'SHIPPED'} canConfirm={canShip} disabledReason={shipDisabledReason}
+                      lastPending={order.shipments.filter((row) => row.status !== 'SHIPPED').length === 1}
+                      chargeable={isChargeableOrder}
+                      amount={order.confirmedFee !== null ? formatMoneyPlain(order.confirmedFee) : '待核价'}
+                      labels={shipment.labels.map((label) => ({ id: label.id, createdAt: label.createdAt.toISOString() }))}
+                    />
+                  ) : null}
+                </CardContent>
+              </Card>
             </li>
           ))}
         </ol>
-      </section></>),
-    rework: (<>{order.sourceOrder || order.reworkOrders.length > 0 ? (
+      </section></Fragment>),
+    rework: (<Fragment key="rework">{order.sourceOrder || order.reworkOrders.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <h2 className="text-base font-semibold">重做关联</h2>
+          <h3 className="text-base font-semibold">重做关联</h3>
           {order.sourceOrder ? (
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
               <span className="text-muted-foreground">原工单</span>
@@ -848,32 +813,18 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </ul>
           ) : null}
         </section>
-      ) : null}</>),
-    designFiles: (<><section className="space-y-3">
-        <ol className="space-y-3">
-          {order.items.map((item) => (
-            <li key={item.id} className="min-w-0 text-sm">
-              <Disclosure id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
+      ) : null}</Fragment>),
+    itemDetails: order.items.map((item) => ({ itemId: item.id, content: (
+              <Disclosure key={item.id} id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
                 <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
-                  <span className="admin-wrap-anywhere min-w-0 font-medium">
-                    <span className="text-muted-foreground">#{item.sequence}</span>
-                    {' · '}
-                    {item.name}
-                  </span>
+                  <span className="min-w-0 font-medium"><span className="sr-only">第 {item.sequence} 款 · {item.name}：</span>设计文件与工艺资料</span>
                   <span className="text-xs text-muted-foreground">
-                    {formatQuantity(item.quantity)} 个
-                    {item.craftNames.length
-                      ? ` · ${item.craftNames.length} 项工艺`
-                      : ''}
-                    <span className="ml-2 group-open/design-item:hidden">展开</span>
-                    <span className="ml-2 hidden group-open/design-item:inline">收起</span>
+                    <span className="group-open/design-item:hidden">展开</span>
+                    <span className="hidden group-open/design-item:inline">收起</span>
                   </span>
                 </DisclosureSummary>
               <div className="space-y-3 px-4 pb-4">
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <h3 className="sr-only">
-                  #{item.sequence} {item.name}
-                </h3>
                 <dl className="flex min-w-0 flex-wrap items-start gap-x-4 gap-y-1 text-xs sm:shrink-0 sm:justify-end sm:text-right">
                   <div className="min-w-0">
                     <dt className="text-muted-foreground">数量</dt>
@@ -1002,13 +953,13 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                           )
                           .join('；')
                       : item.tasks
-                          .map((task) => `${task.craft.name}：${task.worker?.displayName ?? '历史未分派记录'}`)
+                          .map((task) => `${task.craft.name}：${task.worker?.displayName ?? '历史未分派记录'}（${PRODUCTION_TASK_STATUS_REGISTRY[task.status].label}）`)
                           .join('；')
                   }
                   full
                 />
                 ) : null}
-                {hasProductionOperations && (progressByOrderItemId.get(item.id)?.length ?? 0) > 0 ? (
+                {(progressByOrderItemId.get(item.id)?.length ?? 0) > 0 ? (
                   <Row
                     label="无计件进度（不计薪）"
                     value={
@@ -1085,20 +1036,16 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 }))}
               />
               </div>
-              </Disclosure>
-            </li>
-          ))}
-        </ol>
-      </section></>),
-    packaging: (<><OrderPackagingGroupsSection
+              </Disclosure>    ) })),
+    packaging: (<Fragment key="packaging"><OrderPackagingGroupsSection
         order={order}
         canViewCommercialAmounts={canViewCommercialAmounts}
-      /></>),
-    changeHistory: (<>{order.changeRequests.length > 0 ? (
+      /></Fragment>),
+    changeHistory: (<Fragment key="changeHistory">{order.changeRequests.length > 0 ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="text-base font-semibold">工单修改申请</h2>
+              <h3 className="text-base font-semibold">工单修改申请</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 当前工单版本：第 {order.revision} 版
               </p>
@@ -1133,10 +1080,10 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 <p className="admin-wrap-anywhere mt-2 text-sm">
                   原因：{request.reason}
                 </p>
-                <OrderChangeFieldDiff
+                {request.type === 'CANCEL' ? <p className="mt-2 text-sm">取消工单{request.producedQty != null ? ` · 已产 ${request.producedQty} 个` : ''}{request.settleFee != null ? ` · 结算 ${formatMoney(request.settleFee)}` : ''}</p> : <OrderChangeFieldDiff
                   beforeSnapshot={request.beforeSnapshot}
                   proposedChanges={request.proposedChanges}
-                />
+                />}
                 {request.reviewRemark ? (
                   <p className="admin-wrap-anywhere mt-2 text-xs text-muted-foreground">
                     审核备注：{request.reviewRemark}
@@ -1157,9 +1104,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             ))}
           </ol>
         </section>
-      ) : null}</>),
-    disputes: (<><ReportDisputeAdminPanel disputes={reportDisputes} />{(
-        <TaskDisputeAdminPanel
+      ) : null}</Fragment>),
+    disputes: (<Fragment key="disputes"><ReportDisputeAdminPanel headingLevel={3} disputes={reportDisputes} />{(
+        <TaskDisputeAdminPanel headingLevel={3}
           disputes={taskDisputes.map((dispute) => ({
             id: dispute.id,
             status: dispute.status,
@@ -1180,13 +1127,13 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             },
           }))}
         />
-      )}</>),
-    material: (<><OrderMaterialUsageEstimate estimate={materialEstimate} /></>),
-    piecework: (<><OrderWagePanel orderId={order.id} actor={user} />{pieceworkSummary ? (
+      )}</Fragment>),
+    material: (<Fragment key="material"><OrderMaterialUsageEstimate headingLevel={3} estimate={materialEstimate} canManageBom={canManageBom} /></Fragment>),
+    piecework: (<Fragment key="piecework"><OrderWagePanel headingLevel={3} orderId={order.id} actor={user} />{pieceworkSummary && (!order.simpleProduction || pieceworkSummary.items.length > 0) ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
-              <h2 className="text-base font-semibold">已生成计件工资</h2>
+              <h3 className="text-base font-semibold">已生成计件工资</h3>
             </div>
             <strong className="admin-wrap-anywhere font-sans tabular-nums text-primary">
               合计 {formatMoney(pieceworkSummary.total)}
@@ -1220,11 +1167,11 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </ul>
           )}
         </section>
-      ) : null}</>),
-    costs: (<>{(
+      ) : null}</Fragment>),
+    costs: (<Fragment key="costs">{(
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
-            <h2 className="text-base font-semibold">成本补录与调整</h2>
+            <h3 className="text-base font-semibold">成本补录与调整</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               无需重复录入计件工资和外协费用。
             </p>
@@ -1290,9 +1237,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             />
           </div>
         </section>
-      )}</>),
-    logs: (<><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <h2 className="text-base font-semibold">修改日志</h2>
+      )}</Fragment>),
+    logs: (<Fragment key="logs"><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+        <h3 className="text-base font-semibold">修改日志</h3>
         {order.logs.length === 0 ? (
           <TableEmptyState
             variant="compact"
@@ -1343,13 +1290,13 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             })}
           </ul>
         )}
-      </section></>),
+      </section></Fragment>),
     shippingForm: null,
-    completionBlock: (<>{(order.status === OrderStatus.SCHEDULING ||
+    completionBlock: (<Fragment key="completionBlock">{(order.status === OrderStatus.SCHEDULING ||
         order.status === OrderStatus.IN_PRODUCTION) &&
       order.uncoveredOutsourceItems.length > 0 ? (
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
-          <h2 className="text-base font-semibold">暂不能完工</h2>
+          <h3 className="text-base font-semibold">暂不能完工</h3>
           <p className="text-sm text-muted-foreground">
             以下款式含外协工艺，但外协履约数量不足，或还没有未取消的
             外协单。请先创建或补足外协单：
@@ -1370,8 +1317,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </Link>
           ) : null}
         </section>
-      ) : null}</>),
-    shippingBlock: (<>{canShipOrSettle &&
+      ) : null}</Fragment>),
+    shippingBlock: (<Fragment key="shippingBlock">{canShipOrSettle &&
       (order.status === OrderStatus.PACKING ||
         order.status === OrderStatus.COMPLETED) &&
       !canShip ? (
@@ -1379,34 +1326,36 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           id="ship-order"
           className="scroll-mt-28 space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6"
         >
-          <h2 className="text-base font-semibold">暂不能发货</h2>
+          <h3 className="text-base font-semibold">暂不能发货</h3>
           <p className="text-sm text-muted-foreground">
             {shipDisabledReason ?? '请先补齐发货前置事实。'}
           </p>
-          {hasLiveOutsource ? (
-            <Link
-              href="/foreman/outsource"
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              查看外协单
+          {shippingRecoveryHref ? (
+            <Link href={shippingRecoveryHref} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              {shippingBlocker === 'PRODUCTION' ? '查看生产进度' : '处理发货前置条件'}
             </Link>
-          ) : null}
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              该工单已完工，无法补充发货地址，请核对历史收货资料。
+            </p>
+          )}
         </section>
-      ) : null}</>),
-    settlementBlock: (<>{canShipOrSettle &&
+      ) : null}</Fragment>),
+    settlementBlock: (<Fragment key="settlementBlock">{canShipOrSettle &&
       order.status === OrderStatus.SHIPPED &&
       isPricingPending ? (
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
-          <h2 className="text-base font-semibold">暂不能结算</h2>
+          <h3 className="text-base font-semibold">暂不能结算</h3>
           <p className="text-sm text-muted-foreground">
             当前对客价格待管理员确认。请先完成整单重算并生成终价修订，再结算。
           </p>
+          <Link href="#pricing-review" className={buttonVariants({ variant: 'outline', size: 'sm' })}>处理核价</Link>
         </section>
-      ) : null}</>),
-    reworkForm: (<>{canCreateRework ? (
+      ) : null}</Fragment>),
+    reworkForm: (<Fragment key="reworkForm">{canCreateRework ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
-          <h2 className="text-base font-semibold">发起重做工单</h2>
+          <h3 className="text-base font-semibold">发起重做工单</h3>
           </div>
           <ReworkOrderForm
             sourceOrderId={order.id}
@@ -1430,7 +1379,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             }))}
           />
         </section>
-      ) : null}</>),
+      ) : null}</Fragment>),
   };
 
   if (!presentation) return <ActionNotice tone="warning" title="工单已更新，请刷新后查看最新资料"
@@ -1442,18 +1391,21 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   return <>
     <BreadcrumbEntity label={order.orderNo} />
     <ReceiptNotice receipt={receipt} noun="工单" />
-    <AdminOrderDetailView model={model} canEdit={canEdit} prints={presentation.prints}
+    <AdminOrderDetailView simpleProduction={order.simpleProduction} productionOwners={presentation.workspace.productionOwners} model={model} canEdit={canEdit} prints={presentation.prints}
       printHint={maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD
         ? `有款式含 ${maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度` : undefined}
       decision={<AdminOrderDetailDecision key={`${order.revision}:${order.workOrderVersion}:${presentation.workspace.pendingPrintJobId}`} order={presentation.workspace}
         requiresPaperRecall={presentation.prints.some((print) => print.version < order.workOrderVersion || print.state === 'PRINTED')} />}
       packaging={detailSections.packaging}
+      itemDetails={detailSections.itemDetails}
+      printActions={detailSections.printActions}
       supplementary={[
-        { id: 'detail-design-files', title: '设计文件与完整工艺资料', content: detailSections.designFiles },
-        { id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> },
+        ...(hasPricingDetails ? [{ id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> }] : []),
         { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
-        { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
-        { id: 'detail-business-records', title: '基本信息、成本与重做', content: <>{detailSections.basics}{detailSections.costs}{detailSections.rework}{detailSections.reworkForm}</> },
+        { id: 'detail-production-records', title: '生产、用料与计件记录', content: <><ProductionJobPanel key="production-jobs" orderId={order.id} />{detailSections.readiness}{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
+        { id: 'detail-business-records', title: '生产与业务资料', content: detailSections.basics },
+        { id: 'detail-costs', title: '工厂成本', content: detailSections.costs },
+        ...(canCreateRework || order.sourceOrder || order.reworkOrders.length > 0 ? [{ id: 'detail-after-sales', title: '售后与重做', content: <>{detailSections.rework}{detailSections.reworkForm}</> }] : []),
         { id: 'detail-audit-records', title: '工单动态', content: <>{adminActivity ? <OrderActivity key={`${order.id}:${adminActivity.events[0]?.id ?? "empty"}`} orderId={order.id} initialPage={adminActivity} /> : null}{detailSections.changeHistory}</> },
         { id: 'detail-other-actions', title: '其他工单操作', content: detailSections.otherActions },
       ]}
@@ -1463,7 +1415,6 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
 }
 
 type RenderOrderBasicSummaryOptions = {
-  hideRemark?: boolean;
   order: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>;
   hasProductionOperations: boolean;
   productionOperations: Awaited<ReturnType<typeof listOrderProductionOperations>>;
@@ -1473,7 +1424,6 @@ type RenderOrderBasicSummaryOptions = {
 };
 
 function OrderBasicSummarySection({
-  hideRemark = false,
   order,
   hasProductionOperations,
   productionOperations,
@@ -1481,49 +1431,47 @@ function OrderBasicSummarySection({
   assignedWorkerNames,
   canViewCommercialAmounts,
 }: RenderOrderBasicSummaryOptions) {
-  const amounts = canViewCommercialAmounts ? orderDetailAmounts(order) : null;
-  const displayAmount = (amount: string | null, estimated: boolean, total = false) => {
-    return <OrderAmount status={order.status} amount={amount} estimated={estimated}
-      pricingStatus={total ? amounts?.pricingStatus : undefined}
-      incomplete={total && amounts?.feeSource === 'INCOMPLETE'} />;
-  };
   return (
     <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-      <h2 className="text-base font-semibold">基本信息</h2>
+      <h3 className="text-base font-semibold">生产概况与业务资料</h3>
       <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <Row label="工单名称" value={order.customName} full />
         <Row
           label="提交人"
           value={`${order.submitter.displayName}（${roleLabel(order.submitter.role)}）`}
         />
         {hasProductionOperations ? (
-          <>
-            <Row
-              label="计件生产工序"
-              value={productionOperations
-                .map(
-                  (operation) =>
-                    `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
-                )
-                .join('；')}
-            />
-            <Row
-              label="无计件生产进度"
-              value={
-                productionProgressSteps.length > 0
-                  ? productionProgressSteps
-                      .map(
-                        (step) =>
-                          `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
-                      )
-                      .join('；')
-                  : '无'
-              }
-              full
-            />
-          </>
+          <Row
+            label="计件生产工序"
+            value={productionOperations
+              .map(
+                (operation) =>
+                  `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
+              )
+              .join('；')}
+          />
         ) : assignedWorkerNames.length > 0 ? (
           <Row label="历史派工" value={assignedWorkerNames.join('、')} />
+        ) : null}
+        {!hasProductionOperations && order.items.some((item) => item.tasks.length > 0) ? (
+          <Row
+            label="历史生产进度"
+            value={order.items.flatMap((item) => item.tasks.map((task) =>
+              `#${item.sequence} ${task.craft.name}（${PRODUCTION_TASK_STATUS_REGISTRY[task.status].label}）`,
+            )).join('；')}
+            full
+          />
+        ) : null}
+        {productionProgressSteps.length > 0 ? (
+          <Row
+            label="无计件生产进度"
+            value={productionProgressSteps
+              .map(
+                (step) =>
+                  `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
+              )
+              .join('；')}
+            full
+          />
         ) : null}
         {canViewCommercialAmounts && 'settlementType' in order ? (
           <Row
@@ -1533,35 +1481,8 @@ function OrderBasicSummarySection({
         ) : null}
         <Row label="快递代码" value={order.expressCode} />
         <Row label="配送方式" value={order.isSfCollect ? '顺丰到付（自行预约）' : '普通配送'} />
-        <Row label="收货信息" value={formatReceiverInfo(order)} full />
-        {!hideRemark ? <Row label="备注" value={order.remark} full /> : null}
-        <div>
-          <dt className="text-muted-foreground">承诺交期</dt>
-          <dd className="mt-0.5 flex items-center gap-2">
-            {order.promisedDate ? formatDateInputShanghai(order.promisedDate) : '—'}
-            <PromisedDateBadge promisedDate={order.promisedDate} status={order.status} />
-          </dd>
-        </div>
-        {amounts ? (
-          <>
-            <Row
-              label="款式加工费"
-              value={displayAmount(amounts.itemProcessingAmount, amounts.processingEstimated)}
-              tabular
-            />
-            <Row label="入袋费" value={displayAmount(amounts.packagingAmount, amounts.packagingEstimated)} tabular />
-            <Row label="加工费合计" value={displayAmount(amounts.processingAmount, amounts.processingEstimated || amounts.packagingEstimated)} tabular />
-            <Row
-              label={
-                order.isSfCollect
-                    ? '对客应收总额（不含快递费，含耗材费）'
-                    : '对客应收总额'
-              }
-              value={displayAmount(amounts.totalAmount, amounts.estimated, true)}
-              tabular
-            />
-          </>
-        ) : null}
+        {order.shipments.length === 0 ? <Row label="历史收货信息" value={formatReceiverInfo(order)} full /> : null}
+
       </dl>
     </section>
   );
@@ -1573,9 +1494,9 @@ function OrderPackagingGroupsSection({ order, canViewCommercialAmounts }: {
 }) {
   return (
     <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-      <h2 className="text-base font-semibold">
+      <h3 className="text-base font-semibold">
         包装组（{order.packagingGroups.length}）
-      </h2>
+      </h3>
       {order.packageRequirement ? (
         <p className="admin-wrap-anywhere whitespace-pre-wrap text-sm">
           包装补充说明：{order.packageRequirement}
@@ -1599,10 +1520,10 @@ function OrderPackagingGroupsSection({ order, canViewCommercialAmounts }: {
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h3 className="font-medium">
+                    <h4 className="font-medium">
                       包装组 #{group.sequence}
                       {group.name ? ` · ${group.name}` : ''}
-                    </h3>
+                    </h4>
                     <p className="mt-1 font-sans tabular-nums text-muted-foreground">
                       实际 {formatQuantity(group.actualBagCount)} 袋
                       {unitsPerBag > 0

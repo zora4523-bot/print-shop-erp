@@ -1,3 +1,4 @@
+vi.mock('@/components/business/production/ProductionJobPanel', () => ({ ProductionJobPanel: () => null }));
 vi.mock('@/lib/order/change-request-catalog-query', () => ({ listActiveOrderChangeCatalogProducts: vi.fn().mockResolvedValue([]) }));
 const { readHistoricalBlankPriceEditorMock } = vi.hoisted(() => ({ readHistoricalBlankPriceEditorMock: vi.fn().mockResolvedValue(null) }));
 // SalesOrderDetailView still renders the change forms for SALES.
@@ -246,9 +247,11 @@ beforeEach(() => {
 });
 
 function basicAmount(html: string, label: string) {
-  const basics = html.match(/<h2[^>]*>基本信息<\/h2>([\s\S]*?)<\/section>/)?.[1];
-  expect(basics, '当前详情应包含基本信息').toBeDefined();
-  return basics?.split(`>${label}</dt>`)[1]?.match(/<dd[^>]*>([\s\S]*?)<\/dd>/)?.[1]?.replace(/<[^>]+>/g, '');
+  const contents = label === '对客应收总额'
+    ? html.match(/data-slot="current-order-amount">([\s\S]*?)<\/strong>/)?.[1]
+    : html.split(`>${label === '款式加工费' ? '款式加工费合计' : label === '入袋费' ? '包装费' : label}</dt>`)[1]?.match(/<dd[^>]*>([\s\S]*?)<\/dd>/)?.[1];
+  expect(contents, `当前详情应展示${label}`).toBeDefined();
+  return contents?.replace(/<[^>]+>/g, '');
 }
 
 describe('order detail amount consistency', () => {
@@ -268,7 +271,7 @@ describe('order detail amount consistency', () => {
     });
     const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
     expect(basicAmount(html, '对客应收总额')).toBe(expected);
-    expect(html).toContain(`>当前金额</span><strong><span class="text-primary">${expected}`);
+    expect(html).toContain(`>当前金额</span><strong data-slot="current-order-amount"><span class="text-primary">${expected}`);
   });
 
   it.each([Role.ADMIN])('%s does not present unpriced placeholders or shipping estimates as a complete fee', async (role) => {
@@ -284,7 +287,7 @@ describe('order detail amount consistency', () => {
     Object.assign(order.customerCharges[1]!, { amount: '3.00', status: 'ESTIMATED' });
     getOrderDetailMock.mockResolvedValue(order);
     const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
-    for (const label of ['款式加工费', '入袋费', '加工费合计', '对客应收总额']) {
+    for (const label of ['款式加工费', '包装费', '对客应收总额']) {
       expect(basicAmount(html, label)).toBe('待工厂核价');
     }
     expect(html).toContain('class="text-primary">待工厂核价');
@@ -307,7 +310,7 @@ describe('order detail amount consistency', () => {
     getOrderDetailMock.mockResolvedValue(order);
     const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
     expect(basicAmount(html, '对客应收总额')).toBe(scenario.expected);
-    for (const label of ['款式加工费', '入袋费', '加工费合计']) {
+    for (const label of ['款式加工费', '包装费']) {
       expect(basicAmount(html, label)).toBe(scenario.status === OrderStatus.DRAFT ? '未报价' : '¥ 0.00');
     }
     if (scenario.status === OrderStatus.DRAFT) expect(html).toContain('class="text-muted-foreground">未报价');
@@ -357,7 +360,7 @@ describe('order detail commercial visibility', () => {
     const design = html.slice(html.indexOf('id="detail-design-item-'));
     const summary = design.slice(design.indexOf('<summary'), design.indexOf('</summary>'));
     expect(summary).not.toMatch(/已完工|历史完工|生产工序|任务/);
-    expect(summary).toContain('项工艺');
+    expect(summary).toContain('设计文件与工艺资料');
     expect(html).not.toContain('尚未生成生产工序');
     expect(html).not.toContain('该款式无独立生产工序');
     expect(html).not.toContain('该款式无无计件进度步骤');
@@ -573,6 +576,78 @@ describe('order detail commercial visibility', () => {
 
     expect(html).not.toContain('factory-pricing-review');
     expect(html).not.toContain('工单价格状态');
+  });
+
+  it.each([
+    [OrderSettlementType.EXTERNAL_SALES, OrderKind.NORMAL],
+    [OrderSettlementType.NO_CHARGE, OrderKind.NORMAL],
+    [OrderSettlementType.NO_CHARGE, OrderKind.REWORK],
+  ])('%s / %s 的历史生产资料修复仍在生产区且只挂载一次', async (settlementType, kind) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({
+      ...orderFixture(), status: OrderStatus.CONFIRMED, settlementType, kind,
+      packagingGroups: [], purpose: 'STANDARD',
+    });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html.match(/>保存生产资料</g)).toHaveLength(1);
+    expect(html.indexOf('补录生产资料')).toBeGreaterThan(html.indexOf('id="detail-production-records"'));
+    expect(html.indexOf('补录生产资料')).toBeLessThan(html.indexOf('id="detail-business-records"'));
+    expect(html).toContain('name="expectedOrderRevision"');
+  });
+
+  it('免费且无收费内容时不渲染空收费维护栏目', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({ ...orderFixture(), settlementType: OrderSettlementType.NO_CHARGE, customerCharges: [] });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).not.toContain('id="detail-pricing-tools"');
+  });
+
+  it('只有无计件进度时仍阻止提前发货并保留可达恢复区', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const base = orderFixture();
+    getOrderDetailMock.mockResolvedValue({ ...base, status: OrderStatus.COMPLETED,
+      items: base.items.map(item => ({ ...item, tasks: [] })) });
+    productionProgressStepsMock.mockResolvedValue([{ id: 'progress-only', craftCode: 'GLUING', craftName: '粘封',
+      status: ProductionOperationStatus.IN_PROGRESS, plannedQty: '100', orderItemId: 'item-1',
+      orderItem: { sequence: 1, name: '礼盒款' }, reports: [] }]);
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('id="ship-order"');
+    expect(html).toContain('生产工序尚未完成');
+    expect(html).toContain('href="#detail-business-records"');
+    expect(html).toContain('查看生产进度');
+    const summary = html.split('id="detail-business-records"')[1]?.split('id="detail-costs"')[0];
+    expect(summary).toContain('无计件生产进度');
+    expect(summary).toContain('#1 粘封（进行中）');
+    expect(html).toContain('粘封：进行中（0/100）');
+    expect(html).not.toContain('>发货</a>');
+  });
+
+  it('仅有历史派工时，恢复区和逐款资料均展示未完成的状态', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({ ...orderFixture(), status: OrderStatus.COMPLETED });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('href="#detail-business-records"');
+    const summary = html.split('id="detail-business-records"')[1]?.split('id="detail-costs"')[0];
+    expect(summary).toContain('#1 局部烫金（进行中）');
+    expect(html).toContain('局部烫金：张师傅（进行中）');
+  });
+
+  it.each([OrderStatus.COMPLETED, OrderStatus.PACKING])('缺少地址时恢复入口遵守 %s 的编辑边界', async (status) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const base = orderFixture();
+    getOrderDetailMock.mockResolvedValue({ ...base, status, shipments: [],
+      items: base.items.map(item => ({ ...item, tasks: [] })) });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    const block = html.split('id="ship-order"')[1]?.split('</section>')[0];
+    expect(block).toContain('缺少发货地址');
+    if (status === OrderStatus.COMPLETED) {
+      expect(block).not.toContain('<a ');
+      expect(block).toContain('该工单已完工，无法补充发货地址，请核对历史收货资料。');
+      expect(html).not.toContain('补充配送信息');
+    } else {
+      expect(block).toContain('href="#shipment-registration"');
+      expect(html).toContain('补充配送信息');
+    }
   });
 
   it('非管理员非销售账号直接 404，不读取任何工单资料', async () => {

@@ -178,6 +178,28 @@ export function formatOrderLogChanges(changedFields: unknown): LogChangeRow[] {
 // Human-readable label for OrderLog.action. Kept here so the detail
 // page doesn't hardcode the enum strings.
 const ACTION_LABELS: Record<string, string> = {
+  // Historical keys remain readable; current writers use OPERATIONS_RELEASED.
+  FACTORY_CONFIRMED: '工厂确认',
+  ORDER_RELEASED: '下发生产',
+  OPERATIONS_RELEASED: '下发生产',
+  OPERATIONS_MATERIALIZED: '生成生产工序',
+  OPERATIONS_REMATERIALIZED: '更新生产工序版本',
+  FACTORY_REJECTED: '工厂拒单',
+  FACTORY_HELD: '暂停生产',
+  FACTORY_RESUMED: '恢复生产',
+  ORDER_PRINT_REQUESTED: '创建打印任务',
+  ORDER_PRINTED: '确认已打印',
+  ORDER_PRINT_REQUESTS_SUPERSEDED: '旧版打印任务失效',
+  ORDER_SETTLED_V2: '工单结算',
+  CHANGE_REQUEST_CREATED: '提交工单变更申请',
+  CHANGE_REQUEST_WITHDRAWN: '撤回工单变更申请',
+  CHANGE_REQUEST_DENIED: '驳回工单变更申请',
+  CHANGE_REQUEST_CANCEL_APPROVED: '批准取消工单',
+  CHANGE_REQUEST_APPROVED: '批准工单变更',
+  CREATE_REWORK: '创建重做工单',
+  REPORT_DISPUTE_CREATED: '提交报工异议',
+  REPORT_DISPUTE_REVIEWED: '回复报工异议',
+  BLANK_MATERIAL_PRICE_CONFIRMED: '确认历史材料单价',
   CREATE: '创建',
   UPDATE: '编辑',
   PAYROLL_PASS_CHANGE: '调整计薪次数',
@@ -206,6 +228,19 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_PLATE_DETAIL_UPDATED: '修改制版明细',
   ORDER_PLATE_DETAIL_REMOVED: '移除制版明细',
   PRODUCTION_COMPLETED: '生产完成',
+  PRODUCTION_ASSIGNED: '安排生产师傅',
+  PRODUCTION_REGISTERED: '登记生产完成',
+  PRODUCTION_QUANTITY_REQUESTED: '申请修改生产数量',
+  PRODUCTION_QUANTITY_REJECTED: '驳回生产数量申请',
+  PRODUCTION_WAGES_ALLOCATED: '核定生产提成',
+  PRODUCTION_OWNERSHIP_INHERITED: '沿用生产归属',
+  PRODUCTION_ERROR_CORRECTED: '更正生产误登记',
+  PRODUCTION_FACT_REVIEWED: '核对生产事实',
+  PRODUCTION_RECOVERY_CONFLICT: '历史生产核对冲突',
+  PRODUCTION_RECOVERY_RECONCILED: '重核后续生产数量',
+  PRODUCTION_METADATA_RECOVERED: '恢复生产流程',
+  PRODUCTION_INCLUDED_LATER: '核实已计入后续生产',
+  PRODUCTION_CONTINUED: '资料改版延续生产',
 };
 
 export function actionLabel(action: string): string {

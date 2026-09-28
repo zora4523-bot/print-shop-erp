@@ -86,6 +86,7 @@ vi.mock('@/lib/production-completion', () => ({
   maybeCompleteProductionOrder: completionMock,
   dispatchProductionCompletionNotification: completionDispatchMock,
 }));
+vi.mock('@/lib/production/order-state', () => ({ reconcileProductionOrderInTx: completionMock }));
 
 import {
   AdminOrderWorkflowError,

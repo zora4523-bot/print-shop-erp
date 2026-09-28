@@ -1,6 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { FormCreationError, readCreationIdentity } from '@/lib/form-drafts/creation-request';
+import type { CreationIdentity } from '@/lib/form-drafts/model';
 import { appendReceipt } from '@/lib/admin/receipt';
 import {
   getFormString,
@@ -50,7 +52,7 @@ export async function createPurchaseOrderAction(
   _prev: PurchaseMutationResult | null,
   formData: FormData,
 ): Promise<PurchaseMutationResult> {
-  await requirePermission('purchase:manage');
+  const actor = await requirePermission('purchase:manage');
 
   const parsed = createPurchaseOrderSchema.safeParse(
     normalizePurchaseOrderFormInput(formData),
@@ -58,17 +60,26 @@ export async function createPurchaseOrderAction(
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 
   let createdId: string;
+  let replayed = false;
+  let identity: CreationIdentity | undefined;
   try {
-    const created = await createPurchaseOrder(parsed.data);
+    identity = readCreationIdentity(formData);
+    const created = identity
+      ? await createPurchaseOrder(parsed.data, undefined, { ...identity, actorId: actor.id })
+      : await createPurchaseOrder(parsed.data);
     createdId = created.id;
+    replayed = created.creationReplayed === true;
   } catch (err) {
+    if (err instanceof FormCreationError) return { status: 'error', message: err.message, ...(err.creationConflict ? { creationConflict: true } : {}) };
     const invariant = mapInvariantError(err, PurchaseInvariantError);
     if (invariant) return invariant;
     throw err;
   }
 
   revalidatePurchasePaths(createdId);
-  redirect(appendReceipt(`/owner/purchases/${createdId}`, { created: '1' }));
+  redirect(appendReceipt(`/owner/purchases/${createdId}`, {
+    ...(replayed ? { creationReplayed: '1' } : { created: '1' }), ...(identity ? { createdDraft: identity.draftId, creationRequest: identity.clientRequestId } : {}),
+  }));
 }
 
 export async function createPurchaseReceiptAction(

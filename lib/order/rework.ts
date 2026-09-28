@@ -30,6 +30,10 @@ import {
 } from '../production/operation-materialization-service';
 import { getSetting } from '../settings';
 import { canCreateReworkFromStatus } from './rework-eligibility';
+import { transitionOrder } from './status-machine';
+import { releaseFactoryOrderInTx } from './admin-workflow';
+import { dispatchProductionCompletionNotification, type ProductionCompletionNotification } from '@/lib/production-completion';
+import type { NotificationPayloadFor } from '@/lib/notification/events';
 import {
   ORDER_EXTERNAL_SALES_SELECT,
   orderExternalSalesName,
@@ -106,6 +110,7 @@ type ReworkPricingRevisionTxClient = {
 
 type ReworkNotificationPayload = OrderExternalSalesFacts & {
   id: string;
+  status: string;
   orderNo: string;
   customerRef: string | null;
   isUrgent: boolean;
@@ -115,6 +120,7 @@ type ReworkNotificationPayload = OrderExternalSalesFacts & {
 // 重做单是 NO_CHARGE、由管理员提交；通知里的外部销售取原单提交人。
 const REWORK_NOTIFICATION_SELECT = {
   id: true,
+  status: true,
   orderNo: true,
   customerRef: true,
   isUrgent: true,
@@ -136,7 +142,7 @@ async function enqueueReworkNotificationsInTx(
           submitterName: payload.submitter.displayName,
           customerRef: payload.customerRef,
           urgentMark: payload.isUrgent ? '🚨 急单' : '',
-          summary: '重做工单已提交，待工厂确认',
+          summary: payload.status === 'PACKING' ? '重做工单已完成生产，待发货' : payload.status === 'RELEASED' ? '重做工单已下发生产' : '重做工单已提交，待工厂确认',
           deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
         },
         { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },
@@ -179,6 +185,8 @@ export async function createReworkOrder(
   if (actor.role !== Role.ADMIN) {
     throw new ReworkOrderError('只有管理员可以创建重做工单');
   }
+  let completionNotification: ProductionCompletionNotification | undefined;
+  let releaseNotification: NotificationPayloadFor<'ORDER_SCHEDULED'> | null = null;
 
   const submittedNotificationEnabled = await getSetting(
     'notify_order_submitted_enabled',
@@ -906,7 +914,16 @@ export async function createReworkOrder(
       },
     });
     try {
-      await activateProductionOperationsInTx(
+      if (source.simpleProduction) {
+        const prepared = await tx.order.update({ where: { id: createdOrder.id }, data: {
+          status: transitionOrder(OrderStatus.SUBMITTED, OrderStatus.CONFIRMED), simpleProduction: true,
+        } });
+        await tx.orderLog.create({ data: { orderId: createdOrder.id, operatorId: actor.id, action: 'REWORK_CONFIRMED', remark: '管理员确认关联重做生产' } });
+        const released = await releaseFactoryOrderInTx(tx, { orderId: createdOrder.id, expectedRevision: prepared.revision,
+          expectedWorkOrderVersion: prepared.workOrderVersion, printIdempotencyKey: `rework-release:${createdOrder.id}` }, actor);
+        completionNotification = released.completionNotification;
+        releaseNotification = released.postCommitNotification;
+      } else await activateProductionOperationsInTx(
         tx,
         createdOrder.id,
         actor,
@@ -947,6 +964,8 @@ export async function createReworkOrder(
     submittedQueued: submittedNotificationQueued,
     urgentQueued: urgentNotificationQueued,
   } = notificationState;
+  await dispatchProductionCompletionNotification(completionNotification);
+  if (releaseNotification) await dispatchNotification('ORDER_SCHEDULED', releaseNotification, { dedupeKey: `notification:ORDER_SCHEDULED:${created.id}` });
 
   const payload =
     submittedNotificationQueued && urgentNotificationQueued
@@ -965,7 +984,7 @@ export async function createReworkOrder(
           submitterName: payload.submitter.displayName,
           customerRef: payload.customerRef,
           urgentMark: payload.isUrgent ? '🚨 急单' : '',
-          summary: '重做工单已提交，待工厂确认',
+          summary: payload.status === 'PACKING' ? '重做工单已完成生产，待发货' : payload.status === 'RELEASED' ? '重做工单已下发生产' : '重做工单已提交，待工厂确认',
           deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
         },
         { dedupeKey: `notification:ORDER_SUBMITTED:${payload.id}` },

@@ -69,20 +69,25 @@ function requireHourlySalaryActor(actor: WorkerSalaryActor): void {
 // 新工单按账号固定工序 lane 可见，不建立人员与工单的绑定关系。
 function operationOrderWhere(
   operationType: PieceworkOperationType | null,
+  actorId: string,
 ): Prisma.OrderWhereInput {
   return {
     status: { not: OrderStatus.SUBMITTED },
     OR: [
+      { simpleProduction: true, productionJobs: { some: { workerId: actorId } } },
+      { simpleProduction: false, OR: [
       ...(operationType
         ? [{ productionOperations: { some: { operationType } } }]
         : []),
       { productionProgressSteps: { some: {} } },
+    ] },
     ],
   };
 }
 
 function currentVersionWorkerOrderPredicate(
   operationType: PieceworkOperationType | null,
+  actorId: string,
 ): Prisma.Sql {
   const paidLane = operationType
     ? Prisma.sql`EXISTS (
@@ -95,7 +100,7 @@ function currentVersionWorkerOrderPredicate(
     : Prisma.sql`FALSE`;
   return Prisma.sql`
     current_order."status" <> ${OrderStatus.SUBMITTED}::"OrderStatus"
-    AND (
+    AND ((current_order."simpleProduction" = true AND EXISTS (SELECT 1 FROM "ProductionJob" job WHERE job."orderId" = current_order.id AND job."workerId" = ${actorId} AND job."workOrderVersion"=current_order."workOrderVersion")) OR (current_order."simpleProduction" = false AND (
       ${paidLane}
       OR EXISTS (
         SELECT 1
@@ -103,7 +108,7 @@ function currentVersionWorkerOrderPredicate(
          WHERE progress."orderId" = current_order."id"
            AND progress."workOrderVersion" = current_order."workOrderVersion"
       )
-    )
+    )))
   `;
 }
 
@@ -115,7 +120,7 @@ export async function listWorkerOrders(
   const operationType = await getReporterOperationTypeOrNull(actor);
   const search = options?.q?.trim().slice(0, 100);
   const pattern = `%${search?.replace(/[\\%_]/g, '\\$&') ?? ''}%`;
-  const visibility = Prisma.sql`(${currentVersionWorkerOrderPredicate(operationType)}) ${search ? Prisma.sql`AND (current_order."orderNo" ILIKE ${pattern} OR current_order."customName" ILIKE ${pattern})` : Prisma.empty}`;
+  const visibility = Prisma.sql`(${currentVersionWorkerOrderPredicate(operationType, actor.id)}) ${search ? Prisma.sql`AND (current_order."orderNo" ILIKE ${pattern} OR current_order."customName" ILIKE ${pattern})` : Prisma.empty}`;
 
   return db.$transaction(
     async (tx) => {
@@ -252,8 +257,9 @@ export async function getWorkerOrderDetail(
   const operationType = await getReporterOperationTypeOrNull(actor);
   const progressCraftIds = new Set(await getProgressCraftIdsForReporter(actor));
   const order = await db.order.findFirst({
-    where: { id: orderId, ...operationOrderWhere(operationType) },
+    where: { id: orderId, ...operationOrderWhere(operationType, actor.id) },
     select: {
+      simpleProduction: true,
       id: true,
       orderNo: true,
       customName: true,
@@ -369,6 +375,7 @@ export async function getWorkerOrderDetail(
     },
   });
   if (!order) return null;
+  if (order.simpleProduction && !await db.productionJob.findFirst({ where: { orderId, workerId: actor.id, workOrderVersion: order.workOrderVersion }, select: { id: true } })) return null;
   const productionOperations = order.productionOperations.filter(
     (operation) => operation.workOrderVersion === order.workOrderVersion &&
       operation.status !== ProductionOperationStatus.CANCELLED,
@@ -379,7 +386,7 @@ export async function getWorkerOrderDetail(
       step.status !== ProductionOperationStatus.CANCELLED,
   ).map((step) => ({ ...step, reportable: progressCraftIds.has(step.craftId) }));
   if (
-    productionOperations.length === 0 &&
+    !order.simpleProduction && productionOperations.length === 0 &&
     productionProgressSteps.length === 0
   ) {
     return null;

@@ -1,11 +1,14 @@
-import type { ComponentProps } from 'react';
+import { act, type ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { commands, page, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
 import { WORKBENCH_CATALOG, WORKBENCH_CRAFTS } from '@/lib/workbench/__tests__/item-fixtures';
 import type { OrderCreationEditor, OrderEditorSnapshot } from '../order-creation-editor';
+import type { PendingDesignImage } from '../pending-design-image';
+import type { CreateOrderQuoteActionInput, CreateOrderQuoteMutationResult } from '@/actions/create-order-quote.types';
+import { adminCreatePriceFactsKey, adminPackagingPriceFactsKey } from '@/lib/order/admin-create-price';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }) }));
 vi.mock('next/link', () => ({ default: (props: ComponentProps<'a'>) => <a {...props} /> }));
@@ -23,6 +26,7 @@ vi.mock('@/actions/design-upload', () => ({
 }));
 
 import { OrderForm } from '../OrderForm';
+import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';
 
 // 业主 2026-09-26：设计款名称由建单人填写；单款默认跟随工单名称，新增设计款须手动命名，
 // 同一设计款的规格共用名称，同一工单内不重名。管理员与外部销售规则一致。
@@ -53,17 +57,283 @@ async function ready(actor: Actor) {
   await expect.element(designName()).toBeEnabled();
 }
 
-beforeEach(() => {
+function remount(actor: Actor, snapshot: OrderEditorSnapshot) {
+  flushSync(() => root.unmount());
+  host.remove();
+  mount(actor, snapshot);
+}
+
+it('whole-design deletion keeps other shipping, packaging and files aligned', async () => {
+  await ready('admin');
+  const snapshot = editor!.save();
+  const item = snapshot.values.items[0];
+  snapshot.values.items = ['a', 'b', 'a', 'c'].map((designGroupKey, index) => ({
+    ...item, name: designGroupKey, designGroupKey, fig: index + 1,
+    adminPrice: { factsKey: adminCreatePriceFactsKey({ ...item, manualQuoteReason: null }), amount: String((index + 1) * 111), reason: `协议价 ${index + 1}` },
+  }));
+  snapshot.values.packagingGroups = [
+    { name: '混装', mode: 'MIXED_STYLE', actualBagCount: 500, itemUnitsPerBag: [2, 2, 2, 0] },
+    { name: '保留', mode: 'SINGLE_STYLE', actualBagCount: 100, itemUnitsPerBag: [0, 0, 0, 10] },
+  ];
+  snapshot.values.additionalShipments = [[5, 0, 3, 0], [1, 7, 2, 9]].map((itemQuantities) => ({
+    receiverName: '测试收件人', receiverPhone: '13800138000', receiverAddress: '广东省佛山市测试地址',
+    expressCode: null, destinationProvince: '广东', quotedWeightKg: null, shippingFee: null,
+    packingMaterialFee: null, customerChargeOverrideReason: null, itemQuantities,
+  }));
+  snapshot.values.packagingGroups[0].adminPrice = {
+    amount: '0.1234', reason: '协议包装价', factsKey: adminPackagingPriceFactsKey(
+      snapshot.values.packagingGroups[0], snapshot.values.items.map((entry) => entry.quantity),
+      snapshot.values.additionalShipments.map((shipment) => shipment.itemQuantities),
+    ),
+  };
+  const file = (name: string): PendingDesignImage => ({
+    id: name, prepared: { file: new File(['test'], name), fileType: 'CDR', mimeType: 'application/octet-stream' },
+  });
+  snapshot.files = [[file('A.cdr')], [file('B.cdr')], [], [file('C.cdr')]];
+  remount('admin', snapshot);
+  await page.getByRole('button', { name: '删除设计款', exact: true }).click();
+  const saved = editor!.save();
+  expect(saved.values.items.map((entry) => entry.name)).toEqual(['b', 'c']);
+  expect(saved.values.additionalShipments.map((entry) => entry.itemQuantities)).toEqual([[7, 9]]);
+  expect(saved.values.packagingGroups.map((entry) => ({ mode: entry.mode, units: entry.itemUnitsPerBag }))).toEqual([
+    { mode: 'SINGLE_STYLE', units: [2, 0] }, { mode: 'SINGLE_STYLE', units: [0, 10] },
+  ]);
+  expect(saved.files.map((files) => files.map((entry) => entry.prepared.file.name))).toEqual([['B.cdr'], ['C.cdr']]);
+  expect(saved.values.items.map((entry) => entry.adminPrice)).toEqual([
+    snapshot.values.items[1].adminPrice, snapshot.values.items[3].adminPrice,
+  ]);
+  expect(saved.values.packagingGroups[0].adminPrice).toEqual(snapshot.values.packagingGroups[0].adminPrice);
+  await expect.element(page.getByRole('textbox', { name: '本款加工费（元）', exact: true })).toHaveValue('222');
+  await expect.element(page.getByText('款式条件已变化，请重新确认人工价格', { exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByRole('button', { name: '确认当前人工价格', exact: true })).toBeVisible();
+  await expect.element(page.getByText('包装条件已变化，请重新确认包装价格', { exact: true })).toBeVisible();
+  await expect.element(page.getByText('每个额外地址必须为全部款式提供分配数量', { exact: true })).not.toBeInTheDocument();
+});
+
+it('removing the first specification retains its shared design files on the remaining specification', async () => {
+  await ready('external-sales');
+  const snapshot = editor!.save();
+  const item = snapshot.values.items[0];
+  snapshot.values.items = [1, 2].map((fig) => ({ ...item, name: '共享款', designGroupKey: 'a', fig }));
+  snapshot.files = [[{ id: 'shared', prepared: {
+    file: new File(['test'], 'shared.cdr'), fileType: 'CDR', mimeType: 'application/octet-stream',
+  } }], []];
+  remount('external-sales', snapshot);
+  await expect.element(page.getByRole('button', { name: '删除设计款', exact: true })).not.toBeInTheDocument();
+  await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
+  const saved = editor!.save();
+  expect(saved.values.items.map((entry) => entry.fig)).toEqual([2]);
+  expect(saved.files[0].map((entry) => entry.prepared.file.name)).toEqual(['shared.cdr']);
+  await expect.element(page.getByRole('button', { name: '移除当前规格', exact: true })).not.toBeInTheDocument();
+});
+
+for (const actor of ['admin', 'external-sales'] as const) {
+  it(`${actor}: deletes all noncontiguous specifications from the design toolbar`, async () => {
+    await ready(actor);
+    const snapshot = editor!.save();
+    const item = snapshot.values.items[0];
+    snapshot.values.items = [
+      { ...item, name: 'A', designGroupKey: 'a', fig: 1 },
+      { ...item, name: 'B', designGroupKey: 'b', fig: 2 },
+      { ...item, name: 'A', designGroupKey: 'a', fig: 3 },
+    ];
+    remount(actor, snapshot);
+    const toolbar = page.getByRole('group', { name: '设计款操作', exact: true });
+    await expect.element(toolbar.getByRole('button', { name: '删除设计款', exact: true })).toBeVisible();
+    await toolbar.getByRole('button', { name: '删除设计款', exact: true }).click();
+    expect(savedNames()).toEqual(['B']);
+    expect(editor!.save().values.items.map((entry) => entry.fig)).toEqual([2]);
+    await expect.element(page.getByRole('tab', { name: '设计款 1', exact: true })).toHaveFocus();
+    await expect.element(page.getByRole('button', { name: '删除设计款', exact: true })).not.toBeInTheDocument();
+    await expect.element(page.getByRole('button', { name: '移除当前规格', exact: true })).not.toBeInTheDocument();
+  });
+
+  it(`${actor}: removing an interleaved specification stays in its design`, async () => {
+    await ready(actor);
+    const snapshot = editor!.save();
+    const item = snapshot.values.items[0];
+    snapshot.values.items = [
+      { ...item, name: 'A', designGroupKey: 'a', fig: 1 },
+      { ...item, name: 'B', designGroupKey: 'b', fig: 2 },
+      { ...item, name: 'A', designGroupKey: 'a', fig: 3 },
+    ];
+    remount(actor, snapshot);
+    await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
+    expect(savedNames()).toEqual(['B', 'A']);
+    await expect.element(designName()).toHaveValue('A');
+    const selectedSpec = host.querySelector('[aria-label="规格明细"] [aria-selected="true"]');
+    expect(document.activeElement).toBe(selectedSpec);
+  });
+
+  it(`${actor}: deleting a legacy design preserves the remaining hand-written name`, async () => {
+    await ready(actor);
+    const snapshot = editor!.save();
+    const item = snapshot.values.items[0];
+    snapshot.values.customName = '整单名称';
+    snapshot.values.items = [
+      { ...item, name: '旧款 A', designGroupKey: undefined, fig: 1 },
+      { ...item, name: '旧款 B', designGroupKey: undefined, fig: 2 },
+    ];
+    remount(actor, snapshot);
+    await designName().fill('');
+    await page.getByRole('tab', { name: '设计款 2', exact: true }).click();
+    await designName().fill('手填名称');
+    await page.getByRole('tab', { name: '设计款 1', exact: true }).click();
+    await page.getByRole('button', { name: '删除设计款', exact: true }).click();
+    expect(savedNames()).toEqual(['手填名称']);
+    await orderName().fill('整单名称二期');
+    await expect.element(designName()).toHaveValue('手填名称');
+  });
+
+  for (const handwritten of [true, false]) {
+    it(`${actor}: legacy naming decision survives reindexing when ${handwritten ? 'equal to order name' : 'cleared'}`, async () => {
+      await ready(actor);
+      const snapshot = editor!.save();
+      const item = snapshot.values.items[0];
+      snapshot.values.customName = '工单名';
+      snapshot.values.items = ['旧款一', '旧款二'].map((name) => ({ ...item, name, designGroupKey: undefined }));
+      remount(actor, snapshot);
+      await designName().fill(handwritten ? '' : '首款手填');
+      await page.getByRole('tab', { name: '设计款 2', exact: true }).click();
+      await designName().fill(handwritten ? '工单名' : '');
+      await page.getByRole('tab', { name: '设计款 1', exact: true }).click();
+      await page.getByRole('button', { name: '删除设计款', exact: true }).click();
+      await expect.element(designName()).toHaveValue('工单名');
+      await orderName().fill('工单名二期');
+      await expect.element(designName()).toHaveValue(handwritten ? '工单名' : '工单名二期');
+    });
+  }
+}
+
+function successfulQuote(input: CreateOrderQuoteActionInput, amount: string): CreateOrderQuoteMutationResult {
+  const zero = { complete: true, suggestedShippingTotal: '0.00', suggestedPackagingTotal: '0.00', suggestedTotal: '0.00', components: [], errors: [] };
+  const version = { id: 'test', code: 'test', version: 1, sourceSha256: 'test' };
+  return { status: 'success', quote: {
+    factsKey: input.factsKey, knownTotal: amount, total: amount, quoteToken: 'test',
+    totalSemantics: 'COMPLETE', hasManualPricing: false, plateFee: null,
+    priceVersion: { processing: version, logistics: version },
+    items: input.items.map(() => ({ complete: true, errors: [], components: [],
+      suggestedSubtotal: amount, suggestedFixedFee: amount, suggestedUnitPrice: '0.00', snapshot: {} })),
+    packaging: { groups: [], suggestedTotal: '0.00', requiresAdminConfirmation: false, errors: [] },
+    logistics: { ...zero, shipments: [], snapshot: { ...zero, version: 2,
+      policy: { ruleVersion: 'test', billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE',
+        weightResolutionOrder: [], maxOrderQuantity: 999999, billableWeightRounding: 'CEIL_KG' },
+      input: { isSfCollect: false, shipments: [] } } },
+  } };
+}
+
+it('a quote requested before whole-design deletion cannot overwrite the remaining design', async () => {
+  await ready('external-sales');
+  const snapshot = editor!.save();
+  snapshot.values.items = ['A', 'B', 'A'].map((name, index) => ({
+    ...snapshot.values.items[0], name, designGroupKey: name, fig: index + 1,
+  }));
+  snapshot.values.packagingGroups = [{ name: '混装', mode: 'MIXED_STYLE', actualBagCount: 100,
+    itemUnitsPerBag: [10, 10, 10] }];
+  let releaseOld!: () => void;
+  vi.mocked(quoteExternalCreateOrderAction).mockClear();
+  const oldResponse = new Promise<CreateOrderQuoteMutationResult>((resolve) => {
+    vi.mocked(quoteExternalCreateOrderAction).mockImplementation((rawInput) => {
+      const input = rawInput as CreateOrderQuoteActionInput;
+      if (input.items.length === 3) {
+        releaseOld = () => resolve(successfulQuote(input, '9999.99'));
+        return oldResponse;
+      }
+      return Promise.resolve(successfulQuote(input, '222.00'));
+    });
+  });
+  remount('external-sales', snapshot);
+  await expect.poll(() => typeof releaseOld).toBe('function');
+  await page.getByRole('button', { name: '删除设计款', exact: true }).click();
+  await expect.poll(() => vi.mocked(quoteExternalCreateOrderAction).mock.calls
+    .some(([input]) => (input as CreateOrderQuoteActionInput).items.length === 1)).toBe(true);
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await act(async () => { releaseOld(); await oldResponse; });
+  } finally {
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  }
+  // Assert immediately after React drains the old callback. Retrying could hide a stale write
+  // when the quote effect automatically repairs it with a third request 500ms later.
+  const rail = [...host.querySelectorAll('section')].find((section) => section.querySelector('h2')?.textContent === '费用明细')!;
+  expect(rail.textContent).toContain('222.00');
+  expect(rail.textContent).not.toContain('9,999.99');
+  expect(vi.mocked(quoteExternalCreateOrderAction)).toHaveBeenCalledTimes(2);
+  expect(savedNames()).toEqual(['B']);
+  await expect.element(designName()).toHaveValue('B');
+});
+
+beforeEach(async () => {
+  await page.viewport(1280, 800);
+  document.documentElement.lang = 'zh-CN';
   localStorage.clear();
   sessionStorage.clear();
   editor = null;
+  vi.mocked(quoteExternalCreateOrderAction).mockReset().mockResolvedValue({ status: 'error', message: '测试不请求报价' });
 });
-afterEach(() => {
+afterEach(async () => {
   flushSync(() => root.unmount());
   host.remove();
   localStorage.clear();
   sessionStorage.clear();
+  document.documentElement.classList.remove('dark');
+  await commands.setReducedMotion(false);
 });
+
+for (const theme of ['light', 'dark']) for (const [width, height] of [
+  [375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
+]) {
+  it(`${width}x${height} ${theme}: grouped design removal is discoverable and keeps keyboard focus`, async () => {
+    await page.viewport(width, height);
+    await commands.setReducedMotion(true);
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    await ready('admin');
+    const snapshot = editor!.save();
+    const item = snapshot.values.items[0];
+    snapshot.values.items = Array.from({ length: 8 }, (_, index) => ({
+      ...item, name: `款名 ${index + 1}`, designGroupKey: `design-${index}`, fig: index + 1,
+    }));
+    remount('admin', snapshot);
+    const toolbar = host.querySelector<HTMLElement>('[aria-label="设计款操作"]')!;
+    const tabs = host.querySelector<HTMLElement>('[aria-label="设计款"]')!;
+    expect(toolbar.getBoundingClientRect().bottom).toBeLessThanOrEqual(tabs.getBoundingClientRect().top);
+    for (const button of toolbar.querySelectorAll('button')) {
+      expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      expect(button.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    expect(await commands.checkShellAccessibility('[aria-label="设计款操作"], [aria-label="设计款"]')).toEqual([]);
+    toolbar.scrollIntoView({ block: 'start', behavior: 'instant' });
+    const initialTop = toolbar.getBoundingClientRect().top;
+    const initialScroll = window.scrollY;
+    for (let count = 8; count > 1; count--) {
+      const remove = page.getByRole('button', { name: '删除设计款', exact: true });
+      await remove.click();
+      await expect.element(page.getByRole('tab', { name: '设计款 1', exact: true })).toHaveAttribute('aria-selected', 'true');
+      expect(toolbar.getBoundingClientRect().top).toBe(initialTop);
+      expect(window.scrollY).toBe(initialScroll);
+      if (count > 2) await expect.element(remove).toHaveFocus();
+    }
+    await expect.element(page.getByRole('tab', { name: '设计款 1', exact: true })).toHaveFocus();
+    expect(savedNames()).toEqual(['款名 8']);
+    await userEvent.keyboard('{ArrowRight}');
+    await expect.element(page.getByRole('tab', { name: '设计款 1', exact: true })).toHaveFocus();
+    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    for (const label of ['＋ 增加规格', '移除当前规格']) {
+      const button = [...host.querySelectorAll('button')].find((entry) => entry.textContent === label)!;
+      expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      expect(button.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+    }
+    expect(await commands.checkShellAccessibility('[data-slot="order-specification-section"]')).toEqual([]);
+    await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
+    await expect.element(page.getByRole('button', { name: '移除当前规格', exact: true })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(document.activeElement).toBe(host.querySelector('[aria-label="规格明细"] [aria-selected="true"]'));
+  });
+}
 
 for (const actor of ['admin', 'external-sales'] as const) {
   it(`${actor}: a single design starts unnamed and follows the order name until edited by hand`, async () => {
@@ -258,4 +528,3 @@ it('a design without a group key keeps following after gaining one through ＋ �
   await page.getByRole('button', { name: '删除设计款', exact: true }).click();
   expect(savedNames()).toEqual(['新年红包二期', '新年红包二期']);
 });
-

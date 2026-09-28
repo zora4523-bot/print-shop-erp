@@ -117,6 +117,7 @@ const OPERATION_REPORT_SELECT = {
       orderNo: true,
       status: true,
       scheduledAt: true,
+      simpleProduction: true,
       workOrderVersion: true,
     },
   },
@@ -510,6 +511,7 @@ async function loadLockedOperationContext(
       '报工账号无效或已变更岗位',
     );
   }
+  if (operation.order.simpleProduction) throw new OperationReportingError('OPERATION_NOT_REPORTABLE', '请打开已安排的任务登记完成');
   assertReporterCanPerform(operation.operationType, account);
   return { operation, account, existingReport };
 }

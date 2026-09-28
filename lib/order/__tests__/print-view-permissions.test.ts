@@ -142,7 +142,7 @@ describe('getOrderForPrint permissions', () => {
     await expect(getOrderForPrint('scheduling-draft', { id: 'worker-1', role: Role.WORKER }, 'https://erp.example.com')).resolves.toBeNull();
     expect(dbMock.order.findFirst).toHaveBeenCalledWith({
       where: { id: 'scheduling-draft', status: { not: OrderStatus.SUBMITTED } },
-      select: { workOrderVersion: true },
+      select: { workOrderVersion: true, simpleProduction: true },
     });
     expect(dbMock.craft.findMany).not.toHaveBeenCalled();
     expect(buildQrSvgMock).not.toHaveBeenCalled();

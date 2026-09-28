@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { seedOrderShippingRecoveryFixture } from './order-shipping-recovery-fixture';
 import {
   E2E_PASSWORD,
   E2E_USERS,
@@ -44,6 +45,84 @@ test.describe('administrator workspace', () => {
     });
   });
 
+  test('discoverability entries pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [
+      { name: 'discovery-purchase-new', path: '/owner/purchases/new', readyHeading: '新建采购单' },
+      { name: 'discovery-parties', path: '/owner/parties?type=suppliers', readyHeading: '客户/供应商' },
+      { name: 'discovery-boms', path: '/owner/boms', readyHeading: 'BOM/用料' },
+      { name: 'discovery-categories', path: '/owner/rules/product-categories', readyHeading: '产品结构分类 / BOM 分类' },
+      { name: 'discovery-rules', path: '/owner/rules', readyHeading: '规则配置中心' },
+      { name: 'discovery-outsource', path: '/foreman/outsource', readyHeading: '外协单' },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
+  test('standalone return controls pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [
+      { name: 'return-empty-dispatch', path: '/orders/production', readyHeading: '安排生产师傅', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回工单列表', exact: true })).toHaveAttribute('href', '/orders');
+      } },
+      { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '创建外协单', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回工单详情', exact: true })).toHaveAttribute('href', `/orders/${fixture.orderId}`);
+      } },
+      { name: 'return-specifications', path: '/owner/rules/specifications', readyHeading: '规格目录', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回纸张', exact: true })).toHaveAttribute('href', '/owner/rules/papers');
+      } },
+      { name: 'return-password', path: '/account/password', readyHeading: '修改密码', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回首页', exact: true })).toHaveAttribute('href', '/');
+      } },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+    await page.getByRole('link', { name: '返回首页', exact: true }).click();
+    await expect(page).toHaveURL(/\/owner$/);
+  });
+
+  test('warehouse maintenance controls pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库作业台', prepareGateState: async (page) => {
+      const disclosure = page.locator('#admin-main').getByText('仓库与库位设置', { exact: true });
+      await disclosure.click();
+      const settings = disclosure.locator('..');
+      await settings.getByText('改名', { exact: true }).first().click();
+      await expect(settings.getByRole('button', { name: '保存名称', exact: true }).first()).toBeVisible();
+    } }];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
+  test('purchase and BOM recovery controls pass focused light and dark gates', async ({ page }, testInfo) => {
+    let draftsPrepared = false;
+    const routes: AdminRoute[] = [
+      { name: 'recovery-purchase', path: '/owner/purchases/new', readyHeading: '新建采购单', prepareGateState: async (page) => {
+        const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
+        if (draftsPrepared) {
+          await resume.click();
+          await expect(page.getByLabel('采购数量', { exact: true })).toHaveValue('123');
+        }
+        await page.getByLabel('采购数量', { exact: true }).fill('123');
+        await page.reload();
+        await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
+      } },
+      { name: 'recovery-bom', path: '/owner/boms/new', readyHeading: '新建 BOM', prepareGateState: async (page) => {
+        const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
+        if (draftsPrepared) {
+          await resume.click();
+          await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue('待补物料的用料清单');
+        }
+        await page.getByLabel('BOM 名称', { exact: true }).fill('待补物料的用料清单');
+        await page.reload();
+        await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
+      } },
+      { name: 'recovery-material', path: '/owner/materials/new', readyHeading: '新建物料' },
+      { name: 'recovery-supplier', path: '/owner/parties/new?type=SUPPLIER', readyHeading: '新建客户/供应商' },
+      { name: 'recovery-category', path: '/owner/rules/product-categories/new', readyHeading: '新建产品结构分类' },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    draftsPrepared = true;
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
     const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention'));
     expect(routes).toHaveLength(6);
@@ -82,6 +161,85 @@ test.describe('administrator workspace', () => {
   test('order detail expanded records pass focused light and dark gates', async ({ page }, testInfo) => {
     const routes = ownerRoutes(fixture).filter((route) => route.path === `/orders/${fixture.orderId}`);
     expect(routes).toHaveLength(1);
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
+  test('shipping recovery exposes actual progress and respects address edit limits', async ({ page }, testInfo) => {
+    const orders = await seedOrderShippingRecoveryFixture();
+    const routes: AdminRoute[] = [
+      { name: 'shipping-progress-recovery', path: `/orders/${orders.progress}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        const summary = page.locator('#admin-main #detail-business-records');
+        await expect(summary).toHaveAttribute('open', '');
+        await summary.locator(':scope > summary').click();
+        const recovery = page.locator('#admin-main #ship-order').getByRole('link', { name: '查看生产进度', exact: true });
+        if (testInfo.project.use.hasTouch) await recovery.tap();
+        else { await recovery.focus(); await recovery.press('Enter'); }
+        await expect(page).toHaveURL(/#detail-business-records$/);
+        await expect(summary).toHaveAttribute('open', '');
+        await expect(summary).toContainText('#1 粘封（进行中）');
+        const item = page.locator(`#admin-main #detail-design-item-${orders.progress}-item`);
+        await item.locator(':scope > summary').click();
+        await expect(item.getByText('粘封：进行中（40/100）', { exact: true })).toBeVisible();
+      } },
+      { name: 'shipping-released-reason', path: `/orders/${orders.released}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        const shipment = page.locator('#admin-main #shipment-registration');
+        await expect(shipment).toContainText('生产完工后才可发货');
+        await expect(shipment.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
+        await expect(shipment.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
+        await shipment.scrollIntoViewIfNeeded();
+      } },
+      { name: 'shipping-completed-no-address', path: `/orders/${orders.completed}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        const block = page.locator('#admin-main #ship-order');
+        await expect(block).toContainText('该工单已完工，无法补充发货地址，请核对历史收货资料。');
+        await expect(block.getByRole('link')).toHaveCount(0);
+        await expect(page.getByRole('link', { name: '补充配送信息' })).toHaveCount(0);
+        await expect(page.locator('#admin-main #detail-business-records')).toContainText('历史收货地址');
+        await block.scrollIntoViewIfNeeded();
+      } },
+      { name: 'shipping-packing-address-recovery', path: `/orders/${orders.packing}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        await page.locator('#admin-main #ship-order').getByRole('link', { name: '处理发货前置条件', exact: true }).click();
+        const edit = page.locator('#admin-main #shipment-registration').getByRole('link', { name: '补充配送信息' });
+        await expect(edit).toBeVisible();
+        await expect(edit).toHaveAttribute('href', `/orders/${orders.packing}/edit`);
+      } },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
+  test('shipping address cards use the full detail column in light and dark themes', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [];
+    for (const shipmentCount of [1, 2] as const) {
+      const orders = await seedOrderShippingRecoveryFixture({ shipmentCount, longAddress: true });
+      routes.push({
+        name: `shipping-address-layout-${shipmentCount}`, path: `/orders/${orders.released}`,
+        readyHeading: '发货恢复验证',
+        prepareGateState: async (page) => {
+          const section = page.locator('#shipment-registration');
+          const list = section.locator(':scope > ol');
+          const addresses = list.locator(':scope > li');
+          await expect(addresses).toHaveCount(shipmentCount);
+          const listWidth = (await list.boundingBox())!.width;
+          for (const address of await addresses.all()) {
+            expect((await address.boundingBox())!.width).toBeGreaterThanOrEqual(listWidth - 1);
+            await expect(address.getByText('测试收件人', { exact: true })).toBeVisible();
+            await expect(address.getByText('13800138000', { exact: true })).toBeVisible();
+            await expect(address.getByText(/广东省佛山市南海区测试街道物流园收货区/)).toBeVisible();
+            await expect(address.getByRole('list', { name: /的款式数量/ })).toContainText(`${100 / shipmentCount} 个`);
+            await address.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('OTHER');
+            await address.getByRole('textbox', { name: '物流公司名称', exact: true }).fill('测试物流公司');
+            const tracking = address.getByRole('textbox', { name: '运单号', exact: true });
+            await tracking.fill('TEST123456789012345678901234567890');
+            expect((await tracking.boundingBox())!.width).toBeGreaterThan(200);
+            await expect(address.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
+            await expect(address.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
+            await expect(address).toContainText('生产完工后才可发货');
+          }
+          await section.scrollIntoViewIfNeeded();
+        },
+      });
+    }
     await checkRoutes(page, testInfo, routes, 'light');
     await checkRoutes(page, testInfo, routes, 'dark');
   });
@@ -840,8 +998,11 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
       await expect(fees.getByText(title, { exact: true })).toBeVisible();
     }
     // This legacy fixture has only a historical total, no fabricated stage snapshots.
-    await expect(fees.getByText('历史金额', { exact: true })).toBeVisible();
-    await expect(fees.getByText('¥ 646,172.57', { exact: true })).toBeVisible();
+    const currentAmount = fees.locator('[data-slot="current-order-amount"]');
+    await expect(currentAmount).toBeVisible();
+    await expect(currentAmount.locator('..')).toContainText('历史金额');
+    await expect(currentAmount).toHaveText('¥ 646,172.57');
+    await expect(currentAmount.locator('..').getByText('不含快递费，含耗材费', { exact: true })).toBeVisible();
     await expect(fees.getByText('当前', { exact: true })).toHaveCount(0);
     await expect(fees.getByText('—', { exact: true })).toHaveCount(3);
     for (const hint of ['尚未形成报价', '费用核定后显示', '结算后显示']) {
@@ -1403,13 +1564,13 @@ async function prepareOrderDetailDesignPreview(
   // 同 testid 的节点（位于 #admin-main 之外），未限定范围会撞严格模式冲突。
   const records = page.locator('#admin-main [data-testid="admin-order-detail"]:visible');
   await expect(records).toBeVisible();
-  await expect(records.locator('details[id^="detail-"]:not([id^="detail-design-item-"])')).toHaveCount(6);
+  await expect(records.locator('details[id^="detail-"]:not([id^="detail-design-item-"]):not(#detail-packaging)')).toHaveCount(6);
   const sections = [
-    ['detail-design-files', '设计文件与完整工艺资料'],
+    ['detail-costs', '工厂成本'],
     ['detail-pricing-tools', '计价与收费维护'],
     ['detail-delivery-records', '配送与发货记录'],
     ['detail-production-records', '生产、用料与计件记录'],
-    ['detail-business-records', '基本信息、成本与重做'],
+    ['detail-business-records', '生产与业务资料'],
     ['detail-audit-records', '工单动态'],
   ] as const;
   for (const [id, title] of sections) {
@@ -1417,7 +1578,8 @@ async function prepareOrderDetailDesignPreview(
     await expect(section).toHaveAttribute('open', '');
     const summary = section.locator(':scope > summary');
     const content = section.locator(':scope > div');
-    await expect(summary).toHaveText(title);
+    await expect(summary).toContainText(title);
+    await expect(summary.getByText('收起', { exact: true })).toBeVisible();
     await expect(content).toBeVisible();
     await summary.click();
     await expect(section).not.toHaveAttribute('open', '');
@@ -1429,10 +1591,10 @@ async function prepareOrderDetailDesignPreview(
   await expect(records.locator('#detail-pricing-tools').getByRole('heading', { name: '工单价格状态', exact: true })).toBeVisible();
   await expect(records.locator('#detail-delivery-records').getByRole('heading', { name: '发货地址（1）', exact: true })).toBeVisible();
   await expect(records.locator('#detail-production-records').getByRole('heading', { name: '物料用量估算', exact: true })).toBeVisible();
-  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '基本信息', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '生产概况与业务资料', exact: true })).toBeVisible();
   await expect(records.locator('#detail-audit-records').getByRole('region', { name: '操作事件', exact: true })).toBeVisible();
   await expect(records.getByRole('complementary', { name: '工单概览与操作' }).locator('#detail-other-actions')).toBeVisible();
-  await expect(records.locator('#detail-other-actions').getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
+  await expect(records.getByRole('complementary', { name: '工单概览与操作' }).getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
 
   // The current detail contract keeps the style name, quantity, materials and
   // saved processing amount in the main card; complete facts remain on demand.
@@ -1445,7 +1607,9 @@ async function prepareOrderDetailDesignPreview(
   await expect(mainItem.getByText('1,234,567 个', { exact: true })).toBeVisible();
   await expect(mainItem.getByText('特种珠光纸ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', { exact: true })).toBeVisible();
   await expect(mainItem.getByText('https://example.invalid/specification/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/very-long-unbroken-value', { exact: true })).toBeVisible();
-  await expect(mainItem.getByText('¥ 152,345.57', { exact: true })).toBeVisible();
+  const visibleProcessingAmount = mainItem.getByText('¥ 152,345.57', { exact: true }).filter({ visible: true });
+  await expect(visibleProcessingAmount).toHaveCount(1);
+  await expect(visibleProcessingAmount).toBeVisible();
   await expect(mainItem).not.toContainText(data.craftId);
 
   const itemDetails = records.locator(`#detail-design-item-${data.orderItemActiveId}`);
@@ -1459,9 +1623,10 @@ async function prepareOrderDetailDesignPreview(
   await expect(itemDetails).toBeFocused();
   await expect(itemSummary.getByText('收起', { exact: true })).toBeVisible();
   await expect(itemSummary.getByText('展开', { exact: true })).toBeHidden();
-  const designSummary = records.locator('#detail-design-files > summary');
+  const designSummary = itemSummary;
   await designSummary.click();
-  await expect(itemDetails).toBeHidden();
+  await expect(itemDetails).not.toHaveAttribute('open', '');
+  await expect(itemDetails.locator(':scope > div')).toBeHidden();
   await designSummary.click();
   await expect(itemDetails).toHaveAttribute('open', '');
   await expect(itemSummary.getByText('收起', { exact: true })).toBeVisible();

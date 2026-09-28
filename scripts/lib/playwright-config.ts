@@ -39,6 +39,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
     // These are isolated test processes, including when Next uses production
     // build/start. They never represent a live notification/worker acceptance.
     NOTIFICATION_MOCK_MODE: 'true',
+    PIECEWORK_SCHEDULE_CANCEL_ENABLED: 'true',
     WECOM_SMART_BOT_ID: 'e2e-only-smart-bot',
     WECOM_SMART_BOT_SECRET: 'e2e-only-smart-bot-secret',
     CDR_BUNDLE_MOCK_MODE: 'true',
@@ -82,6 +83,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
         testIgnore: [
           '**/worker-responsive.spec.ts',
           '**/admin-responsive.spec.ts',
+          '**/production-dispatch.spec.ts',
           // Has its own project below with JS turned off; running it here
           // too would just re-test the hydrated path.
           '**/no-js.spec.ts',
@@ -110,7 +112,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
       })),
       ...adminViewportProjects.map(({ name, width, height }) => ({
         name,
-        testMatch: '**/admin-responsive.spec.ts',
+        testMatch: ['**/admin-responsive.spec.ts', '**/production-dispatch.spec.ts'],
         use: {
           ...devices['Desktop Chrome'],
           viewport: { width, height },

@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import {
   createWarehouseAction,
   createWarehouseLocationAction,
@@ -41,10 +41,16 @@ export function WarehouseForms({ warehouses }: Props) {
 }
 
 function WarehouseCreateForm() {
+  const [input, setInput] = useState({ name: '', code: '' });
   const [state, formAction, pending] = useActionState<
     WarehouseMutationResult | null,
     FormData
   >(createWarehouseAction, null);
+  const [handledResult, setHandledResult] = useState(state);
+  if (state !== handledResult) {
+    setHandledResult(state);
+    if (state?.status === 'success') setInput({ name: '', code: '' });
+  }
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
   const error = visibleState?.status === 'error' ? visibleState.message : null;
@@ -58,6 +64,7 @@ function WarehouseCreateForm() {
     <form
       id="warehouse-create-form"
       action={formAction}
+      onReset={(event) => event.preventDefault()}
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
@@ -67,6 +74,8 @@ function WarehouseCreateForm() {
         id="warehouse-name"
         name="name"
         label="仓库名称"
+        value={input.name}
+        onChange={(value) => setInput((current) => ({ ...current, name: value }))}
         error={errs.name?.[0]}
         disabled={pending}
       />
@@ -79,6 +88,8 @@ function WarehouseCreateForm() {
             id="warehouse-code"
             name="code"
             label="自定义编码（选填）"
+            value={input.code}
+            onChange={(value) => setInput((current) => ({ ...current, code: value }))}
             hint="留空将自动生成，例如 WH-000001。"
             error={errs.code?.[0]}
             disabled={pending}
@@ -101,10 +112,17 @@ function WarehouseCreateForm() {
 }
 
 function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] }) {
+  const [warehouseId, setWarehouseId] = useState('');
+  const [input, setInput] = useState({ name: '', code: '' });
   const [state, formAction, pending] = useActionState<
     WarehouseMutationResult | null,
     FormData
   >(createWarehouseLocationAction, null);
+  const [handledResult, setHandledResult] = useState(state);
+  if (state !== handledResult) {
+    setHandledResult(state);
+    if (state?.status === 'success') { setInput({ name: '', code: '' }); setWarehouseId(''); }
+  }
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
   const error = visibleState?.status === 'error' ? visibleState.message : null;
@@ -119,6 +137,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
     <form
       id="location-create-form"
       action={formAction}
+      onReset={(event) => event.preventDefault()}
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
@@ -134,9 +153,11 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
             : {})}
           className={selectClass}
           disabled={pending || missingWarehouses}
-          defaultValue=""
+          value={warehouseId}
+          onChange={(event) => setWarehouseId(event.target.value)}
         >
           <option value="">请选择仓库</option>
+          {warehouseId && !warehouses.some((warehouse) => warehouse.id === warehouseId) ? <option value={warehouseId}>原仓库已停用，请重新选择</option> : null}
           {warehouses.map((warehouse) => (
             <option key={warehouse.id} value={warehouse.id}>
               {warehouse.code} · {warehouse.name}
@@ -160,6 +181,8 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
         id="location-name"
         name="name"
         label="库位名称"
+        value={input.name}
+        onChange={(value) => setInput((current) => ({ ...current, name: value }))}
         error={errs.name?.[0]}
         disabled={pending}
       />
@@ -172,6 +195,8 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
             id="location-code"
             name="code"
             label="自定义编码（选填）"
+            value={input.code}
+            onChange={(value) => setInput((current) => ({ ...current, code: value }))}
             hint="留空将自动生成，例如 LOC-000001。"
             error={errs.code?.[0]}
             disabled={pending}
@@ -204,6 +229,8 @@ function TextField({
   hint,
   error,
   disabled,
+  value,
+  onChange,
 }: {
   id: string;
   name: string;
@@ -211,6 +238,8 @@ function TextField({
   hint?: string;
   error?: string | undefined;
   disabled?: boolean;
+  value: string;
+  onChange: (value: string) => void;
 }) {
   return (
     <div className="space-y-2">
@@ -219,6 +248,8 @@ function TextField({
         id={id}
         name={name}
         disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         {...(error
           ? formMessageA11yProps(id, 'error')
           : hint

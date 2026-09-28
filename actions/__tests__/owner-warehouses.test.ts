@@ -30,12 +30,16 @@ vi.mock('@/lib/warehouse', () => ({
   createWarehouseLocation: warehouseMock.createWarehouseLocation,
   WarehouseInvariantError: MockWarehouseInvariantError,
 }));
+vi.mock('@/lib/warehouse-maintenance', async (importOriginal) => { const original = await importOriginal<typeof import('@/lib/warehouse-maintenance')>(); return { ...original, maintainWarehouse: vi.fn() }; });
 vi.mock('next/cache', () => ({ revalidatePath: revalidatePathMock }));
 
 import {
+  maintainWarehouseAction,
   createWarehouseAction,
   createWarehouseLocationAction,
 } from '../owner-warehouses';
+
+import { maintainWarehouse } from '@/lib/warehouse-maintenance';
 
 const ownerActor = {
   id: 'actor-owner',
@@ -54,6 +58,7 @@ const fd = (data: Record<string, string>) => {
 
 beforeEach(() => {
   permissionsMock.requirePermission.mockReset();
+  vi.mocked(maintainWarehouse).mockReset();
   warehouseMock.createWarehouse.mockReset();
   warehouseMock.createWarehouseLocation.mockReset();
   revalidatePathMock.mockReset();
@@ -73,7 +78,7 @@ describe('createWarehouseAction', () => {
     expect(warehouseMock.createWarehouse).toHaveBeenCalledWith({
       code: null,
       name: '自动编码仓库',
-    });
+    }, ownerActor.id);
   });
 
   it("first-line requirePermission('warehouse:manage')", async () => {
@@ -103,7 +108,7 @@ describe('createWarehouseAction', () => {
     expect(warehouseMock.createWarehouse).toHaveBeenCalledWith({
       code: 'WH1',
       name: '一号仓',
-    });
+    }, ownerActor.id);
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/warehouses');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/materials');
     expect(revalidatePathMock).toHaveBeenCalledWith(
@@ -153,7 +158,7 @@ describe('createWarehouseLocationAction', () => {
       warehouseId: 'wh1',
       code: null,
       name: '自动编码库位',
-    });
+    }, ownerActor.id);
   });
 
   it('passes parsed location fields to lib.createWarehouseLocation', async () => {
@@ -170,7 +175,7 @@ describe('createWarehouseLocationAction', () => {
       warehouseId: 'wh1',
       code: 'A01',
       name: 'A01',
-    });
+    }, ownerActor.id);
   });
 
   it('maps warehouse invariant errors to error status', async () => {
@@ -185,5 +190,33 @@ describe('createWarehouseLocationAction', () => {
     );
 
     expect(result).toEqual({ status: 'error', message: '仓库已停用' });
+  });
+});
+
+describe('maintainWarehouseAction', () => {
+  const input = { kind: 'location', id: 'loc1', operation: 'disable', expectedUpdatedAt: '2026-09-27T00:00:00.000Z' };
+  it('checks permission before parsing or calling the domain', async () => {
+    permissionsMock.requirePermission.mockRejectedValue(new UnauthorizedError('无权限'));
+    await expect(maintainWarehouseAction(null, fd(input))).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(maintainWarehouse).not.toHaveBeenCalled();
+  });
+  it('validates the expected version and names', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    expect((await maintainWarehouseAction(null, fd({ ...input, expectedUpdatedAt: 'invalid' }))).status).toBe('invalid');
+    expect((await maintainWarehouseAction(null, fd({ ...input, operation: 'rename', name: ' ' }))).status).toBe('invalid');
+    expect(maintainWarehouse).not.toHaveBeenCalled();
+  });
+  it('passes actor and facts to domain and invalidates every stock selector consumer', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    await expect(maintainWarehouseAction(null, fd(input))).resolves.toEqual({ status: 'success', message: '已停用' });
+    expect(maintainWarehouse).toHaveBeenCalledWith({ ...input, name: undefined }, ownerActor.id);
+    for (const path of ['/owner/materials/[id]', '/owner/rules/papers/[id]', '/foreman/materials/[id]', '/owner/purchases/[id]']) expect(revalidatePathMock).toHaveBeenCalledWith(path, 'page');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/materials/count');
+  });
+  it('returns conflicts without success or invalidation', async () => {
+    permissionsMock.requirePermission.mockResolvedValue(ownerActor);
+    vi.mocked(maintainWarehouse).mockRejectedValue(new MockWarehouseInvariantError('仍有库存'));
+    expect(await maintainWarehouseAction(null, fd(input))).toEqual({ status: 'error', message: '仍有库存' });
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 });

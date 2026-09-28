@@ -1,3 +1,4 @@
+import { VerifiedDraftReceipt } from '@/components/business/form-drafts/VerifiedDraftReceipt';
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
@@ -64,7 +65,7 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function OwnerBomDetailPage({ params, searchParams }: PageProps) {
-  await requirePermission('bom:manage');
+  const actor = await requirePermission('bom:manage');
   const { id } = await params;
   const bom = await loadBom(id);
   if (!bom) notFound();
@@ -73,6 +74,7 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
 
   return (
     <div className="space-y-6">
+      <VerifiedDraftReceipt actorId={actor.id} kind="bom-new" entityId={id} receipt={receipt} />
       <ReceiptNotice receipt={receipt} noun="BOM" />
       <PageHeader
         title={externalPriceBusinessText(bom.name)}

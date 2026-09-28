@@ -365,6 +365,7 @@ export async function claimProductionOperationFromScan(
             select: {
               status: true,
               scheduledAt: true,
+              simpleProduction: true,
               workOrderVersion: true,
             },
           },
@@ -381,6 +382,7 @@ export async function claimProductionOperationFromScan(
         },
       }),
     ]);
+    if (operation?.order.simpleProduction) throw new WorkOrderProgressError('INVALID_INPUT', '请打开已安排的任务登记完成');
     if (!operation) {
       throw new WorkOrderProgressError(
         'OPERATION_NOT_FOUND',

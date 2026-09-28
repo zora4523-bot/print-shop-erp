@@ -8,7 +8,8 @@ function fixture(): AdminOrderDetailInput {
   const order = {
     id: 'order-1', orderNo: 'GD-260907-001', revision: 4, workOrderVersion: 2, editVersion: 3,
     status: 'CONFIRMED', customName: '中秋红包', isUrgent: false,
-    packagingAmount: new Decimal('0'),
+    packagingAmount: new Decimal('0'), processingAmount: new Decimal('100.10'), totalAmount: new Decimal('100.10'),
+    quotedFee: null, confirmedFee: null, settledFee: null,
     items: [{
       id: 'item-1', fig: 1, sequence: 1, name: '红包', quantity: 1000, pack: null,
       craftNames: ['局部烫金'], paperType: '红卡', paperWeightGsm: 120, specification: '大号',
@@ -94,6 +95,7 @@ describe('admin order detail projection', () => {
 
   it('retains exact persisted amounts, zero plate fees and nullable fee stages', () => {
     const input = fixture();
+    Object.assign(input.order, { quotedFee: new Decimal('9007199254.01'), confirmedFee: new Decimal('0') });
     input.workspace.feeStages = { quoted: '9007199254.01', confirmed: '0.00', settled: null, active: 'CONFIRMED' };
     input.workspace.fee = { amount: '0.00', source: 'CONFIRMED', estimated: false };
     const result = buildAdminOrderDetailModel(input);
@@ -107,6 +109,23 @@ describe('admin order detail projection', () => {
     ]);
     expect(result.orderFees).toEqual([{ id: 'packaging', label: '包装费', amount: '0.00' }]);
     expect(result.feeStages[0]).not.toHaveProperty('processingAmount');
+  });
+
+  it('uses complete detail facts even when the workspace misses a missing fee', () => {
+    const input = fixture();
+    Object.assign(input.order, { processingAmount: null, quotedFee: new Decimal('100.10') });
+    input.workspace.fee = { amount: '100.10', source: 'QUOTED', estimated: true };
+    expect(buildAdminOrderDetailModel(input)).toMatchObject({ total: null, feeSource: 'INCOMPLETE' });
+  });
+
+  it.each([false, true])('keeps the settled total immutable with estimated historical charges: %s', (settled) => {
+    const input = fixture();
+    Object.assign(input.order, { confirmedFee: new Decimal('123.45'), settledFee: settled ? new Decimal('120.01') : null });
+    input.order.customerCharges = [{ businessKey: 'SHIPPING:1', status: 'ESTIMATED', amount: new Decimal('23.35'), category: { name: '运费' } }] as unknown as typeof input.order.customerCharges;
+    expect(buildAdminOrderDetailModel(input)).toMatchObject({
+      total: settled ? '120.01' : '123.45', totalEstimated: !settled,
+      feeSource: settled ? 'SETTLED' : 'CONFIRMED', itemProcessingAmount: '100.10',
+    });
   });
 
   it('signs only IMAGE URLs and emits no CDR object key or server Decimal/Date', () => {
@@ -278,6 +297,7 @@ describe('admin order detail projection', () => {
   it('keeps missing data empty instead of fabricating designs, shipping or zero fees', () => {
     const input = fixture();
     input.order.items = [];
+    Object.assign(input.order, { processingAmount: null });
     input.workspace.fee = { amount: null, source: 'INCOMPLETE', estimated: false };
     const result = buildAdminOrderDetailModel(input);
     expect(result).toMatchObject({ total: null, items: [], works: [], logs: [], shipments: [], changes: [], vdiff: null });
@@ -314,6 +334,12 @@ it('keeps the order-level note separate from style notes', () => {
   const input = fixture();
   input.order.remark = '先核对样稿\n再安排生产';
   expect(buildAdminOrderDetailModel(input).remark).toBe(input.order.remark);
+});
+
+it('carries collect-shipping facts into the fee summary', () => {
+  const input = fixture();
+  input.order.isSfCollect = true;
+  expect(buildAdminOrderDetailModel(input).isSfCollect).toBe(true);
 });
 
 // 业主 2026-09-27：客户名称/简称已退役；详情头部的“业务员”取工单归属的外部销售，

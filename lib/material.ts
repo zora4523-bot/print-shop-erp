@@ -1,3 +1,4 @@
+import { acquireWarehouseStockLock } from '@/lib/warehouse-coordination';
 import { isRetiredPaper } from '@/lib/rules/paper-availability';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
@@ -715,6 +716,7 @@ export async function createMaterialTransaction(
   const requestFingerprint = manualMaterialRequestFingerprint(data);
   let notificationQueued = false;
   const result = await db.$transaction(async (tx) => {
+    await acquireWarehouseStockLock(tx);
     // Lock the request before the material, so concurrent delivery of one
     // command can only observe and return the first committed ledger entry.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`print-shop-erp:manual-stock:${idempotencyKey}`}))`;

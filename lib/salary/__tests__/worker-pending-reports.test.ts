@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import { beforeEach, expect, it, vi } from 'vitest';
 import Decimal from 'decimal.js';
 const { tx } = vi.hoisted(() => ({ tx: { $transaction: vi.fn(), user: { findUnique: vi.fn() }, productionReport: { count: vi.fn(), findMany: vi.fn() } } }));

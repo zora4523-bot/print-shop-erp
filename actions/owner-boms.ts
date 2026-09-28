@@ -1,6 +1,8 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { FormCreationError, readCreationIdentity } from '@/lib/form-drafts/creation-request';
+import type { CreationIdentity } from '@/lib/form-drafts/model';
 import { appendReceipt } from '@/lib/admin/receipt';
 import {
   getFormString,
@@ -59,7 +61,7 @@ function mapBomUniqueViolation(error: unknown): BomMutationResult | null {
 
 function normalizeBomFormInput(formData: FormData) {
   const itemCount = Number.parseInt(getFormStringOr(formData, 'itemCount', '0'), 10);
-  const items = Array.from({ length: Number.isFinite(itemCount) ? itemCount : 0 })
+  const items = Array.from({ length: Number.isFinite(itemCount) ? Math.max(0, Math.min(itemCount, 21)) : 0 })
     .map((_, index) => ({
       materialId: getFormStringOr(formData, `items.${index}.materialId`, ''),
       quantity: getFormStringOr(formData, `items.${index}.quantity`, ''),
@@ -84,16 +86,28 @@ export async function createBomAction(
   _prev: BomMutationResult | null,
   formData: FormData,
 ): Promise<BomMutationResult> {
-  await requirePermission('bom:manage');
+  const actor = await requirePermission('bom:manage');
+
+  const itemCount = Number(getFormStringOr(formData, 'itemCount', '0'));
+  if (!Number.isInteger(itemCount) || itemCount < 1 || itemCount > 20) {
+    return { status: 'invalid', fieldErrors: { items: ['请填写 1 至 20 行物料'] } };
+  }
 
   const parsed = createBomSchema.safeParse(normalizeBomFormInput(formData));
   if (!parsed.success) return invalidFromIssues(parsed.error.issues);
 
   let createdId: string;
+  let replayed = false;
+  let identity: CreationIdentity | undefined;
   try {
-    const created = await createBom(parsed.data);
+    identity = readCreationIdentity(formData);
+    const created = identity
+      ? await createBom(parsed.data, { ...identity, actorId: actor.id })
+      : await createBom(parsed.data);
     createdId = created.id;
+    replayed = created.creationReplayed === true;
   } catch (err) {
+    if (err instanceof FormCreationError) return { status: 'error', message: err.message, ...(err.creationConflict ? { creationConflict: true } : {}) };
     const unique = mapBomUniqueViolation(err);
     if (unique) return unique;
     const invariant = mapInvariantError(err, BomInvariantError);
@@ -102,7 +116,9 @@ export async function createBomAction(
   }
 
   revalidateBomPaths(createdId);
-  redirect(appendReceipt(`/owner/boms/${createdId}`, { created: '1' }));
+  redirect(appendReceipt(`/owner/boms/${createdId}`, {
+    ...(replayed ? { creationReplayed: '1' } : { created: '1' }), ...(identity ? { createdDraft: identity.draftId, creationRequest: identity.clientRequestId } : {}),
+  }));
 }
 
 export async function setBomActiveAction(

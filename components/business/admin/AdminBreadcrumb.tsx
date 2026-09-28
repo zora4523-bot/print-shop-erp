@@ -45,6 +45,9 @@ const SEGMENT_LABELS: Record<string, string> = {
   tiers: '价格阶梯',
   notifications: '推送配置',
   attention: '关注事项',
+  analytics: '经营概览',
+  cdr: 'CDR 汇总',
+  'order-changes': '工单修改申请',
   pigsty: 'Pigsty 运维',
   salary: '薪资',
   daily: '计件工资',
@@ -68,6 +71,20 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     ),
     '/owner/rules/customer-pricing/blank': '空白封单价',
     '/owner/rules/customer-pricing/blank/new': '新增纸张与规格价格',
+    '/orders/new': '创建工单',
+    '/orders/production': '安排生产师傅',
+    '/owner/purchases/new': '新建采购单',
+    '/owner/accounts/new': '新建账号',
+    '/owner/boms/new': '新建用料清单',
+    '/owner/materials/new': '新建物料',
+    '/owner/parties/new': '新建客户/供应商',
+    '/owner/rules/papers/new': '新建纸张',
+    '/owner/rules/crafts/new': '新建工艺',
+    '/owner/rules/product-categories/new': '新建产品结构分类',
+    '/owner/rules/product-categories/items/new': '新建产品资料',
+    '/foreman/outsource/new': '创建外协单',
+    '/foreman/materials/new': '新建物料',
+    '/owner/notifications/channels/new': '新建企业微信通知目标',
   };
 
 // Routes that are layout-only (no page.tsx) — linking them produces
@@ -86,12 +103,11 @@ const ID_SEGMENT =
   /^(c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 // 导出供单测直接调用：给定段名 + 详情页交上来的业务编号，算出显示什么。
-function labelFromModules(segment: string): string | undefined {
+function labelFromModules(path: string): string | undefined {
   const labels = new Set<string>();
   for (const adminModule of ADMIN_MODULES) {
     if (adminModule.routeBase === '#') continue;
-    const last = adminModule.routeBase.split('/').filter(Boolean).at(-1);
-    if (last === segment) labels.add(adminModule.breadcrumbLabel);
+    if (adminModule.routeBase === path) labels.add(adminModule.breadcrumbLabel);
   }
   return labels.size === 1 ? [...labels][0] : undefined;
 }
@@ -100,9 +116,14 @@ export function resolveSegmentLabel(
   segment: string,
   entityLabel: string | null,
   pageHeading?: string | null,
+  path?: string,
 ): string {
-  const fromModule = labelFromModules(segment);
+  const fromModule = path ? BREADCRUMB_PATH_LABELS[path] ?? labelFromModules(path) : undefined;
   if (fromModule) return fromModule;
+  if (segment === 'new' && path) {
+    const parent = labelFromModules(path.slice(0, -4));
+    if (parent) return `新建${parent}`;
+  }
   const known = SEGMENT_LABELS[segment];
   if (known) return known;
   if (ID_SEGMENT.test(segment)) return entityLabel ?? pageHeading ?? '详情';
@@ -156,12 +177,13 @@ export function AdminBreadcrumb() {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
           const label =
-            (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
             BREADCRUMB_PATH_LABELS[href] ??
+            (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
             resolveSegmentLabel(
               seg,
               entityLabel,
               isLast ? pageHeading : null,
+              href,
             );
           // Layout-only paths can't be navigated to (404)；render the
           // label as text not link。

@@ -33,6 +33,7 @@ const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
 ];
 
 const SIGNALS: Array<{ key: AdminOrderSignal; label: string }> = [
+  { key: 'pending-quantity', label: '生产数量待核对' },
   { key: 'pending-confirmation', label: '待处理' },
   { key: 'pending-pricing', label: '待核价' },
   { key: 'pending-change', label: '变更申请' },
@@ -174,6 +175,7 @@ export function AdminOrderWorkspace({
             />
             {query.starred ? '取消仅星标' : '仅星标'}
           </Link>
+          <Link href="/orders?queue=all&pendingWages=yes" className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm">待补录提成</Link>
           <Link
             href={buildTableHref(
               '/orders',

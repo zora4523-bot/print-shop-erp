@@ -557,7 +557,7 @@ function WorkOrderHeader({
           <div className="order-name">工单 <b>{displayOrderName}</b></div>
         ) : null}
         <div className="line">
-          状态 <b>{ORDER_STATUS_REGISTRY[order.status].label}</b>
+          状态 <b>{!order.simpleProduction && ['RELEASED', 'FOILING', 'PACKING'].includes(order.status) ? ({ RELEASED: '已下发', FOILING: '烫金中', PACKING: '打包中' } as Record<string, string>)[order.status] : ORDER_STATUS_REGISTRY[order.status].label}</b>
           {order.hasPendingChange ? <span className="tag">变更待审批</span> : null}
           {order.isUrgent ? <span className="tag">加急</span> : null}
           {order.kind === 'REWORK' ? (

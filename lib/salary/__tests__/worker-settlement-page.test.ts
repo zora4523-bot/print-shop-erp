@@ -1,9 +1,10 @@
+vi.mock('server-only', () => ({}));
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
-const { tx } = vi.hoisted(() => ({ tx: { user: { findFirst: vi.fn() }, pieceworkSettlement: { count: vi.fn(), aggregate: vi.fn(), findMany: vi.fn() }, $transaction: vi.fn() } }));
+const { tx } = vi.hoisted(() => ({ tx: { productionJob: { findMany: vi.fn() }, user: { findFirst: vi.fn() }, pieceworkSettlement: { count: vi.fn(), aggregate: vi.fn(), findMany: vi.fn() }, $transaction: vi.fn() } }));
 vi.mock('@/lib/db', () => ({ db: tx }));
 import { listWorkerSettlementPage } from '../worker-settlement-page';
-beforeEach(() => { vi.resetAllMocks(); tx.user.findFirst.mockResolvedValue({ id: 'worker' }); tx.$transaction.mockImplementation((fn) => fn(tx)); tx.pieceworkSettlement.count.mockResolvedValue(45); tx.pieceworkSettlement.findMany.mockResolvedValue([]); tx.pieceworkSettlement.aggregate.mockResolvedValue({ _sum: { payableAmount: '123.45' } }); });
+beforeEach(() => { vi.resetAllMocks(); tx.productionJob.findMany.mockResolvedValue([]); tx.user.findFirst.mockResolvedValue({ id: 'worker' }); tx.$transaction.mockImplementation((fn) => fn(tx)); tx.pieceworkSettlement.count.mockResolvedValue(45); tx.pieceworkSettlement.findMany.mockResolvedValue([]); tx.pieceworkSettlement.aggregate.mockResolvedValue({ _sum: { payableAmount: '123.45' } }); });
 it('keeps period totals independent of pagination and scopes every query to self', async () => {
   const result = await listWorkerSettlementPage({ id: 'worker', role: Role.WORKER }, { page: '2', status: 'paid' });
   expect(result.totalAmount).toBe('123.45');

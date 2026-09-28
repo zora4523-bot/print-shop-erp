@@ -17,8 +17,8 @@ export class InvalidOrderTransitionError extends Error {
 // Canonical work-order transitions:
 //   DRAFT → PENDING_FACTORY → CONFIRMED → RELEASED → FOILING → PACKING
 //         → SHIPPED → SETTLED
-// REJECTED can be corrected and resubmitted. ON_HOLD resumes to the exact
-// pre-hold state under the workflow service's persisted decision evidence.
+// ON_HOLD restores the prior state, then reconciles actual production. Assigned
+// production may reopen PACKING/FOILING only with verified remaining work.
 // SUBMITTED / SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED remain only
 // as expand-migration compatibility states; they are deliberately retained
 // until a later audited contract migration.
@@ -57,11 +57,13 @@ export const ORDER_TRANSITIONS = {
     OrderStatus.CANCELLED,
   ],
   [OrderStatus.FOILING]: [
+    OrderStatus.RELEASED,
     OrderStatus.ON_HOLD,
     OrderStatus.PACKING,
     OrderStatus.CANCELLED,
   ],
   [OrderStatus.PACKING]: [
+    OrderStatus.RELEASED,
     OrderStatus.ON_HOLD,
     OrderStatus.SHIPPED,
     OrderStatus.CANCELLED,
@@ -105,14 +107,17 @@ export const ORDER_TRANSITIONS = {
 // every status write to go through this function so the transition table
 // is the single source of truth. Never write `data: { status: 'XXX' }`
 // directly in a Prisma update.
-export function transitionOrder(from: OrderStatus, to: OrderStatus): OrderStatus {
-  if (!canTransitionOrder(from, to)) {
+type ProductionReopenEvidence = { remainingAssignedProduction: true };
+
+export function transitionOrder(from: OrderStatus, to: OrderStatus, evidence?: ProductionReopenEvidence): OrderStatus {
+  if (!canTransitionOrder(from, to, evidence)) {
     throw new InvalidOrderTransitionError(from, to);
   }
   return to;
 }
 
-export function canTransitionOrder(from: OrderStatus, to: OrderStatus): boolean {
+export function canTransitionOrder(from: OrderStatus, to: OrderStatus, evidence?: ProductionReopenEvidence): boolean {
+  if (to === OrderStatus.RELEASED && (from === OrderStatus.PACKING || from === OrderStatus.FOILING) && !evidence?.remainingAssignedProduction) return false;
   const allowed = ORDER_TRANSITIONS[from] as readonly OrderStatus[];
   return allowed.includes(to);
 }

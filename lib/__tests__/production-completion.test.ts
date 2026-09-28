@@ -20,6 +20,7 @@ type FakeOrderRow = {
   id: string;
   status: OrderStatus;
   requiresOutsource?: boolean;
+  simpleProduction?: boolean;
   workOrderVersion?: number;
   orderNo?: string;
   customerRef?: string | null;
@@ -105,6 +106,8 @@ function makeTx(opts: {
   const logCreate = vi.fn(async () => ({ id: 'log-1' }));
 
   const tx = {
+    orderChangeRequest: { count: vi.fn(async () => 0) },
+    productionFactReview: { count: vi.fn(async () => 0) },
     order: { findUnique: orderFindUnique, update: orderUpdate },
     orderItem: { findMany: itemFindMany },
     craft: { findMany: craftFindMany },
@@ -587,6 +590,28 @@ describe('maybeCompleteProductionOrder — 款式级覆盖闸口', () => {
         data: { status: OrderStatus.COMPLETED, completedAt: NOW },
       }),
     );
+  });
+
+  it.each([OrderStatus.PACKING, OrderStatus.ON_HOLD])('preserves completed outsourcing and original completion on a price-only revision in %s', async status => {
+    const original = new Date('2026-08-20T02:00:00Z');
+    const h = makeTx({ ...baseOpts, order: { ...baseOpts.order, status, simpleProduction: true },
+      operations: [{ id: 'op', status: ProductionOperationStatus.COMPLETED }],
+      outsourceOrders: [{ id: 'os-1', status: OutsourceStatus.RECEIVED, orderItemIds: ['item-1'] }],
+      items: [{ id: 'item-1', sequence: 1, name: '外协款', crafts: ['craft-uv'] }],
+    });
+    const out = await maybeCompleteProductionOrder(h.tx, 'order-1', 'user-1', NOW, original);
+    expect(out.completed).toBe(false); expect(out.notification).toBeUndefined();
+    expect(h.orderUpdate).toHaveBeenCalledWith({ where: { id: 'order-1' }, data: { status, completedAt: original } });
+    expect(h.logCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not carry a completion marker across outstanding outsourcing', async () => {
+    const h = makeTx({ ...baseOpts, order: { ...baseOpts.order, status: OrderStatus.PACKING, simpleProduction: true },
+      operations: [{ id: 'op', status: ProductionOperationStatus.COMPLETED }],
+      outsourceOrders: [{ id: 'os-1', status: OutsourceStatus.IN_PROGRESS, orderItemIds: ['item-1'] }],
+    });
+    const out = await maybeCompleteProductionOrder(h.tx, 'order-1', 'user-1', NOW, new Date('2026-08-20T02:00:00Z'));
+    expect(out.blockedBy).toBe('OUTSOURCE_NOT_RECEIVED'); expect(h.orderUpdate).not.toHaveBeenCalled();
   });
 
   it('款式 A 被覆盖、款式 B 含外协工艺但无外协单 → OUTSOURCE_COVERAGE，不写库', async () => {

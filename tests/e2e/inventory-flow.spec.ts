@@ -1,3 +1,4 @@
+import { detachedActionHeaders } from './_action-replay';
 import Decimal from 'decimal.js';
 import { expect, test, type Page } from '@playwright/test';
 import { E2E_PASSWORD, login } from './_helpers';
@@ -25,7 +26,7 @@ async function stockMovement(page: Page, fixture: Fixture, direction: 'IN' | 'OU
     replayed = true;
     // Deliver the same real form request concurrently. A lost response or a
     // double delivery must never create two movements for one confirmation.
-    const [first, replay] = await Promise.all([route.fetch(), route.fetch()]);
+    const [first, replay] = await Promise.all([route.fetch(), route.fetch({ headers: detachedActionHeaders(route.request()) })]);
     expect(first.status()).toBe(200);
     expect(replay.status()).toBe(200);
     await route.fulfill({ response: first });
@@ -78,7 +79,7 @@ test('库存领退料、调拨重试、盘点冲突与重新盘点保持数量�
     // Replay exactly the UI-generated request before the UI receives success
     // and rotates its idempotency key: simulate a lost-response network retry.
     const first = await route.fetch();
-    const replay = await route.fetch();
+    const replay = await route.fetch({ headers: detachedActionHeaders(route.request()) });
     expect(first.status()).toBe(200);
     expect(replay.status()).toBe(200);
     await route.fulfill({ response: first });

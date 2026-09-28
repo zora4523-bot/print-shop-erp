@@ -64,10 +64,10 @@ it('发布拒绝过期时间和前序未来版本', async () => {
   await expect(publishPersonalPieceworkDraft(revision, actor)).rejects.toThrow('生效时间已过');
   tx.pieceworkPriceBook.findUnique.mockResolvedValue(book);
   tx.pieceworkPriceBook.findFirst.mockResolvedValue({ ...book, version: 1, status: 'PUBLISHED', effectiveFrom: new Date('2030-01-01') });
-  await expect(publishPersonalPieceworkDraft(revision, actor)).rejects.toThrow('晚于');
+  await expect(publishPersonalPieceworkDraft(revision, actor)).rejects.toThrow('新工价只能安排在其后');
 });
 it('创建草稿使用全局唯一版本但只复制本人适用岗位', async () => {
-  tx.pieceworkPriceBook.findFirst.mockResolvedValueOnce({ ...book, status: 'PUBLISHED' }).mockResolvedValueOnce({ version: 10 });
+  tx.pieceworkPriceBook.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ ...book, status: 'PUBLISHED' }).mockResolvedValueOnce({ version: 10 });
   tx.pieceworkPriceBook.create.mockResolvedValue({ ...book, version: 11 });
   expect((await createPersonalPieceworkDraft('worker', actor)).version).toBe(11);
   expect(tx.pieceworkPriceBook.create.mock.calls[0][0].data.workerId).toBe('worker');

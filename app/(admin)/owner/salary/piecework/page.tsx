@@ -135,7 +135,7 @@ export default async function PieceworkSettlementPage({
             <div>
               <h2 className="font-semibold">待锁定报工</h2>
               <p className="text-sm text-muted-foreground">
-                仅显示该日未被 SettlementItem 占用的新工序报工。
+                先核对数量和历史生产，再锁定当日已登记工资。
               </p>
             </div>
             <LockPieceworkSettlementDayForm
@@ -183,17 +183,19 @@ export default async function PieceworkSettlementPage({
                         {row.reportCount} / {row.orderCount}
                       </td>
                       <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                        {formatMoney(row.reportAmount)}
+                        {row.reportCount ? formatMoney(row.reportAmount) : row.obligations.every(item => item.status === 'WAGES_DUE') ? '待补发' : '待核定'}
+                        {row.pendingPricing > 0 && <p className="text-sm text-warning-foreground">待补录提成 {row.pendingPricing} 笔</p>}
+                        {row.obligations.map(item => <p key={item.id}><Link href={`/orders/${item.orderId}#production-job-${item.id}`} className="inline-flex min-h-11 items-center text-sm underline">{item.status === 'WAGES_DUE' ? '工资待补发' : item.status === 'REQUESTED' ? '数量待核定' : '历史生产待核对'} · {item.orderName} · v{item.version}</Link></p>)}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <LockPieceworkSettlementForm
+                        {!row.obligations.length && row.pendingPricing === 0 && <LockPieceworkSettlementForm
                           reporterId={row.reporterId}
                           reporterName={row.reporterName}
                           workDate={workDate}
                           reportCount={row.reportCount}
                           amount={row.reportAmount}
                           returnTo={returnTo}
-                        />
+                        />}
                       </td>
                     </tr>
                   ))}
