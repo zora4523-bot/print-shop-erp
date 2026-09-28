@@ -8,7 +8,7 @@ scope: 单负责人生产流程对抗审查修复
 
 # 单负责人生产流程修复任务
 
-本文件是待执行方案，不代表业务修复、测试或部署已完成。依据 2026-09-28 Claude Code `claude-opus-5-5` 对提交 `830c7ae7` 的只读审查、Codex 对真实调用入口的独立核验，以及[三角色浏览器验收](2026-09-28-production-assignment-browser-audit.md)修订。本方案本身尚未交由 Claude 再次审查。
+本文件是待执行方案，不代表业务修复、测试或部署已完成。依据 2026-09-28 Claude Code `claude-opus-5-5` 对提交 `830c7ae7` 的只读审查、Codex 对真实调用入口的独立核验，以及[三角色浏览器验收](2026-09-28-production-assignment-browser-audit.md)修订。方案 `9b5f0807` 已经 Claude Code Opus 5.5 对抗审查，结论为“补齐具体问题后实施”；[审查与复核记录](2026-09-28-production-remediation-plan-claude-review.md)中的 C1–C5 待吸收为实施子任务，未宣称方案通过或业务修复完成。
 
 业务口径继续遵循[原方案](2026-09-28-production-assignment-plan.md)、[规格](../../SPEC-v1.2.md#2026-09-28-排单与完工登记规则)及 [DECISIONS](../../DECISIONS.md#2026-09-28单负责人完工登记与独立提成账本)。原[实施记录](2026-09-28-production-assignment-implementation.md)保留当时证据，不能据此把下面的问题标为已修复。
 
