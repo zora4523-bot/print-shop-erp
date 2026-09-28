@@ -226,7 +226,8 @@ test.describe('创建工单 — golden path', () => {
     await expect(itemDetails).toHaveCount(1);
     const itemFact = (label: string) =>
       itemDetails
-        .locator('dt')
+        // The per-item disclosure repeats these facts; verify the visible summary.
+        .locator('dt:visible')
         .filter({ hasText: new RegExp(`^${label}$`) })
         .locator('..')
         .locator('dd');

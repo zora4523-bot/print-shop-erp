@@ -118,10 +118,12 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_ci'
           pnpm test:migrations:fresh
 
-      - name: Prepare isolated database
+      - name: Prepare isolated databases and production fixtures
         run: |
           pnpm exec prisma migrate deploy
           pnpm db:seed
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
 
       - name: Audit review data integrity
         run: pnpm audit:review-data
@@ -129,7 +131,7 @@ jobs:
       - name: Unit, regression, and PostgreSQL tests with coverage
         run: |
           mkdir -p .review
-          pnpm exec vitest run --coverage --maxWorkers=2 --reporter=default --reporter=json --outputFile=.review/unit-tests.json
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec vitest run --coverage --maxWorkers=2 --reporter=default --reporter=json --outputFile=.review/unit-tests.json
           node scripts/check-blank-migration-tests.mjs
 
       - name: Upload review data

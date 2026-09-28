@@ -48,3 +48,16 @@ scope: PR 29 合并前验证
 导出修改后，8 个相关测试文件共 147 项通过、0 失败/跳过，覆盖生产登记与恢复 PostgreSQL、数量和状态、请求幂等、发货契约、action 权限以及工价取消并发。命令指定 `dispatch-completion.postgres.test.ts`、`drafts.test.ts`、`creation-request.postgres.test.ts`、`status-machine.test.ts`、`detail-ux-regressions.test.ts`、`OrderDetailShipping.contract.test.ts`、`production-dispatch.test.ts`、`piecework-cancellation.postgres.test.ts`，使用上述独立库和 `--maxWorkers=2`。完整 lint 0 错误、2 条既有 Next 导航警告；不降低断言或超时门槛。
 
 最终 `pnpm check:dead-code --check` 通过（138 个 Knip 分组、553 个 ts-prune 候选、0 个循环依赖），`pnpm typecheck` 与 `git diff --check` 通过。当前候选的 GitHub 打印基线已通过；其余 CI 仍在运行，静态检查失败对应本节已修复的导出候选，最终以追加提交后的 Checks 为准。
+
+
+## CI 隔离前置与建单跨浏览器回归
+
+首轮远端 Quality（`f8f4e513` 的 PR 合并候选）中，Vitest 7,740 通过、133 跳过；statement 覆盖率 82.98% 未达到原 83% 门槛。新增四个 PostgreSQL 文件共 87 条全部被跳过：unit 作业使用 `erp_e2e_unit`，而确认的 E2E URL 指向 `erp_e2e_ci`，未满足这些写入测试的隔离守卫。不能将此归为业务用例已通过。
+
+修复只调整 unit 作业：fresh 验证后的 E2E 库单独 seed、运行现有 `test:e2e:prepare` 准备正式代码所需的测试目录与已发布工价，Vitest 显式切到确认的 E2E URL。普通 CI 库的审计和完整 fresh 链继续保留，没有移除隔离校验、覆盖率门槛或原有测试。YAML 解析及关键准备/运行命令核对通过；当前配置已同步到 `DEVELOPMENT.md`。
+
+首轮 compat 在四种浏览器中均因 `order-create.spec.ts` 的款式事实定位匹配两处而失败：改版后的摘要和折叠详情均有“工艺”。测试明确核对当前可见摘要，保留工艺、规格、纸张、真实建单/编辑/并发保存与金额历史断言，不使用 `.first()` 隐藏歧义。
+
+重新构建 `.next-release` 后，在独立浏览器库运行 `pnpm exec playwright test --config=playwright.compat.config.ts tests/e2e/order-create.spec.ts --grep 'ADMIN 创建' --workers=1 --max-failures=1`，显式使用受控 3120 端口、fixture 账号与 `E2E_PREBUILT=1`：desktop-chromium、desktop-webkit、ios-webkit、android-chromium 四项全部通过，0 跳过/失败/flaky，全局 errors 为空（55.9 秒）。目标 eslint、`pnpm typecheck`、release build 均通过，未更新任何打印或截图基线。
+
+另外新建空库 `erp_e2e_pr_merge_1790618288701`，完整应用 179 条迁移、seed、执行与 CI 相同的 `test:e2e:prepare`，然后在匹配且已确认的隔离库运行全量 Vitest+coverage：720 文件通过、3 文件跳过；7,827 用例通过、0 失败、46 既有跳过（103.65 秒）。覆盖率 86.21 / 80.21 / 91.47 / 88.59%，全部门槛通过。逐项核对结构化报告确认四组此前遗漏的测试实际通过 20 / 6 / 38 / 23，共 87 项，零失败及跳过。证据为 `fresh-ci-migrate.log`、`fresh-ci-prepare.log`、`fresh-ci-unit.log/json`；迁移后的首个 seed 命令曾因临时日志路径拼写错误未执行，修正路径后才依次完成 seed、prepare 与测试，未跳过前置。
