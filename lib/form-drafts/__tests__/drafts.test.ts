@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FORM_DRAFT_PREFIX, FORM_DRAFT_TTL, bomDraftSchema, draftStorageKey, emptyBomDraft, emptyPurchaseDraft, parseStoredDraft, type StoredDraft } from '../model';
 import { readSupplementContext, supplementCreateHref, supplementParams, supplementReturnHref } from '../return-context';
 import { cleanupDrafts, completedDraftIdentity, completeDraft, isDraftCompleted, listDrafts, saveDraft } from '../storage';
@@ -42,6 +42,12 @@ describe('资料补录白名单协议', () => {
 });
 
 describe('完整草稿与标签页存储', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
   it('保留部分金额文本，拒绝跨身份、过期、未来时间、旧 schema 与损坏内容', () => {
     expect(parseStoredDraft(JSON.stringify(record()), 'admin-1', now)?.payload).toMatchObject({ unitCost: '0.', quantity: '123' });
     expect(parseStoredDraft(JSON.stringify(record()), 'sales-1', now)).toBeNull();
@@ -74,6 +80,15 @@ describe('完整草稿与标签页存储', () => {
     expect(completedDraftIdentity(store, record())).toEqual({ draftId, clientRequestId: requestId });
     expect(saveDraft(store, record())).toBe(false);
     expect(listDrafts(store, 'admin-1', 'purchase-new', now)).toEqual([]);
+  });
+  it('完成回执在有效期边界保留身份，过期后不再返回身份', () => {
+    const store = storage();
+    completeDraft(store, record());
+    vi.setSystemTime(now + FORM_DRAFT_TTL);
+    expect(completedDraftIdentity(store, record())).toEqual({ draftId, clientRequestId: requestId });
+    vi.setSystemTime(now + FORM_DRAFT_TTL + 1);
+    expect(completedDraftIdentity(store, record())).toBeNull();
+    expect(isDraftCompleted(store, record())).toBe(false);
   });
   it('仅清理本功能键，按已认证身份和权限隔离', () => {
     const store = storage();
