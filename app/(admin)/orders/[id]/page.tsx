@@ -54,6 +54,7 @@ import {
   isOrderEditable,
 } from '@/lib/order/editable-fields';
 import { roleLabel } from '@/lib/auth/role-labels';
+import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import {
   actionLabel,
   formatOrderLogChanges,
@@ -125,6 +126,7 @@ import { getSalesOrderDetailById } from '@/lib/order/sales-detail-query';
 import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDetailView';
 import {
   orderShippingAvailability,
+  orderShippingBlocker,
   orderShippingRecoveryHref,
 } from '@/lib/order/shipping-availability';
 import { canShowAdminDirectCancel } from '@/lib/order/direct-cancel';
@@ -351,6 +353,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     };
   const { canShip, disabledReason: shipDisabledReason } = orderShippingAvailability(shippingFacts);
   const shippingRecoveryHref = orderShippingRecoveryHref(shippingFacts);
+  const shippingBlocker = orderShippingBlocker(shippingFacts);
   const cancelImpact = orderCancelImpact({
     pendingProductionCount,
     inProgressProductionCount,
@@ -944,13 +947,13 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                           )
                           .join('；')
                       : item.tasks
-                          .map((task) => `${task.craft.name}：${task.worker?.displayName ?? '历史未分派记录'}`)
+                          .map((task) => `${task.craft.name}：${task.worker?.displayName ?? '历史未分派记录'}（${PRODUCTION_TASK_STATUS_REGISTRY[task.status].label}）`)
                           .join('；')
                   }
                   full
                 />
                 ) : null}
-                {hasProductionOperations && (progressByOrderItemId.get(item.id)?.length ?? 0) > 0 ? (
+                {(progressByOrderItemId.get(item.id)?.length ?? 0) > 0 ? (
                   <Row
                     label="无计件进度（不计薪）"
                     value={
@@ -1321,9 +1324,15 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           <p className="text-sm text-muted-foreground">
             {shipDisabledReason ?? '请先补齐发货前置事实。'}
           </p>
-          <Link href={shippingRecoveryHref} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-            处理发货前置条件
-          </Link>
+          {shippingRecoveryHref ? (
+            <Link href={shippingRecoveryHref} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              {shippingBlocker === 'PRODUCTION' ? '查看生产进度' : '处理发货前置条件'}
+            </Link>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              该工单已完工，无法补充发货地址，请核对历史收货资料。
+            </p>
+          )}
         </section>
       ) : null}</>),
     settlementBlock: (<>{canShipOrSettle &&
@@ -1425,33 +1434,38 @@ function OrderBasicSummarySection({
           value={`${order.submitter.displayName}（${roleLabel(order.submitter.role)}）`}
         />
         {hasProductionOperations ? (
-          <>
-            <Row
-              label="计件生产工序"
-              value={productionOperations
-                .map(
-                  (operation) =>
-                    `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
-                )
-                .join('；')}
-            />
-            <Row
-              label="无计件生产进度"
-              value={
-                productionProgressSteps.length > 0
-                  ? productionProgressSteps
-                      .map(
-                        (step) =>
-                          `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
-                      )
-                      .join('；')
-                  : '无'
-              }
-              full
-            />
-          </>
+          <Row
+            label="计件生产工序"
+            value={productionOperations
+              .map(
+                (operation) =>
+                  `${PRODUCTION_OPERATION_LABELS[operation.operationType]}（${productionOperationStatusLabel(operation.status)}）`,
+              )
+              .join('；')}
+          />
         ) : assignedWorkerNames.length > 0 ? (
           <Row label="历史派工" value={assignedWorkerNames.join('、')} />
+        ) : null}
+        {!hasProductionOperations && order.items.some((item) => item.tasks.length > 0) ? (
+          <Row
+            label="历史生产进度"
+            value={order.items.flatMap((item) => item.tasks.map((task) =>
+              `#${item.sequence} ${task.craft.name}（${PRODUCTION_TASK_STATUS_REGISTRY[task.status].label}）`,
+            )).join('；')}
+            full
+          />
+        ) : null}
+        {productionProgressSteps.length > 0 ? (
+          <Row
+            label="无计件生产进度"
+            value={productionProgressSteps
+              .map(
+                (step) =>
+                  `#${step.orderItem.sequence} ${step.craftName}（${productionOperationStatusLabel(step.status)}）`,
+              )
+              .join('；')}
+            full
+          />
         ) : null}
         {canViewCommercialAmounts && 'settlementType' in order ? (
           <Row

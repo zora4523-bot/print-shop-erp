@@ -68,7 +68,7 @@ export function AdminOrderDetailDecision({ order, requiresPaperRecall }: {
       <dl className="mt-2 space-y-1"><div className="flex flex-wrap justify-between gap-2"><dt>提交报价</dt><dd>{order.priceComparison.quoted.amount === null ? '待核定' : formatMoney(order.priceComparison.quoted.amount)}</dd></div>
         <div className="flex flex-wrap justify-between gap-2 font-semibold"><dt>当前确认价</dt><dd>{formatMoney(order.priceComparison.current.amount)}</dd></div></dl>
     </div> : null}
-    {hasAction ? <AdminOrderDecisionPanel order={panelOrder} compact /> : <p className="text-sm">{ORDER_STATUS_REGISTRY[order.status].label} · 暂无待办</p>}
+    {hasAction ? <AdminOrderDecisionPanel order={panelOrder} compact hideHeading /> : <p className="text-sm">{ORDER_STATUS_REGISTRY[order.status].label} · 暂无待办</p>}
     {requiresRecall ? <Dialog open={open} onOpenChange={(value) => { if (pending) return; setOpen(value); if (value) { setRecalled(false); setNotice(null); } }}>
       <DialogTrigger render={<Button type="button" disabled={pending || resultUnknown || !order.pendingPrintJobId}>确认已打印</Button>} />
       <DialogContent>

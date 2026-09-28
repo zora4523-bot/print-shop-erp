@@ -612,8 +612,41 @@ describe('order detail commercial visibility', () => {
     const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
     expect(html).toContain('id="ship-order"');
     expect(html).toContain('生产工序尚未完成');
-    expect(html).toContain('href="#detail-production-records"');
+    expect(html).toContain('href="#detail-business-records"');
+    expect(html).toContain('查看生产进度');
+    const summary = html.split('id="detail-business-records"')[1]?.split('id="detail-costs"')[0];
+    expect(summary).toContain('无计件生产进度');
+    expect(summary).toContain('#1 粘封（进行中）');
+    expect(html).toContain('粘封：进行中（0/100）');
     expect(html).not.toContain('>发货</a>');
+  });
+
+  it('仅有历史派工时，恢复区和逐款资料均展示未完成的状态', async () => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    getOrderDetailMock.mockResolvedValue({ ...orderFixture(), status: OrderStatus.COMPLETED });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('href="#detail-business-records"');
+    const summary = html.split('id="detail-business-records"')[1]?.split('id="detail-costs"')[0];
+    expect(summary).toContain('#1 局部烫金（进行中）');
+    expect(html).toContain('局部烫金：张师傅（进行中）');
+  });
+
+  it.each([OrderStatus.COMPLETED, OrderStatus.PACKING])('缺少地址时恢复入口遵守 %s 的编辑边界', async (status) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const base = orderFixture();
+    getOrderDetailMock.mockResolvedValue({ ...base, status, shipments: [],
+      items: base.items.map(item => ({ ...item, tasks: [] })) });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    const block = html.split('id="ship-order"')[1]?.split('</section>')[0];
+    expect(block).toContain('缺少发货地址');
+    if (status === OrderStatus.COMPLETED) {
+      expect(block).not.toContain('<a ');
+      expect(block).toContain('该工单已完工，无法补充发货地址，请核对历史收货资料。');
+      expect(html).not.toContain('补充配送信息');
+    } else {
+      expect(block).toContain('href="#shipment-registration"');
+      expect(html).toContain('补充配送信息');
+    }
   });
 
   it('非管理员非销售账号直接 404，不读取任何工单资料', async () => {

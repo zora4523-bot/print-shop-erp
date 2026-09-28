@@ -6,6 +6,7 @@ import { actionLabel } from '../log-format';
 import { orderPricingSourceLabel } from '../pricing-source';
 import { orderShippingAvailability, orderShippingRecoveryHref } from '../shipping-availability';
 import { resolveAdminOrderShipDisabledReason } from '../admin-workspace';
+import { OrderStatus } from '@/generated/prisma/enums';
 
 const facts = { status: 'COMPLETED' as const, hasPendingChange: true, pricingPending: true,
   hasLiveOutsource: true, hasIncompleteProduction: true, hasShipment: false };
@@ -51,9 +52,30 @@ it('selects an existing recovery destination for each first blocker', () => {
   input.isPricingPending = false;
   expect(orderShippingRecoveryHref(input)).toBe('/foreman/outsource');
   input.hasLiveOutsource = false;
-  expect(orderShippingRecoveryHref(input)).toBe('#detail-production-records');
+  expect(orderShippingRecoveryHref(input)).toBe('#detail-business-records');
   input.incompleteProductionCount = 0;
   expect(orderShippingRecoveryHref(input)).toBe('#shipment-registration');
   input.hasShipment = true;
   expect(orderShippingAvailability({ ...input, isAdministrator: false }).canShip).toBe(false);
+});
+
+it.each([
+  [OrderStatus.RELEASED, '生产完工后才可发货'],
+  [OrderStatus.FOILING, '生产完工后才可发货'],
+  [OrderStatus.IN_PRODUCTION, '生产完工后才可发货'],
+  [OrderStatus.CONFIRMED, '下发并完成生产后才可发货'],
+  [OrderStatus.ON_HOLD, '工单已暂停，请先恢复生产再核对发货条件'],
+  [OrderStatus.CANCELLED, '工单已取消，无法发货'],
+  [OrderStatus.SETTLED, '工单已结算，无需重复发货'],
+] as const)('explains the next step or terminal restriction in %s without bypassing status priority', (status, reason) => {
+  const result = orderShippingAvailability({ status, isAdministrator: true, hasPendingChange: true,
+    isPricingPending: true, hasLiveOutsource: true, incompleteProductionCount: 2, hasShipment: false });
+  expect(result).toEqual({ canShip: false, disabledReason: reason });
+});
+
+it('does not offer address recovery when the order cannot be edited', () => {
+  const input = { status: OrderStatus.COMPLETED, isAdministrator: true, hasPendingChange: false,
+    isPricingPending: false, hasLiveOutsource: false, incompleteProductionCount: 0, hasShipment: false };
+  expect(orderShippingRecoveryHref(input)).toBeNull();
+  expect(orderShippingRecoveryHref({ ...input, status: OrderStatus.PACKING })).toBe('#shipment-registration');
 });

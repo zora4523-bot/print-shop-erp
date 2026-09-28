@@ -1,4 +1,5 @@
 import { OrderStatus } from '@/generated/prisma/enums';
+import { isOrderEditable } from '@/lib/order/editable-fields';
 import type { ShipmentInput } from './shipping-fields';
 
 export type OrderShippingAvailabilityInput = {
@@ -24,8 +25,7 @@ export function orderShippingBlocker(input: OrderShippingAvailabilityInput): Ord
   return null;
 }
 
-const SHIPPING_BLOCKER_LABELS: Record<OrderShippingBlocker, string> = {
-  STATUS: '当前工单状态不支持发货',
+const SHIPPING_BLOCKER_LABELS: Record<Exclude<OrderShippingBlocker, 'STATUS'>, string> = {
   CHANGE: '存在待审的工单变更',
   PRICING: '价格待管理员确认',
   OUTSOURCE: '外协尚未收回，请先核对外协进度',
@@ -33,14 +33,45 @@ const SHIPPING_BLOCKER_LABELS: Record<OrderShippingBlocker, string> = {
   ADDRESS: '缺少发货地址，无法发货',
 };
 
-export function orderShippingRecoveryHref(input: OrderShippingAvailabilityInput): string {
+function shippingStatusReason(status: OrderStatus): string {
+  switch (status) {
+    case OrderStatus.DRAFT:
+    case OrderStatus.REJECTED:
+      return '提交并完成生产后才可发货';
+    case OrderStatus.PENDING_FACTORY:
+    case OrderStatus.SUBMITTED:
+      return '工厂确认并完成生产后才可发货';
+    case OrderStatus.CONFIRMED:
+    case OrderStatus.SCHEDULING:
+      return '下发并完成生产后才可发货';
+    case OrderStatus.RELEASED:
+    case OrderStatus.FOILING:
+    case OrderStatus.IN_PRODUCTION:
+      return '生产完工后才可发货';
+    case OrderStatus.ON_HOLD:
+      return '工单已暂停，请先恢复生产再核对发货条件';
+    case OrderStatus.SHIPPED:
+      return '工单已发货，无需重复发货';
+    case OrderStatus.SETTLED:
+      return '工单已结算，无需重复发货';
+    case OrderStatus.FINISHED:
+      return '工单已结束，无需重复发货';
+    case OrderStatus.CANCELLED:
+      return '工单已取消，无法发货';
+    default:
+      return '当前工单状态不支持发货';
+  }
+}
+
+export function orderShippingRecoveryHref(input: OrderShippingAvailabilityInput): string | null {
   const blocker = orderShippingBlocker(input);
   switch (blocker) {
     case 'CHANGE': case 'STATUS': return '#order-detail-actions';
     case 'PRICING': return '#pricing-review';
     case 'OUTSOURCE': return '/foreman/outsource';
-    case 'PRODUCTION': return '#detail-production-records';
-    case 'ADDRESS': case null: return '#shipment-registration';
+    case 'PRODUCTION': return '#detail-business-records';
+    case 'ADDRESS': return isOrderEditable(input.status) ? '#shipment-registration' : null;
+    case null: return '#shipment-registration';
   }
 }
 
@@ -50,7 +81,9 @@ export function orderShippingAvailability(
   const blocker = orderShippingBlocker(input);
   return {
     canShip: input.isAdministrator && blocker === null,
-    disabledReason: blocker ? SHIPPING_BLOCKER_LABELS[blocker] : null,
+    disabledReason: blocker === 'STATUS'
+      ? shippingStatusReason(input.status)
+      : blocker ? SHIPPING_BLOCKER_LABELS[blocker] : null,
   };
 }
 

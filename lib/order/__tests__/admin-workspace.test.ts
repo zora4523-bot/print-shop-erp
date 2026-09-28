@@ -438,7 +438,7 @@ describe('admin order workspace predicates', () => {
       expect(resolveAdminOrderShipDisabledReason({ ...base, ...blocked, status: OrderStatus.COMPLETED })).toBeTruthy();
     }
     expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.PACKING })).toBeNull();
-    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.CONFIRMED })).toBe('当前工单状态不支持发货');
+    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.CONFIRMED })).toBe('下发并完成生产后才可发货');
     expect(
       resolveAdminOrderCapabilities({
         ...base,

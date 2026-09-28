@@ -65,3 +65,36 @@ UI 规则同步至 [UI-SYSTEM](../../UI-SYSTEM.md) 与 [UI 规范](../ui-规范.
 完成修复后交 Claude 定点复核：同一 `claude-opus-5-5` 模型，21 turns、约 1 分 58 秒，success、权限拒绝 0。结论“没有发现仍未修的问题，本轮修复也没有引入新的 P1/P2/P3”，逐项通过；原始输出 `code-recheck.json`、`code-recheck.md`。它额外提示的可选 `totalEstimated` 回退差异经核实不影响真实模型：`buildAdminOrderDetailModel` 始终输出 `monetaryFacts.estimated`，两处实际使用同一布尔值，组件测试和真实金额 E2E 均已覆盖。两轮均为只读代码审查，测试由 Codex 执行，不称 Claude 跑过测试。
 
 收尾：本任务独立测试库运行完成后删除；开发服务继续运行，用户原标签页保留。实际业务数据、未归属本任务的两份文档未修改。只创建本地提交，不推送或部署。
+
+## 提交后对抗审查 P3 修复（2026-09-28）
+
+本轮基线 `bc72f10860b54c3428733c98fb6676a25fda9bf5`，沿用 `codex/design-removal`。开始时已跟踪文件与暂存区均无改动，前述两份 09-21 未跟踪文档继续排除。范围是该提交独立 Claude 审查发现的两组 P3，及复核发现的同一恢复路径边界。
+
+- 保留状态、待审、价格、外协、生产、地址的首要阻塞顺序；按阶段说明下一步，暂停时先恢复再核对，不猜测暂停前是否已完工，终态不提示可恢复发货。
+- 生产入口明确为“查看生产进度”，定位到生产概况。无计件步骤独立于计件工序展示，逐款保留已完成数量；仅有历史派工时，概况与逐款资料也显示任务状态，复用现行状态注册表。
+- 缺地址且不可编辑的历史完工单只解释限制，不渲染“处理”链接；PACKING 的真实补地址入口保留。旧收货资料仍在基本资料可查，不开放历史状态编辑。
+- 实页门禁发现详情侧栏私有裁切隐藏标题，改为共享面板可选 `hideHeading` → `sr-only`；只有详情传 true，默认标题与 `aria-labelledby` 保留。删除 CSS 的依据是该唯一详情消费方已使用等价标准隐藏类，没有删除任何业务动作。
+- 没有修改 Action、状态机、金额算法、授权、历史快照、SQL、schema 或迁移；无计件概况为空时不再输出无意义的“无”占位。UI 规范及 UI-SYSTEM 同步。
+
+验证证据目录：本机 `/tmp/order-shipping-recovery-fix/`，截图在 `test-results/admin-ui-baseline-candidates/`。运行模式为生产构建 `.next-release` / 3200；全部写入型 fixture 限于本任务新建的 `erp_e2e_shipping_recovery_20260928`，完成迁移、seed 和项目规定的价格准备；通知/CDR mock、后台 inline，不代表真实外部系统或生产发布验收。
+
+失败与处置：最初定向测试 11 条失败，修复后 107 条通过；扩展 workspace 消费方后 178 条通过。首次全量未注入数据库环境，3 个 PostgreSQL 测试文件导入失败后中止，改用隔离库。随后全量发现 workspace 仍断言旧文案，按现行 UI 规范更新；复核修改暂停文案期间的一轮测试读到了修改前后混合内容，该轮不计最终验收，最终冻结代码重跑。浏览器 fixture 起初缺少免费计费模式与核价时间，被数据库约束拒绝，已补齐，未改约束。手机导航期定位曾命中 React 流式渲染临时隐藏的 `div[hidden]#S:1`，trace 证实其在主内容区外；断言限定 `#admin-main` 的实际页面，保留完整 axe、裁切、overflow 与触控检查。
+
+Claude Code 定点复核使用实际 `claude-opus-5-5`、high effort、Read/Glob/Grep，只读且无权限拒绝。第一轮 33 turns、约 142 秒，确认原两组 P3 关闭，又提出历史任务状态和暂停文案两点，均已采纳。原始输出 `claude-review.json` / `.md`；其称 workspace 的新断言已存在于 HEAD 的说法有误，那是本轮工作区更改，本记录以 Git 基线为准。
+
+修正后第二轮 Claude 定点复核 19 turns、约 64 秒，success、权限拒绝 0，结论未发现剩余有证据的 P1/P2/P3；同时核对 `hideHeading` 的默认兼容和可访问名称。原始输出 `claude-recheck.json` / `.md`。两轮都是静态审查，没有由 Claude 执行测试。
+
+最终浏览器与静态检查：生产构建的新增专项 6 项全部通过、0 跳过（`e2e-complete.log`），每项覆盖四种工单情形和明暗主题，六个宽度为 375、393、768、1024、1280、1920；真实点击/触控与键盘 Enter 均可打开已收起的目标栏目，逐款进度保留承接完成数。浏览器组件 3 文件、54 项通过（`browser.log`），保留审批、结算和打印确认的原行为。`typecheck-complete.log` 通过，`lint-complete.log` 0 错误、2 个既有 Next 导航警告，文案及令牌门禁均通过。未运行全站 E2E、完整覆盖率、打印像素基线或真实通知；本批不修改打印布局、状态机及写入链路。
+
+冻结代码后的最终全量 Vitest（`unit-complete.log`）：713 文件通过、3 文件跳过；7,748 项通过、46 项按既有条件跳过、0 失败。该批包含本轮新增的历史任务状态断言；不将跳过项计为通过。测试完成后已删除本任务专用数据库，未触碰真实工单或现有开发服务。本轮只创建本地修复提交，不推送、不部署。
+
+实际验收命令（隔离包装器仅注入本任务测试库及固定测试账号，不保存连接凭证）：
+
+```sh
+pnpm test --run --maxWorkers=4 --no-file-parallelism
+pnpm test:browser components/business/order/__tests__/AdminOrderDecisionPanel.browser.spec.tsx components/business/order/__tests__/AdminOrderDetailDecision.browser.spec.tsx components/business/order/__tests__/AdminOrderDetailView.browser.spec.tsx
+pnpm test:release tests/visual/admin-responsive.spec.ts --grep 'shipping recovery exposes'
+pnpm typecheck
+pnpm lint
+git diff --check
+```

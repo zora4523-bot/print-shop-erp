@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { seedOrderShippingRecoveryFixture } from './order-shipping-recovery-fixture';
 import {
   E2E_PASSWORD,
   E2E_USERS,
@@ -129,6 +130,49 @@ test.describe('administrator workspace', () => {
   test('order detail expanded records pass focused light and dark gates', async ({ page }, testInfo) => {
     const routes = ownerRoutes(fixture).filter((route) => route.path === `/orders/${fixture.orderId}`);
     expect(routes).toHaveLength(1);
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
+  test('shipping recovery exposes actual progress and respects address edit limits', async ({ page }, testInfo) => {
+    const orders = await seedOrderShippingRecoveryFixture();
+    const routes: AdminRoute[] = [
+      { name: 'shipping-progress-recovery', path: `/orders/${orders.progress}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        const summary = page.locator('#admin-main #detail-business-records');
+        await expect(summary).toHaveAttribute('open', '');
+        await summary.locator(':scope > summary').click();
+        const recovery = page.locator('#admin-main #ship-order').getByRole('link', { name: '查看生产进度', exact: true });
+        if (testInfo.project.use.hasTouch) await recovery.tap();
+        else { await recovery.focus(); await recovery.press('Enter'); }
+        await expect(page).toHaveURL(/#detail-business-records$/);
+        await expect(summary).toHaveAttribute('open', '');
+        await expect(summary).toContainText('#1 粘封（进行中）');
+        const item = page.locator(`#admin-main #detail-design-item-${orders.progress}-item`);
+        await item.locator(':scope > summary').click();
+        await expect(item.getByText('粘封：进行中（40/100）', { exact: true })).toBeVisible();
+      } },
+      { name: 'shipping-released-reason', path: `/orders/${orders.released}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        const shipment = page.locator('#admin-main #shipment-registration');
+        await expect(shipment).toContainText('生产完工后才可发货');
+        await expect(shipment.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
+        await expect(shipment.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
+        await shipment.scrollIntoViewIfNeeded();
+      } },
+      { name: 'shipping-completed-no-address', path: `/orders/${orders.completed}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        const block = page.locator('#admin-main #ship-order');
+        await expect(block).toContainText('该工单已完工，无法补充发货地址，请核对历史收货资料。');
+        await expect(block.getByRole('link')).toHaveCount(0);
+        await expect(page.getByRole('link', { name: '补充配送信息' })).toHaveCount(0);
+        await expect(page.locator('#admin-main #detail-business-records')).toContainText('历史收货地址');
+        await block.scrollIntoViewIfNeeded();
+      } },
+      { name: 'shipping-packing-address-recovery', path: `/orders/${orders.packing}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
+        await page.locator('#admin-main #ship-order').getByRole('link', { name: '处理发货前置条件', exact: true }).click();
+        const edit = page.locator('#admin-main #shipment-registration').getByRole('link', { name: '补充配送信息' });
+        await expect(edit).toBeVisible();
+        await expect(edit).toHaveAttribute('href', `/orders/${orders.packing}/edit`);
+      } },
+    ];
     await checkRoutes(page, testInfo, routes, 'light');
     await checkRoutes(page, testInfo, routes, 'dark');
   });
