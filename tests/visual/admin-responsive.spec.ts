@@ -58,6 +58,27 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('standalone return controls pass focused light and dark gates', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [
+      { name: 'return-empty-dispatch', path: '/orders/production', readyHeading: '安排生产师傅', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回工单列表', exact: true })).toHaveAttribute('href', '/orders');
+      } },
+      { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '创建外协单', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回工单详情', exact: true })).toHaveAttribute('href', `/orders/${fixture.orderId}`);
+      } },
+      { name: 'return-specifications', path: '/owner/rules/specifications', readyHeading: '规格目录', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回纸张', exact: true })).toHaveAttribute('href', '/owner/rules/papers');
+      } },
+      { name: 'return-password', path: '/account/password', readyHeading: '修改密码', prepareGateState: async page => {
+        await expect(page.getByRole('link', { name: '返回首页', exact: true })).toHaveAttribute('href', '/');
+      } },
+    ];
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+    await page.getByRole('link', { name: '返回首页', exact: true }).click();
+    await expect(page).toHaveURL(/\/owner$/);
+  });
+
   test('warehouse maintenance controls pass focused light and dark gates', async ({ page }, testInfo) => {
     const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库作业台', prepareGateState: async (page) => {
       await page.getByText('仓库与库位设置', { exact: true }).click();

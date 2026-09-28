@@ -13,6 +13,11 @@ async function gates(page: Page, info: TestInfo, name: string) {
       document.documentElement.style.colorScheme = theme;
     }, theme);
     await expect.poll(() => page.evaluate(() => document.getAnimations().filter(a => a.playState === 'running' || a.pending).length)).toBe(0);
+    if (name === 'dispatch-success') {
+      const borderColors = await page.getByRole('region', { name: '排单结果' }).getByRole('link')
+        .evaluateAll(links => links.map(link => getComputedStyle(link).borderTopColor));
+      expect(borderColors).not.toContain('rgba(0, 0, 0, 0)');
+    }
     await expectViewportGate(page, info);
     await expectA11yGate(page);
     await attachCandidateScreenshot(page, info, 'production-dispatch', `${name}-${theme}`);
@@ -26,6 +31,7 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   const fixture = await seedProductionDispatchFixture();
   await login(page, { from: `/orders/production?ids=${fixture.id}` });
+  await expect(page.getByRole('navigation', { name: '面包屑导航' }).locator('[aria-current="page"]')).toContainText('安排生产师傅');
   await page.getByRole('combobox', { name: '局部烫金 · 1000 个' }).selectOption(fixture.workerId);
   await page.getByRole('button', { name: '保存草稿' }).click();
   await page.reload();
@@ -35,6 +41,15 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   await gates(page, info, 'dispatch-review');
   await page.getByRole('button', { name: '发布排单', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('已安排 1 张工单');
+  await expect(page.getByRole('combobox')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '返回修改' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /草稿/ })).toHaveCount(0);
+  const resultLink = page.getByRole('link', { name: /查看排单结果/ });
+  await expect(resultLink).toHaveAttribute('href', `/orders/${fixture.id}#detail-production-records`);
+  await gates(page, info, 'dispatch-success');
+  await resultLink.click();
+  await expect(page).toHaveURL(new RegExp(`/orders/${fixture.id}#detail-production-records$`));
+  await expect(page.getByRole('heading', { name: '生产安排与提成' })).toBeVisible();
   const job = await withDb(async db => (await db.query<{ id: string }>('SELECT id FROM "ProductionJob" WHERE "orderId"=$1', [fixture.id])).rows[0]);
   const workerContext = await browser.newContext({ ...info.project.use, baseURL: info.project.use.baseURL });
   const workerPage = await workerContext.newPage();
@@ -43,8 +58,10 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   try {
     await login(workerPage, { from: `/worker/tasks/${job.id}`, username: E2E_USERS.workerHandPress.username, password: E2E_PASSWORD });
     await expect(workerPage.getByLabel('完成数量')).toHaveValue('1000');
+    await expect(workerPage.getByRole('link', { name: '返回生产工单', exact: true })).toHaveAttribute('href', '/worker/tasks');
     await gates(workerPage, info, 'worker-completion');
-    await workerPage.goto('/worker/tasks');
+    await workerPage.getByRole('link', { name: '返回生产工单', exact: true }).click();
+    await expect(workerPage).toHaveURL(/\/worker\/tasks$/);
     await expect(workerPage.getByRole('region', { name: '已安排的生产' }).getByRole('link', { name: /排单扫码验收/ }).first()).toBeVisible();
     await expect(workerPage.getByText('暂无待处理工序', { exact: true })).toHaveCount(0);
     await gates(workerPage, info, 'worker-tasks');
@@ -54,7 +71,9 @@ test('single owner dispatch, quantity approval, wages and external sales state',
     await workerPage.getByRole('button', { name: '登记完成', exact: true }).click();
     await expect(workerPage.getByRole('status')).toContainText('数量待审批');
     expect(await withDb(async db => (await db.query('SELECT id FROM "ProductionWage" WHERE "jobId"=$1', [job.id])).rowCount)).toBe(0);
-    await page.goto(`/orders/${fixture.id}#detail-production-records`);
+    // The result link already opened this exact URL. Reload to fetch the worker's
+    // new request; navigating to the same fragment would keep the old document.
+    await page.reload();
     await expect(page.getByRole('button', { name: '核定并登记完成' })).toBeVisible();
     await page.getByLabel('核定或补登记说明').fill('已核实数量');
     await gates(page, info, 'admin-quantity-approval');

@@ -1,5 +1,6 @@
 import { formatMoney } from '@/lib/dashboard/format';
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { notFound } from 'next/navigation';
 import { db } from '@/lib/db';
 import type { Role } from '@/generated/prisma/enums';
@@ -17,6 +18,6 @@ export async function WorkerCompletionDetail({ id, actor }: { id: string; actor:
     {job.order.remark && <p className="break-words">{job.order.remark}</p>}
     {current ? <CompletionRegistrationForm key={`${job.id}:${job.revision}`} job={{ id: job.id, revision: job.revision, workerName: job.workerName, quantity: job.plannedQty.toString(), requestedQty: job.requestedQty?.toString() ?? null, requestReason: job.requestReason, status: job.status }} admin={false} today={todayShanghai()} /> : <p>工单已改版，请打开当前生产任务。</p>}
     {job.wages.map(wage => <p key={wage.id}>本次提成：{wage.amount === null ? '待管理员补录' : formatMoney(wage.amount)}</p>)}
-    <Link className="inline-flex min-h-11 items-center underline" href="/worker/tasks">返回生产工单</Link>
+    <Link className={buttonVariants({ variant: 'outline', className: 'min-h-11' })} href="/worker/tasks">返回生产工单</Link>
   </div>;
 }

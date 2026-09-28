@@ -72,6 +72,7 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     '/owner/rules/customer-pricing/blank': '空白封单价',
     '/owner/rules/customer-pricing/blank/new': '新增纸张与规格价格',
     '/orders/new': '创建工单',
+    '/orders/production': '安排生产师傅',
     '/owner/purchases/new': '新建采购单',
     '/owner/accounts/new': '新建账号',
     '/owner/boms/new': '新建用料清单',
@@ -176,8 +177,8 @@ export function AdminBreadcrumb() {
           const isLast = i === segments.length - 1;
           const href = '/' + segments.slice(0, i + 1).join('/');
           const label =
-            (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
             BREADCRUMB_PATH_LABELS[href] ??
+            (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
             resolveSegmentLabel(
               seg,
               entityLabel,

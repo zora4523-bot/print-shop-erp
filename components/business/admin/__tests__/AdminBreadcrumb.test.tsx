@@ -78,6 +78,7 @@ describe('AdminBreadcrumb SSR', () => {
     ['/owner/rules/product-categories/new', '新建产品结构分类'],
     ['/owner/rules/product-categories/items/new', '新建产品资料'],
     ['/orders/new', '创建工单'],
+    ['/orders/production', '安排生产师傅'],
     ['/foreman/materials/new', '新建物料'],
     ['/owner/notifications/channels/new', '新建企业微信通知目标'],
   ])('首帧按完整路径显示 %s 的末级标题', (path, label) => {

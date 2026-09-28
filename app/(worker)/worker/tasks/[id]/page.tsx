@@ -10,6 +10,7 @@ import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { notFound, redirect } from 'next/navigation';
 import {
   PieceworkOperationType,
@@ -97,7 +98,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
     return (
       <div className="min-w-0 space-y-5">
         <header className="worker-wrap-anywhere min-w-0 space-y-1">
-          <Link href={`/worker/orders/${operation.orderId}`} className="inline-flex min-h-11 items-center text-sm underline underline-offset-4">
+          <Link href={`/worker/orders/${operation.orderId}`} className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>
             返回工单选择工序
           </Link>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -209,7 +210,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
     return (
       <div className="min-w-0 space-y-5">
         <header className="worker-wrap-anywhere min-w-0 space-y-1">
-          <Link href={`/worker/orders/${progress.orderId}`} className="inline-flex min-h-11 items-center text-sm underline underline-offset-4">
+          <Link href={`/worker/orders/${progress.orderId}`} className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>
             返回工单选择工序
           </Link>
           <div className="flex min-w-0 flex-wrap items-center gap-2">

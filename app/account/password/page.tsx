@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { ChangePasswordForm } from '@/components/business/auth/ChangePasswordForm';
@@ -22,8 +23,8 @@ export default async function ChangePasswordPage() {
         </div>
         <ChangePasswordForm />
         <div className="text-sm">
-          <Link href="/" className="text-muted-foreground hover:text-foreground underline">
-            ← 返回首页
+          <Link href="/" className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>
+            返回首页
           </Link>
         </div>
       </div>

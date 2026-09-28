@@ -3,6 +3,7 @@ import { formatRate } from '@/lib/format/unit-price';
 import { reportWageLines } from '@/lib/salary/report-display';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import {
@@ -360,7 +361,7 @@ function OperationSettlementDetail({
 
       <Link
         href="/worker/salary"
-        className="inline-flex min-h-11 items-center text-sm underline decoration-primary"
+        className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}
       >
         返回我的工资
       </Link>
@@ -445,7 +446,7 @@ function HourlySalaryDetail({
 
       <Link
         href="/worker/salary"
-        className="inline-flex min-h-11 items-center text-sm underline decoration-primary"
+        className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}
       >
         返回我的工资
       </Link>

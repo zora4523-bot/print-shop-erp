@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listProductSpecificationFacts } from '@/lib/product';
 import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
@@ -20,7 +21,7 @@ export default async function SpecificationsPage() {
   const print = [...new Set(products.filter((product) => product.category === 'COLOR_PRINT')
     .map((product) => externalPriceBusinessText(product.specification ?? '')).filter(Boolean))];
   return <div className="space-y-6">
-    <RuleCenterPageHeader title="规格目录" actions={<Link href="/owner/rules/papers" className="text-primary underline">返回纸张</Link>} />
+    <RuleCenterPageHeader title="规格目录" actions={<Link href="/owner/rules/papers" className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>返回纸张</Link>} />
     <section className="space-y-3 rounded-xl border bg-card p-4"><h2 className="font-semibold">空白封</h2>
       <ul className="grid gap-3 sm:grid-cols-2">{BLANK_SPECIFICATIONS.map((spec) => <li key={spec.key}>{spec.specification} mm</li>)}</ul>
     </section>

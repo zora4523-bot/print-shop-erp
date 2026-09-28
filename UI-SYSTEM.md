@@ -203,6 +203,12 @@ token 位于 [`app/globals.css`](./app/globals.css)，浅色 `:root` 与 `.dark`
 
 所有新增原子件使用 `data-slot`、语义 token、可见 `focus-visible` 和 reduced-motion 处理。不要绕开组件直接调用 Base UI primitive，除非正在维护该原子件。
 
+### 返回入口与排单结果
+
+页面页头、表单操作区及独立页尾的返回入口使用 `Link` 配合 `buttonVariants({ variant: 'outline' })`，保持导航语义、焦点样式和至少 44px 高度。`buttonVariants` 内部统一用 `cn` 合并基础、variant 与调用方样式，避免基础透明边框覆盖 outline；直接调用它的导航链接与 `Button` 保持一致。提交期间使用 `PendingLink` 同时阻止点击与客户端导航，并移出 Tab 顺序。表单内取消或返回修改仍使用 `Button type="button"`。说明段落中的辅助导航可以保留文字链接，不重复升级为另一组操作按钮。
+
+安排生产师傅页按编辑、核对、提交中、失败、成功呈现。失败保留已选师傅及重试所需数据；成功使用 `ActionNotice` 显示实际安排张数，并提供逐单“查看排单结果”和“返回工单列表”，结束本次编辑，不再保留发布、返回修改或草稿按钮。清理的是提交时那批工单的草稿，后续版本及其他批次草稿保持独立。页面面包屑显示“安排生产师傅”。本次落点与验收见 [返回入口与排单结果修复记录](./docs/audits/2026-09-29-return-navigation.md)。
+
 ## 共享状态与反馈
 
 共享实现位于 [`components/ui-business/`](./components/ui-business/)。
