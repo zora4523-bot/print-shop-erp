@@ -20,6 +20,7 @@ import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
 import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { getAdminOrderDetailPresentation } from '@/lib/order/admin-detail-query';
 import { buildAdminOrderDetailModel } from '@/components/business/order/admin-order-detail-model';
 import { AdminOrderDetailView } from '@/components/business/order/AdminOrderDetailView';
@@ -715,59 +716,61 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           ) : null}
         </div>
         {order.shipments.length === 0 ? <p className="text-sm text-muted-foreground">未填写发货地址{canEdit ? <> · <Link href={`/orders/${order.id}/edit`} className="inline-flex min-h-11 items-center underline">补充配送信息</Link></> : null}</p> : null}
-        <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+        <ol className="grid min-w-0 grid-cols-1 gap-4">
           {order.shipments.map((shipment) => (
-            <li
-              key={shipment.id}
-              className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium">地址 {shipment.sequence}</span>
-                <ShipmentStatusBadge status={shipment.status} />
-              </div>
-              <p className="mt-2 text-muted-foreground">
-                {formatReceiverInfo(shipment, '未填写收货信息')}
-              </p>
-              {shipment.expressCode ? (
-                <p className="text-muted-foreground">
-                  快递代码：{shipment.expressCode}
-                </p>
-              ) : null}
-              {shipment.destinationProvince ? (
-                <p className="text-muted-foreground">
-                  计费省份：{shipment.destinationProvince}
-                </p>
-              ) : null}
-              {shipment.weightKg ? (
-                <p className="font-sans tabular-nums text-muted-foreground">
-                  发货计费重量：{String(shipment.weightKg)} kg
-                </p>
-              ) : null}
-              {shipment.trackingNo ? (
-                <p className="font-sans tabular-nums">
-                  运单号：{shipment.trackingNo}
-                </p>
-              ) : null}
-              {order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.FINISHED ? (
-                <ShipmentRegistrationForm key={`${shipment.id}:${shipment.registrationVersion}`}
-                  orderId={order.id} shipmentId={shipment.id} version={shipment.registrationVersion}
-                  revision={order.revision} editVersion={order.editVersion} workOrderVersion={order.workOrderVersion} priceRevision={priceRevision ?? 0}
-                  trackingNo={shipment.trackingNo} carrierCode={shipment.carrierCode} carrierName={shipment.carrierName}
-                  shipped={shipment.status === 'SHIPPED'} canConfirm={canShip} disabledReason={shipDisabledReason}
-                  lastPending={order.shipments.filter((row) => row.status !== 'SHIPPED').length === 1}
-                  chargeable={isChargeableOrder}
-                  amount={order.confirmedFee !== null ? formatMoneyPlain(order.confirmedFee) : '待核价'}
-                  labels={shipment.labels.map((label) => ({ id: label.id, createdAt: label.createdAt.toISOString() }))}
-                />
-              ) : null}
-              <p className="mt-2 text-xs text-muted-foreground">
-                {shipment.lines
-                  .map(
-                    (line) =>
-                      `#${line.orderItem.sequence} ${line.orderItem.name} × ${line.quantity}`,
-                  )
-                  .join('；') || '尚未分配款式数量'}
-              </p>
+            <li key={shipment.id} className="admin-wrap-anywhere min-w-0">
+              <Card className="min-w-0 gap-3 text-sm shadow-none">
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                  <h4 className="font-semibold">地址 {shipment.sequence}</h4>
+                  <ShipmentStatusBadge status={shipment.status} />
+                </CardHeader>
+                <CardContent className="min-w-0 space-y-3">
+                  <div className="space-y-1">
+                    {shipment.receiverName || shipment.receiverPhone ? (
+                      <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        {shipment.receiverName ? <span className="font-medium">{shipment.receiverName}</span> : null}
+                        {shipment.receiverPhone ? <span className="tabular-nums">{shipment.receiverPhone}</span> : null}
+                      </p>
+                    ) : null}
+                    {shipment.receiverAddress ? <p className="whitespace-pre-line text-muted-foreground">{shipment.receiverAddress}</p> : null}
+                    {!shipment.receiverName && !shipment.receiverPhone && !shipment.receiverAddress ? <p className="text-muted-foreground">未填写收货信息</p> : null}
+                  </div>
+                  {shipment.expressCode || shipment.destinationProvince || shipment.weightKg ? (
+                    <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {shipment.expressCode ? <div className="flex flex-wrap gap-x-1"><dt>快递代码</dt><dd>{shipment.expressCode}</dd></div> : null}
+                      {shipment.destinationProvince ? <div className="flex flex-wrap gap-x-1"><dt>计费省份</dt><dd>{shipment.destinationProvince}</dd></div> : null}
+                      {shipment.weightKg ? <div className="flex flex-wrap gap-x-1"><dt>发货计费重量</dt><dd className="tabular-nums">{String(shipment.weightKg)} kg</dd></div> : null}
+                    </dl>
+                  ) : null}
+                  {shipment.lines.length ? (
+                    <ul aria-label={`地址 ${shipment.sequence} 的款式数量`} className="space-y-2 border-t pt-3">
+                      {shipment.lines.map((line) => (
+                        <li key={line.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                          <span className="min-w-0 text-muted-foreground">#{line.orderItem.sequence} {line.orderItem.name}</span>
+                          <span className="shrink-0 font-medium tabular-nums">{line.quantity.toLocaleString('zh-CN')} 个</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="text-xs text-muted-foreground">尚未分配款式数量</p>}
+                  {shipment.trackingNo && (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.FINISHED) ? (
+                    <p className="tabular-nums">
+                      运单号：{shipment.trackingNo}
+                    </p>
+                  ) : null}
+                  {order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.FINISHED ? (
+                    <ShipmentRegistrationForm key={`${shipment.id}:${shipment.registrationVersion}`}
+                      orderId={order.id} shipmentId={shipment.id} version={shipment.registrationVersion}
+                      revision={order.revision} editVersion={order.editVersion} workOrderVersion={order.workOrderVersion} priceRevision={priceRevision ?? 0}
+                      trackingNo={shipment.trackingNo} carrierCode={shipment.carrierCode} carrierName={shipment.carrierName}
+                      shipped={shipment.status === 'SHIPPED'} canConfirm={canShip} disabledReason={shipDisabledReason}
+                      lastPending={order.shipments.filter((row) => row.status !== 'SHIPPED').length === 1}
+                      chargeable={isChargeableOrder}
+                      amount={order.confirmedFee !== null ? formatMoneyPlain(order.confirmedFee) : '待核价'}
+                      labels={shipment.labels.map((label) => ({ id: label.id, createdAt: label.createdAt.toISOString() }))}
+                    />
+                  ) : null}
+                </CardContent>
+              </Card>
             </li>
           ))}
         </ol>

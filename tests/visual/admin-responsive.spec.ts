@@ -177,6 +177,42 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('shipping address cards use the full detail column in light and dark themes', async ({ page }, testInfo) => {
+    const routes: AdminRoute[] = [];
+    for (const shipmentCount of [1, 2] as const) {
+      const orders = await seedOrderShippingRecoveryFixture({ shipmentCount, longAddress: true });
+      routes.push({
+        name: `shipping-address-layout-${shipmentCount}`, path: `/orders/${orders.released}`,
+        readyHeading: '发货恢复验证',
+        prepareGateState: async (page) => {
+          const section = page.locator('#shipment-registration');
+          const list = section.locator(':scope > ol');
+          const addresses = list.locator(':scope > li');
+          await expect(addresses).toHaveCount(shipmentCount);
+          const listWidth = (await list.boundingBox())!.width;
+          for (const address of await addresses.all()) {
+            expect((await address.boundingBox())!.width).toBeGreaterThanOrEqual(listWidth - 1);
+            await expect(address.getByText('测试收件人', { exact: true })).toBeVisible();
+            await expect(address.getByText('13800138000', { exact: true })).toBeVisible();
+            await expect(address.getByText(/广东省佛山市南海区测试街道物流园收货区/)).toBeVisible();
+            await expect(address.getByRole('list', { name: /的款式数量/ })).toContainText(`${100 / shipmentCount} 个`);
+            await address.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('OTHER');
+            await address.getByRole('textbox', { name: '物流公司名称', exact: true }).fill('测试物流公司');
+            const tracking = address.getByRole('textbox', { name: '运单号', exact: true });
+            await tracking.fill('TEST123456789012345678901234567890');
+            expect((await tracking.boundingBox())!.width).toBeGreaterThan(200);
+            await expect(address.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
+            await expect(address.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
+            await expect(address).toContainText('生产完工后才可发货');
+          }
+          await section.scrollIntoViewIfNeeded();
+        },
+      });
+    }
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
   test('ten-order batch fits all viewports in light and dark themes', async ({ page }, testInfo) => {
     test.setTimeout(90_000);
     const route: AdminRoute = {

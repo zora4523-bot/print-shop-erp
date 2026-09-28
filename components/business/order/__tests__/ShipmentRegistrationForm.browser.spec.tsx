@@ -64,6 +64,22 @@ it('keeps previous proof links available after replacement', async () => {
   await page.getByText('历史面单照片（1）').click();
   await expect.element(page.getByRole('link', { name: '2026-09-10' })).toHaveAttribute('href', '/api/orders/order/shipments/shipment/labels/old');
 });
+it('stacks controls in a narrow desktop column and gives tracking more room when space allows', async () => {
+  await page.viewport(1280, 800);
+  host.style.width = '360px';
+  render();
+  const tracking = host.querySelector('input')!;
+  const carrier = host.querySelector('select')!;
+  await vi.waitFor(() => {
+    expect(carrier.getBoundingClientRect().top).toBeGreaterThan(tracking.getBoundingClientRect().bottom);
+    expect(tracking.getBoundingClientRect().width).toBeGreaterThan(300);
+  });
+  host.style.width = '600px';
+  await vi.waitFor(() => {
+    expect(Math.abs(carrier.getBoundingClientRect().top - tracking.getBoundingClientRect().top)).toBeLessThan(1);
+    expect(tracking.getBoundingClientRect().width).toBeGreaterThan(carrier.getBoundingClientRect().width);
+  });
+});
 for (const [width,height] of [[375,667],[393,852],[768,1024],[1024,768],[1280,800],[1920,1080]]) for (const theme of ['light','dark']) {
   it(`${width} ${theme}: layout and accessibility`, async () => {
     await page.viewport(width,height); document.documentElement.classList.toggle('dark',theme==='dark'); render({ ...props, carrierCode: 'OTHER' });

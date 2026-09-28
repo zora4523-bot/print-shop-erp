@@ -6,6 +6,7 @@ import { registerShipmentAction } from '@/actions/shipment-registration';
 import { Button } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 
 export type ShipmentRegistrationProps = {
@@ -80,17 +81,17 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
   }
   const ready = Boolean(tracking.trim() && carrier && (carrier !== 'OTHER' || name.trim()));
   const imageUrl = preview ?? (props.labels[0] ? `/api/orders/${props.orderId}/shipments/${props.shipmentId}/labels/${props.labels[0].id}` : null);
-  return <div className="mt-3 space-y-3 border-t pt-3" onPaste={(event) => {
+  return <div className="@container/shipment-form space-y-4 border-t pt-4" onPaste={(event) => {
     const file = [...event.clipboardData.items].find((item) => item.type.startsWith('image/'))?.getAsFile();
     if (file && !busy) { event.preventDefault(); void choose(file); }
   }}>
-    <fieldset disabled={busy} className="grid min-w-0 gap-3 sm:grid-cols-2">
+    <fieldset disabled={busy} className="grid min-w-0 grid-cols-1 gap-3 @[28rem]/shipment-form:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <label className="min-w-0 space-y-1 text-sm">运单号<Input value={tracking} maxLength={64} onChange={(event) => setTracking(event.target.value)} /></label>
-      <label className="min-w-0 space-y-1 text-sm">物流公司<select className="h-11 w-full rounded-md border bg-background px-3" value={carrier} onChange={(event) => setCarrier(event.target.value)}>
+      <label className="min-w-0 space-y-1 text-sm">物流公司<NativeSelect value={carrier} onChange={(event) => setCarrier(event.target.value)}>
         <option value="">请选择</option><option value="ZTO">中通</option><option value="SF">顺丰</option><option value="OTHER">其他</option>
-      </select></label>
-      {carrier === 'OTHER' ? <label className="min-w-0 space-y-1 text-sm sm:col-span-2">物流公司名称<Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label> : null}
-      <label className="min-w-0 space-y-1 text-sm sm:col-span-2">面单照片（选填，可粘贴截图）<Input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} /></label>
+      </NativeSelect></label>
+      {carrier === 'OTHER' ? <label className="col-span-full min-w-0 space-y-1 text-sm">物流公司名称<Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label> : null}
+      <label className="col-span-full min-w-0 space-y-1 text-sm">面单照片（选填，可粘贴截图）<Input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} /></label>
     </fieldset>
     {processing ? <p role="status">正在处理图片…</p> : null}
     {imageUrl ? <a href={imageUrl} target="_blank" rel="noreferrer" className="block" aria-label="查看面单照片">
@@ -100,7 +101,7 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
     {photo ? <Button type="button" variant="outline" disabled={busy} onClick={() => { setPhoto(null); setPreview(null); }}>取消本次图片</Button> : null}
     {props.labels.length > 1 ? <Disclosure><DisclosureSummary className="cursor-pointer py-3 text-sm">历史面单照片（{props.labels.length - 1}）</DisclosureSummary><ul>{props.labels.slice(1).map((label) => <li key={label.id}><a className="block py-3 text-primary underline" target="_blank" rel="noreferrer" href={`/api/orders/${props.orderId}/shipments/${props.shipmentId}/labels/${label.id}`}>{label.createdAt}</a></li>)}</ul></Disclosure> : null}
     {message ? <p role={failed ? 'alert' : 'status'} className={failed ? 'text-sm text-destructive' : 'text-sm'}>{message}</p> : null}
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-col gap-2 @[28rem]/shipment-form:flex-row @[28rem]/shipment-form:flex-wrap">
       <Button type="button" variant="outline" disabled={busy} onClick={() => submit(false)}>{pending ? '保存中…' : '保存物流资料'}</Button>
       {!props.shipped ? <ConfirmActionController level="L2" disabled={busy || !ready || !props.canConfirm}
         trigger={<Button type="button" disabled={busy || !ready || !props.canConfirm}>确认该地址已发货</Button>}
