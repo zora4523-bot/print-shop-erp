@@ -86,6 +86,9 @@ export type AdminOrderWorkspaceRow = {
   submitter: { id: string; name: string };
   status: OrderStatus;
   statusSummary: string | null;
+  productionOwners?: string[];
+  pendingProductionWages?: boolean;
+  simpleProduction?: boolean;
   isUrgent: boolean;
   isStarred: boolean;
   createdAt: string;
@@ -389,8 +392,10 @@ const adminOrderSelect = {
     take: 1,
     select: { reasonCode: true, reasonNote: true, toStatus: true },
   },
+  simpleProduction: true,
+  productionJobs: { select: { workerName: true, workOrderVersion: true, wages: { select: { amount: true } } } },
   productionOperations: {
-    select: { workOrderVersion: true, status: true },
+    select: { workOrderVersion: true, status: true, operationType: true },
   },
   productionProgressSteps: {
     select: { workOrderVersion: true, status: true },
@@ -797,7 +802,7 @@ function mapAdminOrderRow(
     manualPricingPending: manualPricing,
   });
   const currentProductionOperations = row.productionOperations.filter(
-    (operation) => operation.workOrderVersion === row.workOrderVersion,
+    (operation) => operation.workOrderVersion === row.workOrderVersion && (!row.simpleProduction || operation.operationType !== 'PACKING'),
   );
   const currentProductionProgressSteps = row.productionProgressSteps.filter(
     (step) => step.workOrderVersion === row.workOrderVersion,
@@ -851,6 +856,9 @@ function mapAdminOrderRow(
     printFacts,
   };
   return {
+    simpleProduction: row.simpleProduction,
+    productionOwners: [...new Set((row.productionJobs ?? []).filter(job => job.workOrderVersion === row.workOrderVersion).map(job => job.workerName))],
+    pendingProductionWages: (row.productionJobs ?? []).some(job => job.wages.some(wage => wage.amount === null)),
     id: row.id,
     orderNo: row.orderNo,
     purpose: row.purpose,

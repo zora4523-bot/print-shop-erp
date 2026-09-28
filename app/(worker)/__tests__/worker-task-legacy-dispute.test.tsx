@@ -1,8 +1,9 @@
+vi.mock('@/components/business/production/WorkerCompletionDetail', () => ({ WorkerCompletionDetail: () => null }));
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Role, WorkerType, TaskStatus, ProductionTaskDisputeStatus } from '@/generated/prisma/enums';
 const { legacy, disputes, session } = vi.hoisted(() => ({ legacy: vi.fn(), disputes: vi.fn(), session: vi.fn() }));
-vi.mock('@/lib/db', () => ({ db: {} }));
+vi.mock('@/lib/db', () => ({ db: { productionJob: { findFirst: vi.fn().mockResolvedValue(null) } } }));
 vi.mock('@/lib/production/operation-reporting', () => ({ OperationReportingError: class extends Error {} }));
 vi.mock('@/lib/auth/session', () => ({ requireSession: session }));
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NOT_FOUND'); } }));

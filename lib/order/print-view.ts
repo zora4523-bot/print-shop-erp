@@ -222,6 +222,7 @@ export async function getOrderForPrint(
           },
         },
       },
+      productionJobs: { orderBy: { createdAt: 'asc' }, select: { id: true, workOrderVersion: true, operationId: true, progressStepId: true, label: true, workerName: true, plannedQty: true, completedQty: true, completedAt: true, status: true } },
       productionOperations: {
         where: { status: { not: ProductionOperationStatus.CANCELLED } },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -322,7 +323,7 @@ export async function getOrderForPrint(
     { errorCorrectionLevel: 'Q' },
   );
 
-  const productionSteps = buildCurrentProductionSteps({
+  const productionSteps: PrintProductionStep[] = order.simpleProduction ? order.productionJobs.filter(job => job.workOrderVersion === order.workOrderVersion && job.status !== 'CANCELLED').map(job => ({ id: job.id, source: job.operationId ? 'OPERATION' : 'PROGRESS', craftName: job.label, scopeLabel: `生产师傅：${job.workerName}${job.status === 'CARRIED' ? ' · 沿用已产，无新增生产' : ''}`, plannedQty: Number(job.plannedQty), completedQty: Number(job.completedQty ?? 0), defectQty: 0, completedAt: job.completedAt, quantityUnit: '个' })) : buildCurrentProductionSteps({
     workOrderVersion: order.workOrderVersion,
     operations: order.productionOperations,
     progressSteps: order.productionProgressSteps,
@@ -405,6 +406,7 @@ export async function getOrderForPrint(
     orderNo: order.orderNo,
     workOrderVersion: order.workOrderVersion,
     status: order.status,
+    simpleProduction: order.simpleProduction,
     hasPendingChange: order.changeRequests.length > 0,
     customName: order.customName,
     kind: order.kind,

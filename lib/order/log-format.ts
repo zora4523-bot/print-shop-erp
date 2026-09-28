@@ -228,6 +228,13 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_PLATE_DETAIL_UPDATED: '修改制版明细',
   ORDER_PLATE_DETAIL_REMOVED: '移除制版明细',
   PRODUCTION_COMPLETED: '生产完成',
+  PRODUCTION_ASSIGNED: '安排生产师傅',
+  PRODUCTION_REGISTERED: '登记生产完成',
+  PRODUCTION_QUANTITY_REQUESTED: '申请修改生产数量',
+  PRODUCTION_QUANTITY_REJECTED: '驳回生产数量申请',
+  PRODUCTION_WAGES_ALLOCATED: '核定生产提成',
+  PRODUCTION_OWNERSHIP_INHERITED: '沿用生产归属',
+  PRODUCTION_ERROR_CORRECTED: '更正生产误登记',
 };
 
 export function actionLabel(action: string): string {

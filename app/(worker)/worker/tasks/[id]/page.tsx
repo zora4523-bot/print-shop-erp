@@ -1,3 +1,4 @@
+import { WorkerCompletionDetail } from '@/components/business/production/WorkerCompletionDetail';
 import { WorkerOperationSources } from '@/components/business/production/WorkerOperationSources';
 import { formatFoilColors } from '@/lib/order/foil-colors';
 import { resolveReporterPieceworkRate } from '@/lib/salary/piecework-rate-selection';
@@ -64,6 +65,8 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
   const { id } = await params;
   const requestedBatch = (await searchParams)?.reportBatch;
   const actor = { id: user.id, role: user.role };
+  const assigned = await db.productionJob.findFirst({ where: { OR: [{ id }, { operationId: id }, { progressStepId: id }] }, select: { id: true } });
+  if (assigned) return <WorkerCompletionDetail id={assigned.id} actor={actor} />;
   let operation: Awaited<ReturnType<typeof getProductionOperationForReporter>> =
     null;
   try {

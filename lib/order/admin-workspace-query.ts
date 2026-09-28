@@ -35,6 +35,7 @@ export type AdminOrderWorkspaceQuery = {
   signal?: AdminOrderSignal;
   starred: boolean;
   unbilled: boolean;
+  pendingWages?: boolean;
 };
 
 export type AdminOrderWorkspaceParseResult = {
@@ -115,6 +116,7 @@ export function parseAdminOrderWorkspaceQuery(
       ...(signal ? { signal } : {}),
       starred,
       unbilled,
+      ...(firstValue(params.pendingWages) === 'yes' ? { pendingWages: true } : {}),
     },
     issues,
   };
@@ -142,6 +144,7 @@ export function serializeAdminOrderWorkspaceQuery(
     signal: query.signal,
     starred: query.starred ? 'yes' : undefined,
     unbilled: query.unbilled ? 'yes' : undefined,
+    ...(query.pendingWages ? { pendingWages: 'yes' } : {}),
   };
 }
 

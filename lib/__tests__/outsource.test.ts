@@ -971,6 +971,7 @@ describe('markOutsourceReceived', () => {
         id: true,
         status: true,
         requiresOutsource: true,
+        simpleProduction: true,
         workOrderVersion: true,
         orderNo: true,
         customerRef: true,

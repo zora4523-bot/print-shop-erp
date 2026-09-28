@@ -212,7 +212,7 @@ describe('getProductionOperationForReporter', () => {
     expect(where).toEqual({
       id: 'packing-1',
       operationType: PieceworkOperationType.PACKING,
-      order: { status: { in: ['RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'] } },
+      order: { simpleProduction: false, status: { in: ['RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'] } },
     });
     expect(JSON.stringify(where)).not.toContain('workerId');
   });

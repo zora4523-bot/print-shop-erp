@@ -537,133 +537,7 @@ export async function releaseFactoryOrder(
   idempotentReplay: boolean;
 }> {
   assertAdmin(actor);
-  const printIdempotencyKey = checkedIdempotencyKey(input.printIdempotencyKey);
-  const transactionResult: {
-    result: {
-      orderId: string;
-      status: OrderStatus;
-      printJobId: string | null;
-      idempotentReplay: boolean;
-    };
-    postCommitNotification: NotificationPayloadFor<'ORDER_SCHEDULED'> | null;
-  } = await db.$transaction(async (tx) => {
-    await lockOrder(tx, input.orderId);
-    let order = await readLockedOrder(tx, input.orderId);
-    const replay = input.createPrint === false ? null : await tx.orderPrintJob.findUnique({
-      where: { idempotencyKey: printIdempotencyKey },
-      select: {
-        id: true,
-        orderId: true,
-        workOrderVersion: true,
-        printKind: true,
-        reason: true,
-        state: true,
-        requestJobId: true,
-      },
-    });
-    if (replay) {
-      if (
-        replay.orderId !== order.id ||
-        replay.workOrderVersion !== input.expectedWorkOrderVersion ||
-        replay.printKind !== OrderPrintKind.INITIAL ||
-        replay.reason !== '工单首次下发' ||
-        replay.state !== OrderPrintJobState.PENDING ||
-        replay.requestJobId !== null
-      ) {
-        throw new AdminOrderWorkflowError(
-          'IDEMPOTENCY_CONFLICT',
-          '同一下发请求标识已用于其他操作',
-        );
-      }
-      return {
-        result: {
-          orderId: order.id,
-          status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
-          printJobId: replay.id,
-          idempotentReplay: true,
-        },
-        postCommitNotification: null,
-      };
-    }
-    assertExpectedVersion(order, input);
-    assertNoPendingChange(order);
-    if (isAwaitingFactoryConfirmation(order.status)) {
-      const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
-      if (!prepared.ready) {
-        throw new AdminOrderWorkflowError('PREFLIGHT_FAILED', prepared.issues.join('；'));
-      }
-      order = await readLockedOrder(tx, order.id);
-    }
-
-    let releaseResult = null;
-    if (order.status !== OrderStatus.RELEASED && !(order.purpose === 'SAMPLE_SHIPMENT' && order.status === OrderStatus.PACKING)) {
-      if (order.status !== OrderStatus.CONFIRMED) {
-        throw new AdminOrderWorkflowError(
-          'INVALID_STATUS',
-          `工单当前状态 ${order.status} 不允许下发`,
-        );
-      }
-      releaseResult = await activateProductionOperationsInTx(
-        tx,
-        order.id,
-        actor,
-        undefined,
-        { targetStatus: OrderStatus.RELEASED },
-      );
-    }
-    const print = input.createPrint === false ? null : await createOrderPrintRequestInTx(
-      tx,
-      {
-        orderId: order.id,
-        workOrderVersion: order.workOrderVersion,
-        printKind: OrderPrintKind.INITIAL,
-        reason: '工单首次下发',
-        idempotencyKey: printIdempotencyKey,
-      },
-      actor,
-    );
-    if (releaseResult) {
-      // ORDER_SCHEDULED is the historical external event name. In the
-      // canonical workflow its business edge is CONFIRMED -> RELEASED: all
-      // materialized work for this work-order generation has been released to
-      // production, without implying a worker assignment. Count both
-      // piecework operations and non-piecework progress steps; the ID arrays
-      // remain correct when materialization reuses an exact existing ledger,
-      // whereas *Created would incorrectly report zero.
-      const notificationPayload: NotificationPayloadFor<'ORDER_SCHEDULED'> = {
-        orderId: order.id,
-        orderNo: order.orderNo,
-        taskCount:
-          releaseResult.operationIds.length +
-          releaseResult.progressStepIds.length,
-      };
-      const dedupeKey = `notification:${NOTIFICATION_EVENTS.ORDER_SCHEDULED}:${order.id}`;
-      const queued = await enqueueNotificationInTransaction(
-        tx as unknown as EnqueueClient,
-        NOTIFICATION_EVENTS.ORDER_SCHEDULED,
-        notificationPayload,
-        { dedupeKey },
-      );
-      return {
-        result: {
-          orderId: order.id,
-          status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
-          printJobId: print?.jobId ?? null,
-          idempotentReplay: print?.idempotentReplay ?? false,
-        },
-        postCommitNotification: queued ? null : notificationPayload,
-      };
-    }
-    return {
-      result: {
-        orderId: order.id,
-        status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
-        printJobId: print?.jobId ?? null,
-        idempotentReplay: print?.idempotentReplay ?? false,
-      },
-      postCommitNotification: null,
-    };
-  });
+  const transactionResult = await db.$transaction((tx) => releaseFactoryOrderInTx(tx, input, actor));
 
   if (transactionResult.postCommitNotification) {
     await dispatchNotification(
@@ -675,6 +549,138 @@ export async function releaseFactoryOrder(
     );
   }
   return transactionResult.result;
+}
+
+export async function releaseFactoryOrderInTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    expectedRevision: number;
+    expectedWorkOrderVersion: number;
+    printIdempotencyKey: string;
+    createPrint?: boolean;
+  },
+  actor: AdminWorkflowActor,
+) {
+  assertAdmin(actor);
+  const printIdempotencyKey = checkedIdempotencyKey(input.printIdempotencyKey);
+
+  await lockOrder(tx, input.orderId);
+  let order = await readLockedOrder(tx, input.orderId);
+  const replay = input.createPrint === false ? null : await tx.orderPrintJob.findUnique({
+    where: { idempotencyKey: printIdempotencyKey },
+    select: {
+      id: true,
+      orderId: true,
+      workOrderVersion: true,
+      printKind: true,
+      reason: true,
+      state: true,
+      requestJobId: true,
+    },
+  });
+  if (replay) {
+    if (
+      replay.orderId !== order.id ||
+      replay.workOrderVersion !== input.expectedWorkOrderVersion ||
+      replay.printKind !== OrderPrintKind.INITIAL ||
+      replay.reason !== '工单首次下发' ||
+      replay.state !== OrderPrintJobState.PENDING ||
+      replay.requestJobId !== null
+    ) {
+      throw new AdminOrderWorkflowError(
+        'IDEMPOTENCY_CONFLICT',
+        '同一下发请求标识已用于其他操作',
+      );
+    }
+    return {
+      result: {
+        orderId: order.id,
+        status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
+        printJobId: replay.id,
+        idempotentReplay: true,
+      },
+      postCommitNotification: null,
+    };
+  }
+  assertExpectedVersion(order, input);
+  assertNoPendingChange(order);
+  if (isAwaitingFactoryConfirmation(order.status)) {
+    const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
+    if (!prepared.ready) {
+      throw new AdminOrderWorkflowError('PREFLIGHT_FAILED', prepared.issues.join('；'));
+    }
+    order = await readLockedOrder(tx, order.id);
+  }
+
+  let releaseResult = null;
+  if (order.status !== OrderStatus.RELEASED && !(order.purpose === 'SAMPLE_SHIPMENT' && order.status === OrderStatus.PACKING)) {
+    if (order.status !== OrderStatus.CONFIRMED) {
+      throw new AdminOrderWorkflowError(
+        'INVALID_STATUS',
+        `工单当前状态 ${order.status} 不允许下发`,
+      );
+    }
+    releaseResult = await activateProductionOperationsInTx(
+      tx,
+      order.id,
+      actor,
+      undefined,
+      { targetStatus: OrderStatus.RELEASED },
+    );
+  }
+  const print = input.createPrint === false ? null : await createOrderPrintRequestInTx(
+    tx,
+    {
+      orderId: order.id,
+      workOrderVersion: order.workOrderVersion,
+      printKind: OrderPrintKind.INITIAL,
+      reason: '工单首次下发',
+      idempotencyKey: printIdempotencyKey,
+    },
+    actor,
+  );
+  if (releaseResult) {
+    // ORDER_SCHEDULED is the historical external event name. In the
+    // canonical workflow its business edge is CONFIRMED -> RELEASED: all
+    // materialized work for this work-order generation has been released to
+    // production, without implying a worker assignment. Count both
+    // piecework operations and non-piecework progress steps; the ID arrays
+    // remain correct when materialization reuses an exact existing ledger,
+    // whereas *Created would incorrectly report zero.
+    const notificationPayload: NotificationPayloadFor<'ORDER_SCHEDULED'> = {
+      orderId: order.id,
+      orderNo: order.orderNo,
+      taskCount:
+        releaseResult.operationIds.length +
+        releaseResult.progressStepIds.length,
+    };
+    const dedupeKey = `notification:${NOTIFICATION_EVENTS.ORDER_SCHEDULED}:${order.id}`;
+    const queued = await enqueueNotificationInTransaction(
+      tx as unknown as EnqueueClient,
+      NOTIFICATION_EVENTS.ORDER_SCHEDULED,
+      notificationPayload,
+      { dedupeKey },
+    );
+    return {
+      result: {
+        orderId: order.id,
+        status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
+        printJobId: print?.jobId ?? null,
+        idempotentReplay: print?.idempotentReplay ?? false,
+      },
+      postCommitNotification: queued ? null : notificationPayload,
+    };
+  }
+  return {
+    result: {
+      orderId: order.id,
+      status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
+      printJobId: print?.jobId ?? null,
+      idempotentReplay: print?.idempotentReplay ?? false,
+    },
+    postCommitNotification: null,
+  };
 }
 
 export async function settleFactoryOrder(

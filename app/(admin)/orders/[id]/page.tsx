@@ -1,3 +1,5 @@
+import { ProductionDeliverySummary } from '@/components/business/production/ProductionDeliverySummary';
+import { ProductionJobPanel } from '@/components/business/production/ProductionJobPanel';
 import { CreateOrderOutsourceLink } from '@/components/business/outsource/CreateOrderOutsourceLink';
 import { hasPermission } from '@/lib/auth/permissions-dict';
 import { HistoricalBlankPriceEditor } from '@/components/business/order/HistoricalBlankPriceEditor';
@@ -303,7 +305,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const allTasks = order.items.flatMap((item) => item.tasks);
   const hasProductionOperations = productionOperations.length > 0;
   const productionUnits = hasProductionOperations
-    ? [...productionOperations, ...productionProgressSteps]
+    ? [...productionOperations.filter(operation => !order.simpleProduction || operation.operationType !== 'PACKING'), ...productionProgressSteps]
     : [...productionProgressSteps, ...allTasks];
   const pendingProductionCount = productionUnits.filter(
     (unit) => unit.status === 'PENDING',
@@ -702,7 +704,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           </ol>
         </section>
       ) : null}</>),
-    shipments: (<><section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+    shipments: (<>{order.simpleProduction && <ProductionDeliverySummary orderId={order.id} version={order.workOrderVersion} />}<section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-semibold">
             发货地址（{order.shipments.length}）
@@ -1385,7 +1387,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   return <>
     <BreadcrumbEntity label={order.orderNo} />
     <ReceiptNotice receipt={receipt} noun="工单" />
-    <AdminOrderDetailView model={model} canEdit={canEdit} prints={presentation.prints}
+    <AdminOrderDetailView simpleProduction={order.simpleProduction} productionOwners={presentation.workspace.productionOwners} model={model} canEdit={canEdit} prints={presentation.prints}
       printHint={maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD
         ? `有款式含 ${maxDesignsPerItem} 张设计图，建议分款式打印以保证清晰度` : undefined}
       decision={<AdminOrderDetailDecision key={`${order.revision}:${order.workOrderVersion}:${presentation.workspace.pendingPrintJobId}`} order={presentation.workspace}
@@ -1396,7 +1398,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       supplementary={[
         ...(hasPricingDetails ? [{ id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> }] : []),
         { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
-        { id: 'detail-production-records', title: '生产、用料与计件记录', content: <>{detailSections.readiness}{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
+        { id: 'detail-production-records', title: '生产、用料与计件记录', content: <><ProductionJobPanel orderId={order.id} />{detailSections.readiness}{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
         { id: 'detail-business-records', title: '生产与业务资料', content: detailSections.basics },
         { id: 'detail-costs', title: '工厂成本', content: detailSections.costs },
         ...(canCreateRework || order.sourceOrder || order.reworkOrders.length > 0 ? [{ id: 'detail-after-sales', title: '售后与重做', content: <>{detailSections.rework}{detailSections.reworkForm}</> }] : []),

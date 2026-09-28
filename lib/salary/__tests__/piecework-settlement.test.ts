@@ -17,6 +17,8 @@ const { dbMock, databaseClockNowMock, databaseNowMock } = vi.hoisted(() => ({
       update: vi.fn(),
     },
     productionReport: { findMany: vi.fn() },
+    productionJob: { count: vi.fn().mockResolvedValue(0) },
+    productionWage: { findMany: vi.fn(), updateMany: vi.fn() },
     user: { findUnique: vi.fn() },
     businessAuditLog: { create: vi.fn() },
     $executeRaw: vi.fn(),
@@ -91,6 +93,8 @@ beforeEach(() => {
   ]) {
     for (const method of Object.values(delegate)) method.mockReset();
   }
+  dbMock.productionWage.findMany.mockReset().mockResolvedValue([]);
+  dbMock.productionWage.updateMany.mockReset().mockResolvedValue({ count: 0 });
   dbMock.$executeRaw.mockReset().mockResolvedValue(0);
   dbMock.$transaction
     .mockReset()
@@ -104,6 +108,7 @@ beforeEach(() => {
     id: 'worker-1',
     displayName: '张师傅',
   });
+  dbMock.productionJob.count.mockResolvedValue(0);
   dbMock.productionReport.findMany.mockResolvedValue([
     report('partial', '3.00', 'PARTIAL', 'order-1'),
     report('full', '5.00', 'FULL', 'order-2'),
@@ -295,7 +300,7 @@ describe('lockPieceworkSettlement', () => {
     const createCall = dbMock.pieceworkSettlement.create.mock.calls[0]?.[0];
     expect(createCall.data.items.create).toHaveLength(3);
     expect(createCall.data.snapshot).toMatchObject({
-      ledger: 'PRODUCTION_REPORT',
+      ledger: 'PRODUCTION_REPORT_AND_COMPLETION',
       legacyProductionTaskIncluded: false,
       operationCounts: { PARTIAL: 1, FULL: 1, PACKING: 1 },
     });

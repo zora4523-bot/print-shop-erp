@@ -245,6 +245,7 @@ export function buildAdminWorkspaceBaseWhere(
   assertAdmin(actor);
   return andWhere(
     buildOrderWhere(actor, query.list.filters),
+    ...(query.pendingWages ? [{ productionJobs: { some: { wages: { some: { amount: null } } } } }] : []),
     query.starred ? { stars: { some: { userId: actor.id } } } : {},
     query.unbilled
       ? {

@@ -56,9 +56,9 @@ export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.REJECTED]: { label: '已驳回', tone: 'danger' },
   [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'success' },
   [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'warning', dot: true },
-  [OrderStatus.RELEASED]: { label: '已下发', tone: 'info', dot: true },
-  [OrderStatus.FOILING]: { label: '烫金中', tone: 'info', dot: true },
-  [OrderStatus.PACKING]: { label: '打包中', tone: 'info', dot: true },
+  [OrderStatus.RELEASED]: { label: '生产中', tone: 'info', dot: true },
+  [OrderStatus.FOILING]: { label: '生产中', tone: 'info', dot: true },
+  [OrderStatus.PACKING]: { label: '待打包发货', tone: 'info', dot: true },
   [OrderStatus.SETTLED]: { label: '已结算', tone: 'success' },
   [OrderStatus.SUBMITTED]: { label: '待处理', tone: 'info' },
   // SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED 只存在于迁移前的老行

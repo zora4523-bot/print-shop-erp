@@ -262,6 +262,7 @@ export async function listProductionOperationsForReporter(
         ],
       },
       order: {
+        simpleProduction: false,
         status: {
           in: [
             OrderStatus.RELEASED,
@@ -389,7 +390,7 @@ export async function getProductionOperationForReporter(
 ): Promise<ReporterOperationDetail | null> {
   const operationType = await getReporterOperationType(actor);
   const operation = await db.productionOperation.findFirst({
-    where: { id: operationId, operationType, order: { status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
+    where: { id: operationId, operationType, order: { simpleProduction: false, status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
     select: {
       id: true,
       orderId: true,
@@ -547,6 +548,7 @@ export async function listProductionProgressForReporter(
         ],
       },
       order: {
+        simpleProduction: false,
         status: {
           in: [
             OrderStatus.RELEASED,
@@ -615,7 +617,7 @@ export async function getProductionProgressForReporter(
 ): Promise<ReporterProgressDetail | null> {
   const craftIds = await assertActiveProgressReporter(actor);
   const step = await db.productionProgressStep.findFirst({
-    where: { id: progressStepId, craftId: { in: craftIds }, order: { status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
+    where: { id: progressStepId, craftId: { in: craftIds }, order: { simpleProduction: false, status: { in: [OrderStatus.RELEASED, OrderStatus.FOILING, OrderStatus.PACKING, OrderStatus.SCHEDULING, OrderStatus.IN_PRODUCTION] } } },
     select: {
       id: true,
       orderId: true,

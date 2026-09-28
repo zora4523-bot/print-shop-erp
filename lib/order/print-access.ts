@@ -32,9 +32,10 @@ export async function getOrderPrintScope(
 
   const current = await db.order.findFirst({
     where: { id: orderId, status: { not: OrderStatus.SUBMITTED } },
-    select: { workOrderVersion: true },
+    select: { workOrderVersion: true, simpleProduction: true },
   });
   if (!current) return null;
+  if (current.simpleProduction) return { id: orderId, productionJobs: { some: { workerId: actor.id, workOrderVersion: current.workOrderVersion } } };
 
   const operationType = operationTypeForReporterAccount(account);
   const currentStep = {

@@ -1,3 +1,4 @@
+import { SettledProductionWages } from '@/components/business/salary/ProductionWageRecords';
 import { formatRate } from '@/lib/format/unit-price';
 import { reportWageLines } from '@/lib/salary/report-display';
 import type { Metadata } from 'next';
@@ -313,9 +314,10 @@ function OperationSettlementDetail({
         <Money label="报工金额" value={settlement.reportAmount} />
         <Money label="调整" value={settlement.adjustmentAmount} />
         <Money label="应发工资" value={settlement.payableAmount} strong />
-        <Metric label="报工明细" value={`${settlement.items.length} 条`} />
+        <Metric label="报工明细" value={`${settlement.items.length + settlement.productionWages.length} 条`} />
       </section>
 
+      <SettledProductionWages wages={settlement.productionWages} />
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <h2 className="text-sm font-semibold">工序报工（{settlement.items.length}）</h2>
         <ul className="mt-2 divide-y">

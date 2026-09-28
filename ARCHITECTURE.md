@@ -7,6 +7,13 @@ applies_to: repository source at last_verified
 
 # 系统架构
 
+## 2026-09-28 单负责人生产与工资边界
+
+`actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用事务内下发；`completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。
+
+生产人、操作人、工资受益人是不同事实。生产归属在排单时确定，协作受益人仅出现在管理员提成核定入口。新旧报工写入口互斥，统一日结/导出读取两种账本；新增事实不伪装成历史报告。管理专用异步 ProductionJobPanel 不传入销售模型，师傅工资按当前会话受益人读取。
+
+
 ## 2026-09-27 录入页恢复边界
 
 采购、BOM、供应商、物料及产品结构分类的五个新建页位于 `app/(admin-forms)/owner/`，URL 保持不变。该路由组复用管理端外壳和 OwnerLayout 的服务端授权，分类页继续复用规则工作区布局；不继承管理端 `loading.tsx`，避免禁用 JavaScript 时流式占位无法切换为可提交表单。其他管理路由保留原加载行为。

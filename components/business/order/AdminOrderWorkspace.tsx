@@ -174,6 +174,7 @@ export function AdminOrderWorkspace({
             />
             {query.starred ? '取消仅星标' : '仅星标'}
           </Link>
+          <Link href="/orders?queue=all&pendingWages=yes" className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm">待补录提成</Link>
           <Link
             href={buildTableHref(
               '/orders',

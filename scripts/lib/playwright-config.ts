@@ -83,6 +83,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
         testIgnore: [
           '**/worker-responsive.spec.ts',
           '**/admin-responsive.spec.ts',
+          '**/production-dispatch.spec.ts',
           // Has its own project below with JS turned off; running it here
           // too would just re-test the hydrated path.
           '**/no-js.spec.ts',
@@ -111,7 +112,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
       })),
       ...adminViewportProjects.map(({ name, width, height }) => ({
         name,
-        testMatch: '**/admin-responsive.spec.ts',
+        testMatch: ['**/admin-responsive.spec.ts', '**/production-dispatch.spec.ts'],
         use: {
           ...devices['Desktop Chrome'],
           viewport: { width, height },

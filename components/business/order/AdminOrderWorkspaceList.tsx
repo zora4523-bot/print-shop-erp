@@ -221,6 +221,8 @@ function AdminOrderRow({
 
       <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto">
         <AdminWorkspaceStatusBadge status={order.status} />
+        {!!order.productionOwners?.length && <p className="mt-1 text-xs">生产师傅：{order.productionOwners.join('、')}</p>}
+        {order.pendingProductionWages && <Link href={`/orders/${order.id}#detail-production-records`} className="inline-flex min-h-11 items-center text-xs underline">待补录提成</Link>}
         {order.pendingChangeRequest ? (
           <p className="mt-1 text-xs font-semibold">
             <span className="mr-1 rounded-md border border-foreground px-1 text-xs">{order.pendingChangeRequest.type === 'CANCEL' ? '取消申请' : '变更申请'}</span>
@@ -240,7 +242,7 @@ function AdminOrderRow({
         <p className="font-semibold tabular-nums">
           {order.itemCount} 款 · {order.totalQuantity.toLocaleString('zh-CN')}
         </p>
-        {showOrderProgress(order) && <div data-slot="admin-order-row-progress" className="mt-1">
+        {!order.simpleProduction && showOrderProgress(order) && <div data-slot="admin-order-row-progress" className="mt-1">
           <AdminOrderProgress progress={order.progress} compact />
         </div>}
       </div>

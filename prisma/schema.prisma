@@ -53,22 +53,24 @@ enum PartyType {
 }
 
 model User {
-  id                  String          @id @default(cuid())
-  username            String          @unique @db.Citext
+  productionJobs      ProductionJob[]
+  productionWages     ProductionWage[]
+  id                  String           @id @default(cuid())
+  username            String           @unique @db.Citext
   password            String // bcrypt哈希
   role                Role
   workerType          WorkerType? // 仅 role=WORKER 时有值
   machineType         MachineType? // 仅 workerType=MACHINE 时有值；主机型/默认机型
-  machineCapabilities MachineType[]   @default([]) // 开机师傅实际可操作的全部机型
+  machineCapabilities MachineType[]    @default([]) // 开机师傅实际可操作的全部机型
   displayName         String
   phone               String?
   avatar              String?
-  isActive            Boolean         @default(true)
+  isActive            Boolean          @default(true)
   employmentType      EmploymentType?
-  employmentStartDate DateTime?       @db.Date
-  employmentEndDate   DateTime?       @db.Date
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  employmentStartDate DateTime?        @db.Date
+  employmentEndDate   DateTime?        @db.Date
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
 
   formCreationRequests FormCreationRequest[]
 
@@ -406,6 +408,8 @@ enum ReworkCause {
 }
 
 model Order {
+  simpleProduction          Boolean                     @default(false)
+  productionJobs            ProductionJob[]
   id                        String                      @id @default(cuid())
   orderNo                   String                      @unique // GD-YYMMDD-XXX; historical formats remain valid
   submitterId               String
@@ -1146,6 +1150,7 @@ model PieceworkPriceRule {
 // 生产工序只记业务类型和计划数，不记工人或机型。来源行只用于
 // 追溯数量事实，不参与工价键的选择。
 model ProductionOperation {
+  productionJob               ProductionJob?
   id                          String                    @id @default(cuid())
   orderId                     String
   workOrderVersion            Int                       @default(1)
@@ -1290,6 +1295,7 @@ model ProductionScanClaim {
 // 三类计件工序之外的内制工艺只保留生产进度，不存人员/机型/
 // 工价。工艺编码和名称在投产时冻结，字典后续改名不改变历史。
 model ProductionProgressStep {
+  productionJob       ProductionJob?
   id                  String                    @id @default(cuid())
   orderId             String
   workOrderVersion    Int                       @default(1)
@@ -1337,6 +1343,7 @@ model ProductionProgressReport {
 
 // 新 ledger 拥有独立结算边界，不与 DailyWorkerSalaryItem 相加或共用键。
 model PieceworkSettlement {
+  productionWages  ProductionWage[]
   id               String                    @id @default(cuid())
   reporterId       String
   workDate         DateTime                  @db.Date
@@ -3006,4 +3013,80 @@ model FormCreationRequest {
 
   @@unique([actorId, kind, clientRequestId])
   @@index([actorId, kind, draftId])
+}
+
+// Single-owner completion workflow. Historical operation/report ledgers remain intact.
+model ProductionDispatchBatch {
+  id          String   @id
+  requestHash String   @db.VarChar(64)
+  actorId     String
+  result      Json
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model ProductionJob {
+  id               String                  @id @default(cuid())
+  orderId          String
+  workOrderVersion Int
+  operationId      String?                 @unique
+  progressStepId   String?                 @unique
+  workerId         String
+  workerName       String
+  label            String
+  sourceKey        String
+  plannedQty       Decimal                 @db.Decimal(14, 3)
+  completedQty     Decimal?                @db.Decimal(14, 3)
+  requestedQty     Decimal?                @db.Decimal(14, 3)
+  requestReason    String?
+  requestedAt      DateTime?               @db.Timestamptz(3)
+  status           String                  @default("PENDING")
+  manualPricing    Boolean                 @default(false)
+  revision         Int                     @default(0)
+  snapshot         Json
+  completedAt      DateTime?               @db.Timestamptz(3)
+  workDate         DateTime?               @db.Date
+  recordedById     String?
+  recordSource     String?
+  createdAt        DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                @updatedAt @db.Timestamptz(3)
+  order            Order                   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  worker           User                    @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  operation        ProductionOperation?    @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  progressStep     ProductionProgressStep? @relation(fields: [progressStepId], references: [id], onDelete: Restrict)
+  wages            ProductionWage[]
+
+  @@unique([orderId, workOrderVersion, sourceKey])
+  @@index([orderId, workOrderVersion, status])
+  @@index([workerId, status, createdAt])
+}
+
+// Mutable amount is a projection of append-only entries; null means awaiting pricing.
+model ProductionWage {
+  id           String                @id @default(cuid())
+  jobId        String
+  workerId     String
+  workDate     DateTime              @db.Date
+  amount       Decimal?              @db.Decimal(14, 2)
+  revision     Int                   @default(0)
+  snapshot     Json
+  settlementId String?
+  job          ProductionJob         @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  worker       User                  @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  settlement   PieceworkSettlement?  @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  entries      ProductionWageEntry[]
+
+  @@unique([jobId, workerId, workDate])
+  @@index([workerId, workDate, settlementId])
+}
+
+model ProductionWageEntry {
+  id         String         @id @default(cuid())
+  wageId     String
+  amount     Decimal        @db.Decimal(14, 2)
+  actorId    String
+  reason     String
+  requestKey String         @unique
+  snapshot   Json
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  wage       ProductionWage @relation(fields: [wageId], references: [id], onDelete: Restrict)
 }

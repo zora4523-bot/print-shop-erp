@@ -115,7 +115,7 @@ export async function getPieceworkSettlementDay(input: {
     );
   }
   const { start, end } = shanghaiDayRange(input.workDate);
-  const [settlements, reports] = await Promise.all([
+  const [settlements, reports, productionWages] = await Promise.all([
     db.pieceworkSettlement.findMany({
       where: {
         workDate: dateCol,
@@ -134,7 +134,7 @@ export async function getPieceworkSettlementDay(input: {
         lockedAt: true,
         paidAt: true,
         reporter: { select: { displayName: true, username: true } },
-        _count: { select: { items: true } },
+        _count: { select: { items: true, productionWages: true } },
       },
     }),
     db.productionReport.findMany({
@@ -154,6 +154,8 @@ export async function getPieceworkSettlementDay(input: {
         },
       },
     }),
+    db.productionWage.findMany({ where: { workDate: dateCol, settlementId: null, ...(input.reporterId ? { workerId: input.reporterId } : {}) },
+      include: { worker: { select: { displayName: true, username: true } }, job: { select: { orderId: true, label: true } } } }),
   ]);
 
   const candidates = new Map<
@@ -166,6 +168,7 @@ export async function getPieceworkSettlementDay(input: {
       reportCount: number;
       orderIds: Set<string>;
       operationCounts: Record<string, number>;
+      pendingPricing: number;
     }
   >();
   for (const report of reports) {
@@ -177,6 +180,7 @@ export async function getPieceworkSettlementDay(input: {
       reportCount: 0,
       orderIds: new Set<string>(),
       operationCounts: {},
+      pendingPricing: 0,
     };
     current.reportAmount = current.reportAmount.plus(report.amount);
     current.reportCount += 1;
@@ -184,6 +188,16 @@ export async function getPieceworkSettlementDay(input: {
     current.operationCounts[report.operation.operationType] =
       (current.operationCounts[report.operation.operationType] ?? 0) + 1;
     candidates.set(report.reporterId, current);
+  }
+
+  for (const wage of productionWages) {
+    const current = candidates.get(wage.workerId) ?? { reporterId: wage.workerId, reporterName: wage.worker.displayName, username: wage.worker.username, reportAmount: new Decimal(0), reportCount: 0, orderIds: new Set<string>(), operationCounts: {} as Record<string, number>, pendingPricing: 0 };
+    if (wage.amount === null) current.pendingPricing++;
+    else current.reportAmount = current.reportAmount.plus(wage.amount);
+    current.reportCount++;
+    current.orderIds.add(wage.job.orderId);
+    current.operationCounts[wage.job.label] = (current.operationCounts[wage.job.label] ?? 0) + 1;
+    candidates.set(wage.workerId, current);
   }
 
   return {
@@ -200,6 +214,7 @@ export async function getPieceworkSettlementDay(input: {
       reportCount: row.reportCount,
       orderCount: row.orderIds.size,
       operationCounts: row.operationCounts,
+      pendingPricing: row.pendingPricing,
     })),
   };
 }
@@ -229,6 +244,7 @@ export async function getPieceworkSettlementDetail(
       paidAt: true,
       createdAt: true,
       reporter: { select: { displayName: true, username: true } },
+      productionWages: { include: { job: { select: { id: true, orderId: true, label: true, completedQty: true, workerName: true } }, entries: { orderBy: { createdAt: 'asc' } } } },
       items: {
         orderBy: [{ report: { reportedAt: 'asc' } }, { id: 'asc' }],
         select: {
@@ -290,7 +306,7 @@ export async function listWorkerPieceworkSettlements(input: {
       payableAmount: true,
       lockedAt: true,
       paidAt: true,
-      _count: { select: { items: true } },
+      _count: { select: { items: true, productionWages: true } },
     },
   });
 }
@@ -371,7 +387,7 @@ function toReceipt(
     adjustmentAmount: Decimal.Value;
     payableAmount: Decimal.Value;
     reporter: { displayName: string };
-    _count: { items: number };
+    _count: { items: number; productionWages?: number };
   },
   idempotentReplay: boolean,
 ): PieceworkSettlementReceipt {
@@ -384,7 +400,7 @@ function toReceipt(
     reportAmount: new Decimal(row.reportAmount).toFixed(2),
     adjustmentAmount: new Decimal(row.adjustmentAmount).toFixed(2),
     payableAmount: new Decimal(row.payableAmount).toFixed(2),
-    reportCount: row._count.items,
+    reportCount: row._count.items + (row._count.productionWages ?? 0),
     idempotentReplay,
   };
 }
@@ -398,7 +414,7 @@ const SETTLEMENT_RECEIPT_SELECT = {
   adjustmentAmount: true,
   payableAmount: true,
   reporter: { select: { displayName: true } },
-  _count: { select: { items: true } },
+  _count: { select: { items: true, productionWages: true } },
 } satisfies Prisma.PieceworkSettlementSelect;
 
 /**
@@ -482,7 +498,10 @@ export async function lockPieceworkSettlement(input: {
         },
       },
     });
-    if (reports.length === 0) {
+    if (await tx.productionJob.count({ where: { workerId: input.reporterId, workDate: dateCol, status: 'REQUESTED' } })) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在生产数量待审批，请先处理对应工单');
+    const productionWages = await tx.productionWage.findMany({ where: { workerId: input.reporterId, workDate: dateCol, settlementId: null }, include: { job: { select: { orderId: true, label: true } }, entries: { select: { id: true } } } });
+    if (productionWages.some(wage => wage.amount === null)) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待补录提成，请先在工单详情补录');
+    if (reports.length === 0 && productionWages.length === 0) {
       throw new PieceworkSettlementError(
         'NO_REPORTS',
         '该报工人在所选日期没有待结算的新工序报工',
@@ -496,11 +515,12 @@ export async function lockPieceworkSettlement(input: {
       reportUsesTieredFoilWage(report.operation.operationType, report),
     );
     if (unfinished) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '分档烫金工序尚未结束，请待工序完成或取消并核定提成后结算');
-    const aggregate = aggregatePieceworkSettlementReports(reports);
+    const aggregate = aggregatePieceworkSettlementReports([...reports, ...productionWages.map(wage => ({ id: wage.id, amount: wage.amount!, entryType: 'PRODUCTION_WAGE', operation: { id: wage.jobId, orderId: wage.job.orderId, operationType: wage.job.label } }))]);
     const lockedAt = await databaseNow(tx);
     const snapshot = {
       schemaVersion: 1,
-      ledger: 'PRODUCTION_REPORT',
+      ledger: 'PRODUCTION_REPORT_AND_COMPLETION',
+      productionWages: productionWages.map(wage => ({ id: wage.id, amount: wage.amount!.toString(), entryIds: wage.entries.map(entry => entry.id) })),
       legacyProductionTaskIncluded: false,
       reporterId: reporter.id,
       workDate: input.workDate,
@@ -544,6 +564,8 @@ export async function lockPieceworkSettlement(input: {
       },
       select: SETTLEMENT_RECEIPT_SELECT,
     });
+    await tx.productionWage.updateMany({ where: { id: { in: productionWages.map(wage => wage.id) } }, data: { settlementId: created.id } });
+    created._count.productionWages = productionWages.length;
     await writeAuditLogInTx(tx, {
       actor: input.actor,
       action: 'LOCK',
@@ -589,6 +611,8 @@ export async function lockPieceworkSettlementsForDate(input: {
         reporter: { select: { displayName: true } },
       },
     });
+    const manualReporters = await tx.productionWage.findMany({ where: { workDate: parseStrictYmd(input.workDate)!, settlementId: null }, distinct: ['workerId'], select: { workerId: true, worker: { select: { displayName: true } } } });
+    for (const wage of manualReporters) if (!reporters.some(row => row.reporterId === wage.workerId)) reporters.push({ reporterId: wage.workerId, reporter: wage.worker });
     return { now, reporters };
   });
   const settled: PieceworkSettlementReceipt[] = [];

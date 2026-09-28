@@ -1,3 +1,4 @@
+import { WorkerProductionJobs } from '@/components/business/production/WorkerProductionJobs';
 import { firstSearchParam } from '@/lib/admin/table';
 import { WorkerTaskFilters } from '@/components/business/production/WorkerTaskFilters';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
@@ -20,7 +21,7 @@ const OPERATION_LABELS: Record<PieceworkOperationType, string> = {
   [PieceworkOperationType.PACKING]: '打包入袋',
 };
 
-export default async function WorkerTasksPage({ searchParams }: { searchParams: Promise<{ q?: string | string[]; view?: string; page?: string }> }) {
+export default async function WorkerTasksPage({ searchParams }: { searchParams: Promise<{ q?: string | string[]; view?: string; page?: string; productionPage?: string }> }) {
   const sp = await searchParams;
   const query = firstSearchParam(sp.q).trim().slice(0, 100);
   const view = sp.view === 'progress' ? 'progress' : 'paid';
@@ -34,16 +35,17 @@ export default async function WorkerTasksPage({ searchParams }: { searchParams: 
       <header className="worker-wrap-anywhere">
         <h1 className="text-lg font-semibold">生产工序</h1>
         <p className="text-sm text-muted-foreground">
-          {view === 'paid' ? '本岗位可报工工序' : '共享生产步骤，不计入工资'}
+          查看已安排的生产，完成后登记。
         </p>
       </header>
 
+      <WorkerProductionJobs actor={actor} query={query} page={sp.productionPage} />
+      <h2 className="font-semibold">其他可报工工序</h2>
       <WorkerTaskFilters query={query} view={view} />
       {operations.length === 0 && progressSteps.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title="暂无待处理工序"
-
+          title="暂无其他待处理工序"
         />
       ) : (
         <ul className="space-y-3">

@@ -1,3 +1,4 @@
+import { WorkerProductionWages } from '@/components/business/salary/ProductionWageRecords';
 import { listWorkerSettlementPage } from '@/lib/salary/worker-settlement-page';
 import { WorkerPendingReports } from '@/components/business/salary/WorkerPendingReports';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
@@ -32,7 +33,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的工资' };
 
 type PageProps = {
-  searchParams: Promise<{ from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; wagePage?: string | string[]; view?: string; status?: string }>;
 };
 
 export default async function WorkerSalaryPage({ searchParams }: PageProps) {
@@ -77,7 +78,7 @@ async function OperationPieceworkSalaryContent({
   searchParams: sp,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; wagePage?: string | string[]; view?: string; status?: string };
 }) {
   // Only an explicit, valid range narrows anything (业主 2026-09-19). The date
   // boxes start empty: a prefilled current month hid last month's unpaid
@@ -109,6 +110,7 @@ async function OperationPieceworkSalaryContent({
         status={sp.status}
       />
       {invalidRange && <p role="alert" className="text-destructive">开始日期晚于结束日期，请修改后查询。</p>}
+      <WorkerProductionWages actor={actor} from={explicitFrom} to={explicitTo} page={sp.wagePage} />
       <WorkerPendingReports actor={actor} from={explicitFrom} to={explicitTo} page={sp.pendingPage} />
       <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${salaryQuery({ from: explicitFrom, to: explicitTo, status: value })}`} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm ${(sp.status ?? '') === value ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>{label}</Link>)}</nav>
       <h2 className="font-semibold">{sp.status === 'unpaid' ? '待发放工资' : sp.status === 'paid' ? '已发放工资' : '已结算工资'}{rangeLabel}</h2>
@@ -135,7 +137,7 @@ async function OperationPieceworkSalaryContent({
                         }
                       />
                       <Badge variant="outline">
-                        {settlement._count.items} 条报工
+                        {settlement._count.items + settlement._count.productionWages} 条记录
                       </Badge>
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-sm text-muted-foreground">
@@ -161,7 +163,7 @@ async function PieceworkSalaryContent({
   historical = false,
 }: {
   actor: WorkerSalaryActor;
-  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; wagePage?: string | string[]; view?: string; status?: string };
   historical?: boolean;
 }) {
   const from = sp.from ? parseStrictYmd(sp.from) : null;
@@ -256,7 +258,7 @@ async function HourlySalaryContent({
 }: {
   actor: WorkerSalaryActor;
   workerType: WorkerType;
-  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; view?: string; status?: string };
+  searchParams: { from?: string; to?: string; page?: string | string[]; pendingPage?: string | string[]; wagePage?: string | string[]; view?: string; status?: string };
   historical?: boolean;
 }) {
   const fromMonth = validMonth(sp.from) ? sp.from : undefined;

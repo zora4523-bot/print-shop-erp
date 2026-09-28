@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { OrderCostCategory } from '../../generated/prisma/enums';
 
 type CostOrder = {
+  productionJobs?: Array<{ wages: Array<{ amount: Decimal.Value | null }> }>;
   productionOperations?: Array<{
     reports: Array<{ amount: Decimal.Value }>;
   }>;
@@ -78,9 +79,10 @@ function directCost(order: CostOrder) {
       (sum, report) => sum.plus(new Decimal(report.amount)),
       new Decimal(0),
     );
+  const completionPiecework = (order.productionJobs ?? []).flatMap(job => job.wages).reduce((sum, wage) => sum.plus(wage.amount ?? 0), new Decimal(0));
   const automaticPiecework = hasOperationLedger
-    ? operationPiecework
-    : legacyTaskPiecework;
+    ? operationPiecework.plus(completionPiecework)
+    : legacyTaskPiecework.plus(completionPiecework);
   const postedOutsourceOrders = order.outsourceOrders.filter(
     (entry) => entry.amount !== null,
   );

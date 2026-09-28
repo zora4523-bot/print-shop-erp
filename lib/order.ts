@@ -1074,6 +1074,7 @@ type StatusTxClient = {
           id: string;
           status: OrderStatus;
           purpose?: string;
+          simpleProduction?: boolean;
           submitterId: string;
           receiverAddress: string | null;
           receiverPhone: string | null;
@@ -1210,6 +1211,7 @@ type TransitionOptions = {
     orderId: string,
     order: {
       purpose?: string;
+      simpleProduction?: boolean;
       settlementType: OrderSettlementType;
       pricingStatus: string;
       workOrderVersion: number;
@@ -1262,6 +1264,7 @@ async function transitionWithLog(
         id: true,
         status: true,
         submitterId: true,
+        simpleProduction: true,
         receiverAddress: true,
         receiverPhone: true,
         settlementType: true,
@@ -1912,6 +1915,7 @@ export async function assertShipOrderReadinessInTx(
     settlementType: OrderSettlementType;
     isVersionedCommand: boolean;
     hasSubmittedShipmentDetails: boolean;
+    simpleProduction?: boolean;
   },
 ): Promise<StoredShipOrderShipment[]> {
   const storedShipments = await tx.orderShipment.findMany({
@@ -1973,6 +1977,7 @@ export async function assertShipOrderReadinessInTx(
   const currentOperations = await tx.productionOperation.findMany({
     where: {
       orderId: input.orderId,
+      ...(input.simpleProduction ? { operationType: { not: 'PACKING' as const } } : {}),
       workOrderVersion: input.workOrderVersion,
     },
     select: { status: true },
@@ -2345,6 +2350,7 @@ export async function shipOrder(
           settlementType: pricingOrder.settlementType,
           isVersionedCommand: Boolean(command),
           hasSubmittedShipmentDetails: requestedShipments.length > 0,
+          simpleProduction: pricingOrder.simpleProduction,
         });
         if (requestedShipments.length > 0) {
           await applyShipOrderShipmentFactsInTx(prismaTx, {

@@ -7,6 +7,18 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-09-28 单负责人排单与完工提成
+
+`actions/production-dispatch.ts` 提供四个写入口。返回 `{ok,message}`，成功或幂等重放刷新管理工单、师傅任务/工资及工资结算页面；销售与管理员使用同一 `/orders` 权威状态。
+
+- `publishProductionDispatchAction(previous, form)`：`production:manage`（仅 ADMIN）。payload 为 requestKey、1–20 个订单的 id/revision/version/assignments（任务来源键→师傅）；最多 100 项。同事务复核、下发、生成打印待办和记录单一归属。只接收已确认或有效生产中的订单；旧版或已有历史报工不能静默转入新流程。完全相同批次可重放。已打印但未生产的任务更换负责人时追加待重印任务；已有待打印任务复用，不重复创建。
+- `registerProductionCompletionAction(previous, form)`：jobId/revision/quantity/mode/reason/workDate。COMPLETE 用 `task:report`，并在领域校验本人当前归属；BACKFILL/APPROVE/REJECT 必须 ADMIN。数量非默认值只产生申请；APPROVE 必须等于申请量，驳回后可重提。补登不接受客户端师傅，日期不得早于下发或晚于今天，改版任务不得早于本次改版。审批、完成、提成义务和状态同一事务，当前日期闭锁及历史结算不可绕过。
+- `allocateProductionWagesAction(previous, form)`：ADMIN；jobId/requestKey/reason/allocations，每项 workerId/最终金额字符串/expectedRevision（新增 -1）。包含原生产师傅及本工作日全部既有参与人；按净额追加差额流水，不伪造报工。仅已实际完成且工作日未结算可发布。页面核对前后金额后提交。
+- `correctProductionRegistrationAction(input)`：ADMIN；jobId/revision/requestKey/reason/notActuallyProduced=true。仅当前代次、未发货/暂停/关闭、无待审批改动且所有相关工资未结算可更正误登记。追加反向金额与完整审计，重新开放登记；真实生产后改版不走此入口。
+
+切换 `simpleProduction` 后，旧认领/逐批报工入口与数据库旧报告写入口均拒绝该单，不能同时累计。金额待补录不阻止发货；数量待审批或金额待补录会阻止对应师傅实际生产日结算。正常缺工价明确报错，绝不按零价登记。
+
+
 ## 2026-09-28 取消未来计件调价计划
 
 `reviewPieceworkCancellationAction(workerId, targetId)` 与 `cancelPieceworkPlanAction(previous, form)` 均要求 `salary:rule:manage` 和 `PIECEWORK_SCHEDULE_CANCEL_ENABLED=true`。领域再次检查当前启用管理员；个人范围须匹配目标工价的 workerId，但已停用师傅的错误未来计划仍可取消。

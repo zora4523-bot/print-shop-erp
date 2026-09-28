@@ -50,6 +50,7 @@ describe('PERMISSIONS map', () => {
       'order:change:review',
       'order:production-facts:repair',
       'order:price:confirm',
+      'production:manage',
       'task:report',
       'task:dispute:create',
       'task:dispute:review',

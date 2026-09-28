@@ -28,6 +28,8 @@ export type DetailPrintRecord = {
 
 type Props = {
   model: AdminOrderDetailModel;
+  simpleProduction?: boolean;
+  productionOwners?: string[];
   canEdit: boolean;
   decision: ReactNode;
   prints: DetailPrintRecord[];
@@ -56,7 +58,7 @@ function Progress({ label, done, total, unit = '个' }: {
   </div>;
 }
 
-export function AdminOrderDetailView({ model, canEdit, decision, prints, printHint, supplementary, packaging, itemDetails, printActions }: Props) {
+export function AdminOrderDetailView({ simpleProduction, productionOwners, model, canEdit, decision, prints, printHint, supplementary, packaging, itemDetails, printActions }: Props) {
   const { feedback: copyNotice, copy } = useCopyToClipboard();
   const otherActions = supplementary.find(section => section.id === 'detail-other-actions');
   const [preview, setPreview] = useState<number | null>(null);
@@ -149,6 +151,8 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
         <StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>
         {model.isUrgent ? <StatusBadge tone="warning">急单</StatusBadge> : null}
         <p id="order-detail-overview" tabIndex={-1} className={cn(styles.meta, highlighted === 'order-detail-overview' && styles.highlight)}><span>业务员：{model.sales ?? '未填'}</span><span>交期：{model.due ?? '未设置'}{model.dueLeft ? ` · ${model.dueLeft}` : ''}</span><span>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')} 个</span></p>
+        {!!productionOwners?.length && <p className="basis-full text-sm">生产师傅：{productionOwners.join("、")}</p>}
+        <a href="#detail-production-records" className="inline-flex min-h-11 items-center text-sm underline">生产安排与提成</a>
         <Disclosure className="basis-full">
           <DisclosureSummary className={styles.disclosureSummary}><span>工单信息</span><ChevronDown aria-hidden="true" className={styles.disclosureChevron} /><span className={styles.expandLabel}>展开</span><span className={styles.collapseLabel}>收起</span></DisclosureSummary>
           <div className="flex flex-wrap items-center gap-3 pb-3">
@@ -172,7 +176,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
             {decision ?? <p>{ORDER_STATUS_REGISTRY[model.status].label} · 暂无待办</p>}
             {otherActions ? <div id="detail-other-actions" tabIndex={-1} className={styles.otherActions}><h3>维护与其他操作</h3>{otherActions.content}</div> : null}
           </section>
-          {hasProgress ? <section className={styles.asideSection} aria-label="生产进度"><h2 className={styles.eyebrow}>生产进度</h2><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></section> : null}
+          {hasProgress && !simpleProduction ? <section className={styles.asideSection} aria-label="生产进度"><h2 className={styles.eyebrow}>生产进度</h2><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></section> : null}
           <section className={styles.asideSection}><h2 className={styles.eyebrow}>版本与打印</h2>{printActions ? <div className="mb-3 flex flex-wrap gap-2">{printActions}</div> : null}
             {prints.length ? <ol className={styles.prints}>{prints.map((print) => <li key={print.id}><span>工单 v{print.version}<small>{print.at}</small></span><StatusBadge tone={print.version !== model.version || print.state === 'SUPERSEDED' ? 'danger' : print.state === 'PRINTED' ? 'success' : 'warning'}>
               {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : <p className={styles.emptyHint}>尚未创建打印任务</p>}
@@ -212,7 +216,7 @@ export function AdminOrderDetailView({ model, canEdit, decision, prints, printHi
                     <dl className={styles.specs}>{item.specs.map((spec) => <div key={spec.label}><dt>{spec.label}</dt><dd>{spec.value}</dd></div>)}</dl>
                     <div className={styles.fileStatus}><StatusBadge tone={item.hasCdr ? 'success' : 'warning'}>{item.hasCdr ? 'CDR 已上传' : '未上传 CDR'}</StatusBadge>
                       <Button type="button" variant="ghost" onClick={() => locate(document.getElementById(`detail-design-item-${item.id}`) ? `detail-design-item-${item.id}` : 'detail-design-files')}>查看设计文件</Button></div>
-                    {item.progress.map((progress) => <Progress key={progress.label} {...progress} />)}
+                    {!simpleProduction && item.progress.map((progress) => <Progress key={progress.label} {...progress} />)}
                     {item.remark ? <p className={styles.remark}>{item.remark}</p> : null}
                     <dl className={styles.feeLines}>{item.fees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount, model.status, fee.estimated)}</dd></div>)}</dl>
                   </div>

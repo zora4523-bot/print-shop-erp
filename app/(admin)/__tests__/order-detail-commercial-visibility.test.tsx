@@ -1,3 +1,4 @@
+vi.mock('@/components/business/production/ProductionJobPanel', () => ({ ProductionJobPanel: () => null }));
 vi.mock('@/lib/order/change-request-catalog-query', () => ({ listActiveOrderChangeCatalogProducts: vi.fn().mockResolvedValue([]) }));
 const { readHistoricalBlankPriceEditorMock } = vi.hoisted(() => ({ readHistoricalBlankPriceEditorMock: vi.fn().mockResolvedValue(null) }));
 // SalesOrderDetailView still renders the change forms for SALES.

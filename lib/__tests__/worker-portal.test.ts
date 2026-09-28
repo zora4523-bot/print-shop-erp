@@ -184,12 +184,15 @@ describe('worker order visibility', () => {
           id: 'order-other',
           status: { not: OrderStatus.SUBMITTED },
           OR: [
+            { simpleProduction: true, productionJobs: { some: { workerId: 'worker-a' } } },
+            { simpleProduction: false, OR: [
             {
               productionOperations: {
                 some: { operationType: PieceworkOperationType.PARTIAL },
               },
             },
             { productionProgressSteps: { some: {} } },
+          ] },
           ],
         },
       }),

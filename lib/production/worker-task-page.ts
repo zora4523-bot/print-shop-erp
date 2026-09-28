@@ -20,6 +20,7 @@ export async function listWorkerTaskPage(actor: { id: string; role: Role }, filt
     ? Prisma.sql`EXISTS (SELECT 1 FROM "ProductionOperationSource" src JOIN "OrderItem" item ON item.id=src."orderItemId" WHERE src."operationId"=step.id AND item.name ILIKE ${q})`
     : Prisma.sql`EXISTS (SELECT 1 FROM "OrderItem" item WHERE item.id=step."orderItemId" AND item.name ILIKE ${q})`;
   const where = Prisma.sql`step."workOrderVersion" = current_order."workOrderVersion"
+    AND current_order."simpleProduction" = false
     AND step.status IN ('PENDING'::"ProductionOperationStatus", 'IN_PROGRESS'::"ProductionOperationStatus")
     AND current_order.status IN ('RELEASED'::"OrderStatus", 'FOILING'::"OrderStatus", 'PACKING'::"OrderStatus", 'SCHEDULING'::"OrderStatus", 'IN_PRODUCTION'::"OrderStatus")
     ${lanePredicate}

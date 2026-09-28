@@ -24,7 +24,7 @@ export async function listWorkerSettlementPage(actor: { id: string; role: Role }
     const window = paginationWindow(total, parsePositiveInt(input.page, { defaultValue: 1 }), 20);
     const rows = await tx.pieceworkSettlement.findMany({ where, skip: window.skip, take: window.take,
       orderBy: [{ workDate: 'desc' }, { id: 'desc' }],
-      select: { id: true, workDate: true, status: true, reportAmount: true, adjustmentAmount: true, payableAmount: true, _count: { select: { items: true } } },
+      select: { id: true, workDate: true, status: true, reportAmount: true, adjustmentAmount: true, payableAmount: true, _count: { select: { items: true, productionWages: true } } },
     });
     return { ...paginatedResult(rows, total, window), totalAmount: sum._sum.payableAmount?.toString() ?? '0', unpaidAmount: unpaid._sum.payableAmount?.toString() ?? '0' };
   }, { isolationLevel: 'RepeatableRead' });

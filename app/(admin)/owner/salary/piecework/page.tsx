@@ -184,6 +184,7 @@ export default async function PieceworkSettlementPage({
                       </td>
                       <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
                         {formatMoney(row.reportAmount)}
+                        {row.pendingPricing > 0 && <p className="text-sm text-warning-foreground">待补录提成 {row.pendingPricing} 笔</p>}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <LockPieceworkSettlementForm

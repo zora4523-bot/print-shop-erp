@@ -39,6 +39,7 @@ export type ProductionCompletionTx = {
       id: string;
       status: OrderStatus;
       requiresOutsource?: boolean;
+      simpleProduction?: boolean;
       workOrderVersion: number;
       orderNo: string;
       customerRef: string | null;
@@ -166,6 +167,7 @@ export async function maybeCompleteProductionOrder(
       id: true,
       status: true,
       requiresOutsource: true,
+      simpleProduction: true,
       workOrderVersion: true,
       orderNo: true,
       customerRef: true,
@@ -195,7 +197,7 @@ export async function maybeCompleteProductionOrder(
   }
 
   const operations = await tx.productionOperation.findMany({
-    where: { orderId, workOrderVersion: order.workOrderVersion },
+    where: { orderId, workOrderVersion: order.workOrderVersion, ...(order.simpleProduction ? { operationType: { not: 'PACKING' } } : {}) },
     select: { id: true, status: true },
   });
   // A valid canonical generation may contain only no-pay progress steps (for

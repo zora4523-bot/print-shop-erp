@@ -86,6 +86,7 @@ const PROGRESS_REPORT_SELECT = {
       orderNo: true,
       status: true,
       scheduledAt: true,
+      simpleProduction: true,
       workOrderVersion: true,
     },
   },
@@ -216,6 +217,7 @@ async function reportProductionProgressInTx(
         },
       }),
     ]);
+    if (step?.order.simpleProduction) throw new ProgressReportingError('ORDER_NOT_REPORTABLE', '请打开已安排的任务登记完成');
     if (!step) {
       throw new ProgressReportingError(
         'PROGRESS_STEP_NOT_FOUND',
