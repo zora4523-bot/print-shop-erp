@@ -90,7 +90,7 @@ function mount() {
             selectedExportRequestKey="sizing-test-export"
             data={{ rows: orders, total: 20, page: 1, pageSize: 20, pageCount: 1,
               summary: { orderCount: 20, totalQuantity: 20000, effectiveFee: '24690.00', manualPricingCount: 0, incompleteFeeExcludedCount: 0, legacyFeeExcludedCount: 0 },
-              counts: { queues: { todo: 20, print: 0, production: 0, shipped: 0, done: 0, all: 20 }, signals: { 'pending-confirmation': 0, 'pending-pricing': 0, 'pending-change': 0, 'pending-release': 20, 'on-hold': 0, overdue: 0, 'due-today': 0 } },
+              counts: { queues: { todo: 20, print: 0, production: 0, shipped: 0, done: 0, all: 20 }, signals: { 'pending-quantity': 0, 'pending-confirmation': 0, 'pending-pricing': 0, 'pending-change': 0, 'pending-release': 20, 'on-hold': 0, overdue: 0, 'due-today': 0 } },
             }}
           />
         </div>

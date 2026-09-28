@@ -905,6 +905,7 @@ export function OrderChangeReviewForm({
         decision,
         expectedPriceRevision: lastPreview.priceRevision,
         expectedQuoteToken: lastPreview.quoteToken ?? undefined,
+        expectedProductionFactsToken: lastPreview.productionFactsToken,
         pendingChargeResolutions: pendingChargeBuild.resolutions,
         reviewRemark: reviewRemark.trim() || null,
       }),

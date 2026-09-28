@@ -665,12 +665,12 @@ describe('admin order workspace predicates', () => {
       .mockResolvedValueOnce(groups({ PENDING_FACTORY: 1, CONFIRMED: 1, RELEASED: 1, SHIPPED: 1, SETTLED: 1, REJECTED: 1 }));
     const queueCounts = { todo: 13, print: 1, production: 8, shipped: 2, done: 4, all: 23 };
     const signalCounts = {
-      'pending-confirmation': 3, 'pending-pricing': 1, 'pending-release': 3,
+      'pending-quantity': 0, 'pending-confirmation': 3, 'pending-pricing': 1, 'pending-release': 3,
       'pending-change': 6, 'on-hold': 2, overdue: 6, 'due-today': 7,
     };
     dbMock.order.count
       .mockResolvedValueOnce(1).mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(6).mockResolvedValueOnce(7)
+      .mockResolvedValueOnce(6).mockResolvedValueOnce(7).mockResolvedValueOnce(0)
       .mockResolvedValueOnce(2).mockResolvedValueOnce(3).mockResolvedValueOnce(4);
     dbMock.orderItem.aggregate.mockResolvedValue({
       _sum: { quantity: 12345 },
@@ -688,12 +688,12 @@ describe('admin order workspace predicates', () => {
     expect(dbMock.order.groupBy).toHaveBeenNthCalledWith(2, {
       by: ['status'], where: { AND: [buildAdminWorkspaceBaseWhere(actor, query), adminSignalWhere('pending-change', now)] }, _count: { _all: true },
     });
-    for (const [index, signal] of (['pending-pricing', 'overdue', 'due-today'] as const).entries()) {
+    for (const [index, signal] of (['pending-pricing', 'overdue', 'due-today', 'pending-quantity'] as const).entries()) {
       expect(dbMock.order.count.mock.calls[index + 1]?.[0]).toEqual({
         where: { AND: [buildAdminWorkspaceBaseWhere(actor, query), adminSignalWhere(signal, now)] },
       });
     }
-    expect(dbMock.order.count).toHaveBeenCalledTimes(7);
+    expect(dbMock.order.count).toHaveBeenCalledTimes(8);
     expect(dbMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 15_000,
     });
@@ -710,7 +710,7 @@ describe('admin order workspace predicates', () => {
       _sum: { quantity: true },
     });
     expect(dbMock.order.aggregate).toHaveBeenCalledTimes(3);
-    const summaryCountStart = 4;
+    const summaryCountStart = 5;
     expect(dbMock.order.count.mock.calls[summaryCountStart]?.[0]).toEqual({
       where: {
         AND: [expect.any(Object), adminManualPricingWhere()],
@@ -783,7 +783,7 @@ describe('admin order workspace predicates', () => {
       expect(page.counts).toEqual({
         queues: { todo: hasPendingChange ? 1 : todo, print: 0, production: hasPendingChange ? 0 : production, shipped, done, all: 1 },
         signals: {
-          'pending-confirmation': pendingConfirmation, 'pending-pricing': 0,
+          'pending-quantity': 0, 'pending-confirmation': pendingConfirmation, 'pending-pricing': 0,
           'pending-release': hasPendingChange ? 0 : pendingRelease,
           'pending-change': hasPendingChange ? 1 : 0,
           'on-hold': onHold, overdue: 0, 'due-today': 0,
@@ -796,14 +796,14 @@ describe('admin order workspace predicates', () => {
     const now = new Date('2026-09-10T00:00:00Z');
     const query = parseAdminOrderWorkspaceQuery({ queue: 'production', signal: 'overdue', q: '客户搜索', starred: 'yes', page: '3' }).query;
     dbMock.order.groupBy.mockResolvedValueOnce([{ status: OrderStatus.RELEASED, _count: { _all: 3 } }]).mockResolvedValueOnce([]);
-    dbMock.order.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(2).mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    dbMock.order.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(2).mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValueOnce(1);
     const page = await loadAdminOrderWorkspace(actor, query, now);
     expect(page.counts.queues.production).toBe(3);
     expect(page.counts.signals.overdue).toBe(2);
     expect(page.total).toBe(1);
     expect(page.page).toBe(1);
     expect(dbMock.order.groupBy).toHaveBeenNthCalledWith(1, { by: ['status'], where: buildAdminWorkspaceBaseWhere(actor, query), _count: { _all: true } });
-    expect(dbMock.order.count).toHaveBeenNthCalledWith(5, { where: buildAdminWorkspaceResultWhere(actor, query, now) });
+    expect(dbMock.order.count).toHaveBeenNthCalledWith(6, { where: buildAdminWorkspaceResultWhere(actor, query, now) });
     expect(dbMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: buildAdminWorkspaceResultWhere(actor, query, now), skip: 0 }));
   });
 

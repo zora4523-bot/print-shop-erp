@@ -84,10 +84,11 @@ function detailModel(overrides: Partial<AdminOrderDetailModel> = {}): AdminOrder
   };
 }
 
-function renderDetail(model = detailModel(), canEdit = true) {
+function renderDetail(model = detailModel(), canEdit = true, simpleProduction = false) {
   flushSync(() => root.render(<AdminOrderDetailView
     model={model}
     canEdit={canEdit}
+    simpleProduction={simpleProduction}
     printHint={printHint}
     decision={<div><p>当前待办：核对本版打印</p><Button type="button">核对打印任务</Button><a href="#pricing-review" className="inline-flex min-h-11 min-w-11 items-center p-3">前往核价</a></div>}
     prints={[{ id: 'print-1', version: 1, state: 'SUPERSEDED', at: '2026-09-07T02:00:00Z' }, { id: 'print-2', version: 2, state: 'PENDING', at: '2026-09-08T02:00:00Z' }]}
@@ -266,6 +267,13 @@ describe('admin order detail design and interaction gates', () => {
     expect(details!.open).toBe(true);
     await expect.element(page.getByText('该记录来自已保存的审核结果。', { exact: true })).toBeVisible();
     expect(geometryFailures(host, 393)).toEqual([]);
+  });
+
+  it('shows assigned completion without a contradictory empty legacy report ledger, retaining real old reports', async () => {
+    renderDetail(detailModel({ works: [] }), true, true);
+    expect(host.querySelector('[aria-label="报工流水"]')).toBeNull();
+    renderDetail(detailModel(), true, true);
+    expect(host.querySelector('[aria-label="报工流水"]')?.textContent).toContain('1600');
   });
 
   it('renders empty saved data and a valid zero confirmed amount without invented values or edit access', async () => {

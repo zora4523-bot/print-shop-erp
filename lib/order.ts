@@ -1918,6 +1918,10 @@ export async function assertShipOrderReadinessInTx(
     simpleProduction?: boolean;
   },
 ): Promise<StoredShipOrderShipment[]> {
+  if (input.simpleProduction) {
+    const { assertNoHistoricalProductionReview } = await import('@/lib/production/fact-guards');
+    await assertNoHistoricalProductionReview(tx, input.orderId);
+  }
   const storedShipments = await tx.orderShipment.findMany({
     where: { orderId: input.orderId },
     select: {

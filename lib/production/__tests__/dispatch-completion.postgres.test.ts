@@ -1,3 +1,11 @@
+import { preserveCarriedCompletionInTx, reconcileProductionOrderInTx } from '../order-state';
+import { createReworkOrder } from '@/lib/order/rework';
+import { repairProductionMetadata, scanProductionRecovery } from '../recovery';
+import { holdFactoryOrder, resumeFactoryOrder } from '@/lib/order/admin-workflow';
+import { createOrderChangeRequest, withdrawOrderChangeRequest, previewOrderChangeRequestPricing, reviewOrderChangeRequest, previewOrderCancellationSettlement } from '@/lib/order/change-request';
+import { reviewProductionFact } from '../fact-review';
+import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
+import { dispatchNotification } from '@/lib/notification/dispatch';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
@@ -28,6 +36,18 @@ async function newWorker() {
   const id = `worker_${randomUUID()}`;
   await db.user.create({ data: { id, username: id, password: 'not-a-login-hash', displayName: '生产师傅', role: 'WORKER', workerType: 'MACHINE', machineType: 'HAND_PRESS' } });
   return { id, role: 'WORKER' as const };
+}
+async function historicalRate(workerId: string, effectiveFrom: Date) {
+  // A private, new fixture book: no published/shared book is ever backdated.
+  await db.$transaction(async tx => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('print-shop-erp:piecework-price-book:publish'))`;
+    const template = await tx.pieceworkPriceBook.findFirstOrThrow({ where: { workerId: null, status: 'PUBLISHED' }, include: { rules: true } });
+    const latest = await tx.pieceworkPriceBook.aggregate({ _max: { version: true } });
+    const book = await tx.pieceworkPriceBook.create({ data: { workerId, version: latest._max.version! + 1, sourceName: 'TEST historical worker rate',
+      rules: { create: template.rules.filter(rule => rule.operationType === 'PARTIAL').map(rule => ({ operationType: rule.operationType, unit: rule.unit, amount: rule.amount, smallOrderAmount: rule.smallOrderAmount, setupAmount: rule.setupAmount })) } } });
+    await tx.pieceworkPriceBook.update({ where: { id: book.id }, data: { status: 'PUBLISHED', effectiveFrom, publishedAt: effectiveFrom, publishedById: admin.id,
+      sourceSha256: template.sourceSha256, manifestSha256: template.manifestSha256, ruleSetSha256: template.ruleSetSha256, publishNote: '仅隔离测试：原日已生效的独立个人工价' } });
+  });
 }
 async function fixture(quantity = 1000) {
   const craft = await db.craft.findUniqueOrThrow({ where: { code: 'FLAT_FOIL_PARTIAL' } });
@@ -64,6 +84,17 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect((await resolveWorkerWorkOrderScan(f.order.orderNo, worker))?.defaultTaskId).toBe(f.job.id);
     await expect(registerProductionCompletion(completion(f.job), collaborator)).rejects.toThrow('未安排');
     await expect(reportProductionOperation({ operationId: f.job.operationId!, completedQty: 1, defectQty: 0, reworkQty: 0, idempotencyKey: randomUUID() }, worker)).rejects.toThrow('已安排');
+  });
+  it('publishes a five-order selection atomically and replays without duplicate jobs or print requests', async () => {
+    worker = await newWorker();
+    const fixtures = [];
+    for (let i = 0; i < 5; i++) fixtures.push(await fixture());
+    const input = { requestKey: randomUUID(), orders: fixtures.flatMap(row => row.request.orders) };
+    const ids = fixtures.map(row => row.order.id);
+    await publishProductionDispatch(input, admin); await publishProductionDispatch(input, admin);
+    expect(await db.productionJob.count({ where: { orderId: { in: ids }, workerId: worker.id } })).toBe(5);
+    expect(await db.orderPrintJob.count({ where: { orderId: { in: ids } } })).toBe(5);
+    expect(await db.order.count({ where: { id: { in: ids }, status: 'RELEASED' } })).toBe(5);
   });
   it('rolls back every order when one worker assignment is invalid', async () => {
     const a = await fixture(); const b = await fixture();
@@ -132,15 +163,26 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     await expect(db.productionWage.updateMany({ where: { jobId: f.job.id }, data: { amount: '1' } })).rejects.toThrow();
     await expect(db.productionJob.update({ where: { id: f.job.id }, data: { workerId: collaborator.id } })).rejects.toThrow();
   });
-  it('rejects a changed approval quantity and allows a reasoned rejection to retry', async () => {
+  it('allows a reasoned quantity correction before completion and preserves the original request', async () => {
     const f = await assigned(); await registerProductionCompletion({ ...completion(f.job, '990'), reason: '实际数量待核对' }, worker);
     const pending = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
     await expect(lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) })).rejects.toThrow('数量待审批');
-    await expect(registerProductionCompletion({ ...completion(pending, '999'), mode: 'APPROVE', reason: '审批' }, admin)).rejects.toThrow('申请不一致');
-    await registerProductionCompletion({ ...completion(pending, '990'), mode: 'REJECT', reason: '数量未核实' }, admin);
+    await expect(registerProductionCompletion({ ...completion(pending, '999'), mode: 'APPROVE', reason: '' }, admin)).rejects.toThrow('说明');
+    await registerProductionCompletion({ ...completion(pending, '999'), mode: 'APPROVE', reason: '逐箱复核为 999' }, admin);
+    const completed = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
+    expect(completed.completedQty?.toString()).toBe('999'); expect(completed.requestedQty?.toString()).toBe('990');
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: f.job.id } })).amount?.toString()).toBe('199.8');
+    await expect(registerProductionCompletion({ ...completion(pending, '990'), mode: 'APPROVE', reason: '旧页面' }, admin)).rejects.toThrow('变化');
+  });
+  it('requires explicit no-production evidence to reject and preserves the original request in audit', async () => {
+    const f = await assigned(); await registerProductionCompletion({ ...completion(f.job, '990'), reason: '误报数量' }, worker);
+    const pending = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
+    await expect(registerProductionCompletion({ ...completion(pending, '990'), mode: 'REJECT', reason: '未核实' }, admin)).rejects.toThrow('没有实际生产');
+    await registerProductionCompletion({ ...completion(pending, '990'), mode: 'REJECT', reason: '已向原师傅核实未开工', notActuallyProduced: true }, admin);
     const reset = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
     expect(reset.status).toBe('PENDING'); expect(reset.workDate).toBeNull();
     expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(0);
+    expect((await db.orderLog.findFirstOrThrow({ where: { orderId: f.order.id, action: 'PRODUCTION_QUANTITY_REJECTED' } })).changedFields).toMatchObject({ requestedQty: '990', workDate: todayShanghai(), notActuallyProduced: true });
     await registerProductionCompletion(completion(reset), worker);
   });
   it('rejects stale reassignment and non-admin publication', async () => {
@@ -210,9 +252,422 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     const current = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
     const newOwner = await newWorker();
     const request = { requestKey: randomUUID(), orders: [{ ...f.request.orders[0], revision: current.revision, assignments: Object.fromEntries(Object.keys(f.request.orders[0].assignments).map(key => [key, newOwner.id])) }] };
+    await expect(publishProductionDispatch(request, admin)).rejects.toThrow('尚未生产');
+    await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '原师傅确认尚未开工', notActuallyProduced: true }, admin);
     await publishProductionDispatch(request, admin); await publishProductionDispatch(request, admin);
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } })).workerId).toBe(newOwner.id);
     expect(await db.orderPrintJob.count({ where: { orderId: f.order.id, state: 'PENDING', printKind: 'REPRINT' } })).toBe(1);
   });
 
+  it('approves a quantity while held and reconciles completion only on resume', async () => {
+    worker = await newWorker();
+    const f = await assigned();
+    await registerProductionCompletion({ ...completion(f.job, '990'), reason: '真实产量' }, worker);
+    await holdFactoryOrder({ orderId: f.order.id, reasonCode: 'DESIGN_ERROR', reasonNote: '核对生产', affectedFigs: [], idempotencyKey: randomUUID() }, admin);
+    const pending = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
+    await registerProductionCompletion({ ...completion(pending, '990'), mode: 'APPROVE', reason: '实际核定' }, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('ON_HOLD');
+    const result = await resumeFactoryOrder({ orderId: f.order.id, recoveryEvidence: { production: '数量已核实' }, idempotencyKey: randomUUID() }, admin);
+    expect(result.status).toBe('PACKING');
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: f.job.id } })).amount?.toString()).toBe('198');
+  });
+
+  it.each(['WITHDRAW', 'DENY'] as const)('backfills during pending cancellation and completes once after %s', async mode => {
+    worker = await newWorker();
+    const f = await assigned();
+    const order = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    const sales = { id: order.submitterId, role: 'SALES' as const };
+    const request = await createOrderChangeRequest({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion, type: 'CANCEL', reason: '先核实生产', items: [] }, sales);
+    await expect(registerProductionCompletion(completion(f.job), worker)).rejects.toThrow('待审批');
+    await registerProductionCompletion({ ...completion(f.job), mode: 'BACKFILL', workDate: todayShanghai(), reason: '已做忘记扫码' }, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('RELEASED');
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_COMPLETED' && 'orderId' in payload && payload.orderId === order.id)).toHaveLength(0);
+    if (mode === 'WITHDRAW') await withdrawOrderChangeRequest({ requestId: request.id }, sales);
+    else await reviewOrderChangeRequest({ requestId: request.id, decision: 'DENY', reviewRemark: '已完成，继续交付', pendingChargeResolutions: [] }, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('PACKING');
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_COMPLETED' && 'orderId' in payload && payload.orderId === order.id)).toHaveLength(1);
+  });
+
+  it('requires production evidence before cancelling and invalidates a preview after a changed verification', async () => {
+    worker = await newWorker();
+    const f = await assigned();
+    const order = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    const sales = { id: order.submitterId, role: 'SALES' as const };
+    const request = await createOrderChangeRequest({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion, type: 'CANCEL', reason: '尚未生产取消', items: [] }, sales);
+    await expect(previewOrderCancellationSettlement({ requestId: request.id, producedQty: 0 }, admin)).rejects.toThrow('是否已生产');
+    await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '师傅确认尚未开工', notActuallyProduced: true }, admin);
+    const preview = await previewOrderCancellationSettlement({ requestId: request.id, producedQty: 0 }, admin);
+    const fact = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } });
+    await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: fact.revision, mode: 'UNPRODUCED', reason: '再次核对，未开工', notActuallyProduced: true }, admin);
+    const approve = { requestId: request.id, decision: 'APPROVE' as const, reviewRemark: '管理员已核实生产', producedQty: 0, expectedPriceRevision: preview.priceRevision, expectedQuoteToken: preview.quoteToken, expectedProductionFactsToken: preview.productionFactsToken, pendingChargeResolutions: [] };
+    await expect(reviewOrderChangeRequest(approve, admin)).rejects.toThrow('重新预览');
+    const latest = await previewOrderCancellationSettlement({ requestId: request.id, producedQty: 0 }, admin);
+    await reviewOrderChangeRequest({ ...approve, expectedProductionFactsToken: latest.productionFactsToken }, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('CANCELLED');
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } })).status).toBe('CANCELLED');
+    expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(0);
+  });
+
+  it('shows pending quantity even when that worker has no wage row', async () => {
+    worker = await newWorker();
+    const f = await assigned();
+    await registerProductionCompletion({ ...completion(f.job, '990'), reason: '真实产量待核定' }, worker);
+    const day = await getPieceworkSettlementDay({ workDate: todayShanghai(), reporterId: worker.id });
+    expect(day.candidates).toHaveLength(1);
+    expect(day.candidates[0].obligations).toEqual([expect.objectContaining({ id: f.job.id, orderId: f.order.id, status: 'REQUESTED' })]);
+    expect(day.candidates[0].reportCount).toBe(0);
+  });
+
+  it('creates a real assigned rework through its public command, then records and ships it', async () => {
+    worker = await newWorker();
+    const f = await assigned(); await registerProductionCompletion(completion(f.job), worker);
+    // Prepare a shipped source; the tested entry is real createReworkOrder (not manual materialization).
+    await db.order.update({ where: { id: f.order.id }, data: { status: 'SHIPPED', shippedAt: new Date(), receiverName: '测试收件人', receiverPhone: '13800138000', receiverAddress: '广东省佛山市测试地址' } });
+    const redo = await createReworkOrder({ sourceOrderId: f.order.id, cause: 'QUALITY', reason: '真实重做回归', items: [{ sourceOrderItemId: f.order.items[0].id, quantity: 200, craftIds: f.order.items[0].crafts }] }, admin);
+    const order = await db.order.findUniqueOrThrow({ where: { id: redo.id }, include: { shipments: true } });
+    expect(order.status).toBe('RELEASED'); expect(order.simpleProduction).toBe(true);
+    const job = await db.productionJob.findFirstOrThrow({ where: { orderId: redo.id } });
+    expect(job.workerId).toBe(worker.id); expect(job.manualPricing).toBe(true);
+    expect(await db.orderPrintJob.count({ where: { orderId: redo.id } })).toBe(1);
+    await registerProductionCompletion(completion(job, '200'), worker);
+    expect((await db.order.findUniqueOrThrow({ where: { id: redo.id } })).status).toBe('PACKING');
+    const ready = await db.order.findUniqueOrThrow({ where: { id: redo.id } });
+    await registerShipment({ orderId: redo.id, shipmentId: order.shipments[0].id, expectedVersion: order.shipments[0].registrationVersion, expectedRevision: ready.revision, expectedEditVersion: ready.editVersion, expectedWorkOrderVersion: ready.workOrderVersion, expectedPriceRevision: ready.priceRevision, idempotencyKey: randomUUID(), trackingNo: 'TESTREWORK123', carrierCode: 'ZTO', carrierName: '', confirm: true }, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: redo.id } })).status).toBe('SETTLED');
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: order.shipments[0].id } })).status).toBe('SHIPPED');
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: f.job.id } })).amount?.toString()).toBe('200');
+  });
+
+  it('revises a real rework using its own production without inheriting the source a second time', async () => {
+    worker = await newWorker();
+    const source = await assigned();
+    await registerProductionCompletion(completion(source.job), worker);
+    await db.order.update({ where: { id: source.order.id }, data: { status: 'SHIPPED', shippedAt: new Date(), receiverName: '测试收件人', receiverPhone: '13800138000', receiverAddress: '广东省佛山市测试地址' } });
+    const redo = await createReworkOrder({ sourceOrderId: source.order.id, cause: 'QUALITY', reason: '重做自身改版回归', items: [{ sourceOrderItemId: source.order.items[0].id, quantity: 200, craftIds: source.order.items[0].crafts }] }, admin);
+    const item = await db.orderItem.findFirstOrThrow({ where: { orderId: redo.id } });
+    const first = await db.productionJob.findFirstOrThrow({ where: { orderId: redo.id } });
+    await registerProductionCompletion(completion(first, '200'), worker);
+    for (const [version, quantity] of [[2, 200], [3, 300]] as const) {
+      await db.$transaction(async tx => {
+        await tx.orderItem.update({ where: { id: item.id }, data: { name: '重做款修改', quantity } });
+        await tx.orderPackagingGroup.updateMany({ where: { orderId: redo.id }, data: { actualBagCount: quantity } });
+        await tx.order.update({ where: { id: redo.id }, data: { workOrderVersion: version } });
+        await activateProductionOperationsInTx(tx, redo.id, admin, undefined, { targetStatus: 'PACKING', allowVersionRematerialization: true });
+        await activateProductionOperationsInTx(tx, redo.id, admin, undefined, { targetStatus: version === 2 ? 'PACKING' : 'RELEASED', allowVersionRematerialization: true });
+      });
+      const jobs = await db.productionJob.findMany({ where: { orderId: redo.id, workOrderVersion: version } });
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].workerId).toBe(worker.id);
+      expect(jobs[0].manualPricing).toBe(true);
+      expect(jobs[0].status).toBe(version === 2 ? 'CARRIED' : 'PENDING');
+      expect(jobs[0].plannedQty.toString()).toBe(version === 2 ? '0' : '100');
+    }
+    expect(await db.productionWage.count({ where: { job: { orderId: redo.id } } })).toBe(1);
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: source.job.id } })).amount?.toString()).toBe('200');
+    expect((await db.order.findUniqueOrThrow({ where: { id: source.order.id } })).status).toBe('SHIPPED');
+  });
+
+  it('records settled-day production separately from the frozen wage and protects correction without wage rows', async () => {
+    worker = await newWorker();
+    const paid = await assigned(); const forgotten = await assigned();
+    await registerProductionCompletion(completion(paid.job), worker);
+    const receipt = await lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) });
+    const before = await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } });
+    const backfill = { ...completion(forgotten.job), mode: 'BACKFILL' as const, workDate: todayShanghai(), reason: '核实原日已做，工资漏登记' };
+    await expect(registerProductionCompletion(backfill, admin)).rejects.toThrow('原生产日工资已结算');
+    await registerProductionCompletion({ ...backfill, confirmedSettledDay: true }, admin);
+    await registerProductionCompletion({ ...backfill, confirmedSettledDay: true }, admin);
+    const completed = await db.productionJob.findUniqueOrThrow({ where: { id: forgotten.job.id } });
+    expect(completed.status).toBe('COMPLETED'); expect(completed.workerId).toBe(worker.id);
+    expect((await db.order.findUniqueOrThrow({ where: { id: forgotten.order.id } })).status).toBe('PACKING');
+    expect(await db.productionWage.count({ where: { jobId: forgotten.job.id } })).toBe(0);
+    const obligation = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: completed.id } });
+    expect(obligation.status).toBe('WAGES_DUE');
+    expect(await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } })).toEqual(before);
+    await expect(correctProductionRegistration({ jobId: completed.id, revision: completed.revision, requestKey: randomUUID(), reason: '不能绕过原日', notActuallyProduced: true }, admin)).rejects.toThrow('已结算');
+    await expect(allocateProductionWages({ jobId: completed.id, requestKey: randomUUID(), reason: '不能改原日工资', allocations: [{ workerId: worker.id, amount: '200', expectedRevision: -1 }] }, admin)).rejects.toThrow('已结算');
+    await expect(db.productionJob.update({ where: { id: completed.id }, data: { status: 'PENDING', revision: { increment: 1 }, completedQty: null, completedAt: null, workDate: null } })).rejects.toThrow();
+    await reviewProductionFact({ jobId: completed.id, jobRevision: completed.revision, reviewRevision: obligation.revision, mode: 'DISMISS_WAGE', reason: '根据留存凭据确认此前已另行支付，无需补发' }, admin);
+    expect((await db.productionFactReview.findUniqueOrThrow({ where: { jobId: completed.id } })).status).toBe('DISMISSED');
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: completed.id } })).status).toBe('COMPLETED');
+  });
+
+  it('resuming with a pending cancellation does not notify until the last request closes', async () => {
+    worker = await newWorker(); const f = await assigned();
+    await holdFactoryOrder({ orderId: f.order.id, reasonCode: 'DESIGN_ERROR', reasonNote: '暂停核对', affectedFigs: [], idempotencyKey: randomUUID() }, admin);
+    const order = await db.order.findUniqueOrThrow({ where: { id: f.order.id } }); const sales = { id: order.submitterId, role: 'SALES' as const };
+    const request = await createOrderChangeRequest({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion, type: 'CANCEL', reason: '先核实生产', items: [] }, sales);
+    await registerProductionCompletion({ ...completion(f.job), mode: 'BACKFILL', workDate: todayShanghai(), reason: '暂停前已经生产' }, admin);
+    await resumeFactoryOrder({ orderId: order.id, recoveryEvidence: { production: '实际数量已核定，取消待审批' }, idempotencyKey: randomUUID() }, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('RELEASED');
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).completedAt).toBeNull();
+    await withdrawOrderChangeRequest({ requestId: request.id }, sales);
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('PACKING');
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_COMPLETED' && 'orderId' in payload && payload.orderId === order.id)).toHaveLength(1);
+  });
+
+  it('metadata-only approvals retain the accepted 990, original completion time and one notification', async () => {
+    worker = await newWorker(); const f = await assigned();
+    await registerProductionCompletion({ ...completion(f.job, '990'), reason: '实际成品' }, worker);
+    const pending = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
+    await registerProductionCompletion({ ...completion(pending, '990'), mode: 'APPROVE', reason: '核定完成' }, admin);
+    const original = await db.order.findUniqueOrThrow({ where: { id: f.order.id } }); const sales = { id: original.submitterId, role: 'SALES' as const };
+    for (const promisedDate of ['2026-10-03', '2026-10-04']) {
+      const order = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+      const request = await createOrderChangeRequest({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion, type: 'MODIFY', modifyKind: 'OTHER', reason: '交期协商', items: [], promisedDate: new Date(promisedDate) }, sales);
+      const quote = await previewOrderChangeRequestPricing(request.id, admin);
+      await reviewOrderChangeRequest({ requestId: request.id, decision: 'APPROVE', reviewRemark: '同意调整交期', expectedPriceRevision: quote.priceRevision, expectedProductionFactsToken: quote.productionFactsToken, pendingChargeResolutions: [] }, admin);
+      const after = await db.order.findUniqueOrThrow({ where: { id: order.id } });
+      expect(after.status).toBe('PACKING'); expect(after.completedAt).toEqual(original.completedAt);
+      const task = await db.productionJob.findFirstOrThrow({ where: { orderId: order.id, workOrderVersion: after.workOrderVersion } });
+      expect(task.status).toBe('CARRIED'); expect(task.plannedQty.toString()).toBe('0');
+    }
+    expect(await db.productionWage.count({ where: { job: { orderId: f.order.id } } })).toBe(1);
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_COMPLETED' && 'orderId' in payload && payload.orderId === f.order.id)).toHaveLength(1);
+  });
+
+  it.each(['COMPLETE', 'BACKFILL'] as const)('continues unfinished physical work across metadata edits and pays once via %s', async mode => {
+    worker = await newWorker(); const f = await assigned();
+    const priorDay = new Date(`${todayShanghai()}T00:00:00Z`); priorDay.setUTCDate(priorDay.getUTCDate() - 1);
+    await db.productionOperation.update({ where: { id: f.job.operationId! }, data: { createdAt: priorDay } });
+    if (mode === 'BACKFILL') await historicalRate(worker.id, priorDay);
+    // A scan means final completion: the 400 already physically made are still
+    // part of the original 1,000-piece task, not an invented completed batch.
+    const before = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    const request = await createOrderChangeRequest({ orderId: before.id, expectedRevision: before.revision, expectedWorkOrderVersion: before.workOrderVersion, type: 'MODIFY', modifyKind: 'OTHER', reason: '已做部分、继续生产，仅调整交期', items: [], promisedDate: new Date('2026-10-05') }, { id: before.submitterId, role: 'SALES' });
+    const quote = await previewOrderChangeRequestPricing(request.id, admin);
+    await reviewOrderChangeRequest({ requestId: request.id, decision: 'APPROVE', reviewRemark: '继续原任务', expectedPriceRevision: quote.priceRevision, expectedProductionFactsToken: quote.productionFactsToken, pendingChargeResolutions: [] }, admin);
+    const after = await db.order.findUniqueOrThrow({ where: { id: before.id } });
+    const next = await db.productionJob.findFirstOrThrow({ where: { orderId: before.id, workOrderVersion: after.workOrderVersion } });
+    expect(after.status).toBe('RELEASED'); expect(after.completedAt).toBeNull();
+    expect(next.workerId).toBe(worker.id); expect(next.plannedQty.toString()).toBe('1000'); expect(next.manualPricing).toBe(false);
+    expect(await db.productionWage.count({ where: { job: { orderId: before.id } } })).toBe(0);
+    expect((await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } })).evidence).toMatchObject({ resolution: 'CONTINUED', nextJobId: next.id });
+    const input = mode === 'BACKFILL' ? { ...completion(next), mode, workDate: priorDay.toISOString().slice(0, 10), reason: '原任务实际生产日补登记' } : completion(next);
+    await registerProductionCompletion(input, mode === 'BACKFILL' ? admin : worker);
+    await registerProductionCompletion(input, mode === 'BACKFILL' ? admin : worker);
+    const wage = await db.productionWage.findFirstOrThrow({ where: { jobId: next.id } });
+    expect(wage.amount?.toString()).toBe('200');
+    expect(await db.productionWage.count({ where: { job: { orderId: before.id } } })).toBe(1);
+    expect((await db.order.findUniqueOrThrow({ where: { id: before.id } })).status).toBe('PACKING');
+  });
+
+  it('preserves physical completion when a repriced reduction requires no new production', async () => {
+    worker = await newWorker(); const f = await assigned();
+    await registerProductionCompletion({ ...completion(f.job, '990'), reason: '实际成品' }, worker);
+    const pending = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
+    await registerProductionCompletion({ ...completion(pending, '990'), mode: 'APPROVE', reason: '核定完成' }, admin);
+    const before = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    await db.$transaction(async tx => {
+      await tx.orderItem.update({ where: { id: f.order.items[0].id }, data: { quantity: 995 } });
+      await tx.orderPackagingGroup.updateMany({ where: { orderId: before.id }, data: { actualBagCount: 995 } });
+      await tx.order.update({ where: { id: before.id }, data: { workOrderVersion: 2, completedAt: null } });
+      await activateProductionOperationsInTx(tx, before.id, admin, undefined, { targetStatus: 'PACKING', allowVersionRematerialization: true });
+      await preserveCarriedCompletionInTx(tx, before.id, before.completedAt);
+      const completed = await reconcileProductionOrderInTx(tx, before.id, admin.id, new Date());
+      expect(completed.notification).toBeUndefined();
+    });
+    expect((await db.order.findUniqueOrThrow({ where: { id: before.id } })).completedAt).toEqual(before.completedAt);
+    expect(await db.productionWage.count({ where: { job: { orderId: before.id } } })).toBe(1);
+  });
+
+  it('recovers a cancelled old request from original quantities and reprices only the real 310-piece successor', async () => {
+    worker = await newWorker(); const f = await assigned();
+    // Simulate persisted legacy data, without disabling any database protection.
+    await db.productionJob.update({ where: { id: f.job.id }, data: { status: 'CANCELLED', requestedQty: '990', requestReason: '旧申请被历史版本取消', requestedAt: new Date(), workDate: new Date(`${todayShanghai()}T00:00:00Z`) } });
+    await db.$transaction(async tx => {
+      await tx.orderItem.update({ where: { id: f.order.items[0].id }, data: { quantity: 1300 } });
+      await tx.orderPackagingGroup.updateMany({ where: { orderId: f.order.id }, data: { actualBagCount: 1300 } });
+      await tx.order.update({ where: { id: f.order.id }, data: { workOrderVersion: 2 } });
+      await activateProductionOperationsInTx(tx, f.order.id, admin, undefined, { targetStatus: 'RELEASED', allowVersionRematerialization: true });
+    });
+    const next = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workOrderVersion: 2 } });
+    await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'OPEN', reason: '核对旧申请漏计工资' }, admin);
+    await expect(registerProductionCompletion(completion(next, '1300'), worker)).rejects.toThrow('先核对');
+    await reviewProductionFact({ jobId: next.id, jobRevision: next.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '新版尚未开工', notActuallyProduced: true }, admin);
+    const review = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } });
+    const recover = { ...completion(f.job, '990'), mode: 'RECOVER' as const, reviewRevision: review.revision, reason: '原日确实已生产 990' };
+    await registerProductionCompletion(recover, admin); await registerProductionCompletion(recover, admin);
+    const recovered = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
+    expect(recovered.completedQty?.toString()).toBe('990'); expect(recovered.workDate?.toISOString().slice(0, 10)).toBe(todayShanghai());
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: f.job.id } })).amount?.toString()).toBe('198');
+    expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(1);
+    const corrected = await db.productionJob.findUniqueOrThrow({ where: { id: next.id } });
+    expect(corrected.plannedQty.toString()).toBe('310'); expect(corrected.manualPricing).toBe(true);
+    await registerProductionCompletion(completion(corrected, '310'), worker);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('PACKING');
+    const wage = await db.productionWage.findFirstOrThrow({ where: { jobId: next.id } });
+    expect(wage.amount).toBeNull();
+    await expect(lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) })).rejects.toThrow();
+    await allocateProductionWages({ jobId: next.id, requestKey: randomUUID(), reason: '核定改版新增提成', allocations: [{ workerId: worker.id, amount: '62', expectedRevision: wage.revision }] }, admin);
+    const receipt = await lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) });
+    expect((await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } })).payableAmount.toString()).toBe('260');
+  });
+
+  it('blocks direct SQL loss or date rewrites of a requested quantity, then settles only after resolution', async () => {
+    worker = await newWorker(); const f = await assigned();
+    await registerProductionCompletion({ ...completion(f.job, '990'), reason: '实际数量' }, worker);
+    for (const status of ['PENDING', 'CANCELLED'] as const) await expect(db.productionJob.update({ where: { id: f.job.id }, data: { status, revision: { increment: 1 }, requestedQty: null, workDate: null } })).rejects.toThrow();
+    await expect(db.productionJob.update({ where: { id: f.job.id }, data: { workDate: new Date('2026-01-01T00:00:00Z') } })).rejects.toThrow();
+    const pending = await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } });
+    const results = await Promise.allSettled([
+      registerProductionCompletion({ ...completion(pending, '990'), mode: 'APPROVE', reason: '原日核定实际完成' }, admin),
+      lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) }),
+    ]);
+    expect(results[0].status).toBe('fulfilled');
+    await lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) });
+    expect(await db.pieceworkSettlement.count({ where: { reporterId: worker.id } })).toBe(1);
+    expect(await db.productionWageEntry.count({ where: { wage: { jobId: f.job.id } } })).toBe(1);
+  });
+
+  it.each([true, false])('recovers only the dependent craft with unrelated carried production (old request=%s)', async withRequest => {
+    worker = await newWorker(); const f = await fixture(); const fullWorker = await newWorker();
+    await db.user.update({ where: { id: fullWorker.id }, data: { machineType: 'WINDMILL' } });
+    const fullCraft = await db.craft.findUniqueOrThrow({ where: { code: 'FLAT_FOIL_SINGLE' } });
+    const second = await db.orderItem.create({ data: { orderId: f.order.id, name: '独立专版款', sequence: 2, quantity: 1000, craft: 'FULL', pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL', productStructure: 'STANDARD_ENVELOPE', foilTechnique: 'FLAT', frontFoilColors: ['亚金'], crafts: [fullCraft.id], paperType: '珠光纸' } });
+    await db.orderPackagingGroup.create({ data: { orderId: f.order.id, sequence: 2, mode: 'SINGLE_STYLE', actualBagCount: 1000, lines: { create: { orderItemId: second.id, unitsPerBag: 1 } } } });
+    const { targets } = await currentDispatchTargets(db, f.order.id);
+    await publishProductionDispatch({ requestKey: randomUUID(), orders: [{ ...f.request.orders[0], assignments: Object.fromEntries(targets.map(target => [target.key, target.operationType === 'FULL' ? fullWorker.id : worker.id])) }] }, admin);
+    const old = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workerId: worker.id } });
+    const other = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workerId: fullWorker.id } });
+    await db.productionJob.update({ where: { id: old.id }, data: { status: 'CANCELLED', ...(withRequest ? { requestedQty: '990', workDate: new Date(`${todayShanghai()}T00:00:00Z`) } : {}) } });
+    await registerProductionCompletion(completion(other), fullWorker);
+    const otherWage = await db.productionWage.findFirstOrThrow({ where: { jobId: other.id } });
+    await db.$transaction(async tx => {
+      await tx.orderItem.update({ where: { id: f.order.items[0].id }, data: { quantity: 1300 } });
+      await tx.orderPackagingGroup.updateMany({ where: { orderId: f.order.id, sequence: 1 }, data: { actualBagCount: 1300 } });
+      await tx.order.update({ where: { id: f.order.id }, data: { workOrderVersion: 2 } });
+      await activateProductionOperationsInTx(tx, f.order.id, admin, undefined, { targetStatus: 'RELEASED', allowVersionRematerialization: true });
+    });
+    const next = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workOrderVersion: 2, workerId: worker.id } });
+    const carried = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workOrderVersion: 2, workerId: fullWorker.id } });
+    expect(carried.status).toBe('CARRIED');
+    if (!withRequest) await reviewProductionFact({ jobId: old.id, jobRevision: old.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '先前误以为未生产', notActuallyProduced: true }, admin);
+    const previous = await db.productionFactReview.findUnique({ where: { jobId: old.id } });
+    await reviewProductionFact({ jobId: old.id, jobRevision: old.revision, reviewRevision: previous?.revision ?? -1, mode: 'OPEN', reason: '核实旧版实际生产' }, admin);
+    await reviewProductionFact({ jobId: next.id, jobRevision: next.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '后续该工序尚未做', notActuallyProduced: true }, admin);
+    const review = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: old.id } });
+    await registerProductionCompletion({ ...completion(old, '990'), mode: 'RECOVER', workDate: todayShanghai(), reviewRevision: review.revision, reason: '原师傅实际做 990' }, admin);
+    const updated = await db.productionJob.findUniqueOrThrow({ where: { id: next.id } });
+    expect(updated.plannedQty.toString()).toBe('310'); expect(updated.workerId).toBe(worker.id); expect(updated.manualPricing).toBe(true);
+    expect(await db.productionJob.findUniqueOrThrow({ where: { id: carried.id } })).toEqual(carried);
+    expect(await db.productionWage.findUniqueOrThrow({ where: { id: otherWage.id } })).toEqual(otherWage);
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: old.id } })).amount?.toString()).toBe('198');
+    await registerProductionCompletion(completion(updated, '310'), worker);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('PACKING');
+  });
+
+  it('does not include two full old requests in one smaller later fact or reopen an included fact', async () => {
+    worker = await newWorker(); const f = await assigned(); const oldJobs = [f.job];
+    await db.productionJob.update({ where: { id: f.job.id }, data: { status: 'CANCELLED', requestedQty: '990', workDate: new Date(`${todayShanghai()}T00:00:00Z`) } });
+    for (const version of [2, 3]) {
+      await db.$transaction(async tx => {
+        await tx.order.update({ where: { id: f.order.id }, data: { workOrderVersion: version } });
+        await activateProductionOperationsInTx(tx, f.order.id, admin, undefined, { targetStatus: 'RELEASED', allowVersionRematerialization: true });
+      });
+      const next = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workOrderVersion: version } });
+      if (version === 2) { oldJobs.push(next); await db.productionJob.update({ where: { id: next.id }, data: { status: 'CANCELLED', requestedQty: '990', workDate: new Date(`${todayShanghai()}T00:00:00Z`) } }); }
+      else await registerProductionCompletion(completion(next), worker);
+    }
+    const later = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workOrderVersion: 3 } });
+    for (const old of oldJobs) await reviewProductionFact({ jobId: old.id, jobRevision: old.revision, reviewRevision: -1, mode: 'OPEN', reason: '核对旧申请' }, admin);
+    const input = { jobId: oldJobs[0].id, jobRevision: oldJobs[0].revision, reviewRevision: 0, mode: 'INCLUDED_LATER' as const, relatedJobId: later.id, quantity: '990', workDate: todayShanghai(), confirmedIncluded: true, reason: '全部含在此登记' };
+    await reviewProductionFact(input, admin);
+    await expect(reviewProductionFact({ ...input, jobId: oldJobs[1].id, jobRevision: oldJobs[1].revision }, admin)).rejects.toThrow('数量不足');
+    const resolved = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: oldJobs[0].id } });
+    const first = await db.productionJob.findUniqueOrThrow({ where: { id: oldJobs[0].id } });
+    await expect(reviewProductionFact({ jobId: first.id, jobRevision: first.revision, reviewRevision: resolved.revision, mode: 'OPEN', reason: '不能重复恢复' }, admin)).rejects.toThrow('不能作为独立');
+    await expect(db.productionFactReview.update({ where: { id: resolved.id }, data: { status: 'OPEN', revision: { increment: 1 } } })).rejects.toThrow();
+    const unresolved = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: oldJobs[1].id } });
+    await expect(db.productionFactReview.update({ where: { id: unresolved.id }, data: { status: 'RESOLVED', evidence: { resolution: 'INCLUDED_LATER', relatedJobId: later.id, quantity: '990' }, resolvedById: admin.id, resolvedAt: new Date(), revision: { increment: 1 } } })).rejects.toThrow();
+    expect(await db.productionWage.count({ where: { job: { orderId: f.order.id } } })).toBe(1);
+  });
+
+  it.each(['INCLUDED_LATER', 'ADDITIONAL', 'ADDITIONAL_SETTLED'] as const)('resolves historical conflict via %s without rewriting later wages', async mode => {
+    worker = await newWorker(); const f = await assigned();
+    await db.productionJob.update({ where: { id: f.job.id }, data: { status: 'CANCELLED', requestedQty: '990', workDate: new Date(`${todayShanghai()}T00:00:00Z`) } });
+    await db.$transaction(async tx => {
+      await tx.order.update({ where: { id: f.order.id }, data: { workOrderVersion: 2 } });
+      await activateProductionOperationsInTx(tx, f.order.id, admin, undefined, { targetStatus: 'RELEASED', allowVersionRematerialization: true });
+    });
+    const next = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workOrderVersion: 2 } });
+    await registerProductionCompletion(completion(next), worker);
+    const receipt = mode === 'ADDITIONAL_SETTLED' ? await lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) }) : null;
+    const ledger = receipt ? await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } }) : null;
+    const paid = await db.productionWage.findFirstOrThrow({ where: { jobId: next.id } });
+    await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'OPEN', reason: '旧任务可能漏登记，需复核' }, admin);
+    await expect(registerProductionCompletion({ ...completion(f.job), mode: 'RECOVER', reviewRevision: 0, workDate: todayShanghai(), reason: '核实旧生产' }, admin)).rejects.toThrow('不能重复计产');
+    expect((await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } })).status).toBe('CONFLICT');
+    expect(await db.productionWage.findUniqueOrThrow({ where: { id: paid.id } })).toEqual(paid);
+    expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(0);
+    const review = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } });
+    if (mode === 'INCLUDED_LATER') {
+      const input = { jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: review.revision, mode: 'INCLUDED_LATER' as const, relatedJobId: next.id, quantity: '990', workDate: todayShanghai(), confirmedIncluded: true, reason: '凭原记录确认旧数量已含在后续完成中' };
+      await expect(reviewProductionFact(input, worker)).rejects.toThrow('管理员');
+      await expect(reviewProductionFact({ ...input, quantity: '500' }, admin)).rejects.toThrow('旧申请必须全部');
+      await reviewProductionFact(input, admin); await reviewProductionFact(input, admin);
+      expect((await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } })).status).toBe('CANCELLED');
+      expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(0);
+      expect((await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } })).evidence).toMatchObject({ resolution: 'INCLUDED_LATER', relatedJobId: next.id });
+    } else {
+      const input = { ...completion(f.job, '990'), mode: 'RECOVER' as const, reviewRevision: review.revision, workDate: todayShanghai(), reason: '凭原单核实另做过 990 个', confirmedAdditionalProduction: true, confirmedSettledDay: mode === 'ADDITIONAL_SETTLED' };
+      await registerProductionCompletion(input, admin); await registerProductionCompletion(input, admin);
+      const resolved = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } });
+      expect(resolved.status).toBe(mode === 'ADDITIONAL_SETTLED' ? 'WAGES_DUE' : 'RESOLVED');
+      expect(resolved.evidence).toMatchObject({ resolution: 'ADDITIONAL_PRODUCTION', projectionPending: false });
+      if (ledger) {
+        expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(0);
+        expect(await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: ledger.id } })).toEqual(ledger);
+      } else expect((await db.productionWage.findFirstOrThrow({ where: { jobId: f.job.id } })).amount?.toString()).toBe('198');
+    }
+    expect(await db.productionWage.findUniqueOrThrow({ where: { id: paid.id } })).toEqual(paid);
+    expect(await db.productionFactReview.count({ where: { job: { orderId: f.order.id }, status: { in: ['OPEN', 'CONFLICT'] } } })).toBe(0);
+  });
+
+  it('completes a packing-only rework with no fake production wages and one completion event', async () => {
+    worker = await newWorker(); const f = await assigned(); await registerProductionCompletion(completion(f.job), worker);
+    await db.order.update({ where: { id: f.order.id }, data: { status: 'SHIPPED', shippedAt: new Date(), receiverName: '测试收件人', receiverPhone: '13800138000', receiverAddress: '广东省佛山市测试地址' } });
+    const redo = await createReworkOrder({ sourceOrderId: f.order.id, cause: 'LOGISTICS_DAMAGE', reason: '仅重新入袋', items: [{ sourceOrderItemId: f.order.items[0].id, quantity: 200, craftIds: [] }] }, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: redo.id } })).status).toBe('PACKING');
+    expect(await db.productionJob.count({ where: { orderId: redo.id } })).toBe(0);
+    expect(await db.productionWage.count({ where: { job: { orderId: redo.id } } })).toBe(0);
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_COMPLETED' && 'orderId' in payload && payload.orderId === redo.id)).toHaveLength(1);
+  });
+
+  it('recovers an existing scheduling rework without duplicating its tasks, print or source wages', async () => {
+    worker = await newWorker(); const f = await assigned(); await registerProductionCompletion(completion(f.job), worker);
+    await db.order.update({ where: { id: f.order.id }, data: { status: 'SHIPPED', shippedAt: new Date(), receiverName: '测试收件人', receiverPhone: '13800138000', receiverAddress: '广东省佛山市测试地址' } });
+    const redo = await createReworkOrder({ sourceOrderId: f.order.id, cause: 'QUALITY', reason: '恢复夹具', items: [{ sourceOrderItemId: f.order.items[0].id, quantity: 200, craftIds: f.order.items[0].crafts }] }, admin);
+    const old = await db.order.update({ where: { id: redo.id }, data: { status: 'SCHEDULING' } });
+    const input = { orderId: old.id, revision: old.revision, version: old.workOrderVersion, mode: 'RELEASE_REWORK' as const, requestKey: randomUUID(), reason: '扫描确认旧版本未下发' };
+    await expect(repairProductionMetadata(input, worker)).rejects.toThrow('管理员');
+    await repairProductionMetadata(input, admin); await repairProductionMetadata(input, admin);
+    expect((await db.order.findUniqueOrThrow({ where: { id: redo.id } })).status).toBe('RELEASED');
+    expect(await db.orderPrintJob.count({ where: { orderId: redo.id } })).toBe(1);
+    const job = await db.productionJob.findFirstOrThrow({ where: { orderId: redo.id } });
+    await registerProductionCompletion(completion(job, '200'), worker);
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: f.job.id } })).amount?.toString()).toBe('200');
+  });
+
+  it('keeps first production automatic through an unproduced physical revision and repairs a legacy marker idempotently', async () => {
+    worker = await newWorker(); const f = await assigned();
+    await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '确认未开工', notActuallyProduced: true }, admin);
+    await db.$transaction(async tx => {
+      await tx.orderItem.update({ where: { id: f.order.items[0].id }, data: { artworkVersion: '首次生产前改版' } });
+      await tx.order.update({ where: { id: f.order.id }, data: { workOrderVersion: 2 } });
+      await activateProductionOperationsInTx(tx, f.order.id, admin, undefined, { targetStatus: 'RELEASED', allowVersionRematerialization: true });
+    });
+    const next = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, workOrderVersion: 2 } });
+    expect(next.manualPricing).toBe(false);
+    await db.productionJob.update({ where: { id: next.id }, data: { manualPricing: true } });
+    const order = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    const repair = { orderId: order.id, revision: order.revision, version: 2, mode: 'FIX_FIRST_PRICING' as const, requestKey: randomUUID(), reason: '纠正旧版首次生产标记' };
+    expect((await repairProductionMetadata(repair, admin)).replay).toBe(false);
+    expect((await repairProductionMetadata(repair, admin)).replay).toBe(true);
+    const corrected = await db.productionJob.findUniqueOrThrow({ where: { id: next.id } });
+    await registerProductionCompletion(completion(corrected), worker);
+    expect((await db.productionWage.findFirstOrThrow({ where: { jobId: next.id } })).amount?.toString()).toBe('200');
+    const scan = await scanProductionRecovery();
+    expect(scan.jobs.some(job => job.id === f.job.id)).toBe(true);
+  });
 });

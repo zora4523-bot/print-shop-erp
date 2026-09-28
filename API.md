@@ -9,15 +9,21 @@ applies_to: repository source at last_verified
 
 ## 2026-09-28 单负责人排单与完工提成
 
-`actions/production-dispatch.ts` 提供四个写入口。返回 `{ok,message}`，成功或幂等重放刷新管理工单、师傅任务/工资及工资结算页面；销售与管理员使用同一 `/orders` 权威状态。
+`actions/production-dispatch.ts` 提供五个写入口。返回 `{ok,message}`，成功或幂等重放刷新管理工单、师傅任务/工资及工资结算页面；销售与管理员使用同一 `/orders` 权威状态。
 
-- `publishProductionDispatchAction(previous, form)`：`production:manage`（仅 ADMIN）。payload 为 requestKey、1–20 个订单的 id/revision/version/assignments（任务来源键→师傅）；最多 100 项。同事务复核、下发、生成打印待办和记录单一归属。只接收已确认或有效生产中的订单；旧版或已有历史报工不能静默转入新流程。完全相同批次可重放。已打印但未生产的任务更换负责人时追加待重印任务；已有待打印任务复用，不重复创建。
-- `registerProductionCompletionAction(previous, form)`：jobId/revision/quantity/mode/reason/workDate。COMPLETE 用 `task:report`，并在领域校验本人当前归属；BACKFILL/APPROVE/REJECT 必须 ADMIN。数量非默认值只产生申请；APPROVE 必须等于申请量，驳回后可重提。补登不接受客户端师傅，日期不得早于下发或晚于今天，改版任务不得早于本次改版。审批、完成、提成义务和状态同一事务，当前日期闭锁及历史结算不可绕过。
+- `publishProductionDispatchAction(previous, form)`：`production:manage`（仅 ADMIN）。payload 为 requestKey、1–20 个订单的 id/revision/version/assignments（任务来源键→师傅）；最多 100 项。同事务复核、下发、生成打印待办和记录单一归属。只接收已确认或有效生产中的订单；旧版或已有历史报工不能静默转入新流程。完全相同批次可重放。转派前需在生产记录核实原师傅未生产；已打印的任务更换负责人时追加待重印任务；已有待打印任务复用，不重复创建。
+- `registerProductionCompletionAction(previous, form)`：jobId/revision/quantity/mode/reason/workDate，另支持 itemQuantities、notActuallyProduced、confirmedSettledDay、reviewRevision。COMPLETE 用 `task:report`，且为当前启用的归属师傅；BACKFILL/APPROVE/REJECT/RECOVER 必须当前启用 ADMIN。数量非默认值产生申请并冻结计价依据；APPROVE 可据证核定正确数量，保留原申请量、师傅及工作日。REJECT 仅用于明确确认未实际生产，需理由及 notActuallyProduced=true；已生产不能用驳回取消工资。补登记在暂停/待审期间可处理，但交付等待恢复/最后一条申请关闭。旧版或关闭工单使用 RECOVER 并校验核对修订，不能恢复旧扫码入口；后续生产冲突持久标记，生产及工资不写入。原日已结算时管理员明确确认后仅登记生产事实及待补工资，不改原账；普通提成及更正仍禁止写原日。
+- `reviewProductionFactAction(previous, form)`：ADMIN；jobId/jobRevision/reviewRevision（首次 -1）/mode/reason。UNPRODUCED 须 notActuallyProduced=true 且无待审批数量；OPEN 保留原任务下发以来的待核对期间；DISMISS_WAGE 仅据证关闭待补发义务，保留已完成生产和审计。INCLUDED_LATER 须原师傅/原日/相同实物/数量已含在后续完成，提交 relatedJobId、quantity、workDate、confirmedIncluded=true，旧申请量必须全部包含，关联累计量不能超出后续完成量；关闭旧义务但不新增产量工资。核对均检查工单/任务/核对修订；内部证据不进入销售 DTO。
+
 - `allocateProductionWagesAction(previous, form)`：ADMIN；jobId/requestKey/reason/allocations，每项 workerId/最终金额字符串/expectedRevision（新增 -1）。包含原生产师傅及本工作日全部既有参与人；按净额追加差额流水，不伪造报工。仅已实际完成且工作日未结算可发布。页面核对前后金额后提交。
 - `correctProductionRegistrationAction(input)`：ADMIN；jobId/revision/requestKey/reason/notActuallyProduced=true。仅当前代次、未发货/暂停/关闭、无待审批改动且所有相关工资未结算可更正误登记。追加反向金额与完整审计，重新开放登记；真实生产后改版不走此入口。
 
 切换 `simpleProduction` 后，旧认领/逐批报工入口与数据库旧报告写入口均拒绝该单，不能同时累计。金额待补录不阻止发货；数量待审批或金额待补录会阻止对应师傅实际生产日结算。正常缺工价明确报错，绝不按零价登记。
 
+改单/取消预览新增 productionFactsToken，提交时回传 expectedProductionFactsToken。令牌绑定真实数量、任务修订与未生产核对证据；期间补登/核定后旧预览必须失效。待审数量与未核清事实先处理，不能随改版自动取消。管理员使用 `/orders?signal=pending-quantity` 查全部状态和版本，链接定位 `#production-job-<id>`；工资汇总包括只有申请、还没有工资的人员日。
+
+
+历史 RECOVER 可提交 confirmedAdditionalProduction=true，据证核定独立额外生产；仅检查同工序且款式重叠的关联后续任务，要求其中有已完成任务且全部关联任务已闭合。后续工资不变，原日已结算仍须 confirmedSettledDay=true 且只建 WAGES_DUE。只改资料时原任务以 CONTINUED 审计承接完整未登记量和原下发时间，不创建部分完工。
 
 ## 2026-09-28 取消未来计件调价计划
 

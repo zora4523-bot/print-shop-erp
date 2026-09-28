@@ -18,6 +18,7 @@ import {
 } from '../notification/events';
 import { enqueueNotificationInTransaction } from '../notification/transactional-outbox';
 import { activateProductionOperationsInTx } from '../production/operation-materialization-service';
+import { reconcileProductionOrderInTx } from '../production/order-state';
 import {
   dispatchProductionCompletionNotification,
   maybeCompleteProductionOrder,
@@ -484,8 +485,8 @@ export async function resumeFactoryOrder(
       // the final production dependency, the completion gate intentionally
       // ignores ON_HOLD; re-check immediately after restoring the exact
       // production state so the ready notification cannot be lost forever.
-      const completion = await maybeCompleteProductionOrder(
-        tx as unknown as ProductionCompletionTx,
+      const completion = await reconcileProductionOrderInTx(
+        tx,
         order.id,
         actor.id,
         await databaseClockNow(tx),
@@ -538,6 +539,7 @@ export async function releaseFactoryOrder(
 }> {
   assertAdmin(actor);
   const transactionResult = await db.$transaction((tx) => releaseFactoryOrderInTx(tx, input, actor));
+  await dispatchProductionCompletionNotification(transactionResult.completionNotification);
 
   if (transactionResult.postCommitNotification) {
     await dispatchNotification(
@@ -596,11 +598,12 @@ export async function releaseFactoryOrderInTx(
     return {
       result: {
         orderId: order.id,
-        status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
+        status: order.status,
         printJobId: replay.id,
         idempotentReplay: true,
       },
       postCommitNotification: null,
+      completionNotification: undefined,
     };
   }
   assertExpectedVersion(order, input);
@@ -640,6 +643,13 @@ export async function releaseFactoryOrderInTx(
     },
     actor,
   );
+  const completion = order.purpose === 'SAMPLE_SHIPMENT' ? { completed: false, orderStatus: undefined, notification: undefined }
+    : await maybeCompleteProductionOrder(tx as unknown as ProductionCompletionTx, order.id, actor.id, await databaseClockNow(tx));
+  const finalStatus = completion.orderStatus ?? releaseResult?.orderStatus ?? order.status;
+  if (completion.completed) return {
+    result: { orderId: order.id, status: finalStatus, printJobId: print?.jobId ?? null, idempotentReplay: print?.idempotentReplay ?? false },
+    postCommitNotification: null, completionNotification: completion.notification,
+  };
   if (releaseResult) {
     // ORDER_SCHEDULED is the historical external event name. In the
     // canonical workflow its business edge is CONFIRMED -> RELEASED: all
@@ -665,21 +675,23 @@ export async function releaseFactoryOrderInTx(
     return {
       result: {
         orderId: order.id,
-        status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
+        status: finalStatus,
         printJobId: print?.jobId ?? null,
         idempotentReplay: print?.idempotentReplay ?? false,
       },
       postCommitNotification: queued ? null : notificationPayload,
+      completionNotification: undefined,
     };
   }
   return {
     result: {
       orderId: order.id,
-      status: order.purpose === 'SAMPLE_SHIPMENT' ? OrderStatus.PACKING : OrderStatus.RELEASED,
+      status: finalStatus,
       printJobId: print?.jobId ?? null,
       idempotentReplay: print?.idempotentReplay ?? false,
     },
     postCommitNotification: null,
+    completionNotification: undefined,
   };
 }
 

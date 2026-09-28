@@ -250,12 +250,12 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
           </li>)}</ol> : <p className={styles.emptyHint}>未填写收货地址{canEdit ? <> · <Link href={`/orders/${model.id}/edit`}>去编辑页补充</Link></> : null}</p>}</section> : null}
           <div id="order-production-records" tabIndex={-1} className={styles.sectionHeading}><h2>生产记录</h2></div>
           {renderSections(['detail-production-records', 'detail-business-records'])}
-          <section className={styles.ledger} aria-label="报工流水">
+          {(!simpleProduction || model.works.length > 0) && <section className={styles.ledger} aria-label="报工流水">
             <div className={styles.sectionHeading}><h2>报工流水</h2><span>当前版本 · 最近 {model.works.length} 条</span></div>
             {model.works.length === 0 ? <p className={styles.emptyHint}>暂无报工记录</p> : <ol>{model.works.map((work) => <li key={work.id} className={styles.workRow}>
               <time>{work.at}</time><span>{work.label}{work.cumulative !== null ? <small>累计 {work.cumulative} {work.unit}</small> : null}</span><b>{work.actor}</b><strong>{work.quantity === null ? '—' : `${work.quantity} ${work.unit}`}</strong>
             </li>)}</ol>}
-          </section>
+          </section>}
 
           {renderSections(['detail-after-sales'])}
           <div id="order-history-records" tabIndex={-1} className={styles.historyGroup}>

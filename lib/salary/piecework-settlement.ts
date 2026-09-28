@@ -11,6 +11,8 @@ import { todayShanghai } from '../dashboard/shanghai-clock';
 import { db } from '../db';
 import { shanghaiDayRange } from './daily-common';
 import { reportUsesTieredFoilWage } from './tiered-foil-report';
+import { salaryIdentityLockKey } from './hourly-lock';
+import { listProductionWageObligations } from '@/lib/production/wage-obligations';
 import {
   pieceworkReportingDayGateLockKey,
   pieceworkSettlementLockKey,
@@ -115,7 +117,7 @@ export async function getPieceworkSettlementDay(input: {
     );
   }
   const { start, end } = shanghaiDayRange(input.workDate);
-  const [settlements, reports, productionWages] = await Promise.all([
+  const [settlements, reports, productionWages, obligations] = await Promise.all([
     db.pieceworkSettlement.findMany({
       where: {
         workDate: dateCol,
@@ -156,6 +158,7 @@ export async function getPieceworkSettlementDay(input: {
     }),
     db.productionWage.findMany({ where: { workDate: dateCol, settlementId: null, ...(input.reporterId ? { workerId: input.reporterId } : {}) },
       include: { worker: { select: { displayName: true, username: true } }, job: { select: { orderId: true, label: true } } } }),
+    listProductionWageObligations(db, { workDate: dateCol, workerId: input.reporterId }),
   ]);
 
   const candidates = new Map<
@@ -200,6 +203,13 @@ export async function getPieceworkSettlementDay(input: {
     candidates.set(wage.workerId, current);
   }
 
+  for (const item of obligations) {
+    const current = candidates.get(item.workerId) ?? { reporterId: item.workerId, reporterName: item.workerName, username: item.username, reportAmount: new Decimal(0), reportCount: 0,
+      orderIds: new Set<string>(), operationCounts: {} as Record<string, number>, pendingPricing: 0 };
+    current.orderIds.add(item.orderId);
+    candidates.set(item.workerId, current);
+  }
+
   return {
     workDate: input.workDate,
     settlements: settlements.map((row) => ({
@@ -215,6 +225,7 @@ export async function getPieceworkSettlementDay(input: {
       orderCount: row.orderIds.size,
       operationCounts: row.operationCounts,
       pendingPricing: row.pendingPricing,
+      obligations: obligations.filter(item => item.workerId === row.reporterId),
     })),
   };
 }
@@ -436,6 +447,7 @@ export async function lockPieceworkSettlement(input: {
     // Reporting takes the day gate before the reporter/day lock. Settlement
     // must use the same order so the closed-day check and final report set are
     // one serial boundary, without introducing an advisory-lock deadlock.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(input.reporterId)}))`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pieceworkReportingDayGateLockKey(
       input.workDate,
     )}))`;
@@ -499,6 +511,7 @@ export async function lockPieceworkSettlement(input: {
       },
     });
     if (await tx.productionJob.count({ where: { workerId: input.reporterId, workDate: dateCol, status: 'REQUESTED' } })) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在生产数量待审批，请先处理对应工单');
+    if (await tx.productionFactReview.count({ where: { job: { workerId: input.reporterId }, status: { in: ['OPEN', 'CONFLICT'] }, periodStart: { lte: dateCol }, periodEnd: { gte: dateCol } } })) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待核对历史生产，请从工资待办打开对应工单');
     const productionWages = await tx.productionWage.findMany({ where: { workerId: input.reporterId, workDate: dateCol, settlementId: null }, include: { job: { select: { orderId: true, label: true } }, entries: { select: { id: true } } } });
     if (productionWages.some(wage => wage.amount === null)) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待补录提成，请先在工单详情补录');
     if (reports.length === 0 && productionWages.length === 0) {
@@ -613,6 +626,7 @@ export async function lockPieceworkSettlementsForDate(input: {
     });
     const manualReporters = await tx.productionWage.findMany({ where: { workDate: parseStrictYmd(input.workDate)!, settlementId: null }, distinct: ['workerId'], select: { workerId: true, worker: { select: { displayName: true } } } });
     for (const wage of manualReporters) if (!reporters.some(row => row.reporterId === wage.workerId)) reporters.push({ reporterId: wage.workerId, reporter: wage.worker });
+    for (const item of await listProductionWageObligations(tx, { workDate: parseStrictYmd(input.workDate)! })) if (!reporters.some(row => row.reporterId === item.workerId)) reporters.push({ reporterId: item.workerId, reporter: { displayName: item.workerName } });
     return { now, reporters };
   });
   const settled: PieceworkSettlementReceipt[] = [];

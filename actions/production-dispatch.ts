@@ -9,6 +9,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { publishProductionDispatch, dispatchSchema } from '@/lib/production/dispatch';
 import { registerProductionCompletion, completionSchema } from '@/lib/production/completion-registration';
 import { allocateProductionWages, productionWageSchema } from '@/lib/salary/production-wages';
+import { reviewProductionFact, factReviewSchema } from '@/lib/production/fact-review';
 
 export type ProductionActionState = { ok: boolean; message: string } | null;
 function refreshProduction(orderIds: string[]) {
@@ -41,10 +42,29 @@ export async function registerProductionCompletionAction(_state: ProductionActio
   try {
     const mode = form.get('mode');
     const actor = await requirePermission(mode === 'COMPLETE' ? 'task:report' : 'production:manage');
-    const input = completionSchema.parse({ jobId: form.get('jobId'), revision: Number(form.get('revision')), quantity: form.get('quantity'), mode, reason: form.get('reason') ?? '', workDate: form.get('workDate') || undefined });
+    const itemQuantities = Object.fromEntries([...form.entries()].filter(([key]) => key.startsWith('itemQuantity:')).map(([key, value]) => [key.slice('itemQuantity:'.length), value]));
+    const input = completionSchema.parse({ jobId: form.get('jobId'), revision: Number(form.get('revision')), quantity: form.get('quantity'), mode, reason: form.get('reason') ?? '', workDate: form.get('workDate') || undefined,
+      notActuallyProduced: form.get('notActuallyProduced') === 'on', confirmedSettledDay: form.get('confirmedSettledDay') === 'on',
+      confirmedAdditionalProduction: form.get('confirmedAdditionalProduction') === 'on',
+      reviewRevision: form.has('reviewRevision') ? Number(form.get('reviewRevision')) : undefined,
+      ...(Object.keys(itemQuantities).length ? { itemQuantities } : {}),
+    });
     const result = await registerProductionCompletion(input, actor);
     refreshProduction([result.orderId]);
-    return { ok: true, message: result.status === 'REQUESTED' ? '数量已提交审批' : result.status === 'PENDING' ? '已驳回数量申请' : '已登记完成' };
+    return { ok: true, message: input.mode === 'REJECT' ? '已驳回数量申请' : result.status === 'REQUESTED' ? '数量已提交审批' : '已登记完成' };
+  } catch (error) { return failure(error); }
+}
+
+export async function reviewProductionFactAction(_state: ProductionActionState, form: FormData): Promise<ProductionActionState> {
+  try {
+    const actor = await requirePermission('production:manage');
+    const input = factReviewSchema.parse({ jobId: form.get('jobId'), jobRevision: Number(form.get('jobRevision')), reviewRevision: Number(form.get('reviewRevision')),
+      mode: form.get('mode'), reason: form.get('reason'), notActuallyProduced: form.get('notActuallyProduced') === 'on',
+      relatedJobId: form.get('relatedJobId') || undefined, quantity: form.get('quantity') || undefined, workDate: form.get('workDate') || undefined,
+      confirmedIncluded: form.get('confirmedIncluded') === 'on' });
+    const orderId = await reviewProductionFact(input, actor);
+    refreshProduction([orderId]);
+    return { ok: true, message: '生产核对记录已保存' };
   } catch (error) { return failure(error); }
 }
 export async function allocateProductionWagesAction(_state: ProductionActionState, form: FormData): Promise<ProductionActionState> {

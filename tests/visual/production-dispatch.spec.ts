@@ -23,6 +23,7 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   test.setTimeout(180000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   const fixture = await seedProductionDispatchFixture();
   await login(page, { from: `/orders/production?ids=${fixture.id}` });
   await page.getByRole('combobox', { name: '局部烫金 · 1000 个' }).selectOption(fixture.workerId);
@@ -38,6 +39,7 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   const workerContext = await browser.newContext({ ...info.project.use, baseURL: info.project.use.baseURL });
   const workerPage = await workerContext.newPage();
   workerPage.on('pageerror', error => errors.push(error.message));
+  workerPage.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   try {
     await login(workerPage, { from: `/worker/tasks/${job.id}`, username: E2E_USERS.workerHandPress.username, password: E2E_PASSWORD });
     await expect(workerPage.getByLabel('完成数量')).toHaveValue('1000');
@@ -53,10 +55,10 @@ test('single owner dispatch, quantity approval, wages and external sales state',
     await expect(workerPage.getByRole('status')).toContainText('数量待审批');
     expect(await withDb(async db => (await db.query('SELECT id FROM "ProductionWage" WHERE "jobId"=$1', [job.id])).rowCount)).toBe(0);
     await page.goto(`/orders/${fixture.id}#detail-production-records`);
-    await expect(page.getByRole('button', { name: '批准并登记完成' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '核定并登记完成' })).toBeVisible();
     await page.getByLabel('核定或补登记说明').fill('已核实数量');
     await gates(page, info, 'admin-quantity-approval');
-    await page.getByRole('button', { name: '批准并登记完成' }).click();
+    await page.getByRole('button', { name: '核定并登记完成' }).click();
     await expect(page.getByRole('heading', { name: '登记最终提成' })).toBeVisible();
     await page.getByLabel('E2E 开机仔最终提成（元）').fill('190');
     await page.getByLabel('金额依据').fill('核定本次生产最终提成');

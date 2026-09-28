@@ -1,6 +1,9 @@
 import Decimal from 'decimal.js';
 import type { Prisma, ProductionJob } from '@/generated/prisma/client';
 import { currentDispatchTargets, targetLinks } from './dispatch-targets';
+import { assertNoHistoricalProductionReview } from './fact-guards';
+import { reopenAssignedProductionInTx } from './order-state';
+import { salaryIdentityLockKey } from '@/lib/salary/hourly-lock';
 
 function fingerprint(snapshot: Prisma.JsonValue) {
   return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) && typeof snapshot.fingerprint === 'string' ? snapshot.fingerprint : null;
@@ -9,6 +12,7 @@ function fingerprint(snapshot: Prisma.JsonValue) {
 export function revisionProductionQuantities(target: { fingerprint: string; snapshot: Prisma.InputJsonObject }, history: Array<Pick<ProductionJob, 'status' | 'snapshot' | 'completedQty'>>) {
   const items = target.snapshot.items as Array<{ id: string; quantity: number }>;
   const produced = new Map(items.map(item => [item.id, new Decimal(0)]));
+  const fulfilled = new Map(items.map(item => [item.id, new Decimal(0)]));
   for (const job of history) {
     if (job.status !== 'COMPLETED') continue;
     const snapshot = job.snapshot as Record<string, Prisma.JsonValue>;
@@ -17,7 +21,8 @@ export function revisionProductionQuantities(target: { fingerprint: string; snap
     const perItem = !!sourceFingerprints && !!targetFingerprints && typeof snapshot.lane === 'string';
     if (perItem ? snapshot.lane !== target.snapshot.lane : fingerprint(job.snapshot) !== target.fingerprint) continue;
     const original = snapshot.items as Array<{ id: string; quantity: number }>;
-    const quantities = snapshot.productionQuantities as Record<string, string> | undefined
+    const quantities = snapshot.actualItemQuantities as Record<string, string> | undefined
+      ?? snapshot.productionQuantities as Record<string, string> | undefined
       ?? Object.fromEntries(original.map(item => [item.id, String(item.quantity)]));
     const sum = Object.values(quantities).reduce((total, qty) => total.plus(qty), new Decimal(0));
     // A changed aggregate quantity cannot identify which of multiple styles was produced.
@@ -25,18 +30,31 @@ export function revisionProductionQuantities(target: { fingerprint: string; snap
     if (original.length > 1 && !job.completedQty?.eq(sum)) continue;
     for (const item of original) {
       if (perItem && (!sourceFingerprints![item.id] || sourceFingerprints![item.id] !== targetFingerprints![item.id])) continue;
-      if (produced.has(item.id)) produced.set(item.id, produced.get(item.id)!.plus(original.length === 1 ? job.completedQty?.toString() ?? '0' : quantities[item.id] ?? '0'));
+      if (produced.has(item.id)) {
+        produced.set(item.id, produced.get(item.id)!.plus(original.length === 1 ? job.completedQty?.toString() ?? '0' : quantities[item.id] ?? '0'));
+        // Approval fulfils the original demand even if the accepted physical quantity
+        // is lower. Growth uses actual output; unchanged/reduced demand stays done.
+        fulfilled.set(item.id, Decimal.max(fulfilled.get(item.id)!, item.quantity));
+      }
     }
   }
-  const quantities = Object.fromEntries(items.map(item => [item.id, Decimal.max(0, new Decimal(item.quantity).minus(produced.get(item.id)!)).toString()]));
-  return { quantities, remaining: Object.values(quantities).reduce((sum, quantity) => sum.plus(quantity), new Decimal(0)) };
+  const quantities = Object.fromEntries(items.map(item => [item.id, new Decimal(item.quantity).lte(fulfilled.get(item.id)!) ? '0' : Decimal.max(0, new Decimal(item.quantity).minus(produced.get(item.id)!)).toString()]));
+  return {
+    quantities,
+    actualQuantities: Object.fromEntries([...produced].map(([id, quantity]) => [id, quantity.toString()])),
+    fulfilledQuantities: Object.fromEntries([...fulfilled].map(([id, quantity]) => [id, quantity.toString()])),
+    remaining: Object.values(quantities).reduce((sum, quantity) => sum.plus(quantity), new Decimal(0)),
+  };
 }
 /** Revision appends production, never reprices or reassigns earned wages. */
 export async function inheritProductionJobsInTx(tx: Prisma.TransactionClient, orderId: string, actorId: string) {
   const { order, targets } = await currentDispatchTargets(tx, orderId);
   if (!order.simpleProduction) return;
-  const history = await tx.productionJob.findMany({ where: { orderId, workOrderVersion: { lt: order.workOrderVersion } }, orderBy: [{ workOrderVersion: 'desc' }, { id: 'asc' }] });
+  await assertNoHistoricalProductionReview(tx, orderId);
+  const history = await tx.productionJob.findMany({ where: { orderId, workOrderVersion: { lt: order.workOrderVersion } }, orderBy: [{ workOrderVersion: 'desc' }, { id: 'asc' }], include: { operation: true, progressStep: true } });
+  for (const workerId of [...new Set(history.map(job => job.workerId))].sort()) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(workerId)}))`;
   const links = await targetLinks(tx, orderId, order.workOrderVersion);
+  const continuations = new Map<string, string>();
   let unfinished = 0;
   for (const target of targets) {
     const link = links.get(target.key);
@@ -51,13 +69,26 @@ export async function inheritProductionJobsInTx(tx: Prisma.TransactionClient, or
     if (!prior) { unfinished++; continue; }
     const production = revisionProductionQuantities(target, history);
     const quantity = production.remaining;
-    const done = new Decimal(target.quantity).minus(quantity);
+    const done = Object.values(production.actualQuantities).reduce((sum, qty) => sum.plus(qty), new Decimal(0));
+    const previouslyProduced = overlapping.some(job => job.status === 'COMPLETED' && job.completedQty?.gt(0));
     // Existing ownership is historical. An inactive worker may be backfilled by an admin;
     // only a new/incompatible craft needs reassignment, never an inferred owner.
-    await tx.productionJob.create({ data: { orderId, workOrderVersion: order.workOrderVersion,
+    const priorSnapshot = prior.snapshot as Prisma.JsonObject;
+    const priorQuantities = priorSnapshot.productionQuantities as Record<string, string> | undefined
+      ?? Object.fromEntries((priorSnapshot.items as Array<{ id: string; quantity: number }>).map(item => [item.id, String(item.quantity)]));
+    const continuation = prior.status === 'PENDING' && !prior.requestedQty && prior.sourceKey === target.key
+      && fingerprint(prior.snapshot) === target.fingerprint && quantity.eq(prior.plannedQty.toString())
+      && Object.keys(priorQuantities).length === Object.keys(production.quantities).length
+      && Object.entries(production.quantities).every(([id, qty]) => qty === priorQuantities[id]);
+    const startedAt = typeof priorSnapshot.productionStartedAt === 'string' ? priorSnapshot.productionStartedAt : (prior.operation?.createdAt ?? prior.progressStep?.createdAt)?.toISOString();
+    const next = await tx.productionJob.create({ data: { orderId, workOrderVersion: order.workOrderVersion,
       operationId: link.operationId, progressStepId: link.progressStepId, workerId: prior.workerId, workerName: prior.workerName,
       sourceKey: target.key, label: target.label, plannedQty: quantity.toString(), status: quantity.isZero() ? 'CARRIED' : 'PENDING',
-      manualPricing: true, snapshot: { ...target.snapshot, previousJobId: prior.id, carriedQty: done.toString(), productionQuantities: production.quantities, reason: '工单改版新增生产' } } });
+      manualPricing: order.kind === 'REWORK' || previouslyProduced, snapshot: { ...target.snapshot, previousJobId: prior.id,
+        ...(continuation ? { productionStartedAt: startedAt, continuedFromJobId: prior.id } : {}),
+        carriedQty: done.toString(), actualCarriedQuantities: production.actualQuantities, fulfilledQuantities: production.fulfilledQuantities,
+        productionQuantities: production.quantities, reason: previouslyProduced ? '工单改版新增生产' : '首次生产' } } });
+    if (continuation) continuations.set(prior.id, next.id);
     if (quantity.isZero()) {
       if (link.operationId) await tx.productionOperation.update({ where: { id: link.operationId }, data: { status: 'COMPLETED' } });
       if (link.progressStepId) await tx.productionProgressStep.update({ where: { id: link.progressStepId }, data: { status: 'COMPLETED' } });
@@ -65,9 +96,21 @@ export async function inheritProductionJobsInTx(tx: Prisma.TransactionClient, or
       unfinished++;
     }
   }
-  await tx.productionJob.updateMany({ where: { orderId, workOrderVersion: { lt: order.workOrderVersion }, status: { in: ['PENDING', 'REQUESTED'] } }, data: { status: 'CANCELLED', revision: { increment: 1 } } });
-  if (unfinished && ['RELEASED', 'FOILING', 'PACKING'].includes(order.status)) await tx.order.update({ where: { id: orderId }, data: { status: 'RELEASED', completedAt: null } });
+  const oldPending = await tx.productionJob.findMany({ where: { orderId, workOrderVersion: { lt: order.workOrderVersion }, status: 'PENDING' }, include: { factReview: true } });
+  for (const job of oldPending) {
+    const nextJobId = continuations.get(job.id);
+    if (!nextJobId && (job.factReview?.status !== 'UNPRODUCED' || job.factReview.jobRevision !== job.revision)) throw new Error(`请先核实${job.workerName}的${job.label}是否已生产`);
+    if (nextJobId) {
+      const evidence = { resolution: 'CONTINUED', nextJobId, originalWorkerId: job.workerId, physicalWorkUnchanged: true };
+      const now = new Date();
+      await tx.orderLog.create({ data: { orderId, operatorId: actorId, action: 'PRODUCTION_CONTINUED', changedFields: { jobId: job.id, jobRevision: job.revision, ...evidence }, remark: '仅资料改版，原任务实际生产和全部待登记数量由新版继续承接' } });
+      await tx.productionFactReview.upsert({ where: { jobId: job.id }, create: { jobId: job.id, jobRevision: job.revision + 1, status: 'RESOLVED', periodStart: now, periodEnd: now, reason: '实物及归属未变，生产继续承接', evidence, createdById: actorId, resolvedById: actorId, resolvedAt: now }, update: { jobRevision: job.revision + 1, status: 'RESOLVED', evidence, resolvedById: actorId, resolvedAt: now, revision: { increment: 1 } } });
+    }
+    await tx.productionJob.update({ where: { id: job.id }, data: { status: 'CANCELLED', revision: { increment: 1 } } });
+  }
+  const status = unfinished ? await reopenAssignedProductionInTx(tx, orderId, actorId) : order.status;
   await tx.orderLog.create({ data: { orderId, operatorId: actorId, action: 'PRODUCTION_OWNERSHIP_INHERITED', changedFields: { workOrderVersion: order.workOrderVersion, unfinished, historicalWagesPreserved: true } } });
+  return status;
 }
 
 /** A shipped order's redo is a distinct delivery with inherited production ownership. */
@@ -90,7 +133,12 @@ export async function inheritReworkProductionJobsInTx(tx: Prisma.TransactionClie
     if (sourceIds.length !== target.itemIds.length || owners.some(owner => !owner) || new Set(owners.map(owner => owner!.workerId)).size !== 1) continue;
     const owner = owners[0]!;
     const link = links.get(target.key);
-    if (!link || await tx.productionJob.findFirst({ where: { orderId, workOrderVersion: order.workOrderVersion, sourceKey: target.key } })) continue;
+    if (!link) throw new Error('重做生产明细不完整，请核对工单');
+    const existing = await tx.productionJob.findFirst({ where: { orderId, workOrderVersion: order.workOrderVersion, sourceKey: target.key } });
+    if (existing) {
+      if (existing.workerId !== owner.workerId || existing.operationId !== link.operationId || existing.progressStepId !== link.progressStepId) throw new Error('重做生产归属与已有任务不一致，请核对工单');
+      continue;
+    }
     await tx.productionJob.create({ data: { orderId, workOrderVersion: order.workOrderVersion, operationId: link.operationId, progressStepId: link.progressStepId,
       workerId: owner.workerId, workerName: owner.workerName, label: target.label, sourceKey: target.key, plannedQty: target.quantity, manualPricing: true,
       snapshot: { ...target.snapshot, sourceOrderId: order.sourceOrderId, previousJobId: owner.id, reason: '关联重做生产' } } });

@@ -551,6 +551,7 @@ function submitAdminOrderDecision({
         producedQty: parsedProduced,
         expectedPriceRevision: settlementPreview.priceRevision,
         expectedQuoteToken: settlementPreview.quoteToken,
+        expectedProductionFactsToken: settlementPreview.productionFactsToken,
         settleFee: settleFee.trim(),
         ...(settleFeeAdjustmentReason.trim()
           ? {

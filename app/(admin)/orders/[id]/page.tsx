@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { ProductionDeliverySummary } from '@/components/business/production/ProductionDeliverySummary';
 import { ProductionJobPanel } from '@/components/business/production/ProductionJobPanel';
 import { CreateOrderOutsourceLink } from '@/components/business/outsource/CreateOrderOutsourceLink';
@@ -378,8 +379,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     (canViewCommercialAmounts && order.customerCharges.length > 0);
 
   const detailSections = {
-    readiness: (<><ProductionReadinessWarning readiness={savedPricingReadiness} saved />{repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}</>),
-    pricing: (<>{isChargeableOrder && pricingStatus ? (
+    readiness: (<Fragment key="readiness"><ProductionReadinessWarning readiness={savedPricingReadiness} saved />{repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}</Fragment>),
+    pricing: (<Fragment key="pricing">{isChargeableOrder && pricingStatus ? (
         <section
           id="pricing-review"
           className={
@@ -452,8 +453,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             />
           ) : null}
         </section>
-      ) : null}</>),
-    commercial: (<>{canAdminManageCommercialDetails &&
+      ) : null}</Fragment>),
+    commercial: (<Fragment key="commercial">{canAdminManageCommercialDetails &&
       priceRevision !== null ? (
         <OrderCommercialDetailsManager headingLevel={3}
           orderId={order.id}
@@ -501,8 +502,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             };
           })}
         />
-      ) : null}</>),
-    printActions: (<><div className="flex min-w-0 flex-wrap items-center gap-2">
+      ) : null}</Fragment>),
+    printActions: (<Fragment key="printActions"><div className="flex min-w-0 flex-wrap items-center gap-2">
             <a
               href={`/api/orders/${order.id}/pdf?view=inline`}
               target="_blank"
@@ -520,7 +521,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             <Link href={`/print/orders/${order.id}`} prefetch={false} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               网页预览
             </Link>
-          </div></>),
+          </div></Fragment>),
     otherActions: (<div className="flex min-w-0 flex-wrap items-center gap-2">
             {canEdit ? (
               <Link
@@ -586,17 +587,17 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               </>
             ) : null}
           </div>),
-    basics: (<><OrderBasicSummarySection {...{
+    basics: (<Fragment key="basics"><OrderBasicSummarySection {...{
       order, hasProductionOperations, productionOperations, productionProgressSteps,
       assignedWorkerNames, canViewCommercialAmounts,
-    }} /></>),
-    payrollPass: (<>
+    }} /></Fragment>),
+    payrollPass: (<Fragment key="payrollPass">
       {['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING', 'SCHEDULING', 'IN_PRODUCTION'].includes(order.status) && productionOperations.some((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)) && <section className="space-y-3 rounded-xl border bg-card p-4 sm:p-6">
         <h3 className="text-base font-semibold">师傅计薪次数</h3>
         <div className="grid gap-3 sm:grid-cols-2">{productionOperations.filter((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)).map((op) => <PayrollPassForm key={`${op.id}:${op.payrollRevision}`} operationId={op.id} revision={op.payrollRevision} passCount={op.payrollPassCount ?? productionOperationPassCount(op.operationType, op.sources)} sequences={op.sources.flatMap((s) => s.orderItem ? [s.orderItem.sequence] : [])} />)}</div>
       </section>}
-    </>),
-    customerCharges: (<>{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
+    </Fragment>),
+    customerCharges: (<Fragment key="customerCharges">{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
             <h3 className="text-base font-semibold">对客收费明细</h3>
@@ -703,8 +704,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             ))}
           </ol>
         </section>
-      ) : null}</>),
-    shipments: (<>{order.simpleProduction && <ProductionDeliverySummary orderId={order.id} version={order.workOrderVersion} />}<section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      ) : null}</Fragment>),
+    shipments: (<Fragment key="shipments">{order.simpleProduction && <ProductionDeliverySummary orderId={order.id} version={order.workOrderVersion} />}<section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-semibold">
             发货地址（{order.shipments.length}）
@@ -770,8 +771,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </li>
           ))}
         </ol>
-      </section></>),
-    rework: (<>{order.sourceOrder || order.reworkOrders.length > 0 ? (
+      </section></Fragment>),
+    rework: (<Fragment key="rework">{order.sourceOrder || order.reworkOrders.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <h3 className="text-base font-semibold">重做关联</h3>
           {order.sourceOrder ? (
@@ -809,9 +810,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </ul>
           ) : null}
         </section>
-      ) : null}</>),
+      ) : null}</Fragment>),
     itemDetails: order.items.map((item) => ({ itemId: item.id, content: (
-              <Disclosure id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
+              <Disclosure key={item.id} id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
                 <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
                   <span className="min-w-0 font-medium"><span className="sr-only">第 {item.sequence} 款 · {item.name}：</span>设计文件与工艺资料</span>
                   <span className="text-xs text-muted-foreground">
@@ -1033,11 +1034,11 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               />
               </div>
               </Disclosure>    ) })),
-    packaging: (<><OrderPackagingGroupsSection
+    packaging: (<Fragment key="packaging"><OrderPackagingGroupsSection
         order={order}
         canViewCommercialAmounts={canViewCommercialAmounts}
-      /></>),
-    changeHistory: (<>{order.changeRequests.length > 0 ? (
+      /></Fragment>),
+    changeHistory: (<Fragment key="changeHistory">{order.changeRequests.length > 0 ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -1076,10 +1077,10 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 <p className="admin-wrap-anywhere mt-2 text-sm">
                   原因：{request.reason}
                 </p>
-                <OrderChangeFieldDiff
+                {request.type === 'CANCEL' ? <p className="mt-2 text-sm">取消工单{request.producedQty != null ? ` · 已产 ${request.producedQty} 个` : ''}{request.settleFee != null ? ` · 结算 ${formatMoney(request.settleFee)}` : ''}</p> : <OrderChangeFieldDiff
                   beforeSnapshot={request.beforeSnapshot}
                   proposedChanges={request.proposedChanges}
-                />
+                />}
                 {request.reviewRemark ? (
                   <p className="admin-wrap-anywhere mt-2 text-xs text-muted-foreground">
                     审核备注：{request.reviewRemark}
@@ -1100,8 +1101,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             ))}
           </ol>
         </section>
-      ) : null}</>),
-    disputes: (<><ReportDisputeAdminPanel headingLevel={3} disputes={reportDisputes} />{(
+      ) : null}</Fragment>),
+    disputes: (<Fragment key="disputes"><ReportDisputeAdminPanel headingLevel={3} disputes={reportDisputes} />{(
         <TaskDisputeAdminPanel headingLevel={3}
           disputes={taskDisputes.map((dispute) => ({
             id: dispute.id,
@@ -1123,9 +1124,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             },
           }))}
         />
-      )}</>),
-    material: (<><OrderMaterialUsageEstimate headingLevel={3} estimate={materialEstimate} canManageBom={canManageBom} /></>),
-    piecework: (<><OrderWagePanel headingLevel={3} orderId={order.id} actor={user} />{pieceworkSummary ? (
+      )}</Fragment>),
+    material: (<Fragment key="material"><OrderMaterialUsageEstimate headingLevel={3} estimate={materialEstimate} canManageBom={canManageBom} /></Fragment>),
+    piecework: (<Fragment key="piecework"><OrderWagePanel headingLevel={3} orderId={order.id} actor={user} />{pieceworkSummary && (!order.simpleProduction || pieceworkSummary.items.length > 0) ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
@@ -1163,8 +1164,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </ul>
           )}
         </section>
-      ) : null}</>),
-    costs: (<>{(
+      ) : null}</Fragment>),
+    costs: (<Fragment key="costs">{(
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
             <h3 className="text-base font-semibold">成本补录与调整</h3>
@@ -1233,8 +1234,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             />
           </div>
         </section>
-      )}</>),
-    logs: (<><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      )}</Fragment>),
+    logs: (<Fragment key="logs"><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <h3 className="text-base font-semibold">修改日志</h3>
         {order.logs.length === 0 ? (
           <TableEmptyState
@@ -1286,9 +1287,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             })}
           </ul>
         )}
-      </section></>),
+      </section></Fragment>),
     shippingForm: null,
-    completionBlock: (<>{(order.status === OrderStatus.SCHEDULING ||
+    completionBlock: (<Fragment key="completionBlock">{(order.status === OrderStatus.SCHEDULING ||
         order.status === OrderStatus.IN_PRODUCTION) &&
       order.uncoveredOutsourceItems.length > 0 ? (
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
@@ -1313,8 +1314,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </Link>
           ) : null}
         </section>
-      ) : null}</>),
-    shippingBlock: (<>{canShipOrSettle &&
+      ) : null}</Fragment>),
+    shippingBlock: (<Fragment key="shippingBlock">{canShipOrSettle &&
       (order.status === OrderStatus.PACKING ||
         order.status === OrderStatus.COMPLETED) &&
       !canShip ? (
@@ -1336,8 +1337,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             </p>
           )}
         </section>
-      ) : null}</>),
-    settlementBlock: (<>{canShipOrSettle &&
+      ) : null}</Fragment>),
+    settlementBlock: (<Fragment key="settlementBlock">{canShipOrSettle &&
       order.status === OrderStatus.SHIPPED &&
       isPricingPending ? (
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
@@ -1347,8 +1348,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           </p>
           <Link href="#pricing-review" className={buttonVariants({ variant: 'outline', size: 'sm' })}>处理核价</Link>
         </section>
-      ) : null}</>),
-    reworkForm: (<>{canCreateRework ? (
+      ) : null}</Fragment>),
+    reworkForm: (<Fragment key="reworkForm">{canCreateRework ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div>
           <h3 className="text-base font-semibold">发起重做工单</h3>
@@ -1375,7 +1376,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             }))}
           />
         </section>
-      ) : null}</>),
+      ) : null}</Fragment>),
   };
 
   if (!presentation) return <ActionNotice tone="warning" title="工单已更新，请刷新后查看最新资料"
@@ -1398,7 +1399,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       supplementary={[
         ...(hasPricingDetails ? [{ id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> }] : []),
         { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
-        { id: 'detail-production-records', title: '生产、用料与计件记录', content: <><ProductionJobPanel orderId={order.id} />{detailSections.readiness}{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
+        { id: 'detail-production-records', title: '生产、用料与计件记录', content: <><ProductionJobPanel key="production-jobs" orderId={order.id} />{detailSections.readiness}{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
         { id: 'detail-business-records', title: '生产与业务资料', content: detailSections.basics },
         { id: 'detail-costs', title: '工厂成本', content: detailSections.costs },
         ...(canCreateRework || order.sourceOrder || order.reworkOrders.length > 0 ? [{ id: 'detail-after-sales', title: '售后与重做', content: <>{detailSections.rework}{detailSections.reworkForm}</> }] : []),

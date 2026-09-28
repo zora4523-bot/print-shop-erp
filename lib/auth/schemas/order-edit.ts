@@ -357,6 +357,7 @@ export type CreateOrderChangeRequestInput = z.infer<
 >;
 
 const reviewOrderChangeRequestBaseSchema = z.object({
+  expectedProductionFactsToken: z.string().regex(/^[a-f\d]{64}$/).optional(),
   requestId: orderChangeId,
   // Rejection does not depend on a price revision. Approval must require and
   // compare this value in the locked domain command.

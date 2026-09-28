@@ -3451,7 +3451,7 @@ describe('cancellation settlement reference', () => {
     await expect(reviewOrderChangeRequest({
       requestId: value.id, decision: 'APPROVE', reviewRemark: null,
       producedQty: 499, settleFee: '505.00',
-    }, admin)).rejects.toThrow('已产数量不能小于已报工 500');
+    }, admin)).rejects.toThrow('已产数量不能小于已登记生产 500');
     expect(mocks.db.order.update).not.toHaveBeenCalled();
   });
 

@@ -205,6 +205,8 @@ export function adminSignalWhere(
   now: Date = new Date(),
 ): Prisma.OrderWhereInput {
   switch (signal) {
+    case 'pending-quantity':
+      return { productionJobs: { some: { OR: [{ status: 'REQUESTED' }, { factReview: { is: { status: { in: ['OPEN', 'CONFLICT'] } } } }] } } };
     case 'pending-confirmation':
       return {
         status: {
@@ -245,7 +247,7 @@ export function buildAdminWorkspaceBaseWhere(
   assertAdmin(actor);
   return andWhere(
     buildOrderWhere(actor, query.list.filters),
-    ...(query.pendingWages ? [{ productionJobs: { some: { wages: { some: { amount: null } } } } }] : []),
+    ...(query.pendingWages ? [{ productionJobs: { some: { OR: [{ wages: { some: { amount: null } } }, { factReview: { is: { status: 'WAGES_DUE' } } }] } } }] : []),
     query.starred ? { stars: { some: { userId: actor.id } } } : {},
     query.unbilled
       ? {
@@ -267,7 +269,7 @@ export function buildAdminWorkspaceResultWhere(
 ): Prisma.OrderWhereInput {
   return andWhere(
     buildAdminWorkspaceBaseWhere(actor, query),
-    adminQueueWhere(query.queue),
+    query.signal === 'pending-quantity' ? {} : adminQueueWhere(query.queue),
     query.signal ? adminSignalWhere(query.signal, now) : {},
   );
 }
@@ -281,7 +283,7 @@ export async function resolveAdminWorkspaceResultWhere(
 ): Promise<Prisma.OrderWhereInput> {
   assertAdmin(actor);
   const queueWhere =
-    query.queue === 'print'
+    query.signal === 'pending-quantity' ? {} : query.queue === 'print'
       ? { id: { in: await loadCurrentPrintOrderIds(db) } }
       : adminQueueWhere(query.queue);
   return andWhere(

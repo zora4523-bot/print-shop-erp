@@ -134,8 +134,8 @@ function renderWorkspace(signal?: string, zeroCounts = false) {
         counts: {
           queues: { todo: 6, print: 0, production: 1, shipped: 0, done: 1, all: 8 },
           signals: zeroCounts
-            ? { 'pending-confirmation': 0, 'pending-pricing': 0, 'pending-change': 0, 'pending-release': 0, 'on-hold': 0, overdue: 0, 'due-today': 0 }
-            : { 'pending-confirmation': 4, 'pending-pricing': 1, 'pending-change': 1, 'pending-release': 1, 'on-hold': 1, overdue: 1, 'due-today': 2 },
+            ? { 'pending-quantity': 0, 'pending-confirmation': 0, 'pending-pricing': 0, 'pending-change': 0, 'pending-release': 0, 'on-hold': 0, overdue: 0, 'due-today': 0 }
+            : { 'pending-quantity': 0, 'pending-confirmation': 4, 'pending-pricing': 1, 'pending-change': 1, 'pending-release': 1, 'on-hold': 1, overdue: 1, 'due-today': 2 },
         },
       }}
     />
@@ -222,7 +222,7 @@ describe('admin order workspace restrained semantic colors', () => {
         const dashboard = requiredElement('[aria-label="工单决定看板"]');
         for (const card of dashboard.querySelectorAll<HTMLElement>('a')) expectNeutralCard(card);
         const cards = [...dashboard.querySelectorAll<HTMLElement>('a')];
-        expect(cards).toHaveLength(8);
+        expect(cards).toHaveLength(9);
         if (width >= 1280) expect(new Set(cards.map((card) => card.getBoundingClientRect().top)).size).toBe(1);
         expectControlsWithinViewport(width);
         expect(await commands.checkShellAccessibility('[data-testid="order-colors-fixture"]')).toEqual([]);

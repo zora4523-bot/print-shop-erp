@@ -18,6 +18,7 @@ export const ADMIN_ORDER_QUEUES = [
 export type AdminOrderQueue = (typeof ADMIN_ORDER_QUEUES)[number];
 
 export const ADMIN_ORDER_SIGNALS = [
+  'pending-quantity',
   'pending-confirmation',
   'pending-pricing',
   'pending-release',
@@ -112,7 +113,7 @@ export function parseAdminOrderWorkspaceQuery(
         scrollY: undefined,
         view: undefined,
       },
-      queue,
+      queue: signal === 'pending-quantity' ? 'all' : queue,
       ...(signal ? { signal } : {}),
       starred,
       unbilled,

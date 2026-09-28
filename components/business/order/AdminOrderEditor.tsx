@@ -78,6 +78,10 @@ import type {
 } from '@/generated/prisma/enums';
 
 type EditFormProps = ComponentProps<typeof EditOrderForm>;
+function reviewedEditCommand(payload: AdminOrderEditInput, review: AdminOrderEditPreview): AdminOrderEditInput {
+  return { ...payload, expectedQuoteToken: review.quoteToken,
+    expectedProductionFactsToken: review.productionFactsToken, expectedPriceRevision: review.priceRevision };
+}
 export type AdminEditorItem = {
   id: string;
   sequence: number;
@@ -288,11 +292,7 @@ export function AdminOrderEditor(props: Props) {
     saveInFlightRef.current = true;
     startTransition(async () => {
       try {
-        const result = await saveAdminOrderEditAction({
-          ...payload,
-          expectedQuoteToken: review.quoteToken,
-          expectedPriceRevision: review.priceRevision,
-        });
+        const result = await saveAdminOrderEditAction(reviewedEditCommand(payload, review));
         if (result.status === 'error') {
           setError(result.message);
           setReview(null);

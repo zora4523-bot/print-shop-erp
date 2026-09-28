@@ -9,6 +9,7 @@ import { createOrderPrintRequestInTx } from '@/lib/order/print-jobs';
 import { releaseFactoryOrderInTx } from '@/lib/order/admin-workflow';
 import { dispatchNotification } from '@/lib/notification/dispatch';
 import { currentDispatchTargets, eligibleProductionWorker, targetLinks } from './dispatch-targets';
+import { assertNoHistoricalProductionReview } from './fact-guards';
 
 export type ProductionActor = { id: string; role: Role };
 export const dispatchSchema = z.object({
@@ -37,12 +38,14 @@ export async function publishProductionDispatch(raw: DispatchInput, actor: Produ
       return { notifications: [], ids: orders.map(order => order.id) };
     }
     for (const row of orders) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(row.id)}))`;
-    for (const workerId of [...new Set(orders.flatMap(row => Object.values(row.assignments)))].sort()) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(workerId)}))`;
+    const previousOwners = await tx.productionJob.findMany({ where: { orderId: { in: orders.map(row => row.id) } }, select: { workerId: true } });
+    for (const workerId of [...new Set([...orders.flatMap(row => Object.values(row.assignments)), ...previousOwners.map(row => row.workerId)])].sort()) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(workerId)}))`;
     const notifications = [];
     let count = 0;
     for (const row of orders) {
       const { order, targets } = await currentDispatchTargets(tx, row.id);
       if (order.revision !== row.revision || order.workOrderVersion !== row.version) throw new Error(`${order.orderNo} 已修改，请刷新排单`);
+      await assertNoHistoricalProductionReview(tx, order.id);
       if (await tx.orderChangeRequest.count({ where: { orderId: order.id, status: 'PENDING' } })) throw new Error(`${order.orderNo} 有待审批修改，请先处理`);
       if (!['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(order.status)) throw new Error(`${order.orderNo} 当前不可排单，请核对工单状态`);
       count += targets.length;
@@ -51,6 +54,7 @@ export async function publishProductionDispatch(raw: DispatchInput, actor: Produ
       if (!order.simpleProduction && await tx.productionJob.count({ where: { orderId: order.id } })) throw new Error('生产流程不一致，请核对工单');
       const workers = new Map<string, Awaited<ReturnType<typeof eligibleProductionWorker>>>();
       const currentJobs = await tx.productionJob.findMany({ where: { orderId: order.id, workOrderVersion: row.version } });
+      const pastProduction = await tx.productionJob.findMany({ where: { orderId: order.id, workOrderVersion: { lt: row.version }, status: 'COMPLETED' } });
       for (const target of targets) {
         const prior = currentJobs.find(job => job.sourceKey === target.key);
         // Keeping a historical owner is not a new assignment (including inactive accounts).
@@ -75,13 +79,19 @@ export async function publishProductionDispatch(raw: DispatchInput, actor: Produ
         if (existing) {
           if (existing.workerId === worker.id) continue;
           if (existing.status !== 'PENDING') throw new Error(`${order.orderNo} 已登记生产或申请数量，不能转移归属`);
+          const proof = await tx.productionFactReview.findUnique({ where: { jobId: existing.id } });
+          if (proof?.status !== 'UNPRODUCED' || proof.jobRevision !== existing.revision) throw new Error(`${order.orderNo} 请先在生产记录中核实原师傅尚未生产，再调整归属`);
           assignmentChanged = true;
           await tx.productionJob.update({ where: { id: existing.id }, data: { workerId: worker.id, workerName: worker.displayName, revision: { increment: 1 } } });
         } else {
           assignmentChanged = true;
           await tx.productionJob.create({ data: { orderId: order.id, workOrderVersion: row.version,
             operationId: link.operationId, progressStepId: link.progressStepId, workerId: worker.id, workerName: worker.displayName,
-            sourceKey: target.key, label: target.label, plannedQty: target.quantity, manualPricing: order.kind === 'REWORK' || row.version > 1, snapshot: target.snapshot } });
+            sourceKey: target.key, label: target.label, plannedQty: target.quantity,
+            manualPricing: order.kind === 'REWORK' || pastProduction.some(job => {
+              const snapshot = job.snapshot as { lane?: string; items?: Array<{ id: string }> };
+              return snapshot.lane === target.snapshot.lane && snapshot.items?.some(item => target.itemIds.includes(item.id));
+            }), snapshot: target.snapshot } });
         }
       }
       await tx.order.update({ where: { id: order.id }, data: { simpleProduction: true, revision: { increment: 1 } } });

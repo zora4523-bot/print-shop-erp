@@ -33,6 +33,7 @@ const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
 ];
 
 const SIGNALS: Array<{ key: AdminOrderSignal; label: string }> = [
+  { key: 'pending-quantity', label: '生产数量待核对' },
   { key: 'pending-confirmation', label: '待处理' },
   { key: 'pending-pricing', label: '待核价' },
   { key: 'pending-change', label: '变更申请' },

@@ -543,12 +543,13 @@ export async function activateProductionOperationsInTx(
     },
   });
 
-  if (order.kind === OrderKind.REWORK && order.sourceOrderId) await inheritReworkProductionJobsInTx(tx, orderId, actor.id);
-  if (order.simpleProduction && options.allowVersionRematerialization) await inheritProductionJobsInTx(tx, orderId, actor.id);
+  let finalStatus: OrderStatus = targetStatus;
+  if (order.simpleProduction && options.allowVersionRematerialization) finalStatus = await inheritProductionJobsInTx(tx, orderId, actor.id) ?? targetStatus;
+  else if (order.kind === OrderKind.REWORK && order.sourceOrderId) await inheritReworkProductionJobsInTx(tx, orderId, actor.id);
 
   return {
     orderId,
-    orderStatus: targetStatus,
+    orderStatus: finalStatus,
     operationIds,
     operationsCreated: operationIds.length,
     progressStepIds,

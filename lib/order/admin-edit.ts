@@ -113,6 +113,7 @@ export async function editAdminOrder(
           preview = {
             oldTotal: quoted.oldTotal,
             newTotal: quoted.newTotal,
+            productionFactsToken: quoted.productionFactsToken,
             quoteToken: quoted.quoteToken,
             priceRevision: quoted.priceRevision,
             complete: quoted.complete,
@@ -125,6 +126,7 @@ export async function editAdminOrder(
           if (mode === 'save') {
             if (
               !quoted.complete ||
+              input.expectedProductionFactsToken !== quoted.productionFactsToken ||
               input.expectedQuoteToken !== quoted.quoteToken ||
               input.expectedPriceRevision !== quoted.priceRevision
             ) {
@@ -138,6 +140,7 @@ export async function editAdminOrder(
                 decision: 'APPROVE',
                 reviewRemark: '管理员核对差异后保存修改',
                 expectedPriceRevision: quoted.priceRevision,
+                expectedProductionFactsToken: quoted.productionFactsToken,
                 pendingChargeResolutions: input.pendingChargeResolutions,
                 ...(quoted.quoteToken !== null
                   ? { expectedQuoteToken: quoted.quoteToken }

@@ -1,3 +1,4 @@
+vi.mock('server-only', () => ({}));
 import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -17,7 +18,8 @@ const { dbMock, databaseClockNowMock, databaseNowMock } = vi.hoisted(() => ({
       update: vi.fn(),
     },
     productionReport: { findMany: vi.fn() },
-    productionJob: { count: vi.fn().mockResolvedValue(0) },
+    productionJob: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]) },
+    productionFactReview: { count: vi.fn().mockResolvedValue(0) },
     productionWage: { findMany: vi.fn(), updateMany: vi.fn() },
     user: { findUnique: vi.fn() },
     businessAuditLog: { create: vi.fn() },
@@ -109,6 +111,8 @@ beforeEach(() => {
     displayName: '张师傅',
   });
   dbMock.productionJob.count.mockResolvedValue(0);
+  dbMock.productionJob.findMany.mockReset().mockResolvedValue([]);
+  dbMock.productionFactReview.count.mockReset().mockResolvedValue(0);
   dbMock.productionReport.findMany.mockResolvedValue([
     report('partial', '3.00', 'PARTIAL', 'order-1'),
     report('full', '5.00', 'FULL', 'order-2'),

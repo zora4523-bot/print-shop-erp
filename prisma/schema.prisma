@@ -3054,10 +3054,33 @@ model ProductionJob {
   operation        ProductionOperation?    @relation(fields: [operationId], references: [id], onDelete: Restrict)
   progressStep     ProductionProgressStep? @relation(fields: [progressStepId], references: [id], onDelete: Restrict)
   wages            ProductionWage[]
+  factReview       ProductionFactReview?
 
   @@unique([orderId, workOrderVersion, sourceKey])
   @@index([orderId, workOrderVersion, status])
   @@index([workerId, status, createdAt])
+}
+
+// One durable verification obligation per production event. Closing a fact review
+// does not erase either the production fact or an unpaid historical wage.
+model ProductionFactReview {
+  id           String        @id @default(cuid())
+  jobId        String        @unique
+  jobRevision  Int
+  status       String        @default("OPEN")
+  periodStart  DateTime      @db.Date
+  periodEnd    DateTime      @db.Date
+  reason       String
+  evidence     Json
+  revision     Int           @default(0)
+  createdById  String
+  resolvedById String?
+  resolvedAt   DateTime?     @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
+  job          ProductionJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@index([status, periodStart, periodEnd])
 }
 
 // Mutable amount is a projection of append-only entries; null means awaiting pricing.

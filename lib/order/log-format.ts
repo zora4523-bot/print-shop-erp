@@ -235,6 +235,12 @@ const ACTION_LABELS: Record<string, string> = {
   PRODUCTION_WAGES_ALLOCATED: '核定生产提成',
   PRODUCTION_OWNERSHIP_INHERITED: '沿用生产归属',
   PRODUCTION_ERROR_CORRECTED: '更正生产误登记',
+  PRODUCTION_FACT_REVIEWED: '核对生产事实',
+  PRODUCTION_RECOVERY_CONFLICT: '历史生产核对冲突',
+  PRODUCTION_RECOVERY_RECONCILED: '重核后续生产数量',
+  PRODUCTION_METADATA_RECOVERED: '恢复生产流程',
+  PRODUCTION_INCLUDED_LATER: '核实已计入后续生产',
+  PRODUCTION_CONTINUED: '资料改版延续生产',
 };
 
 export function actionLabel(action: string): string {

@@ -15,6 +15,23 @@ describe('revision physical quantity carryover', () => {
   it('uses approved actual quantity for a single identifiable style', () => {
     expect(revisionProductionQuantities(target(1100), [finished(990, 1000)]).remaining.toString()).toBe('110');
   });
+  it('preserves an approved completion through metadata-only revisions without inventing the missing ten pieces', () => {
+    const result = revisionProductionQuantities(target(1000), [finished(990, 1000)]);
+    expect(result.remaining.toString()).toBe('0');
+    expect(result.actualQuantities).toEqual({ a: '990' });
+    expect(revisionProductionQuantities(target(995), [finished(990, 1000)]).remaining.toString()).toBe('0');
+  });
+  it('uses actual production for a later increase, including a one-piece demand increase', () => {
+    const history = [finished(990, 1000)];
+    expect(revisionProductionQuantities(target(1300), history).remaining.toString()).toBe('310');
+    expect(revisionProductionQuantities(target(1001), history).remaining.toString()).toBe('11');
+  });
+  it('does not count a carried completion as another physical production batch', () => {
+    const original = finished(990, 1000);
+    const carried = { status: 'CARRIED', completedQty: null, snapshot: { ...original.snapshot, fulfilledQuantities: { a: '1000' }, carriedQty: '990', productionQuantities: { a: '0' } } };
+    expect(revisionProductionQuantities(target(1000), [carried, original]).remaining.toString()).toBe('0');
+    expect(revisionProductionQuantities(target(1300), [carried, original]).remaining.toString()).toBe('310');
+  });
   it('does not silently mark ambiguous multi-style actual production as complete', () => {
     expect(revisionProductionQuantities(target(100, 100), [finished(195, 100, 100)]).remaining.toString()).toBe('200');
   });
