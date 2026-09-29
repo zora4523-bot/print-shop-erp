@@ -18,6 +18,7 @@ import {
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 import type { MaterialSummary } from '@/lib/material';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export type MaterialRouteBase =
   | '/owner/materials'
@@ -71,8 +72,6 @@ const CATEGORY_OPTIONS = [
   { value: 'OTHER', label: '其他' },
 ] as const;
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const MATERIAL_FIELD_LABELS: Record<string, string> = {
   code: '物料编码',
@@ -191,13 +190,12 @@ export function MaterialForm(props: Props) {
       ) : (
         <div className="space-y-2">
           <Label htmlFor="category">分类</Label>
-          <select
+          <NativeSelect
             id="category"
             name="category"
             {...(errs.category?.[0]
               ? formMessageA11yProps('category', 'error')
               : {})}
-            className={selectClass}
             defaultValue={
               initial?.category ?? selectableCategories[0]?.value ?? 'OTHER'
             }
@@ -208,7 +206,7 @@ export function MaterialForm(props: Props) {
                 {option.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.category?.[0] ? (
             <FormMessage fieldId="category" tone="error">
               {errs.category[0]}

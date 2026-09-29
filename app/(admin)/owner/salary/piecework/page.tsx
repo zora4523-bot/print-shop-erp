@@ -21,6 +21,7 @@ import {
   LockPieceworkSettlementForm,
   MarkPieceworkSettlementPaidForm,
 } from '@/components/business/salary/PieceworkSettlementActions';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '工序计件结算' };
 
@@ -316,15 +317,15 @@ function FilterBar({
       </label>
       <label className="space-y-1">
         <span className="block text-xs text-muted-foreground">状态</span>
-        <select
+        <NativeSelect
+          className="w-auto"
           name="status"
           defaultValue={status ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
         >
           <option value="">全部</option>
           <option value={PieceworkSettlementStatus.LOCKED}>已锁定未发</option>
           <option value={PieceworkSettlementStatus.PAID}>已发放</option>
-        </select>
+        </NativeSelect>
       </label>
       <Button type="submit" size="sm">
         筛选

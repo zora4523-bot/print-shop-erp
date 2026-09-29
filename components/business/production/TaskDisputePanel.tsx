@@ -8,6 +8,7 @@ import { ProductionTaskDisputeStatus } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { TaskDisputeStatusBadge } from './TaskDisputeStatusBadge';
+import { Textarea } from '@/components/ui/textarea';
 
 export function TaskDisputePanel({
   taskId,
@@ -46,7 +47,7 @@ export function TaskDisputePanel({
           <label htmlFor="task-dispute-reason" className="font-medium">
             异议原因
           </label>
-          <textarea
+          <Textarea
             id="task-dispute-reason"
             name="reason"
             minLength={5}
@@ -57,7 +58,7 @@ export function TaskDisputePanel({
             aria-invalid={Boolean(reasonError)}
             aria-describedby={reasonError ? 'task-dispute-reason-error' : undefined}
             placeholder="请说明具体任务、期望数量/金额和依据"
-            className="w-full resize-y rounded-md border bg-background px-3 py-2"
+            className="w-full"
           />
           {reasonError ? (
             <p id="task-dispute-reason-error" className="text-xs text-destructive">

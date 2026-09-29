@@ -1,9 +1,10 @@
+import { FormPendingScope, ScopedPageHeader } from '@/components/business/form/FormPendingScope';
 import { readSupplementContext } from '@/lib/form-drafts/return-context';
 import { newFormDraftContext } from '@/lib/form-drafts/server-context';
 import { createPurchaseOrderAction } from '@/actions/owner-purchases';
 import { PurchaseOrderForm } from '@/components/business/purchase/PurchaseOrderForm';
 import { FormPage } from '@/app/_components/FormPage';
-import { PageHeader, ReceiptNotice } from '@/components/ui-business';
+import { ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -39,9 +40,10 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
     : '';
 
   return (
+    <FormPendingScope>
     <FormPage>
       <ReceiptNotice receipt={receipt} noun={receiptNoun} />
-      <PageHeader
+      <ScopedPageHeader
         title="新建采购单"
         subtitle="创建采购单不会增加库存；到货后可分批收货。"
         back={{ href: '/owner/purchases', label: '返回采购单' }}
@@ -65,5 +67,6 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
         />
       </section>
     </FormPage>
+    </FormPendingScope>
   );
 }

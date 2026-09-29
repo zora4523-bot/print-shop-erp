@@ -17,6 +17,7 @@ import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 import { formatDateInputShanghai } from '@/lib/format/dates';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '工时录入' };
 
@@ -289,11 +290,11 @@ function FilterBar({
         >
           员工
         </label>
-        <select
+        <NativeSelect
           id="attendance-worker"
           name="workerId"
           defaultValue={selectedWorkerId ?? ''}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         >
           {workers.map((w) => (
             <option key={w.id} value={w.id}>
@@ -305,7 +306,7 @@ function FilterBar({
               ）
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <Button type="submit" size="sm">
         切换

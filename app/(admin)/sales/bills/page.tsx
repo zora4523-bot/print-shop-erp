@@ -7,6 +7,7 @@ import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-regist
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PageHeader, EmptyState, TableScrollArea, StatusBadge, StatCard } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '我的对客应付账单' };
 export default async function SalesBillsPage({ searchParams }: { searchParams: Promise<{ status?: string; period?: string }> }) {
@@ -25,9 +26,9 @@ export default async function SalesBillsPage({ searchParams }: { searchParams: P
       <StatCard label="已结清" value={formatMoney(paid)} tone="success" />
     </div>
     <Form action="/sales/bills" className="flex flex-wrap items-end gap-3">
-      <label className="grid gap-1">状态<select name="status" defaultValue={filters.status ?? ''} className="min-h-11 rounded-md border bg-background px-3">
+      <label className="grid gap-1">状态<NativeSelect name="status" defaultValue={filters.status ?? ''}>
         <option value="">全部</option>{Object.entries(SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY).map(([value, entry]) => <option key={value} value={value}>{entry.label}</option>)}
-      </select></label>
+      </NativeSelect></label>
       <label className="grid gap-1">周期<input name="period" type="month" defaultValue={filters.period ?? ''} className="min-h-11 rounded-md border bg-background px-3" /></label>
       <Button type="submit">筛选</Button><Link href="/sales/bills" scroll={false} className={buttonVariants({ variant: 'ghost' })}>清除筛选</Link>
     </Form>

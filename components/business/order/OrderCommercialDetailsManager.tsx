@@ -10,6 +10,7 @@ import {
 } from '@/actions/order';
 import type { OrderCommercialDetailMutationResult } from '@/actions/order.types';
 import { Badge } from '@/components/ui/badge';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -167,8 +168,8 @@ function ManualChargeEditor({
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-xs">
               <span>费用类型</span>
-              <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              <NativeSelect
+                className="w-full"
                 value={categoryCode}
                 onChange={(event) =>
                   setCategoryCode(event.target.value as ManualChargeCode)
@@ -179,7 +180,7 @@ function ManualChargeEditor({
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label className="space-y-1 text-xs">
               <span>

@@ -14,6 +14,7 @@ import type {
 import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
@@ -163,15 +164,15 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
           <fieldset disabled={pending || auxiliary.blocked} className="min-w-0 space-y-4">
             <div className="max-w-sm space-y-1">
               <label htmlFor={`fulfillment-mode-${orderId}`} className="text-sm font-medium">更正后的物流方式</label>
-              <select
+              <NativeSelect
                 id={`fulfillment-mode-${orderId}`}
                 value={String(target)}
                 onChange={(event) => setTarget(event.target.value === 'true')}
-                className={fieldClass}
+                className="w-full"
               >
                 <option value="true">顺丰到付（本单不收快递费）</option>
                 <option value="false">非到付（确认对客快递费）</option>
-              </select>
+              </NativeSelect>
             </div>
             {target ? (
               <p className="text-sm text-muted-foreground">对客快递费将按零元核对，其他收费保持不变；存在已记录运费成本时仍需先处理成本冲突。</p>
@@ -183,10 +184,10 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
                   <input type="hidden" name="sfShipmentId" value={shipment.id} />
                   <div className="min-w-0 space-y-1">
                     <label htmlFor={`${prefix}-province`} className="text-xs font-medium">计费省份</label>
-                    <select id={`${prefix}-province`} name="sfShipmentDestinationProvince" defaultValue={shipment.destinationProvince ?? ''} className={fieldClass}>
+                    <NativeSelect id={`${prefix}-province`} name="sfShipmentDestinationProvince" defaultValue={shipment.destinationProvince ?? ''} className="w-full">
                       <option value="">请选择计费省份</option>
                       {ZTO_PROVINCE_OPTIONS.map((province) => <option key={province} value={province}>{province}</option>)}
-                    </select>
+                    </NativeSelect>
                   </div>
                   <div className="min-w-0 space-y-1">
                     <label htmlFor={`${prefix}-weight`} className="text-xs font-medium">计费重量（kg）</label>
@@ -236,4 +237,3 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   );
 }
 
-const fieldClass = 'min-h-9 w-full rounded-lg border border-input bg-background px-2.5 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';

@@ -23,6 +23,8 @@ import {
 import type { CancellationSettlementPreview } from '@/lib/order/change-request';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import {
   ActionNotice,
@@ -328,12 +330,12 @@ function AdminDecisionForm({
           <label className="block text-xs font-medium" htmlFor="decision-reason">
             原因
           </label>
-          <select
+          <NativeSelect
             id="decision-reason"
             value={reasonCode}
             disabled={pending}
             onChange={(event) => setReasonCode(event.target.value as ReasonCode)}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            className="w-full"
           >
             {(mode === 'reject' ? REJECT_REASONS : HOLD_REASONS).map(
               ([value, label]) => (
@@ -342,7 +344,7 @@ function AdminDecisionForm({
                 </option>
               ),
             )}
-          </select>
+          </NativeSelect>
           <Input
             value={figs}
             disabled={pending}
@@ -418,7 +420,7 @@ function AdminDecisionForm({
           </label>
         </div>
       ) : null}
-      <textarea
+      <Textarea
         value={note}
         disabled={pending}
         onChange={(event) => setNote(event.target.value)}
@@ -433,7 +435,7 @@ function AdminDecisionForm({
         }
         aria-label="裁决说明"
         required={requiresNote}
-        className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full"
       />
       {formIssue ? <p id="admin-decision-form-help" role="status" className="text-xs text-muted-foreground">{formIssue}</p> : null}
       <div className="flex flex-wrap gap-2">

@@ -2,6 +2,8 @@
 
 import { useActionState, useRef, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { setOrderSfCollectAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
@@ -122,7 +124,7 @@ export function SfCollectToggleForm({
                     <label htmlFor={`${prefix}-province`} className="text-xs font-medium">
                       计费省份 <RequiredMark />
                     </label>
-                    <select
+                    <NativeSelect
                       id={`${prefix}-province`}
                       name="sfShipmentDestinationProvince"
                       defaultValue={shipment.destinationProvince ?? ''}
@@ -133,7 +135,7 @@ export function SfCollectToggleForm({
                       aria-describedby={
                         provinceError ? `${prefix}-province-error` : undefined
                       }
-                      className={selectClass}
+                      className="w-full"
                     >
                       <option value="">— 请选择 —</option>
                       {ZTO_PROVINCE_OPTIONS.map((province) => (
@@ -141,7 +143,7 @@ export function SfCollectToggleForm({
                           {province}
                         </option>
                       ))}
-                    </select>
+                    </NativeSelect>
                     <FieldError
                       id={`${prefix}-province-error`}
                       message={provinceError}
@@ -210,7 +212,7 @@ export function SfCollectToggleForm({
                     <label htmlFor={`${prefix}-reason`} className="text-xs font-medium">
                       收费调整说明
                     </label>
-                    <textarea
+                    <Textarea
                       id={`${prefix}-reason`}
                       name="sfShipmentChargeOverrideReason"
                       defaultValue={
@@ -223,7 +225,7 @@ export function SfCollectToggleForm({
                       aria-describedby={
                         reasonError ? `${prefix}-reason-error` : undefined
                       }
-                      className={`${selectClass} min-h-20 resize-y py-2`}
+                      className="w-full"
                       placeholder="人工收费与系统建议不同时必填"
                     />
                     <FieldError
@@ -269,9 +271,6 @@ export function SfCollectToggleForm({
     </form>
   );
 }
-
-const selectClass =
-  'flex min-h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 
 function FieldError({ id, message }: { id: string; message?: string }) {

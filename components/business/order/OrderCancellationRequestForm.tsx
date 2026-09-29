@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
 type Props = {
   orderId: string;
@@ -70,14 +71,14 @@ export function OrderCancellationRequestForm({
     >
       <label className="block space-y-1 text-sm">
         <span className="font-medium">取消原因</span>
-        <textarea
+        <Textarea
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           rows={3}
           maxLength={500}
           required
           disabled={pending}
-          className="w-full rounded-md border bg-background px-3 py-2"
+          className="w-full"
           placeholder="说明取消原因，生产中订单由管理员核对已产数量并裁决"
         />
       </label>

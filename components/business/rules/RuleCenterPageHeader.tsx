@@ -1,4 +1,5 @@
 import { PageHeader, StatusBadge, type PageHeaderProps } from '@/components/ui-business';
+import { ScopedPageHeader } from '@/components/business/form/FormPendingScope';
 import type { RuleCenterEffect } from '@/lib/navigation/rule-center';
 import { RULE_CENTER_EFFECT_REGISTRY } from '@/lib/ui/status-registry';
 
@@ -11,6 +12,8 @@ export type RuleCenterPageHeaderProps = {
   status?: PageHeaderProps['status'];
   actions?: React.ReactNode;
   className?: string;
+  /** 在 FormPendingScope 内使用时，表单提交中锁住返回入口。 */
+  lockBackWhilePending?: boolean;
 };
 
 export function RuleCenterEffectBadge({
@@ -46,9 +49,11 @@ export function RuleCenterPageHeader({
   status,
   actions,
   className,
+  lockBackWhilePending = false,
 }: RuleCenterPageHeaderProps) {
+  const Header = lockBackWhilePending ? ScopedPageHeader : PageHeader;
   return (
-    <PageHeader
+    <Header
       title={title}
       subtitle={subtitle}
       back={back}

@@ -13,6 +13,7 @@ import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice } from '@/components/ui-business';
 import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -607,7 +608,7 @@ function Field({
         ) : null}
       </Label>
       {multiline ? (
-        <textarea
+        <Textarea
           id={name}
           name={name}
           disabled={disabled}
@@ -618,7 +619,7 @@ function Field({
           onChange={(event) => setValue(event.target.value)}
           aria-invalid={hasError}
           aria-describedby={describedBy}
-          className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
+          className="mt-1 w-full"
           rows={3}
         />
       ) : (

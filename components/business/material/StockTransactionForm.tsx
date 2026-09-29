@@ -22,6 +22,8 @@ import {
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
 import { TX_REASON_OPTIONS } from '@/lib/material-labels';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 
 type Props = {
   action: (
@@ -56,8 +58,6 @@ export function stockTransactionImpactItems(
   ];
 }
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const STOCK_TRANSACTION_FIELDS: Record<
   string,
@@ -193,13 +193,12 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="direction">方向</Label>
-          <select
+          <NativeSelect
             id="direction"
             name="direction"
             {...(errs.direction?.[0]
               ? formMessageA11yProps('direction', 'error')
               : {})}
-            className={selectClass}
             value={direction}
             onChange={(event) => {
               const next = event.target.value === 'OUT' ? 'OUT' : 'IN';
@@ -210,7 +209,7 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
           >
             <option value="IN">入库</option>
             <option value="OUT">出库</option>
-          </select>
+          </NativeSelect>
           {errs.direction?.[0] ? (
             <FormMessage fieldId="direction" tone="error">
               {errs.direction[0]}
@@ -230,13 +229,12 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
 
       <div className="space-y-2">
         <Label htmlFor="locationId">库位</Label>
-        <select
+        <NativeSelect
           id="locationId"
           name="locationId"
           {...(errs.locationId?.[0]
             ? formMessageA11yProps('locationId', 'error')
             : {})}
-          className={selectClass}
           value={locationId}
           onChange={(event) => setLocationId(event.target.value)}
           disabled={pending}
@@ -249,7 +247,7 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
               {option.isDefault ? '（默认）' : ''}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {errs.locationId?.[0] ? (
           <FormMessage fieldId="locationId" tone="error">
             {errs.locationId[0]}
@@ -260,13 +258,12 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="reasonType">原因</Label>
-          <select
+          <NativeSelect
             id="reasonType"
             name="reasonType"
             {...(errs.reasonType?.[0]
               ? formMessageA11yProps('reasonType', 'error')
               : {})}
-            className={selectClass}
             value={reasonType}
             onChange={(event) =>
               setReasonType(event.target.value as typeof reasonType)
@@ -278,7 +275,7 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
                 {o.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.reasonType?.[0] ? (
             <FormMessage fieldId="reasonType" tone="error">
               {errs.reasonType[0]}
@@ -298,7 +295,7 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
 
       <div className="space-y-2">
         <Label htmlFor="remark">备注（选填）</Label>
-        <textarea
+        <Textarea
           id="remark"
           name="remark"
           rows={3}
@@ -307,7 +304,7 @@ export function StockTransactionForm({ action, unit, locationOptions, initialIde
           {...(errs.remark?.[0]
             ? formMessageA11yProps('remark', 'error')
             : {})}
-          className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-20 w-full"
         />
         {errs.remark?.[0] ? (
           <FormMessage fieldId="remark" tone="error">

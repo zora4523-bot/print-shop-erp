@@ -14,6 +14,7 @@ import {
   notificationChannelSelectionIssueMessage,
   type NotificationChannelSelectionIssue,
 } from '@/lib/notification/channel-selection';
+import { Textarea } from '@/components/ui/textarea';
 
 type ChannelOption = {
   id: string;
@@ -72,14 +73,14 @@ export function RuleForm({
 
       <div className="space-y-2">
         <Label htmlFor="messageTemplate">消息模板（Markdown）</Label>
-        <textarea
+        <Textarea
           id="messageTemplate"
           name="messageTemplate"
           defaultValue={initial.messageTemplate}
           rows={8}
           required
           aria-invalid={!!fieldErrors?.messageTemplate}
-          className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="w-full font-mono"
         />
         {fieldErrors?.messageTemplate?.map((m, i) => (
           <p key={i} className="text-sm text-destructive">

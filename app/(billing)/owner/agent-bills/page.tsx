@@ -32,6 +32,7 @@ import {
 } from '@/components/ui-business';
 import { formatMoney } from '@/lib/dashboard/format';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '代理商月度账单' };
 
@@ -125,10 +126,10 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         </label>
         <label className="space-y-1 text-xs text-muted-foreground">
           <span>状态</span>
-          <select
+          <NativeSelect
             name="status"
             defaultValue={status ?? ''}
-            className="block h-9 rounded-md border bg-background px-3 text-sm text-foreground"
+            className="block w-auto"
           >
             <option value="">全部</option>
             {Object.values(AgentMonthlyBillStatus).map((value) => (
@@ -136,14 +137,14 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                 {AGENT_MONTHLY_BILL_STATUS_REGISTRY[value].label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="min-w-0 max-w-full basis-full space-y-1 text-xs text-muted-foreground sm:w-auto sm:basis-auto">
           <span>代理商</span>
-          <select
+          <NativeSelect
             name="agentUserId"
             defaultValue={agentUserId ?? ''}
-            className="block h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-3 text-sm text-foreground sm:min-w-44"
+            className="block w-full min-w-0 max-w-full sm:min-w-44"
           >
             <option value="">全部</option>
             {accounts.map((account) => (
@@ -151,7 +152,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                 {account.displayName} ({account.username})
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <Button type="submit" size="sm">
           筛选

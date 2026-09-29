@@ -79,6 +79,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -221,6 +222,11 @@ export type OrderFormProps = {
   initialEditor?: OrderEditorSnapshot;
   submissionId?: string;
   registerEditor?: (editor: OrderCreationEditor | null) => void;
+  /**
+   * 批量建单保活（审查 #47）：非当前工单的实例保持挂载但不在文档中，
+   * 此时不登记 editor、不挂离开守卫；草稿自动保存照常（各自独立的 draftScope）。
+   */
+  active?: boolean;
   lifecycle?: OrderCreationLifecycle;
   workbenchTransferId?: string;
   crafts: readonly CraftOption[];
@@ -611,8 +617,8 @@ function UrgentOrderField({
           >
             急单
           </span>
-          <span className="flex min-w-0 items-center gap-1">
-            {/* 44px 触控目标里的 20px 勾选框与标题左对齐 */}
+          <span className="flex min-w-0 items-start gap-1">
+            {/* 44px 触控目标里的 20px 勾选框与标题左对齐；说明折行时勾选框对准首行（§8.1） */}
             <span className="-ml-3 shrink-0">
               <Checkbox
                 id="isUrgent"
@@ -627,7 +633,7 @@ function UrgentOrderField({
             </span>
             <span
               data-slot="urgent-order-description"
-              className="min-w-0 text-xs leading-4 text-muted-foreground"
+              className="min-w-0 pt-3.5 text-xs leading-4 text-muted-foreground"
             >
               提交后会推送至排产群
             </span>
@@ -648,7 +654,7 @@ export function OrderForm({
   workbenchTransferId,
   initialEditor,
   submissionId,
-  registerEditor,
+  registerEditor, active = true,
   lifecycle,
 }: OrderFormProps) {
   const sampleEditorRef = useRef(initialEditor?.sample);
@@ -881,7 +887,7 @@ export function OrderForm({
   );
   useOrderFormLeaveGuard(
     shouldProtectOrderFormLeave({
-      enabled: true,
+      enabled: active,
       dirty: isDirty,
       pendingFileCount: pendingDesignFileCount,
       submitted: Boolean(submittedOrder),
@@ -914,7 +920,7 @@ export function OrderForm({
   );
 
   useEffect(() => {
-    if (!registerEditor) return;
+    if (!registerEditor || !active) return;
     registerEditor({
       canLeave: localDraftReady && !submitting && !uploading && !createdDraft && !pendingSubmission,
       save: () => {
@@ -924,7 +930,7 @@ export function OrderForm({
       },
     });
     return () => registerEditor(null);
-  }, [registerEditor, getValues, persistLocalDraftValues, itemsArray.fields, selectedDesignQueues, samplePurpose,
+  }, [registerEditor, active, getValues, persistLocalDraftValues, itemsArray.fields, selectedDesignQueues, samplePurpose,
     localDraftReady, submitting, uploading, createdDraft, pendingSubmission]);
 
   useEffect(() => {
@@ -2722,9 +2728,9 @@ export function OrderForm({
                       <Label htmlFor="externalSalesUserId">
                         关联外部销售<RequiredMark />
                       </Label>
-                      <select
+                      <NativeSelect
                         id="externalSalesUserId"
-                        className={`${selectClass} mt-2`}
+                        className="mt-2"
                         required
                         aria-required="true"
                         aria-invalid={Boolean(errors.externalSalesUserId)}
@@ -2748,7 +2754,7 @@ export function OrderForm({
                             {account.displayName} · {account.username}
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                       <FieldError
                         id="externalSalesUserId-hint"
                         reservedLines={1}
@@ -3460,9 +3466,6 @@ export function orderServerFieldErrorMessages(
 // ──────────────────────────────────────────────────────────────────────
 // Field primitives — keep the big form body readable
 // ──────────────────────────────────────────────────────────────────────
-
-const selectClass =
-  'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 function initialOrderFormValues(clientSubmissionId: string, initialItem: ReturnType<typeof createExternalOrderItem>): CreateOrderInput {
   return {

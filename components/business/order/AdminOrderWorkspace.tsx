@@ -17,6 +17,7 @@ import { buildTableHref } from '@/lib/admin/table';
 import { cn } from '@/lib/utils';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { LinkPendingHint, PageHeader } from '@/components/ui-business';
 import { AdminOrderWorkspaceList } from './AdminOrderWorkspaceList';
@@ -111,11 +112,11 @@ export function AdminOrderWorkspace({
         >
           {hiddenFilterInputs(params)}
 
-          <select
+          <NativeSelect
             name="submitterId"
             defaultValue={query.list.filters.submitterId ?? ''}
             aria-label="按业务员筛选"
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 w-auto max-w-40 grow sm:grow-0"
+            className="w-auto max-w-40 grow sm:grow-0"
           >
             <option value="">全部业务员</option>
             {options.submitters.map((option) => (
@@ -123,12 +124,12 @@ export function AdminOrderWorkspace({
                 {option.label}
               </option>
             ))}
-          </select>
-          <select
+          </NativeSelect>
+          <NativeSelect
             name="craftId"
             defaultValue={query.list.filters.craftIds[0] ?? ''}
             aria-label="按工艺线筛选"
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 w-auto max-w-40 grow sm:grow-0"
+            className="w-auto max-w-40 grow sm:grow-0"
           >
             <option value="">全部工艺线</option>
             {options.crafts.map((option) => (
@@ -136,7 +137,7 @@ export function AdminOrderWorkspace({
                 {option.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <div className="relative ml-auto min-w-[200px] flex-1 sm:max-w-60">
             <Search
               aria-hidden="true"

@@ -10,6 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { SupplierPartyOption } from '@/lib/party';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
+import { useReportFormPending } from '@/components/business/form/FormPendingScope';
 
 export type PurchaseMaterialOption = {
   id: string;
@@ -29,8 +32,6 @@ type Props = {
   draftContext: FormDraftContext;
 };
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const NEW_SUPPLIER_HREF = '/owner/parties/new?type=SUPPLIER';
 
@@ -43,6 +44,7 @@ export function PurchaseOrderForm({
 }: Props) {
 
   const [state, formAction, pending] = useActionState<PurchaseMutationResult | null, FormData>(action, null);
+  useReportFormPending(pending);
   const formRef = useRef<HTMLFormElement>(null);
   const draft = useFormDraft(draftContext, emptyPurchaseDraft(initialSupplierPartyId), formRef);
   const [feedback, setFeedback] = useState({ result: state, requestId: draft.identity.clientRequestId });
@@ -78,10 +80,9 @@ export function PurchaseOrderForm({
               <SupplementLink href={NEW_SUPPLIER_HREF} disabled={pending || draft.blocked} onSupplement={() => draft.supplement('SUPPLIER', 'supplierPartyId')}>新建供应商</SupplementLink>
             </div>
           </div>
-          <select
+          <NativeSelect
             id="supplierPartyId"
             name="supplierPartyId"
-            className={selectClass}
             disabled={disabled || missingSuppliers}
             value={payload.supplierPartyId}
             onChange={(event) => change('supplierPartyId', event.target.value)}
@@ -95,7 +96,7 @@ export function PurchaseOrderForm({
                 {supplier.code} · {supplier.shortName ?? supplier.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.supplierPartyId?.[0] ? (
             <p className="text-sm text-destructive">{errs.supplierPartyId[0]}</p>
           ) : null}
@@ -111,10 +112,9 @@ export function PurchaseOrderForm({
             <Label htmlFor="materialId">物料</Label>
             <SupplementLink href="/owner/materials/new" disabled={pending || draft.blocked} onSupplement={() => draft.supplement('MATERIAL', 'materialId')}>新建物料</SupplementLink>
           </div>
-          <select
+          <NativeSelect
             id="materialId"
             name="materialId"
-            className={selectClass}
             disabled={disabled || missingMaterials}
             value={payload.materialId}
             onChange={(event) => change('materialId', event.target.value)}
@@ -127,7 +127,7 @@ export function PurchaseOrderForm({
                 {material.unit}）
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.materialId?.[0] ? (
             <p className="text-sm text-destructive">{errs.materialId[0]}</p>
           ) : null}
@@ -169,7 +169,7 @@ export function PurchaseOrderForm({
 
       <div className="space-y-2">
         <Label htmlFor="remark">备注（选填）</Label>
-        <textarea
+        <Textarea
           id="remark"
           name="remark"
           rows={3}
@@ -177,7 +177,7 @@ export function PurchaseOrderForm({
           onChange={(event) => change('remark', event.target.value)}
           disabled={disabled}
           aria-invalid={Boolean(errs.remark?.[0])}
-          className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-20 w-full"
         />
         {errs.remark?.[0] ? (
           <p className="text-sm text-destructive">{errs.remark[0]}</p>

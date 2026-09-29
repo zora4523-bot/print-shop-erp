@@ -6,6 +6,7 @@ import { useActionState, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { allocateProductionWagesAction } from '@/actions/production-dispatch';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type Allocation = { workerId: string; name: string; amount: string; revision: number };
 export function ProductionWageForm({ jobId, owner, wages, workers }: { jobId: string; owner: { id: string; name: string }; wages: Allocation[]; workers: Array<{ id: string; name: string }> }) {
@@ -20,7 +21,7 @@ export function ProductionWageForm({ jobId, owner, wages, workers }: { jobId: st
     <p className="text-sm text-muted-foreground">填写本次生产各人的最终应得金额。</p>
     <fieldset disabled={pending || reviewing || state?.ok} className="space-y-3">
     {rows.map((row, index) => <div key={index} className="grid min-w-0 gap-2 sm:grid-cols-[1fr_1fr_auto]">
-      {row.revision >= 0 || row.workerId === owner.id ? <label htmlFor={`${jobId}-wage-${index}`} className="flex min-h-11 items-center">{row.name}</label> : <select aria-label={`参与师傅 ${index + 1}`} className="min-h-11 min-w-0 rounded-md border bg-background px-3" value={row.workerId} required onChange={event => setRows(current => current.map((item, i) => i !== index ? item : { ...item, workerId: event.target.value, name: workers.find(worker => worker.id === event.target.value)?.name ?? '' }))}><option value="">选择协作师傅</option>{workers.filter(worker => !rows.some((other, i) => i !== index && other.workerId === worker.id)).map(worker => <option key={worker.id} value={worker.id}>{worker.name}</option>)}</select>}
+      {row.revision >= 0 || row.workerId === owner.id ? <label htmlFor={`${jobId}-wage-${index}`} className="flex min-h-11 items-center">{row.name}</label> : <NativeSelect aria-label={`参与师傅 ${index + 1}`} className="min-w-0" value={row.workerId} required onChange={event => setRows(current => current.map((item, i) => i !== index ? item : { ...item, workerId: event.target.value, name: workers.find(worker => worker.id === event.target.value)?.name ?? '' }))}><option value="">选择协作师傅</option>{workers.filter(worker => !rows.some((other, i) => i !== index && other.workerId === worker.id)).map(worker => <option key={worker.id} value={worker.id}>{worker.name}</option>)}</NativeSelect>}
       <Input id={`${jobId}-wage-${index}`} aria-label={`${row.name || '协作师傅'}最终提成（元）`} className="min-h-11" type="number" step="0.01" min="0" max="9999999999.99" value={row.amount} required onChange={event => setRows(current => current.map((item, i) => i === index ? { ...item, amount: event.target.value } : item))} />
       {row.revision < 0 && row.workerId !== owner.id && <Button type="button" variant="outline" className="min-h-11" onClick={() => setRows(current => current.filter((_, i) => i !== index))}>移除协作师傅</Button>}
     </div>)}

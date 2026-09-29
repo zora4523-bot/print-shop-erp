@@ -10,8 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-const selectClass =
-  'h-11 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export function BlankPaperForm({
   priceBookId,
@@ -96,10 +95,9 @@ export function BlankPaperForm({
         {mode === 'existing' ? (
           <div className="space-y-2">
             <Label htmlFor="paperId">纸张</Label>
-            <select
+            <NativeSelect
               id="paperId"
               name="paperId"
-              className={selectClass}
               required
               defaultValue=""
             >
@@ -111,7 +109,7 @@ export function BlankPaperForm({
                   {paper.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">

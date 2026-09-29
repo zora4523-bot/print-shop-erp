@@ -13,6 +13,8 @@ import type { OrderItemPricingRoute } from '@/generated/prisma/enums';
 import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { resolveOrderItemFoilSides } from '@/lib/order/pricing-route';
@@ -391,7 +393,7 @@ function ExistingOrderItemChanges({
         );
         return (
           <div key={item.id} className="min-w-0 rounded-lg border p-3">
-            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-start gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
               <Checkbox
                 className="-ml-3"
                 checked={current.selected}
@@ -401,7 +403,7 @@ function ExistingOrderItemChanges({
                   updateItem(item.id, { selected: checked })
                 }
               />
-              <span className="admin-wrap-anywhere min-w-0 font-medium">
+              <span className="admin-wrap-anywhere min-w-0 pt-3 leading-5 font-medium">
                 #{item.sequence} · {externalPriceBusinessText(item.name)}
               </span>
             </label>
@@ -448,7 +450,7 @@ function ExistingOrderItemChanges({
                 ) : null}
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>规格</span>
-                  <select
+                  <NativeSelect
                     value={current.specificationSelectionKey}
                     disabled={pending || specificationOptions.length === 0}
                     onChange={(event) => {
@@ -475,7 +477,7 @@ function ExistingOrderItemChanges({
                         ),
                       });
                     }}
-                    className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
+                    className="w-full min-w-0"
                   >
                     {!sourceHasCatalogOption ? (
                       <option value="">
@@ -492,7 +494,7 @@ function ExistingOrderItemChanges({
                         {externalPriceBusinessText(option.specification)}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                   <span className="block text-xs text-muted-foreground">
                     仅显示与当前计价路线、纸张和克重一致的活动目录规格。
                   </span>
@@ -555,20 +557,20 @@ function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason,
     <>
       <label className="block min-w-0 space-y-1 text-sm">
         <span className="font-medium">修改类别</span>
-        <select
+        <NativeSelect
           value={modifyKind}
           onChange={(event) =>
             setModifyKind(event.target.value as typeof modifyKind)
           }
           disabled={pending}
-          className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
+          className="w-full"
         >
           {MODIFY_KINDS.filter(([value]) => hasItems || value === 'DUE_DATE').map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         <span className="block text-xs text-muted-foreground">
           选择交期时填写新的承诺交期；收货地址通过工单资料编辑修改。
         </span>
@@ -588,14 +590,14 @@ function OrderChangeReasonFields({ modifyKind, setModifyKind, reason, setReason,
 
       <label className="block min-w-0 space-y-1 text-sm">
         <span className="font-medium">修改原因</span>
-        <textarea
+        <Textarea
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           rows={3}
           maxLength={500}
           required
           disabled={pending}
-          className="w-full min-w-0 rounded-md border bg-background px-3 py-2"
+          className="w-full min-w-0"
           placeholder="写明客户要求、交期影响等，方便管理员审核"
         />
       </label>
@@ -789,7 +791,7 @@ function OrderChangeRequestDraftForm({
           <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
             <label className="min-w-0 space-y-1 text-sm">
               <span>参考现有款式（继承纸张、工艺和计价路线）</span>
-              <select
+              <NativeSelect
                 value={templateItemId}
                 disabled={pending}
                 onChange={(event) => {
@@ -798,14 +800,14 @@ function OrderChangeRequestDraftForm({
                   setNewTargetProductId(null);
                   setNewSpecification(null);
                 }}
-                className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
+                className="w-full min-w-0"
               >
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
                     #{item.sequence} · {externalPriceBusinessText(item.name)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label className="min-w-0 space-y-1 text-sm">
               <span>新款式名称</span>
@@ -831,7 +833,7 @@ function OrderChangeRequestDraftForm({
             </label>
             <label className="min-w-0 space-y-1 text-sm">
               <span>规格</span>
-              <select
+              <NativeSelect
                 value={newSpecificationSelectionKey}
                 disabled={pending || !selectedTemplate}
                 onChange={(event) => {
@@ -844,7 +846,7 @@ function OrderChangeRequestDraftForm({
                   setNewTargetProductId(selected?.productId ?? null);
                   setNewSpecification(selected?.specification ?? null);
                 }}
-                className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 py-2"
+                className="w-full min-w-0"
               >
                 <option value="">
                   继承参考款式规格
@@ -860,7 +862,7 @@ function OrderChangeRequestDraftForm({
                     {externalPriceBusinessText(option.specification)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label className="min-w-0 space-y-1 text-sm lg:col-span-2">
               <span>正面烫金颜色（可多色）</span>

@@ -24,6 +24,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
 import { getSession } from '@/lib/auth/session';
 import { getCraftSummary, isRetiredCraft, listCraftsPage } from '@/lib/craft';
+import { FormPendingScope } from '@/components/business/form/FormPendingScope';
 
 export type CraftCatalogListProps = {
   searchParams: Promise<{
@@ -115,8 +116,10 @@ export async function NewCraftCatalogItem({
 }: Pick<CraftCatalogListProps, 'routeBase'>) {
   await requirePermission('dict:craft:manage');
   return (
+    <FormPendingScope>
     <div className="space-y-4">
       <RuleCenterPageHeader
+        lockBackWhilePending
         title="新建工艺"
         effect="immediate"
         subtitle="启用后会进入新工单与新规则的工艺选择器。"
@@ -130,6 +133,7 @@ export async function NewCraftCatalogItem({
         />
       </div>
     </div>
+    </FormPendingScope>
   );
 }
 
@@ -147,9 +151,11 @@ export async function EditCraftCatalogItem({
   const boundUpdate = updateCraftAction.bind(null, id);
 
   return (
+    <FormPendingScope>
     <div className="space-y-6">
       <ReceiptNotice receipt={receipt} noun="工艺" />
       <RuleCenterPageHeader
+        lockBackWhilePending
         title={`编辑工艺：${craft.name}`}
         effect="immediate"
         back={{ href: routeBase, label: '返回工艺' }}
@@ -190,5 +196,6 @@ export async function EditCraftCatalogItem({
         </section>
       ) : null}
     </div>
+    </FormPendingScope>
   );
 }

@@ -17,6 +17,7 @@ import {
   notificationChannelSelectionIssueMessage,
   type NotificationChannelSelectionIssue,
 } from '@/lib/notification/channel-selection';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type Props = {
   // 由 Server Component 读好当前值传进来（页面层不直连 Prisma 之外的东西，
@@ -123,17 +124,17 @@ function SettingField({
       </p>
       <div className="flex items-center gap-2">
         {field.kind === 'boolean' ? (
-          <select
+          <NativeSelect
+            className="w-auto"
             id={settingKey}
             name={settingKey}
             defaultValue={defaultValue}
             aria-invalid={hasError}
             aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
-            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             <option value="true">开启</option>
             <option value="false">关闭</option>
-          </select>
+          </NativeSelect>
         ) : field.kind === 'int' ? (
           <Input
             id={settingKey}
@@ -282,15 +283,15 @@ function ManagementNotificationRoutingField({
                 <Label htmlFor={`${prefix}.enabled`} className="text-xs">
                   角色开关
                 </Label>
-                <select
+                <NativeSelect
+                  className="w-auto"
                   id={`${prefix}.enabled`}
                   name={`${prefix}.enabled`}
                   defaultValue={String(current.enabled)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   <option value="true">开启</option>
                   <option value="false">关闭</option>
-                </select>
+                </NativeSelect>
               </div>
               {visibleChannels.length === 0 ? (
                 <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">

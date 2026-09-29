@@ -8,6 +8,7 @@ import {
 } from '@/actions/foreman-attendance';
 import type { AttendanceMutationResult } from '@/actions/foreman-attendance.types';
 import { WorkerType } from '@/generated/prisma/enums';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type Props = {
   workerId: string;
@@ -121,29 +122,29 @@ export function AttendanceRecordDialog({
       <div className="grid grid-cols-2 gap-3">
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">实际上班</span>
-          <select
+          <NativeSelect
             aria-label="实际上班"
             value={workUnits}
             onChange={(event) => setWorkUnits(event.target.value)}
-            className="min-h-11 w-full rounded-md border bg-background px-3"
+            className="w-full"
           >
             <option value="1">1 天</option>
             <option value="0.5">0.5 天</option>
             <option value="0">0 天</option>
-          </select>
+          </NativeSelect>
         </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">请假</span>
-          <select
+          <NativeSelect
             aria-label="请假"
             value={leaveUnits}
             onChange={(event) => setLeaveUnits(event.target.value)}
-            className="min-h-11 w-full rounded-md border bg-background px-3"
+            className="w-full"
           >
             <option value="0">0 天</option>
             <option value="0.5">0.5 天</option>
             <option value="1">1 天</option>
-          </select>
+          </NativeSelect>
         </label>
       </div>
 

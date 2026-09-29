@@ -14,6 +14,8 @@ import { createReworkOrderAction } from '@/actions/order';
 import type { CreateReworkOrderMutationResult } from '@/actions/order.types';
 import { ReworkCause } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
@@ -160,29 +162,29 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span className="font-medium">重做原因类型</span>
-          <select
+          <NativeSelect
             value={cause}
             disabled={pending}
             onChange={(event) => setCause(event.target.value as ReworkCause)}
-            className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
+            className="w-full"
           >
             {Object.entries(REWORK_CAUSE_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-medium">详细原因</span>
-          <textarea
+          <Textarea
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             rows={2}
             maxLength={500}
             required
             disabled={pending}
-            className="w-full rounded-md border bg-background px-3 py-2"
+            className="w-full"
             placeholder="例如：运输途中受潮，重做第 1 款 500 个"
           />
         </label>

@@ -19,6 +19,7 @@ import {
   formMessageA11yProps,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type PartyFormInitial = {
   type: PartyType;
@@ -63,8 +64,6 @@ const PARTY_TYPE_OPTIONS = [
   { value: PartyType.BOTH, label: '客户/供应商' },
 ] as const;
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const PARTY_FIELD_LABELS: Record<string, string> = {
   type: '类型',
@@ -135,13 +134,12 @@ export function PartyForm(props: Props) {
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="type">类型</Label>
-            <select
+            <NativeSelect
               id="type"
               name="type"
               {...(errs.type?.[0]
                 ? formMessageA11yProps('type', 'error')
                 : {})}
-              className={selectClass}
               defaultValue={initialType}
               disabled={pending}
             >
@@ -150,7 +148,7 @@ export function PartyForm(props: Props) {
                   {option.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {errs.type?.[0] ? (
               <FormMessage fieldId="type" tone="error">
                 {errs.type[0]}

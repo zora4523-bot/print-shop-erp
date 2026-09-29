@@ -29,6 +29,11 @@ const NATIVE_CHECKBOX_GUARD_MESSAGE =
 const API_LINK_GUARD_MESSAGE =
   "Use a native <a href download> for /api/ download routes; next/link prefetches them in production.";
 
+const NATIVE_SELECT_GUARD_MESSAGE =
+  "Use NativeSelect from @/components/ui/native-select instead of a raw <select> (ui-规范 §3.2).";
+const NATIVE_TEXTAREA_GUARD_MESSAGE =
+  "Use Textarea from @/components/ui/textarea instead of a raw <textarea> (ui-规范 §3.2).";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -94,6 +99,14 @@ const eslintConfig = defineConfig([
           selector:
             "JSXOpeningElement[name.name='Link'] > JSXAttribute[name.name='href'] TemplateLiteral > TemplateElement:first-child[value.cooked=/^\\/api\\//]",
           message: API_LINK_GUARD_MESSAGE,
+        },
+        {
+          selector: "JSXOpeningElement[name.name='select']",
+          message: NATIVE_SELECT_GUARD_MESSAGE,
+        },
+        {
+          selector: "JSXOpeningElement[name.name='textarea']",
+          message: NATIVE_TEXTAREA_GUARD_MESSAGE,
         },
       ],
     },

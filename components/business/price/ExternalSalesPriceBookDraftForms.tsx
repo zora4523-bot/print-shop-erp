@@ -48,6 +48,8 @@ import {
   externalPriceRuleDisplayName,
 } from '@/lib/price/external-price-display';
 import { RequiredMark } from '@/components/business/form/RequiredMark';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 
 export type CustomerPriceBookDraftRuleContext =
   CustomerPriceRuleDraftEditorDto['context'];
@@ -57,10 +59,6 @@ type MutationState = CustomerPriceBookMutationResult | null;
 type FieldErrors = Record<string, string[]>;
 
 const controlClass = 'min-h-11';
-const selectClass =
-  'min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40';
-const textareaClass =
-  'w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40';
 
 const RULE_KIND_LABELS: Record<CustomerPriceRuleKind, string> = {
   [CustomerPriceRuleKind.BASE]: '基础费用',
@@ -555,10 +553,10 @@ export function CreateCustomerPriceBookDraftForm({
       ) : null}
       <div className="space-y-2">
         <Label htmlFor={changeReasonId}>调价原因<RequiredMark /></Label>
-        <textarea
+        <Textarea
           id={changeReasonId}
           name="changeReason"
-          className={`${textareaClass} min-h-24`}
+          className="min-h-24"
           placeholder="例如：2026 年 9 月原材料与快递调价"
           minLength={2}
           maxLength={500}
@@ -840,10 +838,10 @@ export function PublishCustomerPriceBookDraftForm({
           </div>
           <div className="space-y-2">
             <Label htmlFor={publishNoteId}>补充发布说明（可选）</Label>
-            <textarea
+            <Textarea
               id={publishNoteId}
               name="publishNote"
-              className={`${textareaClass} min-h-20`}
+              className="min-h-20"
               placeholder="如需补充说明，请在此填写"
               minLength={2}
               maxLength={500}
@@ -1229,10 +1227,9 @@ function MatcherTriStateField({
   const errorId = `${id}-error`;
   return (
     <Field label={label} htmlFor={id} errorId={errorId} errors={errors}>
-      <select
+      <NativeSelect
         id={id}
         name={name}
-        className={selectClass}
         defaultValue={defaultValue === null ? '' : String(defaultValue)}
         aria-invalid={Boolean(errors?.length)}
         aria-describedby={errors?.length ? errorId : undefined}
@@ -1240,7 +1237,7 @@ function MatcherTriStateField({
         <option value="">不限</option>
         <option value="true">{trueLabel}</option>
         <option value="false">{falseLabel}</option>
-      </select>
+      </NativeSelect>
     </Field>
   );
 }
@@ -1391,10 +1388,9 @@ export function CustomerPriceBookDraftRuleForm({
               errorId={errorIdFor('categoryId')}
               errors={errors.categoryId}
             >
-              <select
+              <NativeSelect
                 id={`${prefix}-category`}
                 name="categoryId"
-                className={selectClass}
                 defaultValue={rule.categoryId}
                 required
                 aria-required="true"
@@ -1405,7 +1401,7 @@ export function CustomerPriceBookDraftRuleForm({
                     {externalPriceBusinessText(category.name)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             <Field
               label="适用产品"
@@ -1415,10 +1411,9 @@ export function CustomerPriceBookDraftRuleForm({
               errorId={errorIdFor('productId')}
               errors={errors.productId}
             >
-              <select
+              <NativeSelect
                 id={`${prefix}-product`}
                 name="productId"
-                className={selectClass}
                 defaultValue={rule.productId ?? ''}
                 {...fieldA11y('productId', `${prefix}-product-hint`)}
               >
@@ -1428,7 +1423,7 @@ export function CustomerPriceBookDraftRuleForm({
                     {externalPriceBusinessText(product.name)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             <Field
               label="费用类型"
@@ -1436,10 +1431,9 @@ export function CustomerPriceBookDraftRuleForm({
               errorId={errorIdFor('kind')}
               errors={errors.kind}
             >
-              <select
+              <NativeSelect
                 id={`${prefix}-kind`}
                 name="kind"
-                className={selectClass}
                 defaultValue={rule.kind}
                 required
                 aria-required="true"
@@ -1450,7 +1444,7 @@ export function CustomerPriceBookDraftRuleForm({
                     {RULE_KIND_LABELS[kind]}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
           </>
         ) : (
@@ -1522,10 +1516,9 @@ export function CustomerPriceBookDraftRuleForm({
             errorId={errorIdFor('calculationType')}
             errors={errors.calculationType}
           >
-            <select
+            <NativeSelect
               id={`${prefix}-calculationType`}
               name="calculationType"
-              className={selectClass}
               defaultValue={rule.calculationType ?? ''}
               {...fieldA11y('calculationType')}
             >
@@ -1535,7 +1528,7 @@ export function CustomerPriceBookDraftRuleForm({
                   {CALCULATION_TYPE_LABELS[type]}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </Field>
         ) : (
           null
@@ -1714,15 +1707,14 @@ export function CustomerPriceBookDraftRuleForm({
                 errorId={`${prefix}-craftMode-error`}
                 errors={errors['match.craftMode']}
               >
-                <select
+                <NativeSelect
                   id={`${prefix}-craftMode`}
                   name="match.craftMode"
-                  className={selectClass}
                   defaultValue={rule.match.craftMode === 'ALL' ? 'ALL' : ''}
                 >
                   <option value="">命中任一工艺（默认）</option>
                   <option value="ALL">必须同时包含全部工艺</option>
-                </select>
+                </NativeSelect>
               </Field>
               <MatchCheckboxGroup<string>
                 legend="排除工艺"

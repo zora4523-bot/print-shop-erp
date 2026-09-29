@@ -17,6 +17,7 @@ import type { ProductMutationResult } from '@/actions/owner-products.types';
 import type { ProductCategoryOption } from '@/lib/product';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type EditInitial = {
   code: string | null;
@@ -55,8 +56,6 @@ type Props = CommonProps &
     }
   );
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const PRODUCT_FIELD_LABELS: Record<string, string> = {
   code: '产品编码',
@@ -149,13 +148,12 @@ export function ProductForm(props: Props) {
             新建分类
           </Link>
         </div>
-        <select
+        <NativeSelect
           id="categoryNodeId"
           name="categoryNodeId"
           {...(errs.categoryNodeId?.[0]
             ? formMessageA11yProps('categoryNodeId', 'error')
             : {})}
-          className={selectClass}
           defaultValue={defaultCategoryNodeId}
           disabled={pending || missingCategoryNodes}
         >
@@ -170,7 +168,7 @@ export function ProductForm(props: Props) {
               </option>
             );
           })}
-        </select>
+        </NativeSelect>
         {errs.categoryNodeId?.[0] ? (
           <FormMessage fieldId="categoryNodeId" tone="error">
             {errs.categoryNodeId[0]}

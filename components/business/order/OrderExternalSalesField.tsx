@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Label } from '@/components/ui/label';
+import { NativeSelect } from '@/components/ui/native-select';
 import type { OrderExternalSalesAssociation } from '@/lib/order/external-sales-association';
 
 export function OrderExternalSalesField({ association, disabled, error }: {
@@ -15,7 +16,7 @@ export function OrderExternalSalesField({ association, disabled, error }: {
   return (
     <div className="min-w-0 space-y-1.5">
       <Label htmlFor="externalSalesUserId">关联外部销售</Label>
-      <select
+      <NativeSelect
         id="externalSalesUserId"
         name="externalSalesUserId"
         value={value}
@@ -24,7 +25,7 @@ export function OrderExternalSalesField({ association, disabled, error }: {
         required
         aria-invalid={Boolean(error)}
         aria-describedby={`external-sales-hint${error ? ' external-sales-error' : ''}`}
-        className="min-h-11 w-full rounded-md border bg-background px-3 text-sm"
+        className="w-full"
       >
         {!current ? <option value="">不适用</option> : null}
         {currentUnavailable ? (
@@ -37,7 +38,7 @@ export function OrderExternalSalesField({ association, disabled, error }: {
             {option.displayName} · {option.username}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <p id="external-sales-hint" className="text-xs text-muted-foreground">
         {blockedReason ?? '保存后工单及后续对账归属所选账号，原账号将无法查看此工单。'}
       </p>

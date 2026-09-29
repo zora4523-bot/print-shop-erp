@@ -14,6 +14,7 @@ import {
   formMessageA11yProps,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type MaterialOption = {
   id: string;
@@ -39,8 +40,6 @@ type Props = {
   initialIdempotencyKey: string;
 };
 
-const selectClass =
-  'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const STOCK_TRANSFER_FIELDS: Record<
   string,
@@ -118,13 +117,12 @@ export function StockTransferForm({
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Field id="transfer-material" label="物料" error={errors.materialId?.[0]}>
-          <select
+          <NativeSelect
             id="transfer-material"
             name="materialId"
             {...(errors.materialId?.[0]
               ? formMessageA11yProps('transfer-material', 'error')
               : {})}
-            className={selectClass}
             value={materialId}
             onChange={(event) => setMaterialId(event.target.value)}
             disabled={pending || materials.length === 0}
@@ -135,16 +133,15 @@ export function StockTransferForm({
                 {material.code} · {externalPriceBusinessText(material.name)}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </Field>
         <Field id="transfer-source" label="来源库位" error={errors.sourceLocationId?.[0]}>
-          <select
+          <NativeSelect
             id="transfer-source"
             name="sourceLocationId"
             {...(errors.sourceLocationId?.[0]
               ? formMessageA11yProps('transfer-source', 'error')
               : {})}
-            className={selectClass}
             value={sourceLocationId}
             onChange={(event) => setSourceLocationId(event.target.value)}
             disabled={pending || locations.length === 0}
@@ -156,7 +153,7 @@ export function StockTransferForm({
                 {location.warehouseName} / {location.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {materialId && sourceLocationId ? (
             <p className="text-xs text-muted-foreground">
               可用 {available} {selectedMaterial?.unit ?? ''}
@@ -164,13 +161,12 @@ export function StockTransferForm({
           ) : null}
         </Field>
         <Field id="transfer-destination" label="目标库位" error={errors.destinationLocationId?.[0]}>
-          <select
+          <NativeSelect
             id="transfer-destination"
             name="destinationLocationId"
             {...(errors.destinationLocationId?.[0]
               ? formMessageA11yProps('transfer-destination', 'error')
               : {})}
-            className={selectClass}
             value={destinationLocationId}
             onChange={(event) => setDestinationLocationId(event.target.value)}
             disabled={pending || locations.length === 0}
@@ -186,7 +182,7 @@ export function StockTransferForm({
                 {location.warehouseName} / {location.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </Field>
       </div>
 

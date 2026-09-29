@@ -8,6 +8,7 @@ import {
   OrderLamination,
 } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -536,8 +537,8 @@ export function OrderItemProductField({
   return (
     <label className="mt-4 block space-y-2 text-sm">
       匹配产品
-      <select
-        className="min-h-11 w-full rounded-lg border bg-background px-3"
+      <NativeSelect
+        className="w-full"
         value={value ?? ''}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
@@ -548,7 +549,7 @@ export function OrderItemProductField({
             {product.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </label>
   );
 }

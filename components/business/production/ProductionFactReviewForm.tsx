@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { reviewProductionFactAction } from '@/actions/production-dispatch';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export function ProductionFactReviewForm({ jobId, jobRevision, reviewRevision, mode, laterJobs = [], quantity, quantityLocked, workDate }: {
   jobId: string; jobRevision: number; reviewRevision: number; mode: 'UNPRODUCED' | 'OPEN' | 'DISMISS_WAGE' | 'INCLUDED_LATER';
@@ -17,7 +18,7 @@ export function ProductionFactReviewForm({ jobId, jobRevision, reviewRevision, m
     <input type="hidden" name="reviewRevision" value={reviewRevision} /><input type="hidden" name="mode" value={mode} />
     <p className="text-sm">{mode === 'UNPRODUCED' ? '修改实物或取消前，请核实原任务是否已生产。尚在生产时不可勾选未生产，也不可把部分产量登记为任务完成。' : mode === 'OPEN' ? '保留待核对记录，核实原生产日期、数量及工资后处理。' : mode === 'INCLUDED_LATER' ? '仅用于旧产量已经包含在后续同一师傅、同一日期的登记中，不新增产量或工资。只包含部分或登记日期不同，请保留核对，不能当作额外生产。' : '仅关闭有证据证明无需补发的工资义务；原生产事实和冲突证据继续保留。'}</p>
     {mode === 'INCLUDED_LATER' && <>
-      <label className="block space-y-1" htmlFor={`${prefix}-related`}><span>关联后续生产登记</span><select id={`${prefix}-related`} name="relatedJobId" required className="min-h-11 w-full rounded-md border bg-background px-3"><option value="">请选择已核对的登记</option>{laterJobs.map(job => <option key={job.id} value={job.id}>{job.label}</option>)}</select></label>
+      <label className="block space-y-1" htmlFor={`${prefix}-related`}><span>关联后续生产登记</span><NativeSelect id={`${prefix}-related`} name="relatedJobId" required className="w-full"><option value="">请选择已核对的登记</option>{laterJobs.map(job => <option key={job.id} value={job.id}>{job.label}</option>)}</NativeSelect></label>
       <label className="block space-y-1" htmlFor={`${prefix}-quantity`}><span>全部已包含的实际数量</span><Input id={`${prefix}-quantity`} name="quantity" type="number" min="1" step="1" required readOnly={quantityLocked} defaultValue={quantity} /></label>
       <label className="block space-y-1" htmlFor={`${prefix}-date`}><span>原实际生产日期</span><Input id={`${prefix}-date`} name="workDate" type="date" required readOnly={!!workDate} defaultValue={workDate} /></label>
       <label className="flex min-h-11 items-start gap-1"><Checkbox className="-ml-3" name="confirmedIncluded" value="on" required /><span className="py-3">已核实旧产量与原师傅原日工资义务均包含在关联登记中</span></label>

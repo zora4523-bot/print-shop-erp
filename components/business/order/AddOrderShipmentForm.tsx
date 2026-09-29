@@ -8,6 +8,7 @@ import type {
   AddOrderShipmentPreview,
 } from '@/lib/order/add-shipment-schema';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 import { applyParsedReceiverFact } from '@/lib/order/receiver-address-paste';
@@ -154,8 +155,8 @@ export function AddOrderShipmentForm({
           >
             <div className="min-w-0 sm:col-span-2">
               <Label htmlFor={`${uid}-source`}>从哪个地址分货</Label>
-              <select
-                className="flex min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm"
+              <NativeSelect
+                className="w-full min-w-0"
                 id={`${uid}-source`}
                 value={sourceId}
                 onChange={(event) => {
@@ -168,7 +169,7 @@ export function AddOrderShipmentForm({
                     地址 {row.sequence} · {row.receiverAddress}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
             {(
               [

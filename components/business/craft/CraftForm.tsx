@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { useReportFormPending } from '@/components/business/form/FormPendingScope';
 
 type EditInitial = {
   name: string;
@@ -43,6 +44,7 @@ export function CraftForm(props: Props) {
     props.action,
     null,
   );
+  useReportFormPending(pending);
   const isCreate = props.mode === 'create';
   const initial = props.mode === 'edit' ? props.initial : undefined;
 

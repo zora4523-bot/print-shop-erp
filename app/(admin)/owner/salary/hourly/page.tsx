@@ -16,6 +16,7 @@ import {
 import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 import { formatMoney } from '@/lib/dashboard/format';
+import { NativeSelect } from '@/components/ui/native-select';
 export const metadata = { title: '历史时薪档案' };
 
 type PageProps = {
@@ -209,24 +210,24 @@ function FilterBar({
       </div>
       <div className="flex flex-col">
         <label htmlFor="hourly-paid" className="text-xs text-muted-foreground">状态</label>
-        <select
+        <NativeSelect
+          className="w-auto"
           id="hourly-paid"
           name="paid"
           defaultValue={paid ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
         >
           <option value="">全部</option>
           <option value="unpaid">仅未发</option>
           <option value="paid">仅已发</option>
-        </select>
+        </NativeSelect>
       </div>
       <div className="flex min-w-0 max-w-full flex-col">
         <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅</label>
-        <select
+        <NativeSelect
           id="hourly-workerId"
           name="workerId"
           defaultValue={workerId ?? ''}
-          className="w-full min-w-0 rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-full min-w-0"
         >
           <option value="">全部师傅</option>
           {workers.map((worker) => (
@@ -235,7 +236,7 @@ function FilterBar({
               {worker.isActive ? '' : ' · 已停用'}）
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <Button type="submit" size="sm">
         筛选

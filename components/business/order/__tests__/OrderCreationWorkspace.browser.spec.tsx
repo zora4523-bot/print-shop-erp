@@ -15,17 +15,22 @@ vi.mock('@/actions/create-order-quote', () => ({ quoteExternalCreateOrderAction:
 vi.mock('@/actions/workbench', () => ({ quoteWorkbenchItemAction: vi.fn() }));
 vi.mock('@/actions/design-upload', () => ({ deleteOrderItemDesignAction: vi.fn(), recordDesignUploadAction: vi.fn(), signDesignUploadAction: vi.fn() }));
 vi.mock('next/link', () => ({ __esModule: true, default: (props: ComponentProps<'a'>) => <a {...props} /> }));
+const fixtureMounts = new Map<string, number>();
 vi.mock('@/components/business/order/OrderForm', () => ({
   OrderForm: function Fixture(props: OrderFormProps) {
+    useEffect(() => {
+      fixtureMounts.set(props.submissionId!, (fixtureMounts.get(props.submissionId!) ?? 0) + 1);
+    }, [props.submissionId]);
     const [name, setName] = useState(props.initialEditor?.values.customName ?? '');
     const [busy, setBusy] = useState(false);
-    const { registerEditor } = props;
+    const { registerEditor, active = true } = props;
     useEffect(() => {
+      if (!active) return;
       registerEditor?.({ canLeave: !busy, save: () => ({ values: createOrderSchema.parse({
         customName: name, customerRef: null, receiverName: null, receiverPhone: null, receiverAddress: '测试收货地址', expressCode: null, packageRequirement: null, remark: null, items: [{ name: '设计', quantity: 100, crafts: ['foil'], productId: 'product', pricingRoute: 'STOCK_BLANK', paperType: '红卡', paperWeightGsm: 160, specification: '大号封', remark: null, foilTechnique: 'FLAT', hasLocalFoil: true, frontFoilColors: ['亚金'] }],
       }), files: [] }) });
       return () => registerEditor?.(null);
-    }, [registerEditor, name, busy]);
+    }, [registerEditor, active, name, busy]);
     const result = { orderId: `order-${props.submissionId}`, orderNo: `GD-${name}`, intent: 'submit' as const };
     return <div>
       <input aria-label="模拟工单名称" value={name ?? ''} onChange={(event) => setName(event.target.value)} />
@@ -42,7 +47,7 @@ let root: Root;
 const props: OrderFormProps = { crafts: [], products: [], externalSalesAccounts: [], draftScope: 'workspace-test' };
 function mount() { flushSync(() => root.render(<OrderCreationWorkspace {...props} />)); }
 beforeEach(() => {
-  sessionStorage.clear();
+  sessionStorage.clear(); fixtureMounts.clear();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host); mount();
 });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); sessionStorage.clear(); });
@@ -107,4 +112,20 @@ it('keeps unsaved work when the batch is full', async () => {
   await expect.element(page.getByRole('button', { name: '＋ 添加工单' })).toBeDisabled();
   await expect.element(page.getByRole('button', { name: '开始新一批', exact: true })).not.toBeInTheDocument();
   await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('尚未保存');
+});
+
+it('keeps each order form mounted while switching, with only the active form in the document', async () => {
+  await page.getByLabelText('模拟工单名称').fill('第一单');
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
+  await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('');
+  await page.getByLabelText('模拟工单名称').fill('第二单');
+  await page.getByRole('button', { name: '工单 1', exact: true }).click();
+  await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('第一单');
+  await page.getByRole('button', { name: '工单 2', exact: true }).click();
+  await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('第二单');
+  await page.getByRole('button', { name: '工单 1', exact: true }).click();
+  await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('第一单');
+  expect(document.querySelectorAll('input[aria-label="模拟工单名称"]')).toHaveLength(1);
+  expect(document.querySelectorAll('[data-order-form-host]')).toHaveLength(1);
+  expect([...fixtureMounts.values()]).toEqual([1, 1]);
 });

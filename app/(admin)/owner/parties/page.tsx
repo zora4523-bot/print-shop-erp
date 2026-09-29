@@ -24,6 +24,7 @@ import {
   PARTY_LIST_SORT_KEYS,
   PARTY_TYPE_LABELS,
 } from '@/lib/party';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = {
   title: '客户/供应商',
@@ -104,10 +105,10 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
         filters={
           <label className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">类型</span>
-            <select
+            <NativeSelect
+              className="w-auto"
               name="type"
               defaultValue={type ?? ''}
-              className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
             >
               <option value="">全部</option>
               <option value="suppliers">供应商（含客户/供应商）</option>
@@ -116,7 +117,7 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
                   {PARTY_TYPE_LABELS[option]}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
         }
       />

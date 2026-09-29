@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useOrderFormLeaveGuard } from './use-order-form-leave-guard';
 import { Button } from '@/components/ui/button';
 import { OrderForm, type OrderFormProps } from './OrderForm';
@@ -24,12 +25,20 @@ function readEntries(key: string): Entry[] {
 }
 
 /**
- * 审查 #47：切换工单标签时，`editor.save()` 必须同步执行——OrderForm 以
- * `key={active.id}` 挂载，切换后旧表单立即卸载，推迟到空闲就读不到它的状态。
- * 能推迟的只有 sessionStorage 持久化（条目列表本身没变，只是再落一次盘），
- * 这里放到空闲回调里，让切换的那一帧只做快照 + 重渲染。
- * `<Activity>` 保活各张表单已评估、暂不采用：隐藏态会卸载 effect，OrderForm
- * 的 registerEditor / 草稿自动保存 / 离开守卫都依赖 effect，需改 OrderForm 内部。
+ * 审查 #47：批量建单切换工单时保留各张表单实例，不再 `key={active.id}` 重建。
+ *
+ * 取舍（方案 A `<Activity>` vs 方案 B 全挂载 + `hidden`，最终为 B 的变体）：
+ * - `<Activity mode="hidden">` 会卸载 effect；OrderForm 的草稿自动保存、离开守卫、
+ *   registerEditor 都要改成「重新可见时再启」，而隐藏态 DOM 仍留在文档里。
+ * - 两种方案都把非当前表单留在文档里，而 OrderForm / OrderFormB 大量使用静态 id
+ *   （`customName`、`externalSalesUserId`、`items.0.name`…）。重复 id 会让
+ *   label 关联、FormErrorSummary / 跨工单错误跳转（getElementById）命中别的表单。
+ * - 因此每张表单渲染进自己的常驻宿主节点（portal），只有当前工单的宿主被挂进
+ *   文档；其余宿主脱离文档保活。React 实例、react-hook-form 状态、effect 全部保留，
+ *   文档里任何时刻只有一张表单：id 唯一、只提交/校验/播报当前表单、隐藏实例不可聚焦。
+ * - 副作用以 `active` 控制：只有当前实例登记 editor、挂离开守卫；自动保存照常
+ *   （各自 draftScope 独立）。切换前仍同步调用 `editor.save()`：它落本地草稿，
+ *   并给工作台的「未上传文件」离开守卫与「撤销移除」后的重挂载提供快照。
  */
 function whenIdle(task: () => void) {
   if (typeof window.requestIdleCallback === 'function') {
@@ -51,6 +60,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const editor = useRef<OrderCreationEditor | null>(null);
   const [snapshots, setSnapshots] = useState<Record<string, OrderEditorSnapshot>>({});
   const entriesRef = useRef<Entry[]>([]);
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const active = entries.find((entry) => entry.id === activeId);
   const showResult = Boolean(active?.done || active?.recovered);
   const navigationLocked = locked || sampleBusy || Boolean(active?.created && !showResult);
@@ -107,21 +117,21 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
     setActiveId(next[0].id);
   }
 
-  function created(result: OrderCreatedEntry) {
-    saveEntries(entriesRef.current.map((entry) => entry.id === activeId ? { ...entry, created: result } : entry));
+  function created(entryId: string, result: OrderCreatedEntry) {
+    saveEntries(entriesRef.current.map((entry) => entry.id === entryId ? { ...entry, created: result } : entry));
     setLocked(true);
   }
 
-  function completed(result: OrderCreatedEntry) {
+  function completed(entryId: string, result: OrderCreatedEntry) {
     if (entriesRef.current.length === 1) {
       try { sessionStorage.removeItem(storageKey); } catch { setStorageError(true); }
       return;
     }
-    const next = entriesRef.current.map((entry) => entry.id === activeId
+    const next = entriesRef.current.map((entry) => entry.id === entryId
       ? { ...entry, done: true, created: { ...result, orderNo: entry.created?.orderNo ?? result.orderNo } }
       : entry);
     saveEntries(next);
-    setSnapshots((current) => { const next = { ...current }; delete next[activeId]; return next; });
+    setSnapshots((current) => { const next = { ...current }; delete next[entryId]; return next; });
     setLocked(false);
     const unfinished = next.find((entry) => !entry.created && !entry.done);
     if (unfinished) setActiveId(unfinished.id);
@@ -139,6 +149,8 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
     setLocked(false);
   }
 
+  const liveEntries = entries.filter((entry) => !entry.done && !entry.recovered);
+  const formVisible = Boolean(active && !(showResult && active.created));
   if (!active) return <p role="status" className="p-4 text-sm text-muted-foreground">正在恢复建单草稿…</p>;
   return <div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
@@ -167,10 +179,37 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
       <p>{active.created.orderNo}</p>
       {!active.done ? <p className="text-sm text-muted-foreground">请到工单详情核对文件、费用和提交状态，继续处理已有工单。</p> : null}
       <Link className="inline-flex min-h-11 items-center underline" href={`/orders/${active.created.orderId}${active.created.intent === 'fees' ? '#admin-fee-editor' : ''}`}>查看工单{active.created.intent === 'fees' ? '并编辑收费' : ''}</Link>
-    </section> : <OrderForm {...props} key={active.id}
-      draftScope={active.primary ? props.draftScope : `${props.draftScope}:batch:${active.id}`}
-      workbenchTransferId={active.primary ? props.workbenchTransferId : undefined}
-      submissionId={active.id} initialEditor={snapshots[active.id]} registerEditor={registerEditor}
-      lifecycle={{ submissionId: active.id, retainResult: entries.length > 1, onCreated: created, onCompleted: completed, onBusyChange: setSampleBusy }} />}
+    </section> : null}
+    <div ref={setSlot} className="min-w-0" data-slot="order-creation-active-form" />
+    {liveEntries.map((entry) => <KeptAliveOrderForm key={entry.id} id={entry.id} slot={slot} active={formVisible && entry.id === activeId}
+      snapshot={snapshots[entry.id]} render={(active, initialEditor) => <OrderForm {...props}
+        draftScope={entry.primary ? props.draftScope : `${props.draftScope}:batch:${entry.id}`}
+        workbenchTransferId={entry.primary ? props.workbenchTransferId : undefined}
+        submissionId={entry.id} initialEditor={initialEditor} registerEditor={registerEditor} active={active}
+        lifecycle={{ submissionId: entry.id, retainResult: entries.length > 1, onCreated: (result) => created(entry.id, result),
+          onCompleted: (result) => completed(entry.id, result), onBusyChange: (busy) => { if (entry.id === activeId) setSampleBusy(busy); } }} />} />)}
   </div>;
+}
+
+/**
+ * 常驻宿主：节点随组件创建一次，只在 active 时挂进工作台的表单槽，否则脱离文档保活。
+ * initialEditor 在首次挂载时冻结——OrderForm 只在挂载时读它，之后的快照不回灌存活实例。
+ */
+function KeptAliveOrderForm({ id, slot, active, snapshot, render }: {
+  id: string; slot: HTMLElement | null; active: boolean; snapshot?: OrderEditorSnapshot;
+  render: (active: boolean, initialEditor?: OrderEditorSnapshot) => ReactNode;
+}) {
+  const [node] = useState(() => {
+    const element = document.createElement('div');
+    element.className = 'min-w-0';
+    element.dataset.orderFormHost = id;
+    return element;
+  });
+  const [initialEditor] = useState(snapshot);
+  useLayoutEffect(() => {
+    if (!active || !slot) return;
+    slot.append(node);
+    return () => node.remove();
+  }, [active, node, slot]);
+  return createPortal(render(active, initialEditor), node);
 }

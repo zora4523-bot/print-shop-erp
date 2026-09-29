@@ -8,6 +8,7 @@ import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { isValidPackagingUnitsPerBag } from '@/lib/order/packaging-units';
 import { PendingButton } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import type { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-facts-presentation';
 import { ProductionReadinessWarning } from './ProductionReadinessWarning';
 
@@ -26,10 +27,10 @@ export function LegacyProductionFactsRepairForm({ facts, canRepair }: Props) {
         <p className="text-sm font-medium">款式 #{item.sequence} · {item.name}</p>
         <input type="hidden" name={`items.${index}.itemId`} value={item.id} />
         {item.craft === null ? <label className="block space-y-1 text-sm">工艺
-          <select className="h-11 w-full rounded-md border bg-background px-3" name={`items.${index}.craft`} required defaultValue="" aria-invalid={!!errors[`items.${index}.craft`]} aria-describedby={errors[`items.${index}.craft`]?.length ? `${facts.orderId}-items.${index}.craft-error` : undefined}>
+          <NativeSelect className="w-full" name={`items.${index}.craft`} required defaultValue="" aria-invalid={!!errors[`items.${index}.craft`]} aria-describedby={errors[`items.${index}.craft`]?.length ? `${facts.orderId}-items.${index}.craft-error` : undefined}>
             <option value="" disabled>请选择工艺</option>
             {Object.values(OrderCraft).map((craft) => <option key={craft} value={craft}>{adminOrderCraftTags([craft])[0]}</option>)}
-          </select>{fieldError(`items.${index}.craft`)}
+          </NativeSelect>{fieldError(`items.${index}.craft`)}
         </label> : null}
         {facts.needsPackaging ? <label className="block space-y-1 text-sm">每包数量
           <Input name={isValidPackagingUnitsPerBag(item.pack) ? undefined : `items.${index}.unitsPerBag`} type="number" min={1} max={9999999} step={1} required readOnly={isValidPackagingUnitsPerBag(item.pack)} defaultValue={item.pack ?? ''} aria-invalid={!!errors[`items.${index}.unitsPerBag`]} aria-describedby={errors[`items.${index}.unitsPerBag`]?.length ? `${facts.orderId}-items.${index}.unitsPerBag-error` : undefined} />
@@ -37,10 +38,10 @@ export function LegacyProductionFactsRepairForm({ facts, canRepair }: Props) {
         </label> : null}
       </div>)}
       {facts.needsPackaging ? <label className="block space-y-1 text-sm">包装方式
-        <select className="h-11 w-full rounded-md border bg-background px-3" name="packagingMode" defaultValue={facts.packagingMode ?? ''} required aria-invalid={!!errors.packagingMode}>
+        <NativeSelect className="w-full" name="packagingMode" defaultValue={facts.packagingMode ?? ''} required aria-invalid={!!errors.packagingMode}>
           <option value="" disabled>请选择包装方式</option>
           {Object.values(OrderPackagingMode).map((mode) => <option key={mode} value={mode}>{PACKAGING_MODE_LABELS[mode]}</option>)}
-        </select>{fieldError('packagingMode')}
+        </NativeSelect>{fieldError('packagingMode')}
       </label> : null}
       <PendingButton pending={pending} pendingLabel="正在保存…">保存生产资料</PendingButton>
     </fieldset>

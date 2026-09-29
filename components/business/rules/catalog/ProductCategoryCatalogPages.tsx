@@ -27,6 +27,7 @@ import {
   listProductCategoryNodes,
 } from '@/lib/product';
 import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
+import { FormPendingScope } from '@/components/business/form/FormPendingScope';
 
 export type ProductCategoryCatalogDetailProps = {
   params: Promise<{ id: string }>;
@@ -107,9 +108,11 @@ export async function NewProductCategoryCatalogItem({
       return { id: node.id, label: `${'　'.repeat(depth)}${node.name}` };
     });
   return (
+    <FormPendingScope>
     <div className="space-y-6">
       <SupplementOwnership actorId={actor.id} context={supplement ?? null} />
       <RuleCenterPageHeader
+        lockBackWhilePending
         title="新建产品结构分类"
         effect="immediate"
         back={{ href: backHref, label: supplement ? '返回原录入' : '返回产品结构分类' }}
@@ -125,6 +128,7 @@ export async function NewProductCategoryCatalogItem({
         />
       </section>
     </div>
+    </FormPendingScope>
   );
 }
 
@@ -148,9 +152,11 @@ export async function EditProductCategoryCatalogItem({
   };
 
   return (
+    <FormPendingScope>
     <div className="space-y-6">
       <ReceiptNotice receipt={receipt} noun="产品结构分类" />
       <RuleCenterPageHeader
+        lockBackWhilePending
         title={`编辑产品结构分类：${node.name}`}
         effect="immediate"
         subtitle={`${node._count.products} 个产品资料`}
@@ -191,5 +197,6 @@ export async function EditProductCategoryCatalogItem({
         </section>
       ) : null}
     </div>
+    </FormPendingScope>
   );
 }

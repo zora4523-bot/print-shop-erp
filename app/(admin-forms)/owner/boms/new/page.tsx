@@ -1,10 +1,11 @@
+import { FormPendingScope, ScopedPageHeader } from '@/components/business/form/FormPendingScope';
 import { readReceipt } from '@/lib/admin/receipt';
 import { readSupplementContext } from '@/lib/form-drafts/return-context';
 import { randomUUID } from 'node:crypto';
 import { newFormDraftContext } from '@/lib/form-drafts/server-context';
 import { createBomAction } from '@/actions/owner-boms';
 import { BomForm } from '@/components/business/bom/BomForm';
-import { PageHeader, ReceiptNotice } from '@/components/ui-business';
+import { ReceiptNotice } from '@/components/ui-business';
 import { FormPage } from '@/app/_components/FormPage';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listBomProductOptions } from '@/lib/bom';
@@ -30,9 +31,10 @@ export default async function NewBomPage({ searchParams }: { searchParams: Promi
   ]);
 
   return (
+    <FormPendingScope>
     <FormPage>
       <ReceiptNotice receipt={receipt} noun={returned?.entityType === 'CATEGORY' ? '分类' : '物料'} />
-      <PageHeader
+      <ScopedPageHeader
         title="新建用料清单"
         back={{ href: '/owner/boms', label: '返回用料清单' }}
         subtitle="同一用料对象只能有一个启用版本。"
@@ -74,5 +76,6 @@ export default async function NewBomPage({ searchParams }: { searchParams: Promi
         />
       </section>
     </FormPage>
+    </FormPendingScope>
   );
 }

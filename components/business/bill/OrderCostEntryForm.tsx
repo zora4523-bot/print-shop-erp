@@ -5,6 +5,7 @@ import { createOrderCostEntryAction } from '@/actions/bill';
 import type { OrderCostMutationResult } from '@/actions/bill.types';
 import { OrderCostCategory } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 
 const MANUAL_CATEGORY_OPTIONS = [
@@ -65,21 +66,21 @@ export function OrderCostEntryForm({
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="space-y-1 text-sm">
           <span>成本类型</span>
-          <select
+          <NativeSelect
             name="category"
             value={selectedCategory}
             disabled={pending}
             onChange={(event) =>
               setCategory(event.target.value as OrderCostCategory)
             }
-            className="min-h-11 w-full rounded-md border bg-background px-3"
+            className="w-full"
           >
             {categoryOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="space-y-1 text-sm lg:col-span-2">
           <span>成本名称</span>

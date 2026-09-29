@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { PendingLink } from './PendingLink';
 
 // 页面标题区——管理端、账单、销售、师傅端所有页面的唯一页头
 // （ui-规范 §8.3）。统一 H1 字号、返回入口、状态徽标与右侧操作的摆放，
@@ -10,7 +11,15 @@ export type PageHeaderBack = {
   href: string;
   /** 完整文案，统一写成「返回<目标页名>」，例如「返回工单列表」。 */
   label: string;
+  /**
+   * 表单提交中锁住返回入口（aria-disabled、tabindex -1、阻止点击），
+   * 语义与 PendingLink 一致。只在客户端表单持有 pending 时传入。
+   */
+  pending?: boolean;
 };
+
+const BACK_CLASS =
+  '-ml-1 inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 export type PageHeaderProps = {
   title: string;
@@ -48,14 +57,22 @@ export function PageHeader({
     >
       {breadcrumb}
       {back ? (
-        <Link
-          href={back.href}
-          data-slot="page-header-back"
-          className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ChevronLeft aria-hidden="true" className="size-4 shrink-0" />
-          {back.label}
-        </Link>
+        back.pending === undefined ? (
+          <Link href={back.href} data-slot="page-header-back" className={BACK_CLASS}>
+            <ChevronLeft aria-hidden="true" className="size-4 shrink-0" />
+            {back.label}
+          </Link>
+        ) : (
+          <PendingLink
+            href={back.href}
+            pending={back.pending}
+            data-slot="page-header-back"
+            className={BACK_CLASS}
+          >
+            <ChevronLeft aria-hidden="true" className="size-4 shrink-0" />
+            {back.label}
+          </PendingLink>
+        )
       ) : null}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0 flex-1">

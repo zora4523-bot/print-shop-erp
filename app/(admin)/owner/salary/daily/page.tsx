@@ -19,6 +19,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
 import { EmptyState, PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '历史日薪档案' };
 
@@ -228,22 +229,22 @@ function FilterBar({
       </label>
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">历史发放状态</span>
-        <select
+        <NativeSelect
           name="paid"
           defaultValue={paid ?? ''}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         >
           <option value="">全部</option>
           <option value="unpaid">仅未发</option>
           <option value="paid">仅已发</option>
-        </select>
+        </NativeSelect>
       </label>
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">师傅</span>
-        <select
+        <NativeSelect
           name="workerId"
           defaultValue={workerId ?? ''}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         >
           <option value="">全部师傅</option>
           {workers.map((worker) => (
@@ -251,7 +252,7 @@ function FilterBar({
               {worker.displayName}（{worker.username}）
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <Button type="submit" size="sm">
         筛选

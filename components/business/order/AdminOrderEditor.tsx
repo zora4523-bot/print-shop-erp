@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import styles from './AdminOrderEditor.module.css';
 import { useAdminOrderLeaveGuard } from './use-admin-order-leave-guard';
 import {
@@ -1151,7 +1152,7 @@ function DraftItemSection({
               : undefined
           }
         >
-          <select
+          <NativeSelect
             id={`spec-${draft.key}`}
             value={
               options.find(
@@ -1169,7 +1170,7 @@ function DraftItemSection({
                   specification: option.specification,
                 });
             }}
-            className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 text-sm"
+            className="w-full min-w-0"
           >
             {!options.some(
               (option) =>
@@ -1183,7 +1184,7 @@ function DraftItemSection({
                 {externalPriceBusinessText(option.specification)}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </EditorField>
         <EditorField
           label="数量（个）"

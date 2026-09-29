@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import type { OrderPackagingMode } from '@/generated/prisma/enums';
 import { createOrderSchema } from '@/lib/auth/schemas';
 import {
@@ -95,7 +96,7 @@ function QuoteRefreshFixture() {
     packaging={packagingView('SINGLE_STYLE', unitsPerBag, quantity)}
     // Packaging now sits after the design card; like the real page, order notes follow it,
     // so removing the summary below cannot clamp the scroll position while editing.
-    footerExtras={<section><label htmlFor="test-remark">工单备注（选填）</label><textarea id="test-remark" className="mt-2 min-h-24 w-full" /></section>}
+    footerExtras={<section><label htmlFor="test-remark">工单备注（选填）</label><Textarea id="test-remark" className="mt-2 min-h-24 w-full" /></section>}
     onQuantityChange={(value) => { setQuantity(value); setQuoteFailed(false); }}
     onUnitsPerBagChange={(_, value) => { setUnitsPerBag(value); setQuoteFailed(false); }}
   />;
