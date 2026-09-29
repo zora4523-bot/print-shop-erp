@@ -125,7 +125,7 @@ export function CreateOutsourceForm({
         ) : (
           <ul className="space-y-2">
             {items.map((it) => (
-              <li key={it.id} className="flex min-w-0 items-center gap-1 text-sm">
+              <li key={it.id} className="flex min-w-0 items-start gap-1 text-sm">
                 <Checkbox
                   className="-ml-3"
                   id={`item-${it.id}`}
@@ -139,7 +139,7 @@ export function CreateOutsourceForm({
                     }))
                   }
                 />
-                <Label htmlFor={`item-${it.id}`} className="block min-w-0 flex-1 leading-relaxed">
+                <Label htmlFor={`item-${it.id}`} className="block min-w-0 flex-1 pt-3 leading-5">
                   #{it.sequence} · {externalPriceBusinessText(it.name)} · 数量{' '}
                   {it.quantity.toLocaleString()}
                 </Label>

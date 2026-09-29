@@ -33,12 +33,12 @@
     height: 24px;
   }
 
-  /* 表头在行外，仍是 44px 触控目标（§8 紧凑豁免只覆盖工单行）；负边距把
-     指示框中心对到行勾选框那一列（行内 24px 盒的中心在列起点 +12px）。 */
+  /* 表头在行外，仍是 44px 触控目标（§8 紧凑豁免只覆盖工单行）。容器居中排布，
+     左右对称的负边距让 44px 盒与行内 24px 盒同心，指示框落在同一列。 */
   .selectionHeader :global([data-slot="checkbox"]) {
     width: 44px;
     height: 44px;
-    margin: -10px 0 -10px -10px;
+    margin: -10px;
   }
 
   .row :global([data-slot="checkbox-indicator"]),

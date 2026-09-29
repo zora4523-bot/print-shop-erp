@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, type Page, type TestInfo } from '@playwright/test';
+import { collectGeometryIssues } from './ui-gates-geometry';
 
 export async function expectViewportGate(page: Page, testInfo: TestInfo) {
   const mobile = testInfo.project.use.viewport?.width
@@ -167,6 +168,7 @@ export async function expectViewportGate(page: Page, testInfo: TestInfo) {
 
     return [...new Set(issues)];
   }, { mobile });
+  failures.push(...(await page.evaluate(collectGeometryIssues)));
 
   expect(failures, failures.join('\n')).toEqual([]);
 }
