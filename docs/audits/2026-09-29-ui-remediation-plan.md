@@ -87,11 +87,17 @@
 - `AdminOrderEditor` 的返回仍是受控按钮（保存/上传中需禁用并走离开确认），PageHeader 的 `back` 是纯链接，故未替换。其他四个删除了底部「返回列表」的表单（Bom/Craft/ProductCategory/PurchaseOrder）改由页头返回；提交中的离开保护依赖 PendingButton 的导航拦截。
 - 「批准变更」确认按钮保留「批准」，避免与触发按钮同名冲突。
 - 留待下轮：
-  - 原生 select 全量迁移（P2-2，72 处 / 41 文件）。
-  - 运行时几何探针门禁化（本次探针脚本未入库）。
+  - 原生 select 全量迁移（P2-2，72 处 / 41 文件）。——order/bill 以外已迁（2026-09-29），并加 eslint 门禁禁 JSX `<select>` / `<textarea>`。
+  - ~~运行时几何探针门禁化~~ **已入库（2026-09-29）**：`tests/visual/ui-gates-geometry.ts` 并入 `expectViewportGate`，admin/worker 响应式门禁全部路由自动获得四条规则：`row-misaligned`（同行控件底边差 >2px 且高差 >2px；每个控件只归属最近一个含其他控件的 flex/grid 行，纯图片缩略图触发器不算控件）、`checkbox-offset`（指示框与其后首个可见标签文字首行中心差 >3px，跳过 `.sr-only`）/ `checkbox-gap`（间距不在 2–20px）、`icon-offset`（输入框内绝对定位图标中心差 >2px）、`selection-column`（「选择本页」/thead 全选框与首行勾选框中心 X 差 >1px）。样式指纹普查仍只作审查工具，不进门禁。首次运行命中的真实问题（待修，门禁在修复前为红）：
+    - `/foreman/materials` 搜索框放大镜 `top-2`，全部六视口 dy −6px（`icon-offset`）。
+    - `/foreman/outsource/new` 款式勾选行 `items-center` + 长名换行，dy 12–24px（375/393/768/1024）。
+    - 工单详情「变更申请」款式勾选（`OrderChangeRequestForm`），长名换行 dy 12–36px（六视口）。
+    - `/orders/new` 急单说明在 375/393 换行，dy 8.5px（`OrderForm` 急单字段）。
+    - `/orders` 桌面紧凑列表「选择本页」与行勾选框 dx 5px（1024/1280/1920）。
+    以上四条勾选均违反 §8.1「多行说明 `items-start` 且勾选框与首行居中」。
   - `OrderForm` 的 `<Activity>` 保活（批量建单切换重建表单）。
   - `orders/production/page.tsx` 直连 db。
-  - `PageHeader.back` 支持提交中锁定：Bom/Craft/ProductCategory/PurchaseOrder 四个表单删掉底部返回后，提交中离开只剩 PendingButton 的导航拦截；新建外协单保留表单内锁定返回（§8.3 例外）。
+  - ~~`PageHeader.back` 支持提交中锁定~~ **已解决（2026-09-29）**：`back.pending` 复用 `PendingLink`（aria-disabled、tabindex -1、阻止点击/导航）；页头与表单分处服务端页面时用 `components/business/form/FormPendingScope`（客户端 Provider，不产生 DOM）+ `ScopedPageHeader` / `RuleCenterPageHeader lockBackWhilePending`，表单内 `useReportFormPending(pending)` 上报。Bom/Craft/ProductCategory/PurchaseOrder 四个表单已接入；SSR / 零 JS 下 pending 恒 false，不影响原生提交。新建外协单仍保留表单内锁定返回（§8.3 例外）。
 
 ## 验证
 
@@ -104,3 +110,19 @@
   - 终轮 chromium 215/216；唯一失败 `purchase-flow` 为既有测试时序问题（确认层关闭即读库），改为轮询持久状态后 4/4 通过（969c9848）。
   - 六视口门禁：管理端 152 通过 / 10 跳过（首轮 24 失败：新建外协单双返回入口 + 面包屑改名定位，已修）；师傅端 12/12。
   - 期间一次开发服务器 Turbopack 持久缓存 panic（`Restore of All … failed`），清 `.next` 后不再出现，与业务无关。
+
+## 第二轮（2026-09-29，上一轮遗留）
+
+| 遗留项 | 结果 | 提交 |
+|---|---|---|
+| 原生 select 全量迁移（P2-2） | 73 处 select + 剩余 textarea 全部迁到 NativeSelect / Textarea，eslint 禁止原生 `<select>` / `<textarea>` | b7707951 |
+| 运行时几何探针门禁化 | `tests/visual/ui-gates-geometry.ts` 并入 `expectViewportGate`：行内控件底边、勾选框首行居中与间距、输入框图标居中、表头全选同列；首轮命中 5 处真实问题并已修 | 28524ffd、b7707951 |
+| 批量建单保活 | 每张表单挂在独立常驻节点，只挂当前一张；切换不再重建 OrderForm，id 唯一，只有当前表单登记编辑器与离开守卫 | b7707951 |
+| `orders/production` 直连 db | 数据组装下沉 `lib/production/dispatch-page.ts`，页面不再引用 db | e67ec43e |
+| PageHeader back 提交中锁定 | `back.pending` 走 PendingLink；四个表单经 FormPendingScope 把提交状态传给页头 | b7707951 |
+
+验证（隔离库、开发配置）：静态门禁全过；单测 718 文件 / 7865 项；组件浏览器测试 60 文件 / 910 项；chromium E2E 216/216；六视口门禁管理端 150 通过 / 10 跳过、师傅端 12/12。管理端首轮有 2 项（768、1024 的 `/orders` 搜索回车后等待地址栏 `q`，5 秒超时）失败，单独复跑 4/4 通过，判为偶发时序。
+
+观察项（未改）：
+- `/orders` 筛选表单改为 `next/form` 后，地址栏要等 RSC 返回才更新（原生 GET 是整页跳转，地址栏即时变化）；负载高时上述用例可能超时。若要消除，可给筛选提交加即时 pending 提示或让测试等待列表结果而非地址栏。
+- 批量建单保活后，隐藏表单的报价请求、自动保存定时器仍在运行（10 张时内存与后台请求增加）；隐藏表单出错要切回才可见。

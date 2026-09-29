@@ -493,7 +493,7 @@ P0-1 已完成，`baseline.json` 的 `money` 待迁移条目为 0；费率与阶
 | 类别 | 处数 | 迁移项 |
 |---|---|---|
 | 本地 `*Badge` / 第二套 tone | 29 个 + `lib/order/sales-list-presentation.ts:31` | **P2-1** |
-| 原生 `<select` + `selectClass` | 68 处 / 39 文件 + 8 份常量 | **P2-2** |
+| 原生 `<select` + `selectClass` | 已清零（2026-09-29）+ eslint 门禁（业务范围禁 JSX `<select>` / `<textarea>`） | **P2-2** ✅ |
 | 裸 `disabled={pending}` 按钮 | 55 处 / 35 文件 | **P2-3** |
 | 手写分页 | `components/business/price/RulePriceWorkbench.tsx:905`（翻页链接须走 `PriceWorkspaceLink` 导航拦截，共享分页不支持） | 豁免 |
 | 一线表单字段错误未接 `FormMessage` | 12 文件 / 50 处 | **P2-6** |
