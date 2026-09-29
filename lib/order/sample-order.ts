@@ -4,7 +4,7 @@ import { db } from '../db';
 import type { Prisma } from '../../generated/prisma/client';
 import { OrderQuotedFeeCompleteness } from '../../generated/prisma/enums';
 import { createOrderSchema, type CreateOrderInput } from '../auth/schemas';
-import { calculateExternalOrderCharges } from '../price/external-order-charges';
+import { calculateExternalOrderCharges, getZtoTariff } from '../price/external-order-charges';
 import { readPublishedCreateOrderPriceSnapshot } from './create-order-published-rule-adapter';
 import { createExternalOrderQuoteToken } from './create-order-quote-token';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
@@ -74,12 +74,32 @@ export function sampleQuoteFacts(input: CreateOrderInput): SampleQuoteFacts {
   };
 }
 
+/**
+ * 业主 2026-09-30：寄样品只是几个红包，默认不超过首重。每个地址按收件省份的
+ * 中通首重计费，提交时即自动确认；实际超重由管理员在履约费用中改。省份不在
+ * 报价表内时没有首重，快递费保持待核价，不估算、不按零元。
+ */
+function withSampleFirstWeight(
+  facts: SampleQuoteFacts,
+  rules: Parameters<typeof getZtoTariff>[1],
+): SampleQuoteFacts {
+  if (facts.purpose !== 'SAMPLE_SHIPMENT') return facts;
+  return {
+    ...facts,
+    shipments: facts.shipments.map((shipment) => ({
+      ...shipment,
+      weightKg: getZtoTariff(shipment.province, rules)?.firstWeightKg ?? null,
+    })),
+  };
+}
+
 async function calculateSampleQuote(
   tx: Prisma.TransactionClient,
-  facts: SampleQuoteFacts,
+  rawFacts: SampleQuoteFacts,
   now: Date,
 ) {
   const snapshot = await readPublishedCreateOrderPriceSnapshot(tx, { now });
+  const facts = withSampleFirstWeight(rawFacts, snapshot.orderCharges.rules);
   if (
     facts.purpose === 'SAMPLE_SHIPMENT' &&
     facts.samplePackagingRuleCode &&
@@ -142,7 +162,7 @@ async function calculateSampleQuote(
       },
     }),
   };
-  return { result, snapshot, logistics };
+  return { result, snapshot, logistics, facts };
 }
 
 export async function quoteSampleOrder(raw: unknown) {
@@ -220,20 +240,34 @@ export async function finalizeSampleOrderInTx(
     purpose: order.purpose as SampleQuoteFacts['purpose'],
     samplePackagingRuleCode: order.samplePackagingRuleCode,
     isSfCollect: order.isSfCollect,
+    // Like the browser quote, submission never trusts a stored weight: before
+    // confirmation none can be carrier-recorded, and a rejected draft may have
+    // changed province since its earlier first-weight default was written.
     shipments: order.shipments.map((shipment) => ({
       shipmentKey: String(shipment.sequence),
       province: shipment.destinationProvince,
       quantity: shipment.lines.reduce((sum, line) => sum + line.quantity, 0),
-      weightKg: shipment.weightKg?.toString() ?? null,
+      weightKg: null,
     })),
   };
-  const { result, snapshot, logistics } = await calculateSampleQuote(
+  const { result, snapshot, logistics, facts: priced } = await calculateSampleQuote(
     tx,
     facts,
     now,
   );
   if (result.quoteToken !== expectedQuoteToken)
     throw new SampleQuoteChangedError(result);
+  // The first-weight default stays the billable weight until an administrator
+  // records another one, so shipping repricing and fulfilment start from it.
+  const firstWeightDefaults = new Set<string>();
+  for (const shipment of order.shipments) {
+    const key = String(shipment.sequence);
+    const weightKg = priced.shipments.find((row) => row.shipmentKey === key)?.weightKg;
+    if (!weightKg) continue;
+    firstWeightDefaults.add(key);
+    if (shipment.weightKg?.equals(weightKg)) continue;
+    await tx.orderShipment.update({ where: { id: shipment.id }, data: { weightKg } });
+  }
   // All production facts remain, but their customer price is included in the
   // order charge. Zero rows are explicit, not unresolved manual item prices.
   await tx.orderItem.updateMany({
@@ -278,6 +312,7 @@ export async function finalizeSampleOrderInTx(
             shipmentId: null,
             ruleCode: null,
             evidence: { purpose: 'PROOF' },
+            firstWeightDefault: false,
           },
         ]
       : (logistics?.snapshot.components ?? []).map((line) => ({
@@ -293,6 +328,9 @@ export async function finalizeSampleOrderInTx(
           )!.id,
           ruleCode: line.ruleCode,
           evidence: line,
+          firstWeightDefault:
+            line.categoryCode === 'SHIPPING' &&
+            firstWeightDefaults.has(line.shipmentKey),
         }));
   for (const line of lines) {
     const category = await tx.customerChargeCategory.findUnique({
@@ -329,6 +367,9 @@ export async function finalizeSampleOrderInTx(
           source: 'SAMPLE_ORDER_QUOTE',
           priceVersion: snapshot.priceVersion,
           line: line.evidence,
+          ...(line.firstWeightDefault
+            ? { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' }
+            : {}),
         }),
       ) as Prisma.InputJsonObject,
     };
