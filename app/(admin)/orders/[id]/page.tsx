@@ -523,7 +523,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               网页预览
             </Link>
           </div></Fragment>),
-    otherActions: (<div className="flex min-w-0 flex-wrap items-center gap-2">
+    otherActions: (<Fragment key="otherActions"><div className="flex min-w-0 flex-wrap items-center gap-2">
             {canEdit ? (
               <Link
                 href={`/orders/${order.id}/edit`}
@@ -587,7 +587,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 />
               </>
             ) : null}
-          </div>),
+          </div></Fragment>),
     basics: (<Fragment key="basics"><OrderBasicSummarySection {...{
       order, hasProductionOperations, productionOperations, productionProgressSteps,
       assignedWorkerNames, canViewCommercialAmounts,

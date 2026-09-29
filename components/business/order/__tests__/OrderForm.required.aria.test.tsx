@@ -216,7 +216,11 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(label, '工单名称应有关联的 <label>').not.toBeNull();
     const labelInner = label![1]!;
     expect(labelInner).toContain('工单名称');
-    expect(labelInner).toMatch(/<span aria-hidden="true"[^>]*>\s*\*/);
+    // 星号是 aria-hidden 元素上的 CSS 生成内容：既不进无障碍名称，也不进 label 文本。
+    expect(labelInner).toMatch(
+      /<span aria-hidden="true" data-slot="required-mark"[^>]*after:content-\[&#x27;\*&#x27;\][^>]*><\/span>/,
+    );
+    expect(labelInner.replace(/<[^>]*>/g, '')).toBe('工单名称');
   });
 
   it('加了 required 不等于换回浏览器原生气泡：form 仍是 noValidate', () => {

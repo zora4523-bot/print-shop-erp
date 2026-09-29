@@ -153,7 +153,7 @@ test('ADMIN smart-only configuration, legacy read-only history, routes and mock 
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
   await row().getByRole('button', { name: '删除', exact: true }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: '删除', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '永久删除', exact: true }).click();
   await expect(row().getByRole('alert', { name: '删除失败', exact: true })).toContainText('历史推送记录');
   await expectNoNextErrorOverlay(page);
 });

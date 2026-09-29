@@ -279,7 +279,7 @@ export function AdminBreadcrumb() {
                 ) : (
                   // Layout-only ancestor: not navigable AND not the
                   // current page. Plain <span>, no aria-current.
-                  <span className="block truncate text-muted-foreground">
+                  <span className="block truncate text-muted-foreground" title={label}>
                     {label}
                   </span>
                 )}

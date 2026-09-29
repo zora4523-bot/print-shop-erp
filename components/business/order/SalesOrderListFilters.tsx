@@ -93,7 +93,8 @@ export function SalesOrderListFilters({
                 <span
                   className={cn(
                     'rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground',
-                    active && 'bg-primary/15 text-primary',
+                    // 选中态按钮自身已是 primary 淡底；计数胶囊再叠一层会让暗色对比跌破 4.5:1。
+                    active && 'bg-transparent text-primary ring-1 ring-inset ring-primary/40',
                     tab.id === 'todo' &&
                       summary.todo > 0 &&
                       !active &&

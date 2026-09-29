@@ -21,6 +21,8 @@ describe('admin shell not-found UI', () => {
 
     expect(html).toContain('href="/"');
     expect(html).not.toContain('href="/owner"');
-    expect(html).toContain('返回首页');
+    expect(html).toContain('回我的工作台');
+    expect(html).toContain('data-kind="no-access"');
+    expect(html.match(/<h1\b/g)).toHaveLength(1);
   });
 });
