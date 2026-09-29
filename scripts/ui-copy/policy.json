@@ -24,6 +24,19 @@
     "ProductionTask",
     "PER_UNIT"
   ],
+  "bannedPatterns": [
+    {
+      "name": "camelCase 标识符",
+      "pattern": "\\b[a-z]+[A-Z][A-Za-z0-9]*\\b",
+      "flags": "",
+      "skipCodeKeys": true
+    },
+    {
+      "name": "内部版本/角色词",
+      "pattern": "\\b(?:legacy|v2|worker)\\b",
+      "flags": "i"
+    }
+  ],
   "exemptions": [
     {
       "file": "app/(admin)/owner/pigsty/page.tsx",
@@ -62,6 +75,13 @@
         "Secret",
         "worker",
         "Worker"
+      ]
+    },
+    {
+      "prefix": "app/(admin)/owner/notifications/",
+      "words": [
+        "Bot ID",
+        "Secret"
       ]
     },
     {

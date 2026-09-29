@@ -1,5 +1,6 @@
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
+import { FIELD_ARIA_READONLY_CLASS, FIELD_BASE_CLASS } from './field-styles';
 
 export function NativeSelect({
   className,
@@ -8,7 +9,9 @@ export function NativeSelect({
   return (
     <select
       className={cn(
-        'flex min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive',
+        FIELD_BASE_CLASS,
+        FIELD_ARIA_READONLY_CLASS,
+        'flex min-h-11 py-2',
         className,
       )}
       {...props}

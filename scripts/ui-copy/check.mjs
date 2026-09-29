@@ -40,10 +40,22 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
   const found = new Map();
   const visited = new Set();
   const record = (node, text) => {
+    // 纯站内路径（如 <Form action="/worker/orders">）是导航目标，不是可见文案。
+    if (/^\/[\w\-./[\]]*$/.test(text)) return;
     const origin = node.getSourceFile();
     const originFile = context.root ? path.relative(context.root, origin.fileName).split(path.sep).join('/') : file;
     const banned = [...config.banned, ...(config.scopedBanned ?? []).filter(rule => originFile.startsWith(rule.prefix)).flatMap(rule => rule.words)];
     const words = banned.filter(word => new RegExp(word === 'null' ? '\\bnull\\b' : word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(text));
+    // 模式规则：可见文案里的 camelCase 字段名（finishedAt）与 legacy / v2 / worker 等内部词。
+    // 纯标识符字面量（'receiverName'、'match.perFoilColor'）是字段键 / 能力键，只有作为
+    // JSX 文本直接渲染时才算外显；带空格或中文的句子则一律检查。
+    const codeKey = !ts.isJsxText(node) && /^[A-Za-z0-9_.]+$/.test(text);
+    for (const rule of config.bannedPatterns ?? []) {
+      if (codeKey && rule.skipCodeKeys) continue;
+      for (const match of text.matchAll(new RegExp(rule.pattern, `${rule.flags ?? ''}g`))) {
+        if (!words.includes(match[0])) words.push(match[0]);
+      }
+    }
     if (!words.length) return;
     if (originFile.startsWith('node_modules/') || originFile.startsWith('generated/')) return;
     if (config.exemptions.some(e => e.file === originFile && e.text === text && e.reason?.trim())) return;
@@ -84,6 +96,8 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     ts.forEachChild(node, value);
   };
   const visit = (n) => {
+    // <script> / next <Script> / <style> 的内联源码不是可见文案。
+    if (ts.isJsxElement(n) && /^(?:script|Script|style)$/.test(n.openingElement.tagName.getText(sf))) return;
     if (ts.isJsxText(n)) value(n);
     if (ts.isJsxExpression(n) && !ts.isJsxAttribute(n.parent)) value(n.expression);
     if (ts.isJsxAttribute(n)) {

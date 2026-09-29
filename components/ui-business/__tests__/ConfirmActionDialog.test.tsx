@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { Button } from '@/components/ui/button';
 import {
   ConfirmActionController, ConfirmActionDialog,
-  confirmationCanSubmit,
+  confirmationActionVariant, confirmationCancelLabel, confirmationCanSubmit,
 } from '@/components/ui-business';
 
 describe('ConfirmActionDialog', () => {
@@ -69,3 +69,25 @@ const rejectedNotice = <ConfirmActionDialog {...facts} notice="重复后果" />;
 // @ts-expect-error arbitrary children are deliberately not a presentation prop
 const rejectedChildren = <ConfirmActionDialog {...facts}><p>自由段落</p></ConfirmActionDialog>;
 void [rejectedDescription, rejectedNotice, rejectedChildren];
+
+describe('ConfirmActionDialog ui-review #1/#9/#10 contracts', () => {
+  it('colours the confirm button red only when danger is set, never because of L3', () => {
+    expect(confirmationActionVariant(true)).toBe('destructive');
+    expect(confirmationActionVariant(false)).toBe('default');
+    expect(confirmationActionVariant(undefined)).toBe('default');
+  });
+
+  it('defaults the dismiss label to 暂不取消 when the confirm text starts with 取消', () => {
+    expect(confirmationCancelLabel('取消工单')).toBe('暂不取消');
+    expect(confirmationCancelLabel(' 取消外协')).toBe('暂不取消');
+    expect(confirmationCancelLabel('确认删除')).toBe('取消');
+    expect(confirmationCancelLabel('取消工单', '返回')).toBe('返回');
+  });
+
+  it('blocks confirmation until the acknowledgement box is ticked', () => {
+    expect(confirmationCanSubmit('L2', '', false)).toBe(false);
+    expect(confirmationCanSubmit('L2', '', true)).toBe(true);
+    expect(confirmationCanSubmit('L3', '已核对', false)).toBe(false);
+    expect(confirmationCanSubmit('L3', '已核对', true)).toBe(true);
+  });
+});

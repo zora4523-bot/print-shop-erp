@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { FormMessage, formMessageA11yProps } from './FormMessage';
@@ -46,7 +47,13 @@ export type ConfirmActionDialogProps = {
   changes: readonly { label: string; old: string; new: string }[];
   consequences: readonly string[];
   confirmText: string;
+  /** 确认按钮是否用破坏色。只由它决定——L3 只意味着要填理由，不意味着红色。 */
   danger?: boolean;
+  /**
+   * 可选的确认勾选（如「我已核对打印稿」）。传入后必须勾选才能确认，
+   * 用于「确认已打印」这类需要显式自证的场景，替代普通 Dialog 当确认层。
+   */
+  acknowledgement?: string;
   /** Reject JSX children even when other props are spread (TypeScript excess-property loophole). */
   children?: never;
 };
@@ -66,26 +73,42 @@ export function ConfirmActionController({ children, ...control }: ConfirmActionC
 export function confirmationCanSubmit(
   level: ConfirmActionLevel,
   reason: string,
+  acknowledged = true,
 ): boolean {
-  return level === 'L2' || reason.trim().length > 0;
+  return acknowledged && (level === 'L2' || reason.trim().length > 0);
+}
+
+/** 确认按钮配色只看 danger（ui 审查 #9）。 */
+export function confirmationActionVariant(danger: boolean | undefined): 'destructive' | 'default' {
+  return danger ? 'destructive' : 'default';
+}
+
+/**
+ * 「取消」与「取消工单」并排时用户分不清哪个是撤回（ui 审查 #1）。
+ * confirmText 以「取消」开头且调用方没给 cancelLabel 时，关闭按钮改叫「暂不取消」。
+ */
+export function confirmationCancelLabel(confirmText: string, cancelLabel?: string): string {
+  if (cancelLabel !== undefined) return cancelLabel;
+  return confirmText.trim().startsWith('取消') ? '暂不取消' : '取消';
 }
 
 /**
  * L2 用于需要先看影响范围的操作；L3 在此基础上强制填写理由。
  * AlertDialog 负责焦点圈定、Escape/遮罩策略与关闭后的触发器焦点恢复。
  */
-export function ConfirmActionDialog({ action, changes, consequences, confirmText, danger }: ConfirmActionDialogProps) {
+export function ConfirmActionDialog({ action, changes, consequences, confirmText, danger, acknowledgement }: ConfirmActionDialogProps) {
   const control = useContext(ConfirmationControlContext);
   if (!control) throw new Error('ConfirmActionDialog requires ConfirmActionController');
   const {
-    level, trigger, cancelLabel = '取消', formId, disabled = false,
+    level, trigger, cancelLabel, formId, disabled = false,
     reasonLabel = '操作理由', reasonName = 'reason', reasonPlaceholder = '填写理由（最多 500 字）',
     onConfirm, className, defaultOpen = false, open, onOpenChange, focusReturnRef,
   } = control;
   const reasonId = useId();
   const [reason, setReason] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
   const reasonRequired = level === 'L3';
-  const canSubmit = confirmationCanSubmit(level, reason) && !disabled;
+  const canSubmit = confirmationCanSubmit(level, reason, !acknowledgement || acknowledged) && !disabled;
 
   return (
     <>
@@ -95,11 +118,15 @@ export function ConfirmActionDialog({ action, changes, consequences, confirmText
           // 打开时立即清空；关闭时等当前 click/submit 默认动作完成后再清。
           // 这样外部 form 仍能读取本次理由，同时 Escape/取消不会留下可被
           // 后续 Enter 提交复用的陈旧 hidden value。
-          if (nextOpen) setReason('');
+          if (nextOpen) {
+            setReason('');
+            setAcknowledged(false);
+          }
           onOpenChange?.(nextOpen);
           if (!nextOpen) {
             window.requestAnimationFrame(() => {
               setReason('');
+              setAcknowledged(false);
               focusReturnRef?.current?.focus();
             });
           }
@@ -150,12 +177,24 @@ export function ConfirmActionDialog({ action, changes, consequences, confirmText
             </div>
           ) : null}
 
+          {acknowledgement ? (
+            <label className="flex items-center gap-1 text-sm font-medium">
+              <Checkbox
+                checked={acknowledged}
+                onCheckedChange={(checked) => setAcknowledged(checked === true)}
+                aria-required
+                className="-ml-3"
+              />
+              {acknowledgement}
+            </label>
+          ) : null}
+
           <AlertDialogFooter>
-            <AlertDialogCancel type="button">{cancelLabel}</AlertDialogCancel>
+            <AlertDialogCancel type="button">{confirmationCancelLabel(confirmText, cancelLabel)}</AlertDialogCancel>
             <AlertDialogAction
               type={formId ? 'submit' : 'button'}
               form={formId}
-              variant={danger || level === 'L3' ? 'destructive' : 'default'}
+              variant={confirmationActionVariant(danger)}
               disabled={!canSubmit || (changes.length === 0 && consequences.length === 0)}
               onClick={() => onConfirm?.(reason.trim() || null)}
             >

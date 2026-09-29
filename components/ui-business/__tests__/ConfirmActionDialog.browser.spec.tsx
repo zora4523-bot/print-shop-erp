@@ -108,3 +108,23 @@ it('submits the trimmed reason to the original external form', async () => {
   await page.getByRole('button', { name: '删除', exact: true }).click();
   expect(submit).toHaveBeenCalledExactlyOnceWith('重复项目');
 });
+
+it('requires the acknowledgement tick, keeps L3 non-red and renames the dismiss button for 取消 actions', async () => {
+  const confirm = vi.fn();
+  flushSync(() => root.render(
+    <ConfirmActionController level="L3" trigger={<Button>取消工单</Button>} onConfirm={confirm}>
+      <ConfirmActionDialog action="取消工单" changes={[]} consequences={['工单进入已取消。']}
+        confirmText="取消工单" acknowledgement="我已通知客户" />
+    </ConfirmActionController>,
+  ));
+  await page.getByRole('button', { name: '取消工单' }).click();
+  const action = page.getByRole('button', { name: '取消工单', exact: true }).last();
+  await expect.element(page.getByRole('button', { name: '暂不取消', exact: true })).toBeVisible();
+  expect(document.querySelector('[data-slot="alert-dialog-action"]')!.className).not.toContain('text-destructive');
+  await page.getByRole('textbox', { name: '操作理由' }).fill('客户撤单');
+  await expect.element(action).toBeDisabled();
+  await page.getByRole('checkbox', { name: '我已通知客户' }).click();
+  await expect.element(action).toBeEnabled();
+  await action.click();
+  expect(confirm).toHaveBeenCalledExactlyOnceWith('客户撤单');
+});

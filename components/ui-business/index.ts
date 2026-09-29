@@ -48,6 +48,7 @@ export type { DisabledReasonCause, DisabledReasonProps } from './DisabledReason'
 export { PendingButton } from './PendingButton';
 export type { PendingButtonProps } from './PendingButton';
 export { PendingLink } from './PendingLink';
+export { LinkPendingHint } from './LinkPendingHint';
 export type { PendingLinkProps } from './PendingLink';
 
 export { EnvNotice } from './EnvNotice';
@@ -108,6 +109,8 @@ export type { TableEmptyStateProps } from './TableEmptyState';
 export {
   ConfirmActionController,
   ConfirmActionDialog,
+  confirmationActionVariant,
+  confirmationCancelLabel,
   confirmationCanSubmit,
 } from './ConfirmActionDialog';
 export type {

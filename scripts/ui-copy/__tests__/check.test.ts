@@ -94,7 +94,7 @@ it('keeps every documented internal mapping in the gate and wires the required l
 
 it('blocks connection implementation terms in notification flows without banning diagnostic vocabulary globally', () => {
   expect(inspectUiCopy('<p>后台 worker 将使用 Secret</p>', 'components/business/notification/Example.tsx')).toHaveLength(1);
-  expect(inspectUiCopy('<p>worker 运行状态</p>', 'app/(admin)/owner/diagnostics/page.tsx')).toEqual([]);
+  expect(inspectUiCopy('<p>Secret 轮换状态</p>', 'app/(admin)/owner/diagnostics/page.tsx')).toEqual([]);
 });
 
 
@@ -107,4 +107,51 @@ it.each([
 });
 it('allows required order blockers and attachment warnings', () => {
   expect(inspectUiCopy('<p>完工后才可发货。图片和 CDR 文件不会保存在本地草稿中。</p>', 'components/business/order/OrderForm.tsx', policy)).toEqual([]);
+});
+
+describe('pattern rules (ui-review #30)', () => {
+  it.each([
+    ['<p>完成于 finishedAt</p>', 'finishedAt'],
+    ['<Badge label="legacy 规则" />', 'legacy'],
+    ['<p>Legacy 价格</p>', 'Legacy'],
+    ['<p>价目簿 v2</p>', 'v2'],
+    ['<p>V2版工价</p>', 'V2'],
+    ['<p>发给 worker</p>', 'worker'],
+    ['toast.error("Worker 不在线");', 'Worker'],
+  ])('rejects %s', (source, word) => {
+    const [hit] = check(source);
+    expect(hit?.words).toContain(word);
+  });
+
+  it.each([
+    '<p>师傅端</p>',
+    '<p>workers 队列</p>',
+    '<p>iv2x</p>',
+    '<p>PDF 与 CDR</p>',
+    '<p>Finished</p>',
+    'const x = <a href="/worker/tasks">师傅</a>;',
+    'const x = <Form action="/worker/orders">筛选</Form>;',
+  ])('accepts %s', (source) => {
+    expect(check(source)).toEqual([]);
+  });
+
+  it('bans notification credentials copy on the owner notifications pages too', () => {
+    const rule = policy.scopedBanned.find((entry: { prefix: string }) => entry.prefix === 'app/(admin)/owner/notifications/');
+    expect(rule?.words).toEqual(expect.arrayContaining(['Bot ID', 'Secret']));
+    expect(inspectUiCopy('<p>填写 Bot ID</p>', 'app/(admin)/owner/notifications/page.tsx', policy)).toHaveLength(1);
+    expect(inspectUiCopy('<p>填写 Bot ID</p>', 'app/(admin)/owner/orders/page.tsx', policy)).toEqual([]);
+  });
+});
+
+describe('pattern rule precision', () => {
+  it('treats bare identifier literals as code keys but still flags them as JSX text', () => {
+    expect(check("const f = [['receiverName', '收件人']]; export const V = () => <p>{f.map(x => x[1])}</p>;")).toEqual([]);
+    expect(check('setError("externalSalesUserId", { message: "请选择外部销售" });')).toEqual([]);
+    expect(check('<th>finishedAt</th>')).toHaveLength(1);
+  });
+
+  it('ignores inline script source', () => {
+    expect(check('<script>{`localStorage.getItem("x")`}</script>')).toEqual([]);
+    expect(check('<Script id="t">{`localStorage.getItem("x")`}</Script>')).toEqual([]);
+  });
 });

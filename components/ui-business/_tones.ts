@@ -32,13 +32,13 @@ export const TONE_ICON_BOX: Record<Tone, string> = {
 
 // 实色徽章：StatusBadge / Tag 类直接展示&ldquo;状态色&rdquo;时用。背景 + 同色暗版前景。
 export const TONE_BADGE_SOFT: Record<Tone, string> = {
-  primary: 'bg-primary/10 text-foreground border-primary/30',
-  warning: 'bg-warning/10 text-warning-foreground border-warning/30',
-  info: 'bg-info/10 text-info-foreground border-info/30',
-  success: 'bg-success/10 text-success-foreground border-success/30',
+  primary: 'bg-primary/10 text-foreground border-primary/40',
+  warning: 'bg-warning/10 text-warning-foreground border-warning/40',
+  info: 'bg-info/10 text-info-foreground border-info/40',
+  success: 'bg-success/10 text-success-foreground border-success/40',
   // 「已取消 / 失败」这类**非正常终态**专用。之前只能退回 neutral，
   // 结果和「草稿」「已完成」同色，用户分不出正常结束和被取消。
-  danger: 'bg-destructive/10 text-destructive border-destructive/30',
+  danger: 'bg-destructive/10 text-destructive border-destructive/40',
   neutral: 'bg-muted text-foreground border-border',
 };
 

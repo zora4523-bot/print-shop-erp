@@ -24,6 +24,11 @@ const NATIVE_CONFIRM_GUARD_MESSAGE =
 const NATIVE_CHECKBOX_GUARD_MESSAGE =
   "Use the shared Checkbox component so the 44px target, 20px indicator, keyboard states, and mixed-state semantics stay consistent.";
 
+// next/link 会在生产环境对视口内链接做预取；指向 /api/ 导出接口时每次打开页面
+// 都会打一次导出请求（2026-09-29 薪资页 400 即此）。下载用原生 <a href download>。
+const API_LINK_GUARD_MESSAGE =
+  "Use a native <a href download> for /api/ download routes; next/link prefetches them in production.";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -79,6 +84,16 @@ const eslintConfig = defineConfig([
           selector:
             "JSXOpeningElement[name.name='input'] > JSXAttribute[name.name='type'] > JSXExpressionContainer > Literal[value='checkbox']",
           message: NATIVE_CHECKBOX_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='Link'] > JSXAttribute[name.name='href'] Literal[value=/^\\/api\\//]",
+          message: API_LINK_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='Link'] > JSXAttribute[name.name='href'] TemplateLiteral > TemplateElement:first-child[value.cooked=/^\\/api\\//]",
+          message: API_LINK_GUARD_MESSAGE,
         },
       ],
     },
