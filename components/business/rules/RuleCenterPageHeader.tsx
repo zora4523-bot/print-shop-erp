@@ -1,12 +1,19 @@
 import { PageHeader, StatusBadge, type PageHeaderProps } from '@/components/ui-business';
 import { ScopedPageHeader } from '@/components/business/form/FormPendingScope';
+import { cn } from '@/lib/utils';
 import type { RuleCenterEffect } from '@/lib/navigation/rule-center';
 import { RULE_CENTER_EFFECT_REGISTRY } from '@/lib/ui/status-registry';
 
 export type RuleCenterPageHeaderProps = {
   title: string;
+  titleId?: string;
   subtitle?: React.ReactNode;
   scope?: string;
+  /**
+   * 作用域胶囊的强调：计价口径与相邻分区不同（如「元 / 单」整单总价）时用
+   * primary 提醒，不用红色（红色只表示危险 / 失败，ui-规范 §8.2）。
+   */
+  scopeEmphasis?: boolean;
   effect?: RuleCenterEffect;
   back?: PageHeaderProps['back'];
   status?: PageHeaderProps['status'];
@@ -42,8 +49,10 @@ export function RuleCenterEffectBadge({
  */
 export function RuleCenterPageHeader({
   title,
+  titleId,
   subtitle,
   scope,
+  scopeEmphasis = false,
   effect,
   back,
   status,
@@ -55,6 +64,7 @@ export function RuleCenterPageHeader({
   return (
     <Header
       title={title}
+      titleId={titleId}
       subtitle={subtitle}
       back={back}
       status={status}
@@ -64,7 +74,13 @@ export function RuleCenterPageHeader({
         scope || effect ? (
           <>
             {scope ? (
-              <span className="inline-flex h-6 items-center rounded-md border px-2 text-xs font-semibold text-foreground">
+              <span
+                data-emphasis={scopeEmphasis ? 'primary' : undefined}
+                className={cn(
+                  'inline-flex h-6 items-center rounded-md border px-2 text-xs font-semibold text-foreground',
+                  scopeEmphasis && 'border-primary/40 bg-primary/10 text-primary',
+                )}
+              >
                 {scope}
               </span>
             ) : null}

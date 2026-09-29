@@ -31,6 +31,7 @@ import {
   TableScrollArea, FilterClearLink } from '@/components/ui-business';
 import { formatMoney } from '@/lib/dashboard/format';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '代理商月度账单' };
@@ -102,7 +103,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
           label="未出账已结算工单"
           value={`${stats.unbilledOrderCount} 单`}
           icon={TriangleAlert}
-          tone={stats.unbilledOrderCount > 0 ? 'danger' : 'neutral'}
+          tone={stats.unbilledOrderCount > 0 ? 'warning' : 'neutral'}
         />
       </div>
 
@@ -117,11 +118,11 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       <Form id="agent-bill-filters" key={JSON.stringify([period ?? '', status ?? '', agentUserId ?? ''])} action="/owner/agent-bills" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
         <label className="space-y-1 text-xs text-muted-foreground">
           <span>账期</span>
-          <input
+          <Input
             name="period"
             type="month"
             defaultValue={period}
-            className="block h-9 rounded-md border bg-background px-3 text-sm text-foreground"
+            className="block w-auto"
           />
         </label>
         <label className="space-y-1 text-xs text-muted-foreground">

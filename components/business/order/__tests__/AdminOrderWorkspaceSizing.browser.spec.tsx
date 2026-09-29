@@ -129,12 +129,39 @@ function assertAligned(width: number) {
   }
 }
 
+/** 看板 9 张卡在含侧栏的主区内不出现孤行，且筛选按钮与筛选字段同处一个流式行、不溢出（§8）。 */
+function assertDashboardRowsBalanced(width: number) {
+  const cards = [...element('[aria-label="工单决定看板"]').querySelectorAll<HTMLElement>('a')];
+  expect(cards).toHaveLength(9);
+  const perRow = new Map<number, number>();
+  for (const card of cards) {
+    const top = Math.round(card.getBoundingClientRect().top);
+    perRow.set(top, (perRow.get(top) ?? 0) + 1);
+  }
+  expect(new Set(perRow.values()).size, `${width}px 看板每行卡片数`).toBe(1);
+  if (width >= 1280) expect(perRow.size, `${width}px 看板单行`).toBe(1);
+  const form = element('#admin-order-filters');
+  const formBox = form.getBoundingClientRect();
+  for (const control of form.querySelectorAll<HTMLElement>('button, a, select, input:not([type="hidden"])')) {
+    const box = control.getBoundingClientRect();
+    expect(box.left, control.textContent ?? '').toBeGreaterThanOrEqual(formBox.left - 0.5);
+    expect(box.right, control.textContent ?? '').toBeLessThanOrEqual(formBox.right + 0.5);
+  }
+  if (width >= 1920) {
+    const apply = element('#admin-order-filters button[type="submit"]').getBoundingClientRect();
+    const search = element('#admin-order-filters input[name="q"]').getBoundingClientRect();
+    expect(Math.abs((apply.top + apply.bottom) / 2 - (search.top + search.bottom) / 2), '应用筛选与搜索同行').toBeLessThan(1);
+  }
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+}
+
 for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
   for (const theme of ['light', 'dark']) {
     it(`${width}×${height} ${theme}: fills the main area and keeps selection actions above the list`, async () => {
       await page.viewport(width, height);
       document.documentElement.classList.toggle('dark', theme === 'dark');
       mount();
+      assertDashboardRowsBalanced(width);
       expect(host.querySelector('[aria-label="工单批量操作"]')).toBeNull();
       await page.getByRole('checkbox', { name: '选择本页 20 项工单', exact: true }).click();
       await expect.element(page.getByRole('region', { name: '工单批量操作' })).toBeVisible();

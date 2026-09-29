@@ -472,7 +472,7 @@ export function OrderItemSpecificationFields({
         />
         {allowCustomSize &&
         item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
-          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+          <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
             <Checkbox className="-ml-3"
               checked={customSizeSelected}
               disabled={disabled}

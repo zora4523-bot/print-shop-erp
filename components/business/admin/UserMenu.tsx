@@ -38,7 +38,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         aria-label={`用户菜单：${displayName}`}
         className={buttonVariants({
           variant: 'ghost',
-          className: 'h-11 min-w-11 gap-2 px-2',
+          className: 'min-h-11 min-w-11 gap-2 px-2',
         })}
       >
         <Avatar className="size-7 after:border-0">

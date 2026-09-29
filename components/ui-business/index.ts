@@ -17,6 +17,7 @@ export { HeroBanner } from './HeroBanner';
 export type { HeroBannerProps } from './HeroBanner';
 
 export { PageHeader } from './PageHeader';
+export { FORM_PAGE_WIDTH_CLASS, FormPageContainer } from './FormPageContainer';
 export type { PageHeaderProps } from './PageHeader';
 
 export { EmptyState } from './EmptyState';
@@ -84,6 +85,8 @@ export {
   formMessageId,
 } from './FormMessage';
 export type { FormMessageProps, FormMessageTone } from './FormMessage';
+
+export { RequiredMark } from './RequiredMark';
 
 export { FormErrorSummary } from './FormErrorSummary';
 export type {

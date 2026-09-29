@@ -1,4 +1,5 @@
 import { useEffect, useState, type ComponentProps } from 'react';
+import { Input } from '@/components/ui/input';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -33,7 +34,7 @@ vi.mock('@/components/business/order/OrderForm', () => ({
     }, [registerEditor, active, name, busy]);
     const result = { orderId: `order-${props.submissionId}`, orderNo: `GD-${name}`, intent: 'submit' as const };
     return <div>
-      <input aria-label="模拟工单名称" value={name ?? ''} onChange={(event) => setName(event.target.value)} />
+      <Input aria-label="模拟工单名称" value={name ?? ''} onChange={(event) => setName(event.target.value)} />
       <Button onClick={() => setBusy(true)}>开始上传</Button>
       <Button onClick={() => { props.lifecycle?.onCreated(result); setBusy(true); }}>模拟已创建但上传失败</Button>
       <Button onClick={() => { props.lifecycle?.onCreated(result); props.lifecycle?.onCompleted(result); }}>模拟创建完成</Button>

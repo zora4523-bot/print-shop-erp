@@ -386,7 +386,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           id="pricing-review"
           className={
             isPricingPending
-              ? 'space-y-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4 shadow-sm sm:p-6'
+              ? 'space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-4 shadow-sm sm:p-6'
               : 'space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6'
           }
         >
@@ -401,7 +401,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                   : '价格已确认。'}
               </p>
             </div>
-            <Badge variant={isPricingPending ? 'destructive' : 'secondary'}>
+            {/* 待工厂核价 = 主强调（§4.3），不是失败。 */}
+            <Badge variant={isPricingPending ? 'default' : 'secondary'}>
               {orderPricingStatusLabel(pricingStatus)}
             </Badge>
           </div>
@@ -1313,7 +1314,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               href={`/foreman/outsource/new?orderId=${order.id}`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
             >
-              创建外协单
+              新建外协单
             </Link>
           ) : null}
         </section>

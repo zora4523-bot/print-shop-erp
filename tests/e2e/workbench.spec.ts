@@ -38,7 +38,7 @@ async function transferCoatedOrder(
   await choose(page, '工单类型', '彩印');
   await choose(page, '纸张材质', '铜版纸');
   await choose(page, '覆膜', '触感膜');
-  await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+  await quote(page).getByRole('button', { name: '按此款式新建工单' }).click();
   await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
   await expect(
     page.getByRole('spinbutton', { name: '数量', exact: true }),
@@ -89,7 +89,7 @@ test.describe('shared workbench calculator', () => {
       (key) => localStorage.setItem(key, 'unrelated'),
       preservedDraftKey,
     );
-    await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+    await quote(page).getByRole('button', { name: '按此款式新建工单' }).click();
     await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
     await expect(
       page.getByRole('spinbutton', { name: '数量', exact: true }),
@@ -149,7 +149,7 @@ test.describe('shared workbench calculator', () => {
     page.on('dialog', (dialog) => dialog.accept());
     await page.goto('/workbench');
     await ready(page);
-    await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+    await quote(page).getByRole('button', { name: '按此款式新建工单' }).click();
     await expect(
       page.getByRole('button', { name: '使用本次报价创建工单' }),
     ).toBeVisible();
@@ -302,7 +302,7 @@ test.describe('shared workbench calculator', () => {
         return original.call(this, key, value);
       };
     });
-    await quote(page).getByRole('button', { name: '按此款式创建工单' }).click();
+    await quote(page).getByRole('button', { name: '按此款式新建工单' }).click();
     await expect(page).toHaveURL(/\/orders\/new\?fromWorkbench=/);
     await expect(
       page.getByRole('region', { name: '带入报价条件' }).getByRole('alert'),
@@ -453,7 +453,7 @@ test.describe('shared workbench calculator', () => {
       .fill('2000');
     await ready(page);
     await expect(
-      quote(page).getByRole('button', { name: '按此款式创建工单' }),
+      quote(page).getByRole('button', { name: '按此款式新建工单' }),
     ).toBeEnabled();
     await page.screenshot({
       path: '/tmp/workbench-printed.png',

@@ -248,7 +248,7 @@ describe('createOutsourceOrder', () => {
     dbMock.order.findUnique.mockResolvedValue({ status });
     await expect(
       createOutsourceOrder(baseInput, foremanActor),
-    ).rejects.toThrow(/不能新增外协/);
+    ).rejects.toThrow(/不能新建外协单/);
     expect(dbMock.outsourceOrder.create).not.toHaveBeenCalled();
   });
 

@@ -13,7 +13,7 @@ async function reportTen(browser: Browser, operationId: string) {
     const form = workerPage.locator('section').filter({ has: workerPage.getByRole('heading', { name: '扫码报工', exact: true }) });
     await form.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill('10');
     await form.getByRole('spinbutton', { name: '本次工单件数进度', exact: true }).fill('0');
-    await form.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
+    await form.getByRole('spinbutton', { name: '不良数', exact: true }).fill('0');
     await form.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
     await form.getByRole('button', { name: '提交扫码报工', exact: true }).click();
     await form.getByRole('button', { name: '确认报工', exact: true }).click();

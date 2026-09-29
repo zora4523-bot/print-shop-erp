@@ -148,7 +148,7 @@ function changeDiffs(request: Order['changeRequests'][number], currentItemIds: S
     const itemId = typeof change.itemId === 'string' ? change.itemId : null;
     const source = itemId ? beforeItems.get(itemId) : undefined;
     if (change.operation !== 'ADD' && (change.operation !== 'UPDATE' || !source)) continue;
-    const prefix = source ? `第 ${source.sequence ?? '—'} 款 · ` : '新增款式 · ';
+    const prefix = source ? `第 ${source.sequence ?? '—'} 款 · ` : '添加款式 · ';
     for (const [field, label] of DIFF_FIELDS) {
       if (!(field in change)) continue;
       if (source && JSON.stringify(source[field] ?? null) === JSON.stringify(change[field] ?? null)) continue;

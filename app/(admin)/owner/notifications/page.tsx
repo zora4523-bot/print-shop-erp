@@ -504,18 +504,15 @@ function SmartBotConnectionPanel({
       <div className="flex flex-wrap items-center gap-2">
         <strong>智能机器人长连接</strong>
         <Badge variant={presentation.badgeVariant}>{presentation.label}</Badge>
-        {lastSeenAt ? (
-          <span className="text-xs text-muted-foreground">
-            最近心跳 {formatDateTimeShanghai(lastSeenAt)}
-          </span>
-        ) : null}
+        <span className="text-xs text-muted-foreground">
+          {lastSeenAt
+            ? `最近心跳 ${formatDateTimeShanghai(lastSeenAt)}`
+            : '暂无心跳记录'}
+        </span>
       </div>
       <p className={presentation.danger ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>
         {presentation.description}
         {mock ? ' 当前为测试模式，不会向企业微信真实发送。' : ''}
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground">
-        此状态来自后台处理进程上报的连接心跳，不是网页服务推断的结果。
       </p>
     </div>
   );

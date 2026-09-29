@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
@@ -18,7 +19,7 @@ import { ProductReferenceImpact } from '@/components/business/product/ProductRef
 import { ProductsTable } from '@/components/business/product/ProductsTable';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice, FormPageContainer, LinkPendingHint } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
@@ -182,13 +183,18 @@ export async function ProductCatalogList({
                       page: null,
                     })}
                     prefetch={false}
+                    scroll={false}
                     aria-current={status === value ? 'page' : undefined}
-                    className={buttonVariants({
-                      variant: status === value ? 'selected' : 'ghost',
-                      size: 'sm',
-                    })}
+                    className={cn(
+                      buttonVariants({
+                        variant: status === value ? 'selected' : 'ghost',
+                        size: 'sm',
+                      }),
+                      'relative',
+                    )}
                   >
                     {label}
+                    <LinkPendingHint />
                   </Link>
                 ))}
               </div>
@@ -246,7 +252,7 @@ export async function NewProductCatalogItem({
       )
     : activeCategoryNodes;
   return (
-    <div className="space-y-4">
+    <FormPageContainer>
       <RuleCenterPageHeader
         title="新建产品资料"
         effect="immediate"
@@ -262,7 +268,7 @@ export async function NewProductCatalogItem({
           categoryManagementHref={RULE_CENTER_HREFS.productCategories}
         />
       </div>
-    </div>
+    </FormPageContainer>
   );
 }
 

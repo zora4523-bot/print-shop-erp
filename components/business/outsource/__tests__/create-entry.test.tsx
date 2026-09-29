@@ -17,17 +17,17 @@ describe('外协创建入口', () => {
     const html = renderToStaticMarkup(<CreateOrderOutsourceLink orderId="order-1" canManage status={status} />);
     if (canAttachOutsource(status)) {
       expect(html).toContain('href="/foreman/outsource/new?orderId=order-1"');
-      expect(html).not.toContain('不能新增外协');
+      expect(html).not.toContain('不能新建外协单');
     } else {
       expect(html).not.toContain('href=');
-      expect(html).toContain(`当前工单${ORDER_STATUS_REGISTRY[status].label}，不能新增外协`);
+      expect(html).toContain(`当前工单${ORDER_STATUS_REGISTRY[status].label}，不能新建外协单`);
       expect(html).toContain('disabled');
     }
   });
   it('不向无权限用户提供管理入口', () => {
     expect(renderToStaticMarkup(<CreateOrderOutsourceLink orderId="order-1" canManage={false} status={OrderStatus.DRAFT} />)).toBe('');
   });
-  it('包装中且已完工不能新增外协，原因默认折叠', () => {
+  it('包装中且已完工不能新建外协单，原因默认折叠', () => {
     const html = renderToStaticMarkup(<CreateOrderOutsourceLink orderId="order-1" canManage status={OrderStatus.PACKING} completedAt="2026-09-27T12:00:00Z" />);
     expect(html).toContain('当前工单已完成生产');
     expect(html).not.toContain('href=');

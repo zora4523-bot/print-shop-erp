@@ -41,7 +41,7 @@ export default async function OwnerAttentionPage({ searchParams }: Props) {
             href={`/owner/attention?kind=${item}`}
             aria-current={item === kind ? 'page' : undefined}
             className={buttonVariants({
-              variant: item === kind ? 'secondary' : 'outline',
+              variant: item === kind ? 'selected' : 'outline',
               className: 'relative',
             })}
           >

@@ -1,4 +1,5 @@
 import { useState, type ComponentProps } from 'react';
+import { Input } from '@/components/ui/input';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,7 +30,7 @@ function Fixture() {
   });
   return (
     <>
-      <input aria-label="草稿" defaultValue="未保存的数量" />
+      <Input aria-label="草稿" defaultValue="未保存的数量" />
       <NavigationFixtureLink href="/orders/another-order" onClick={(event) => {
         event.preventDefault();
         pushed('/orders/another-order');

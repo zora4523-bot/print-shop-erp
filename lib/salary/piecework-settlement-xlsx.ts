@@ -165,7 +165,7 @@ export async function buildPieceworkSettlementWorkbook(
     '工序类型',
     '条目类型',
     '合格完成数',
-    '缺陷数',
+    '不良数',
     '返工数',
     '计薪数',
     '单位',

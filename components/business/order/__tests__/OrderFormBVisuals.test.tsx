@@ -287,6 +287,9 @@ describe('OrderSubmissionSuccess', () => {
     expect(html).toContain('工单已提交');
     expect(html).toContain('GD-20260827-1234');
     expect(html).toContain('待工厂核价确认');
+    // 待工厂核价 = 主强调，不是失败色（§4.3）。
+    expect(html).toContain('border-primary bg-primary/5 text-primary">待工厂核价确认');
+    expect(html).not.toContain('bg-destructive/5');
     expect(html).toContain('再建一单');
     expect(html).toContain('返回工单列表');
   });

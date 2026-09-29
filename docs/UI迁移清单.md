@@ -190,6 +190,8 @@ inventory: UI现状盘点.md
 
 ### P2-2 共享 NativeSelect（§3.2）
 
+> **状态（2026-09-29）：已完成。** 73 处 `<select`、全部原生 `<textarea` 与 14 处可见原生 `<input` 已迁到 `NativeSelect` / `Textarea` / `Input`（同一规格 `components/ui/field-styles.ts`），eslint 在业务范围禁止三者复发。记录见 [`audits/2026-09-29-ui-remediation-plan.md`](audits/2026-09-29-ui-remediation-plan.md)。以下为当初的任务描述，保留作追溯。
+
 - 新增 `components/ui/native-select.tsx`（原生 `<select>` 包装：`Input` 同款高度 `h-9` / 触控 `min-h-11`、`rounded-md`、`border-input`、`focus-visible:ring-3 ring-ring/50`、`aria-invalid` 样式、`data-slot="native-select"`）；删除 8 份 `selectClass`（`OrderListFilterFields.tsx:13`、`BomForm.tsx:42`、`ProductCategoryForm.tsx:48`、`PurchaseReceiptForm.tsx:53`、`OrderForm.tsx:4158`、`SfCollectToggleForm.tsx:264`、`ExternalSalesPriceBookDraftForms.tsx:57`、`RulePriceWorkbench.tsx:123`）；替换 68 处 `<select`（39 文件，页面层：`owner/salary/{hourly,daily,piecework}`、`owner/agent-bills`、`sales/bills`、`owner/parties`、`foreman/attendance`）。同批把 17 处原生 `<textarea` 换 `Textarea`，30 处可见原生 `<input` 换 `Input`。
 - 验收：`grep -rn "<select\b\|<textarea\b" app components/business` 为 0；eslint 加 `no-restricted-syntax` 拦原生 select/textarea（与现有 checkbox 规则同形）；六视口触控门禁通过。
 - 代价：39 + 15 + 19 文件，分三批。

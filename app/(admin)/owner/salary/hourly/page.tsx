@@ -5,6 +5,7 @@ import { listHourlyPayrolls, listHourlyPayrollWorkerIds } from '@/lib/salary/hou
 import { listUsers } from '@/lib/account';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
 import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea, FilterClearLink } from '@/components/ui-business';
@@ -200,12 +201,12 @@ function FilterBar({
     <Form id="salary-hourly-filters" key={JSON.stringify([selectedMonth, paid ?? '', workerId ?? ''])} action="/owner/salary/hourly" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
         <label htmlFor="hourly-month" className="text-xs text-muted-foreground">月份</label>
-        <input
+        <Input
           id="hourly-month"
           type="month"
           name="month"
           defaultValue={selectedMonth}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto"
         />
       </div>
       <div className="flex flex-col">

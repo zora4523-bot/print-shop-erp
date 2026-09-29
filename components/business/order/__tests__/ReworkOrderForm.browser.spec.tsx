@@ -34,7 +34,7 @@ it('confirms once, permits cancellation and submits the selected payload only on
   expect(mocks.create).not.toHaveBeenCalled();
   await expect.element(page.getByRole('button', { name: '创建重做单（1 款）', exact: true })).toHaveFocus();
   await page.getByRole('button', { name: '创建重做单（1 款）', exact: true }).click();
-  await page.getByRole('button', { name: '确认创建', exact: true }).click();
+  await page.getByRole('button', { name: '创建重做单', exact: true }).click();
   await vi.waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
   expect(mocks.create.mock.calls[0][1]).toMatchObject({ sourceOrderId: 'order-1', reason: '运输途中受潮', items: [{ sourceOrderItemId: 'item-1', quantity: 500, craftIds: [] }] });
 });

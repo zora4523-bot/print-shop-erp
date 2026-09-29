@@ -65,7 +65,7 @@ export default async function SalaryIndexPage() {
             href="/owner/salary/piecework"
             className={buttonVariants({ variant: 'outline', size: 'sm' })}
           >
-            查看工序计件结算 →
+            查看工序计件结算
           </Link>
         </div>
       </section>
@@ -91,17 +91,27 @@ export default async function SalaryIndexPage() {
             hint={`${s.dailyUnpaidAllTime.count} 条`}
           />
         </div>
-        <Link
-          href="/owner/salary/daily"
-          className={buttonVariants({ variant: 'outline', size: 'sm' })}
-        >
-          查看历史日薪档案 →
-        </Link>
+        <div>
+          <Link
+            href="/owner/salary/daily"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看历史日薪档案
+          </Link>
+        </div>
       </section>
 
-      <Link href="/owner/salary/hourly" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-        历史时薪档案
-      </Link>
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold">历史时薪档案</h2>
+        <div>
+          <Link
+            href="/owner/salary/hourly"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看历史时薪档案
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }

@@ -174,7 +174,11 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
       await fees.getByLabel('定价依据').fill('管理员调整样品收费');
       await fees.getByRole('button', { name: '保存收费', exact: true }).click();
       await expect.poll(async () => (await db.query('SELECT "confirmedFee"::text AS fee FROM "Order" WHERE id=$1', [orderId])).rows[0].fee).toBe(purpose === '打样' ? '99.00' : '3.00');
-      await adminPage.goto('/orders');
+      // 按工单号定位：其他夹具（看板夹具按上海「今天中午」建单、原生 SQL 以
+      // Asia/Shanghai 会话 NOW() 写入无时区列）会产生晚于当前 UTC 的 createdAt，
+      // 上海时间 0–12 点跑全套时把本单挤出默认队列首页（每页 20 条）。
+      const { orderNo } = (await db.query('SELECT "orderNo" FROM "Order" WHERE id=$1', [orderId])).rows[0];
+      await adminPage.goto(`/orders?q=${encodeURIComponent(orderNo)}`);
       await expect(
         adminPage
           .locator('[data-slot="badge"]')

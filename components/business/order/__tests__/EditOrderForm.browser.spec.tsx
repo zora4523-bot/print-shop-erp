@@ -263,7 +263,7 @@ describe('complete order editing', () => {
     ).not.toBeNull();
     await name.fill('外部礼盒');
     await page
-      .getByRole('textbox', { name: '包装补充说明（选填）' })
+      .getByRole('textbox', { name: '包装补充说明', exact: true })
       .fill('封口后贴标签');
     await page.getByRole('button', { name: '保存', exact: true }).click();
     await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());

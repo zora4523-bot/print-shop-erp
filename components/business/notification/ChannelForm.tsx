@@ -6,7 +6,11 @@ import { buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PendingButton } from '@/components/ui-business';
+import {
+  FormMessage,
+  formMessageA11yProps,
+  PendingButton,
+} from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
 
 type EditInitial = {
@@ -50,6 +54,16 @@ export function ChannelForm(props: Props) {
   const [isActive, setIsActive] = useState(initial?.isActive ?? false);
   const fieldErrors =
     state?.status === 'invalid' ? state.fieldErrors : undefined;
+  // 字段错误经 FormMessage 与控件连线（ui-规范 §5.4）；有常驻说明时一并描述。
+  const fieldA11y = (fieldId: keyof NonNullable<typeof fieldErrors>, hintId?: string) => {
+    if (!fieldErrors?.[fieldId]?.length) {
+      return hintId ? { 'aria-describedby': hintId } : {};
+    }
+    const a11y = formMessageA11yProps(fieldId, 'error');
+    return hintId
+      ? { ...a11y, 'aria-describedby': `${a11y['aria-describedby']} ${hintId}` }
+      : a11y;
+  };
 
   return (
     <form action={formAction} aria-busy={pending} className="space-y-5">
@@ -61,22 +75,18 @@ export function ChannelForm(props: Props) {
             name="channelKey"
             placeholder="scheduling_group"
             required
-            aria-invalid={!!fieldErrors?.channelKey}
+            {...fieldA11y('channelKey', 'channelKey-hint')}
           />
         ) : (
           <Input
             id="channelKey"
             value={initial!.channelKey}
             readOnly
-            className="bg-muted/30"
+            {...fieldA11y('channelKey', 'channelKey-hint')}
           />
         )}
-        {fieldErrors?.channelKey?.map((m, i) => (
-          <p key={i} className="text-sm text-destructive">
-            {m}
-          </p>
-        ))}
-        <p className="text-xs text-muted-foreground">
+        <FieldError fieldId="channelKey" messages={fieldErrors?.channelKey} />
+        <p id="channelKey-hint" className="text-xs text-muted-foreground">
           英文小写、数字或下划线，例如 <code>scheduling_group</code>。
         </p>
       </div>
@@ -89,13 +99,9 @@ export function ChannelForm(props: Props) {
           defaultValue={initial?.channelName}
           placeholder="排产群"
           required
-          aria-invalid={!!fieldErrors?.channelName}
+          {...fieldA11y('channelName')}
         />
-        {fieldErrors?.channelName?.map((m, i) => (
-          <p key={i} className="text-sm text-destructive">
-            {m}
-          </p>
-        ))}
+        <FieldError fieldId="channelName" messages={fieldErrors?.channelName} />
       </div>
 
       <div className="space-y-2">
@@ -105,13 +111,9 @@ export function ChannelForm(props: Props) {
           id="transport"
           value="企业微信群"
           readOnly
-          className="bg-muted/30"
+          {...fieldA11y('transport')}
         />
-        {fieldErrors?.transport?.map((m, i) => (
-          <p key={i} className="text-sm text-destructive">
-            {m}
-          </p>
-        ))}
+        <FieldError fieldId="transport" messages={fieldErrors?.transport} />
       </div>
 
       <div className="space-y-2 rounded-xl border bg-muted/20 p-4 text-sm">
@@ -148,7 +150,7 @@ export function ChannelForm(props: Props) {
         )}
       </div>
 
-      <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+      <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
         <Checkbox
           id="isActive"
           name="isActive"
@@ -160,19 +162,14 @@ export function ChannelForm(props: Props) {
           }
           onCheckedChange={(checked) => setIsActive(checked === true)}
           aria-label="启用"
-          aria-invalid={!!fieldErrors?.isActive}
-          aria-describedby={fieldErrors?.isActive ? 'isActive-error' : undefined}
+          {...fieldA11y('isActive')}
         />
         <span className="min-w-0 py-2">
           启用
         </span>
       </label>
 
-      {fieldErrors?.isActive ? (
-        <p id="isActive-error" role="alert" className="text-sm text-destructive">
-          {fieldErrors.isActive.join('；')}
-        </p>
-      ) : null}
+      <FieldError fieldId="isActive" messages={fieldErrors?.isActive} />
 
       {isCreate || !smartBotBound ? (
         <p className="text-xs text-muted-foreground">绑定后可启用。</p>
@@ -196,5 +193,20 @@ export function ChannelForm(props: Props) {
         </Link>
       </div>
     </form>
+  );
+}
+
+function FieldError({
+  fieldId,
+  messages,
+}: {
+  fieldId: string;
+  messages?: string[];
+}) {
+  if (!messages?.length) return null;
+  return (
+    <FormMessage fieldId={fieldId} tone="error">
+      {messages.join('；')}
+    </FormMessage>
   );
 }

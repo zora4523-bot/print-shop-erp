@@ -226,7 +226,7 @@ export function EditOrderForm({
           )}
           <Field
             name="packageRequirement"
-            label="包装补充说明（选填）"
+            label="包装补充说明"
             initial={initial.packageRequirement}
             errors={fieldErrors(state, 'packageRequirement')}
             disabled={pendingLocked}
@@ -539,7 +539,7 @@ function OrderBasicFieldsSection({
           />
         )}
         {!isShippingOnly && (
-          <label className="flex min-h-11 cursor-pointer items-center gap-1 sm:col-span-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+          <label className="flex min-h-11 cursor-pointer items-center gap-1 sm:col-span-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
             <Checkbox
               className="-ml-3"
               id="isUrgent"

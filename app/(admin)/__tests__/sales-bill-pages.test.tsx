@@ -81,12 +81,19 @@ it('lists members by order name and marks unnamed orders instead of repeating th
   expect(nameCell(rows.find((row) => row.includes('/orders/order-1')))).toBe('中秋礼盒');
   expect(html).not.toContain('客户');
 });
-it('marks a DRAFT bill detail as provisional and falls back to the raw snapshot for unknown item status', async () => {
+it('marks a DRAFT bill detail as provisional and labels item status through the order status registry', async () => {
   detail.mockResolvedValue({ ...bill, status: 'DRAFT', paidAt: null, items: [{ ...bill.items[0], orderStatusSnapshot: 'SHIPPED' }] });
   const html = await renderDetail();
   expect(html).toContain('金额未定稿');
-  expect(html).toContain('SHIPPED');
+  expect(html).toContain('已发货');
+  expect(html).not.toContain('SHIPPED');
   expect(html).not.toContain('未识别');
+});
+it('shows 未识别配置 instead of the raw snapshot for an unrecognised item status', async () => {
+  detail.mockResolvedValue({ ...bill, items: [{ ...bill.items[0], orderStatusSnapshot: 'LEGACY_UNKNOWN' }] });
+  const html = await renderDetail();
+  expect(html).toContain('未识别配置');
+  expect(html).not.toContain('LEGACY_UNKNOWN');
 });
 it('does not show the provisional notice on a confirmed bill', async () => {
   detail.mockResolvedValue({ ...bill, status: 'CONFIRMED', paidAt: null });
@@ -138,8 +145,10 @@ it.each([
 ])('renders the %s detail badge with the sales-facing label %s', async (status, label) => {
   detail.mockResolvedValue({ ...bill, status, paidAt: status === 'PAID' ? bill.paidAt : null });
   const html = await renderDetail();
-  // 只看徽标本身：DRAFT 的未定稿提示条也含「整理中」，不能靠全文包含来断言。
-  const badges = (html.match(/<[a-z]+[^>]*data-slot="badge"[^>]*>[\s\S]*?<\/[a-z]+>/g) ?? []).map((tag) => tag.replace(/<[^>]+>/g, '').trim());
+  // 只看账单状态徽标本身：DRAFT 的未定稿提示条也含「整理中」，不能靠全文包含来断言；
+  // 明细表里是逐行的工单状态徽标（另一套注册表），不属于账单状态。
+  const outsideTable = html.replace(/<table[\s\S]*?<\/table>/g, '');
+  const badges = (outsideTable.match(/<[a-z]+[^>]*data-slot="badge"[^>]*>[\s\S]*?<\/[a-z]+>/g) ?? []).map((tag) => tag.replace(/<[^>]+>/g, '').trim());
   expect(badges).toEqual([label]);
   for (const adminOnly of ['草稿', '已确认·待收', '已收']) expect(html).not.toContain(adminOnly);
 });

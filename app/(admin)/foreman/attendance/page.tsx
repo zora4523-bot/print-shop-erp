@@ -11,6 +11,7 @@ import { getActiveWorkHours } from '@/lib/salary/rules';
 import { roleLabel, workerTypeLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
@@ -282,12 +283,12 @@ function FilterBar({
         >
           月份
         </label>
-        <input
+        <Input
           id="attendance-month"
           type="month"
           name="month"
           defaultValue={selectedMonth}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         />
       </div>
       <div className="flex min-w-0 max-w-full flex-col">

@@ -37,7 +37,7 @@ export function BackgroundJobActionButton({
     >
       <input type="hidden" name="jobId" value={jobId} />
       <Button variant="outline" size="xs" type="submit" disabled={pending}>
-        {pending ? '处理中…' : label}
+        {pending ? '正在处理…' : label}
       </Button>
       {state?.status === 'error' ? (
         <span role="alert" className="text-xs text-destructive">

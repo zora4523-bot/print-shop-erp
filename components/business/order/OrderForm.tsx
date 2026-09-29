@@ -606,7 +606,7 @@ function UrgentOrderField({
         <label
           htmlFor="isUrgent"
           data-slot="urgent-order-field"
-          className="grid min-w-0 cursor-pointer gap-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+          className="grid min-w-0 cursor-pointer gap-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
         >
           <span id="urgent-order-accessible-label" className="sr-only">
             急单（提交后会推送至排产群）
@@ -2705,6 +2705,8 @@ export function OrderForm({
         {(
           <OrderFormB
             title="新建工单"
+            // 页头唯一返回入口；提交 / 上传中锁住，避免中途离开（§8.3）。
+            back={{ href: '/orders', label: '返回工单列表', pending: submitting || uploading }}
             settlementLabel={settlementLabel}
             customNameRequired
             designImageRequired
@@ -2881,7 +2883,7 @@ export function OrderForm({
             : undefined}
             orderPackagingExtras={
               <div className="space-y-3">
-                <Label htmlFor="packageRequirement">包装补充说明（选填）</Label>
+                <Label htmlFor="packageRequirement">包装补充说明</Label>
                 <Input
                   id="packageRequirement"
                   maxLength={500}
@@ -2901,7 +2903,7 @@ export function OrderForm({
             }
             footerExtras={
               <section className="space-y-3">
-                <Label htmlFor="remark">工单备注（选填）</Label>
+                <Label htmlFor="remark">工单备注</Label>
                 <Textarea id="remark" maxLength={1000} className="mt-2 min-h-24"
                   disabled={orderFormControlsDisabled} aria-invalid={Boolean(errors.remark)}
                   aria-describedby={errors.remark ? 'order-remark-error' : undefined}
@@ -2961,14 +2963,14 @@ export function OrderForm({
                             <h3 className="text-sm font-semibold">
                               地址 {shipmentIndex + 2}
                             </h3>
+                            {/* 从本单拿掉一个地址 = 移除，不是永久删除；用中性 outline，不手写红色（§8.2）。 */}
                             <Button
                               type="button"
                               variant="outline"
-                              className="text-destructive"
                               disabled={orderFormControlsDisabled}
                               onClick={() => shipmentsArray.remove(shipmentIndex)}
                             >
-                              删除地址
+                              移除地址
                             </Button>
                           </div>
                           <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 @min-[560px]:grid-cols-2">

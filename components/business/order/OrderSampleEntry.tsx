@@ -8,6 +8,7 @@ import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-option
 import type { PricingCraftIdentity } from '@/lib/order/pricing-route';
 import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
 import { WorkbenchCalculator } from '@/components/business/workbench/WorkbenchCalculator';
+import { PageHeader } from '@/components/ui-business';
 import { EMPTY_SAMPLE_FORM, type SampleOrderFormState } from './SampleOrderForm';
 
 type SamplePurpose = 'SAMPLE_SHIPMENT' | 'PROOF';
@@ -50,6 +51,12 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
   externalSalesAccounts?: readonly ExternalSalesAccountOption[];
   onExternalSalesChange?: (externalSalesUserId: string | null) => void;
 }) {
+  // 样品提交中锁住页头返回，与主建单表单一致（§8.3）。
+  const [busy, setBusy] = useState(false);
+  const trackedLifecycle: OrderCreationLifecycle | undefined = lifecycle ? {
+    ...lifecycle,
+    onBusyChange: (value) => { setBusy(value); lifecycle.onBusyChange?.(value); },
+  } : undefined;
   const values = form.getValues();
   const sampleForm: SampleOrderFormState = {
     ...EMPTY_SAMPLE_FORM,
@@ -59,11 +66,11 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
     collect: values.isSfCollect ?? false, remark: values.remark ?? '',
   };
   return <section className="space-y-4">
-    <h1 className="text-xl font-semibold">新建工单</h1>
+    <PageHeader title="新建工单" back={{ href: '/orders', label: '返回工单列表', pending: busy }} />
     <WorkbenchCalculator options={options} crafts={crafts}
       draftScope={`order-create:${draftScope}`}
       externalSalesAccounts={externalSalesAccounts}
-      createEntry={{ onExternalSalesChange, editorSnapshot, onEditorSnapshot, lifecycle, canEditFees, purpose, form: sampleForm,
+      createEntry={{ onExternalSalesChange, editorSnapshot, onEditorSnapshot, lifecycle: trackedLifecycle, canEditFees, purpose, form: sampleForm,
         item: values.items[itemIndex] ?? initialItem,
         context: { customName: values.customName, packageRequirement: values.packageRequirement, externalSalesUserId: values.externalSalesUserId,
           promisedDate: values.promisedDate,

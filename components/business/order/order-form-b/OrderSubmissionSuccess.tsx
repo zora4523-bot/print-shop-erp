@@ -51,7 +51,7 @@ export function OrderSubmissionSuccess({
           className={cn(
             'mt-3 inline-flex rounded-full border px-4 py-1.5 text-xs font-semibold',
             manualQuote
-              ? 'border-destructive bg-destructive/5 text-destructive'
+              ? 'border-primary bg-primary/5 text-primary'
               : 'border-border text-foreground',
           )}
         >

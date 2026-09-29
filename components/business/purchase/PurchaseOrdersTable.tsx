@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import {
   AdminRowActions,
   AdminSortLink,
@@ -144,7 +145,7 @@ export function PurchaseOrdersTable({
                   <Link
                     href={`/owner/purchases/${order.id}`}
                     prefetch={false}
-                    className="text-sm text-primary underline hover:no-underline"
+                    className={buttonVariants({ variant: 'ghost', size: 'sm' })}
                   >
                     查看
                   </Link>

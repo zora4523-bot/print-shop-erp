@@ -13,6 +13,7 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState, PageHeader, StatCard, TableScrollArea, ReceiptNotice, FilterClearLink } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
@@ -309,11 +310,11 @@ function FilterBar({
     <Form id="salary-piecework-filters" key={JSON.stringify([workDate, status ?? ''])} action="/owner/salary/piecework" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="space-y-1">
         <span className="block text-xs text-muted-foreground">结算日期</span>
-        <input
+        <Input
           type="date"
           name="date"
           defaultValue={workDate}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="block w-auto"
         />
       </label>
       <label className="space-y-1">

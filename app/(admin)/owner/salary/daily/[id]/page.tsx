@@ -135,8 +135,8 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
               <tr>
                 <th className="px-4 py-2 text-left">工单 / 款式</th>
                 <th className="px-4 py-2 text-left">工艺</th>
-                <th className="px-4 py-2 text-right">良品</th>
-                <th className="px-4 py-2 text-right">次品</th>
+                <th className="px-4 py-2 text-right">合格</th>
+                <th className="px-4 py-2 text-right">不良</th>
                 <th className="px-4 py-2 text-right">返工</th>
                 <th className="px-4 py-2 text-right">板数</th>
                 <th className="px-4 py-2 text-right">下数</th>

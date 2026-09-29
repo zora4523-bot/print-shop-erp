@@ -18,11 +18,16 @@ export type PageHeaderBack = {
   pending?: boolean;
 };
 
+/** 页面 H1 的字重与换行（字号按 size 另给）；无权限空态等整页标题复用它，保持同一层级。 */
+export const PAGE_TITLE_CLASS = 'admin-wrap-anywhere min-w-0 font-semibold tracking-tight';
+
 const BACK_CLASS =
   '-ml-1 inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 export type PageHeaderProps = {
   title: string;
+  /** h1 的 id，供外层 `<section aria-labelledby>` 引用。 */
+  titleId?: string;
   subtitle?: React.ReactNode;
   // breadcrumb 槽——AdminBreadcrumb 已存在，业务侧塞进来即可。
   breadcrumb?: React.ReactNode;
@@ -41,6 +46,7 @@ export type PageHeaderProps = {
 
 export function PageHeader({
   title,
+  titleId,
   subtitle,
   breadcrumb,
   back,
@@ -86,8 +92,9 @@ export function PageHeader({
           ) : null}
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <h1
+              id={titleId}
               className={cn(
-                'admin-wrap-anywhere min-w-0 font-semibold tracking-tight',
+                PAGE_TITLE_CLASS,
                 size === 'worker' ? 'text-xl' : 'text-2xl',
               )}
             >

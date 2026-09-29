@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { FormMessage, formMessageA11yProps } from './FormMessage';
+import { RequiredMark } from './RequiredMark';
 
 export type ConfirmActionLevel = 'L2' | 'L3';
 
@@ -158,9 +159,7 @@ export function ConfirmActionDialog({ action, changes, consequences, confirmText
             <div className="space-y-1">
               <label htmlFor={reasonId} className="text-sm font-medium">
                 {reasonLabel}
-                <span className="ml-1 text-destructive" aria-hidden>
-                  *
-                </span>
+                <RequiredMark />
               </label>
               <Textarea
                 id={reasonId}

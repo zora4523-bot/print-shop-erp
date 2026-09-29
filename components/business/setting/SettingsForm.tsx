@@ -314,7 +314,7 @@ function ManagementNotificationRoutingField({
                       : null;
                     const option = (
                       <label
-                        className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+                        className="flex min-h-11 cursor-pointer items-start gap-1 rounded-md pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
                       >
                         <Checkbox
                           name={`${prefix}.channelIds`}
@@ -323,7 +323,7 @@ function ManagementNotificationRoutingField({
                           disabled={disabled}
                           aria-label={`${role.label}：${channel.channelName}`}
                         />
-                        <span className="admin-wrap-anywhere min-w-0 py-2">
+                        <span className="admin-wrap-anywhere min-w-0 py-3">
                           {channel.channelName}
                           <span className="ml-1 font-mono text-xs text-muted-foreground">
                             {channel.channelKey}

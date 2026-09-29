@@ -393,7 +393,7 @@ function ExistingOrderItemChanges({
         );
         return (
           <div key={item.id} className="min-w-0 rounded-lg border p-3">
-            <label className="flex min-h-11 min-w-0 cursor-pointer items-start gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-start gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
               <Checkbox
                 className="-ml-3"
                 checked={current.selected}
@@ -778,7 +778,7 @@ function OrderChangeRequestDraftForm({
 
       {hasItems && !hasPackagingGroups ? <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
-        <label className="flex min-h-11 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+        <label className="flex min-h-11 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
           <Checkbox className="-ml-3"
             checked={addEnabled}
             disabled={pending}

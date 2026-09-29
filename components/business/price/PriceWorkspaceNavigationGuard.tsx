@@ -11,6 +11,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from 'react';
+import Form from 'next/form';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
@@ -279,6 +280,67 @@ export function PriceWorkspaceLink({
         onConfirm={() => {
           if (replace) router.replace(href, { scroll });
           else router.push(href, { scroll });
+        }}>
+        <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
+          `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
+          '已保存的价目和已发布版本保持不变。',
+        ]} confirmText="放弃修改并离开" danger />
+      </ConfirmActionController>
+    </>
+  );
+}
+
+/**
+ * 收费项目筛选表单：next/form 软导航（审查 #41）。原生 GET 提交时由
+ * beforeunload 拦住未保存档位；软导航不触发 beforeunload，也不经过文档级
+ * 链接拦截，所以这里在提交时自己判断：有未保存档位就先弹同一个确认层。
+ */
+export function PriceWorkspaceFilterForm({
+  action,
+  onSubmit,
+  ...props
+}: Omit<ComponentProps<typeof Form>, 'action'> & { action: string }) {
+  const { unsaved } = useContext(NavigationGuardContext);
+  const router = useRouter();
+  const submitterRef = useRef<HTMLElement | null>(null);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+
+  return (
+    <>
+      <Form
+        {...props}
+        action={action}
+        onSubmit={(event) => {
+          onSubmit?.(event);
+          if (event.defaultPrevented || unsaved.tierCount === 0) return;
+
+          const submitter = (event.nativeEvent as SubmitEvent).submitter;
+          const target = new URL(action, window.location.href);
+          const params = new URLSearchParams();
+          for (const [name, value] of new FormData(event.currentTarget, submitter)) {
+            if (typeof value === 'string') params.append(name, value);
+          }
+          target.search = params.toString();
+          const destination = guardedPriceWorkspaceDestination(
+            window.location.href,
+            target.href,
+          );
+          if (!destination) return;
+
+          event.preventDefault();
+          submitterRef.current = submitter ?? event.currentTarget;
+          setPendingHref(destination);
+        }}
+      />
+      <ConfirmActionController level="L2"
+        open={pendingHref !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingHref(null);
+        }}
+        focusReturnRef={submitterRef}
+        cancelLabel="继续编辑"
+        onConfirm={() => {
+          if (pendingHref) router.push(pendingHref);
         }}>
         <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
           `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,

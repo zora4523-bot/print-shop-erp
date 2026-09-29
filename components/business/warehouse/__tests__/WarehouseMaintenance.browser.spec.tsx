@@ -20,9 +20,9 @@ const props = { kind: 'location' as const, id: 'location', name: '单独停用�
 it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]])('explains the parent prerequisite before permitting restoration at %ix%i', async (width, height) => {
   await page.viewport(width, height);
   flushSync(() => root.render(<WarehouseMaintenance {...props} parentActive={false} />));
-  const restore = page.getByRole('button', { name: '恢复使用库位', exact: true });
+  const restore = page.getByRole('button', { name: '启用库位', exact: true });
   await expect.element(restore).toBeDisabled();
-  await expect.element(restore).toHaveAccessibleDescription('请先恢复所属仓库，再恢复库位');
+  await expect.element(restore).toHaveAccessibleDescription('请先启用所属仓库，再启用库位');
   for (const dark of [false, true]) {
     document.documentElement.classList.toggle('dark', dark);
     await vi.waitFor(() => expect(document.getAnimations().filter((animation) => animation.playState === 'running' || animation.pending)).toHaveLength(0));

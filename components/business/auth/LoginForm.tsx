@@ -67,7 +67,7 @@ export function LoginForm({ from }: { from: string }) {
       ) : null}
 
       <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? '登录中…' : '登录'}
+        {pending ? '正在登录…' : '登录'}
       </Button>
     </form>
   );

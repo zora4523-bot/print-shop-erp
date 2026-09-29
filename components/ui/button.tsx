@@ -19,8 +19,9 @@ const buttonStyles = cva(
           "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+        // 悬停只加描边、不加深底：暗色下 /30 底会把红字对比压到 4.27:1（< 4.5）。
         destructive:
-          "bg-destructive/10 text-destructive hover:border-destructive/50 focus-visible:border-destructive focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 in-data-[emphasis=inverse]:not-disabled:border-primary in-data-[emphasis=inverse]:not-disabled:bg-primary in-data-[emphasis=inverse]:not-disabled:text-primary-foreground",
+          "bg-destructive/10 text-destructive hover:border-destructive/50 focus-visible:border-destructive focus-visible:ring-destructive dark:bg-destructive/20 in-data-[emphasis=inverse]:not-disabled:border-primary in-data-[emphasis=inverse]:not-disabled:bg-primary in-data-[emphasis=inverse]:not-disabled:text-primary-foreground",
         // 标准选中态（分段按钮 / 筛选 / 标签页共用）：品牌色描边 + 10% 底 + 加粗，
         // 悬停不变色——选中项不是「可再点一次」的目标。
         selected:

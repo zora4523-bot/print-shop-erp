@@ -203,7 +203,7 @@ export function AdminOrderBatchActions({
           if (confirmation) run(confirmation.command, confirmation.orders);
           setConfirmation(null);
         }}>
-        <ConfirmActionDialog action={confirmation ? BATCH_COMMAND_CONFIG[confirmation.command].confirmLabel : '确认批量操作'} changes={[]} consequences={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []} confirmText={confirmation ? BATCH_COMMAND_CONFIG[confirmation.command].confirmLabel : '确认操作'} />
+        <ConfirmActionDialog action={confirmation ? BATCH_COMMAND_CONFIG[confirmation.command].confirmLabel : '批量处理所选工单'} changes={[]} consequences={confirmation ? batchConfirmationImpact(confirmation.command, confirmation.orders) : []} confirmText={confirmation ? BATCH_COMMAND_CONFIG[confirmation.command].confirmLabel : '批量处理所选工单'} />
       </ConfirmActionController>
       <p
         role="status"

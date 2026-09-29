@@ -202,7 +202,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
             const selected = selectedItems.has(item.id);
             return (
               <li key={item.id} className="min-w-0 rounded-lg border p-3">
-                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
                   <Checkbox
                     className="-ml-3"
                     checked={selected}
@@ -264,7 +264,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                         {item.crafts.map((craft) => (
                           <label
                             key={craft.id}
-                            className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+                            className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
                           >
                             <Checkbox
                               checked={
@@ -316,7 +316,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
           <ConfirmActionDialog action="创建重做单"
             changes={items.filter((item) => selectedItems.has(item.id)).map((item) => ({ label: `第 ${item.sequence} 款重做数量`, old: '未创建', new: `${quantities[item.id]} 个` }))}
             consequences={['创建关联重做工单，不新增客户应收，生产任务正常记录师傅工资。', '原工单状态、应收账单和历史工资保持不变。']}
-            confirmText="确认创建" />
+            confirmText="创建重做单" />
         </ConfirmActionController>
       </div>
     </form>

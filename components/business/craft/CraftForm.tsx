@@ -68,7 +68,7 @@ export function CraftForm(props: Props) {
         defaultValue={initial?.name}
       />
 
-      <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+      <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
         <Checkbox
           name="isOutsource"
           defaultChecked={initial?.isOutsource}

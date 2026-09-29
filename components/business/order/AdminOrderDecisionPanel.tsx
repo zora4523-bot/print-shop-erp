@@ -59,7 +59,7 @@ type DecisionReceipt = { text: string; tone: 'success' | 'warning' };
 
 function DecisionConfirmation({
   label, title, impactItems, changes = [], confirmLabel, disabled,
-  onConfirm, describedBy, variant = 'default',
+  onConfirm, describedBy, variant = 'default', cancelLabel,
 }: {
   label: string;
   title: string;
@@ -70,14 +70,25 @@ function DecisionConfirmation({
   onConfirm: () => void;
   describedBy?: string;
   variant?: 'default' | 'destructive' | 'outline';
+  /** 确认层关闭按钮的具体文案；「取消X」类裁决不得叫「取消」（§8.2）。 */
+  cancelLabel?: string;
 }) {
+  // 危险裁决的红色必须同时落在确认层（danger 决定确认按钮配色），不只触发按钮。
   return <ConfirmActionController level="L2"
     disabled={disabled}
+    cancelLabel={cancelLabel}
     trigger={<Button type="button" size="sm" variant={variant} aria-describedby={describedBy}>{label}</Button>}
     onConfirm={onConfirm}>
-    <ConfirmActionDialog action={title} changes={changes} consequences={impactItems} confirmText={confirmLabel} />
+    <ConfirmActionDialog action={title} changes={changes} consequences={impactItems} confirmText={confirmLabel} danger={variant === 'destructive'} />
   </ConfirmActionController>;
 }
+
+/** 裁决确认层的关闭按钮文案：写清「不做」后工单怎样，避免与「取消工单」混淆。 */
+const DECISION_CANCEL_LABELS: Partial<Record<NonNullable<FormMode>, string>> = {
+  reject: '暂不驳回',
+  'change-approve': '保留工单',
+  'change-deny': '暂不拒绝',
+};
 
 function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow }) {
   if (order.status !== 'PENDING_FACTORY' && order.status !== 'SUBMITTED') {
@@ -447,6 +458,7 @@ function AdminDecisionForm({
           disabled={pending || Boolean(formIssue)}
           describedBy={formIssue ? 'admin-decision-form-help' : undefined}
           variant={mode === 'reject' || mode === 'change-approve' || mode === 'change-deny' ? 'destructive' : 'default'}
+          cancelLabel={DECISION_CANCEL_LABELS[mode]}
           onConfirm={submitDecision}
         />
         <Button

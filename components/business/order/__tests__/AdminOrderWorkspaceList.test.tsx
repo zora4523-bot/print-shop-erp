@@ -55,7 +55,8 @@ describe('AdminOrderWorkspaceList', () => {
     expect(filtered).toContain('href="/orders?queue=all"');
     expect(filtered).toContain('清除筛选');
     const emptyQueue = renderToStaticMarkup(<AdminOrderWorkspaceList {...props} />);
-    expect(emptyQueue).toContain('这个队列清空了');
+    expect(emptyQueue).toContain('暂无工单');
+    expect(emptyQueue).not.toContain('这个队列清空了');
     expect(emptyQueue).toContain('查看全部工单');
     expect(emptyQueue).not.toContain('清除筛选');
   });

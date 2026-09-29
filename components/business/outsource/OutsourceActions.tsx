@@ -9,6 +9,7 @@ import {
   type FormEvent,
 } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   ActionNotice,
   ConfirmActionController, ConfirmActionDialog,
@@ -89,13 +90,13 @@ export function OutsourceActions({
           <div className="flex min-w-0 flex-wrap items-end gap-3">
             <label className="grid min-w-0 gap-1 text-sm text-muted-foreground">
               回货日期（可留空，默认为今天）
-              <input
+              <Input
                 type="date"
                 name="actualDate"
                 value={actualDate}
                 onChange={(event) => setActualDate(event.target.value)}
                 disabled={receivePending}
-                className="min-h-11 rounded-md border bg-background px-3 py-2 text-sm text-foreground disabled:opacity-70"
+                className="w-auto"
               />
             </label>
             <ConfirmActionController level="L2"

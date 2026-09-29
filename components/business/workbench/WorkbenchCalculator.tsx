@@ -349,7 +349,7 @@ export function WorkbenchCalculator({
               disabled={!!inputIssue || pending}
               onClick={createOrder}
             >
-              按此款式创建工单
+              按此款式新建工单
             </Button>
             {transferError ? (
               <ActionNotice tone="error" title={transferError} />

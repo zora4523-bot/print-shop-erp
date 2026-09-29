@@ -26,6 +26,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Button } from '@/components/ui/button';
+import { PageHeader, type PageHeaderProps } from '@/components/ui-business';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
@@ -127,6 +128,8 @@ export type OrderFormBProps = {
     isSfCollect: boolean;
   };
   title?: string;
+  /** 页头唯一返回入口；提交中由调用方传 pending 锁住（§8.3）。 */
+  back?: PageHeaderProps['back'];
   settlementLabel?: string;
   customNameRequired?: boolean;
   designImageRequired?: boolean;
@@ -387,8 +390,7 @@ function DesignFileBox({
               : `拖放或选择${fileLabel}`
           }
           className={cn(
-            'flex h-auto data-[slot=button]:min-h-20 w-full cursor-pointer items-center justify-between gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-3.5 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
-            error && 'border-destructive bg-destructive/5',
+            'flex h-auto data-[slot=button]:min-h-20 w-full cursor-pointer items-center justify-between gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-3.5 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:bg-destructive/5',
           )}
           onClick={openFilePicker}
           onDragOver={(event) => {
@@ -497,6 +499,7 @@ function OrderDesignFilesSection({ itemNumber, queue, disabled, required, groupe
 export function OrderFormB({
   values,
   title = '新建工单',
+  back,
   settlementLabel,
   customNameRequired = true,
   designImageRequired = true,
@@ -729,16 +732,16 @@ export function OrderFormB({
         putFile(file, DesignFileType.IMAGE);
       }}
     >
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight">
-          {title}
-        </h1>
-        {settlementLabel ? (
+      <PageHeader
+        className="mb-4"
+        title={title}
+        back={back}
+        actions={settlementLabel ? (
           <span className="rounded-full border px-3 py-1 text-xs font-semibold text-muted-foreground">
             {settlementLabel}
           </span>
-        ) : null}
-      </header>
+        ) : undefined}
+      />
 
       {!onAddSpecification ? <><div
         role="group"
@@ -1039,7 +1042,7 @@ export function OrderFormB({
 
             {afterShipping}
 
-            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
               <Checkbox className="-ml-3"
                 checked={values.isSfCollect ?? false}
                 disabled={disabled}

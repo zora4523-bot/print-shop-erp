@@ -1,5 +1,6 @@
+import Form from 'next/form';
 import Link from 'next/link';
-import { Search, X } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { buildTableHref } from '@/lib/admin/table';
 import type { OrderListQuery } from '@/lib/order/list-query';
 import type {
@@ -9,7 +10,10 @@ import type {
 import { cn } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { LinkPendingHint } from '@/components/ui-business';
+import { FilterClearLink, LinkPendingHint } from '@/components/ui-business';
+
+/** 销售工单搜索表单的 id，供「清除筛选」在导航时 reset 未提交的输入。 */
+export const SALES_ORDER_FILTER_FORM_ID = 'sales-order-filters';
 
 const SALES_TABS: Array<{
   id: 'all' | SalesOrderListView;
@@ -82,7 +86,7 @@ export function SalesOrderListFilters({
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   buttonVariants({ variant: active ? 'selected' : 'outline' }),
-                  'relative min-h-9 shrink-0 gap-1.5 rounded-full px-3 text-sm',
+                  'relative shrink-0 gap-1.5',
                   tab.id === 'todo' &&
                     !active &&
                     summary.todo > 0 &&
@@ -109,10 +113,14 @@ export function SalesOrderListFilters({
           })}
         </nav>
 
-        <form
+        {/* key 只跟已应用的搜索词走：清除 / 应用后按 URL 重置输入，切视图不丢未提交输入。 */}
+        <Form
+          key={q}
+          id={SALES_ORDER_FILTER_FORM_ID}
           action="/orders"
           role="search"
-          className="flex w-full min-w-0 items-center gap-2 xl:ml-auto xl:w-72 xl:shrink-0"
+          scroll={false}
+          className="flex w-full min-w-0 flex-wrap items-center gap-2 xl:ml-auto xl:w-auto xl:shrink-0 xl:flex-nowrap"
         >
           {query.view ? (
             <input type="hidden" name="view" value={query.view} />
@@ -120,7 +128,7 @@ export function SalesOrderListFilters({
           {query.pageSize !== 20 ? (
             <input type="hidden" name="pageSize" value={query.pageSize} />
           ) : null}
-          <div className="relative min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1 xl:w-60 xl:flex-none">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -131,30 +139,24 @@ export function SalesOrderListFilters({
               defaultValue={q}
               aria-label="搜索工单名或工单号"
               placeholder="搜工单名 / 单号"
-              className="h-10 rounded-full pl-9 pr-9"
+              className="pl-9"
             />
-            {q ? (
-              <Link
-                href={buildTableHref('/orders', {}, {
-                  ...baseParams,
-                  q: undefined,
-                  view: query.view,
-                })}
-                prefetch={false}
-                aria-label="清除搜索"
-                className={cn(
-                  buttonVariants({ variant: 'ghost', size: 'icon-xs' }),
-                  'absolute right-2 top-1/2 -translate-y-1/2 rounded-full',
-                )}
-              >
-                <X aria-hidden="true" />
-              </Link>
-            ) : null}
           </div>
-          <Button type="submit" className="h-10 rounded-full px-4">
+          <Button type="submit" variant="outline">
             搜索
           </Button>
-        </form>
+          {q ? (
+            <FilterClearLink
+              href={buildTableHref('/orders', {}, {
+                ...baseParams,
+                q: undefined,
+                view: query.view,
+              })}
+              formId={SALES_ORDER_FILTER_FORM_ID}
+              className={buttonVariants({ variant: 'ghost' })}
+            />
+          ) : null}
+        </Form>
       </div>
 
       {issues.length > 0 ? (

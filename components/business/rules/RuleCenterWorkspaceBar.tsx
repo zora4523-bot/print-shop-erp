@@ -163,13 +163,13 @@ export function RuleCenterWorkspaceBar({
 
   return (
     <header
-      className="admin-sticky-below-header sticky z-[8] mb-4 min-w-0 overflow-hidden rounded-xl border border-foreground/20 bg-foreground text-background shadow-sm dark:border-border dark:bg-card dark:text-card-foreground"
+      className="admin-sticky-below-header sticky z-10 mb-4 min-w-0 overflow-hidden rounded-xl border border-foreground/20 bg-foreground text-background shadow-sm dark:border-border dark:bg-card dark:text-card-foreground"
       aria-label="规则中心版本与发布"
     >
       <div className="flex min-h-14 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:px-4">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
-            <span className="shrink-0 text-sm font-extrabold tracking-[0.06em]">
+            <span className="shrink-0 text-sm font-semibold tracking-wide">
               规则配置中心
             </span>
             {current?.id !== 'overview' ? (
@@ -219,7 +219,7 @@ export function RuleCenterWorkspaceBar({
                 href={publishHref}
                 prefetch={false}
                 aria-label="进入价格版本发布"
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-background px-3.5 text-xs font-extrabold text-foreground transition-colors hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background focus-visible:ring-offset-2 focus-visible:ring-offset-foreground dark:bg-card-foreground dark:text-card dark:hover:bg-card-foreground/90 dark:focus-visible:ring-card-foreground dark:focus-visible:ring-offset-card"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-background px-3.5 text-xs font-semibold text-foreground transition-colors hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background focus-visible:ring-offset-2 focus-visible:ring-offset-foreground dark:bg-card-foreground dark:text-card dark:hover:bg-card-foreground/90 dark:focus-visible:ring-card-foreground dark:focus-visible:ring-offset-card"
               >
                 <Send aria-hidden="true" className="size-3.5" />
                 发布

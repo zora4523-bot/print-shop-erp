@@ -18,14 +18,14 @@ export function CreateOrderOutsourceLink({ orderId, status, completedAt, canMana
       <Disclosure>
         <DisclosureSummary className="px-3">外协操作</DisclosureSummary>
         <DisabledReason cause="status" reason={reason}>
-          <Button type="button" disabled variant="outline" size="sm">创建外协单</Button>
+          <Button type="button" disabled variant="outline" size="sm">新建外协单</Button>
         </DisabledReason>
       </Disclosure>
     );
   }
   return (
     <Link href={`/foreman/outsource/new?orderId=${orderId}`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-      创建外协单
+      新建外协单
     </Link>
   );
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -77,7 +78,7 @@ export function BomsTable({
               <Link
                 href={`/owner/boms/${bom.id}`}
                 prefetch={false}
-                className="text-sm text-primary underline hover:no-underline"
+                className={buttonVariants({ variant: 'ghost', size: 'sm' })}
               >
                 查看
               </Link>

@@ -43,6 +43,12 @@ describe('SalesOrderListFilters', () => {
     expect(html).not.toContain('客户');
     expect(html).toContain('value="福明"');
     expect(html).toContain('name="view" value="todo"');
+    // 清除入口统一「清除筛选」，并指向同一张搜索表单（§8.2）。
+    expect(html).toContain('id="sales-order-filters"');
+    expect(html).toContain('>清除筛选');
+    expect(html).toContain('href="/orders?view=todo"');
+    expect(html).not.toContain('清除搜索');
+    expect(html).not.toContain('rounded-full px-4');
     expect(html).not.toContain('全部师傅');
     expect(html).not.toContain('导出工单');
   });

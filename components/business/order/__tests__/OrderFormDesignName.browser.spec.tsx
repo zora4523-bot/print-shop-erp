@@ -11,7 +11,7 @@ import type { CreateOrderQuoteActionInput, CreateOrderQuoteMutationResult } from
 import { adminCreatePriceFactsKey, adminPackagingPriceFactsKey } from '@/lib/order/admin-create-price';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }) }));
-vi.mock('next/link', () => ({ default: (props: ComponentProps<'a'>) => <a {...props} /> }));
+vi.mock('next/link', () => ({ __esModule: true, default: (props: ComponentProps<'a'>) => <a {...props} /> }));
 vi.mock('next/image', () => ({ default: ({ alt }: { alt: string }) => <span>{alt}</span> }));
 vi.mock('@/actions/order', () => ({ createOrderAction: vi.fn(), submitOrderAction: vi.fn() }));
 vi.mock('@/actions/create-order-quote', () => ({

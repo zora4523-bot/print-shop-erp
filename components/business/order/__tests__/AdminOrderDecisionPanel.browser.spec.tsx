@@ -108,7 +108,10 @@ describe('admin order decisions require review before mutation', () => {
     await expect.element(dialog).toBeVisible();
     await expect.element(dialog.getByText('核实已产数量 100 个，最终结算金额 ¥ 120.00。', { exact: true })).toBeVisible();
     expect(actions.review).not.toHaveBeenCalled();
-    await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    // 危险裁决：确认层确认按钮走 danger 配色，关闭按钮写清后果而不是「取消」（§8.2）。
+    expect(dialog.getByRole('button', { name: '确认取消并结算工单', exact: true }).element().className).toContain('text-destructive');
+    await expect.element(dialog.getByRole('button', { name: '取消', exact: true })).not.toBeInTheDocument();
+    await dialog.getByRole('button', { name: '保留工单', exact: true }).click();
     await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
     expect(actions.review).not.toHaveBeenCalled();
     await submit.click();

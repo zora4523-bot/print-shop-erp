@@ -122,7 +122,7 @@ export default async function PieceworkSettlementDetailPage({
                 <th className="px-4 py-2 text-left">工单</th>
                 <th className="px-4 py-2 text-left">工序</th>
                 <th className="px-4 py-2 text-center">类型</th>
-                <th className="px-4 py-2 text-right">合格 / 缺陷 / 返工</th>
+                <th className="px-4 py-2 text-right">合格 / 不良 / 返工</th>
                 <th className="px-4 py-2 text-right">计薪数</th>
                 <th className="px-4 py-2 text-right">工价</th>
                 <th className="px-4 py-2 text-right">金额</th>

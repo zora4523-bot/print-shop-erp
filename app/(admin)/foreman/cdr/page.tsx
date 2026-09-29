@@ -12,6 +12,7 @@ import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
 import { RegenerateBundleForm } from '@/components/business/cdr/RegenerateBundleForm';
 import { RevokeBundleForm } from '@/components/business/cdr/RevokeBundleForm';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { EmptyState, EnvNotice, ErrorBoundary, PageHeader, SectionLoading, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import {
   formatDateInputShanghai,
@@ -306,24 +307,24 @@ function FilterBar({ from, to }: { from: string; to: string }) {
         <label htmlFor="cdr-from" className="text-xs text-muted-foreground">
           起始日期
         </label>
-        <input
+        <Input
           id="cdr-from"
           type="date"
           name="from"
           defaultValue={from}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto"
         />
       </div>
       <div className="flex flex-col">
         <label htmlFor="cdr-to" className="text-xs text-muted-foreground">
           终止日期
         </label>
-        <input
+        <Input
           id="cdr-to"
           type="date"
           name="to"
           defaultValue={to}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto"
         />
       </div>
       <Button type="submit" size="sm">

@@ -740,7 +740,7 @@ function buildEditorChanges(
         ...editorCatalogChange(source, draft),
       });
       differences.push({
-        label: '新增款式',
+        label: '添加款式',
         before: '—',
         after: `${draft.name || '未命名'} · ${externalPriceBusinessText(draft.specification)} · ${draft.quantity || '0'} 个 · 正面 ${draft.front || '无'} / 反面 ${draft.back || '无'}`,
       });
@@ -1251,7 +1251,7 @@ function DraftItemSection({
       {!source.packagingEditable || draft.added ? (
         <p className="mt-2 text-xs text-muted-foreground">
           {draft.added
-            ? '新增款式的分袋安排待补充，请核对包装明细。'
+            ? '添加的款式分袋安排待补充，请核对包装明细。'
             : '分袋记录缺失或存在多组分货，当前不能直接修改每包数量。'}
         </p>
       ) : null}

@@ -327,7 +327,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
         }}
       >
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
+          <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             id="inventory-count-search"
             value={query}

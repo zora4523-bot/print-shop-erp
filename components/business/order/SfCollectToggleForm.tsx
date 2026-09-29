@@ -178,7 +178,7 @@ export function SfCollectToggleForm({
                       htmlFor={`${prefix}-shipping-fee`}
                       className="text-xs font-medium"
                     >
-                      实际对客快递费（元，选填）
+                      实际对客快递费（元）
                     </label>
                     <Input
                       id={`${prefix}-shipping-fee`}

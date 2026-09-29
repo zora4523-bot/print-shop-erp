@@ -236,6 +236,8 @@ describe('OrderFormB', () => {
 
     expect(html).toContain('data-slot="order-form-b"');
     expect(html).toContain('新建工单');
+    // 标题经统一页头渲染，不再手写 h1（§8.3）。
+    expect(html).toContain('data-slot="page-header"');
     expect(html).not.toContain(
       '一款的全部字段一屏展开，右侧价格实时跟着变。熟练销售录单最快，桌面优先。',
     );

@@ -1,9 +1,10 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { Palette, Pencil, Ruler, Search } from 'lucide-react';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { EmptyState, StatusBadge } from '@/components/ui-business';
+import { EmptyState, FilterClearLink, LinkPendingHint, StatusBadge } from '@/components/ui-business';
 import {
   buildTableHref,
   type TableHrefParams,
@@ -29,6 +30,8 @@ type RuleSpecWorkspaceProps = {
     queryParams: TableHrefParams;
   };
 };
+
+const SPEC_FILTER_FORM_ID = 'rule-spec-filters';
 
 function displayText(value: string | null, fallback: string): string {
   return externalPriceBusinessText(value ?? '') || fallback;
@@ -59,13 +62,11 @@ export function RuleSpecWorkspace({
 }: RuleSpecWorkspaceProps) {
   const clearHref = buildTableHref(routeBase, {}, hiddenSearchParams);
   const clearSearch = (
-    <Link
+    <FilterClearLink
       href={clearHref}
-      prefetch={false}
+      formId={SPEC_FILTER_FORM_ID}
       className={cn(buttonVariants({ variant: 'outline' }), 'min-h-11')}
-    >
-      清除搜索
-    </Link>
+    />
   );
 
   return (
@@ -108,7 +109,10 @@ export function RuleSpecWorkspace({
           </StatusBadge>
         </div>
 
-        <form
+        {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
+        <Form
+          id={SPEC_FILTER_FORM_ID}
+          key={JSON.stringify([query, status, hiddenSearchParams])}
           action={routeBase}
           role="search"
           aria-label="搜索规格主数据"
@@ -134,7 +138,8 @@ export function RuleSpecWorkspace({
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" className="min-h-11">
+              {/* 页头「新建」是页面唯一主按钮，搜索降为 outline（ui-规范 §8.2）。 */}
+              <Button type="submit" variant="outline" className="min-h-11">
                 搜索
               </Button>
               {query ? clearSearch : null}
@@ -160,17 +165,22 @@ export function RuleSpecWorkspace({
                   page: null,
                 })}
                 prefetch={false}
+                scroll={false}
                 aria-current={status === value ? 'page' : undefined}
-                className={buttonVariants({
-                  variant: status === value ? 'selected' : 'ghost',
-                  size: 'sm',
-                })}
+                className={cn(
+                  buttonVariants({
+                    variant: status === value ? 'selected' : 'ghost',
+                    size: 'sm',
+                  }),
+                  'relative',
+                )}
               >
                 {label}
+                <LinkPendingHint />
               </Link>
             ))}
           </div>
-        </form>
+        </Form>
       </div>
 
       {products.length > 0 ? (

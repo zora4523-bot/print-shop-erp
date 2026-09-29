@@ -28,7 +28,7 @@ import { MaterialsTable } from '@/components/business/material/MaterialsTable';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice, FormPageContainer } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
@@ -255,7 +255,7 @@ export async function NewMaterialCatalogItem({
   const excludesPaper = excludedCategories?.includes(MaterialCategory.PAPER);
 
   return (
-    <div className="space-y-6">
+    <FormPageContainer>
       <SupplementOwnership actorId={actor.id} context={supplement ?? null} />
       {paperOnly ? (
         <RuleCenterPageHeader
@@ -283,7 +283,7 @@ export async function NewMaterialCatalogItem({
           excludedCategories={excludedCategories}
         />}
       </section>
-    </div>
+    </FormPageContainer>
   );
 }
 

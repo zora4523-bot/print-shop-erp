@@ -1,4 +1,5 @@
 import { useState, type ComponentProps, type ReactNode } from 'react';
+import { Input } from '@/components/ui/input';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +26,7 @@ function Harness({ children }: { children: ReactNode }) {
   const [mainDirty, setMainDirty] = useState(false);
   const auxiliary = useOrderEditorAuxiliaryController(mainDirty);
   return <OrderEditorAuxiliaryContext.Provider value={auxiliary.context}>
-    <input aria-label="主工单名称" disabled={auxiliary.dirty || auxiliary.pending} onChange={() => setMainDirty(true)} />
+    <Input aria-label="主工单名称" disabled={auxiliary.dirty || auxiliary.pending} onChange={() => setMainDirty(true)} />
     <output data-testid="dirty">{String(auxiliary.dirty)}</output>
     <output data-testid="pending">{String(auxiliary.pending)}</output>
     {children}

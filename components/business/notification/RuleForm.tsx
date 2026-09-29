@@ -6,7 +6,12 @@ import { useActionState } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { DisabledReason, PendingButton } from '@/components/ui-business';
+import {
+  DisabledReason,
+  FormMessage,
+  formMessageA11yProps,
+  PendingButton,
+} from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
 import { notificationEventLabel } from '@/lib/notification/event-labels';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
@@ -79,14 +84,16 @@ export function RuleForm({
           defaultValue={initial.messageTemplate}
           rows={8}
           required
-          aria-invalid={!!fieldErrors?.messageTemplate}
+          {...(fieldErrors?.messageTemplate?.length
+            ? formMessageA11yProps('messageTemplate', 'error')
+            : {})}
           className="w-full font-mono"
         />
-        {fieldErrors?.messageTemplate?.map((m, i) => (
-          <p key={i} className="text-sm text-destructive">
-            {m}
-          </p>
-        ))}
+        {fieldErrors?.messageTemplate?.length ? (
+          <FormMessage fieldId="messageTemplate" tone="error">
+            {fieldErrors.messageTemplate.join('；')}
+          </FormMessage>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           可用占位符：
           {payloadFields.map((f, i) => (
@@ -111,7 +118,12 @@ export function RuleForm({
         ) : null}
       </div>
 
-      <fieldset className="space-y-2">
+      <fieldset
+        className="space-y-2"
+        {...(fieldErrors?.channelIds?.length
+          ? formMessageA11yProps('channelIds', 'error')
+          : {})}
+      >
         <legend className="text-sm font-medium">
           {managementRole ? '收件角色（固定）' : '推送到群（多选）'}
         </legend>
@@ -166,7 +178,7 @@ export function RuleForm({
                 ? notificationChannelSelectionIssueMessage(c.selectionIssue)
                 : null;
               const option = (
-                <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
                   <Checkbox
                     name="channelIds"
                     value={c.id}
@@ -177,8 +189,8 @@ export function RuleForm({
                   <span
                     className={
                       issueMessage
-                        ? 'min-w-0 py-2 text-muted-foreground'
-                        : 'min-w-0 py-2'
+                        ? 'min-w-0 py-3 text-muted-foreground'
+                        : 'min-w-0 py-3'
                     }
                   >
                     {c.channelName}
@@ -208,14 +220,14 @@ export function RuleForm({
             })}
           </div>
         )}
-        {fieldErrors?.channelIds?.map((m, i) => (
-          <p key={i} className="text-sm text-destructive">
-            {m}
-          </p>
-        ))}
+        {fieldErrors?.channelIds?.length ? (
+          <FormMessage fieldId="channelIds" tone="error">
+            {fieldErrors.channelIds.join('；')}
+          </FormMessage>
+        ) : null}
       </fieldset>
 
-      <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+      <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
         <Checkbox
           id="isActive"
           name="isActive"
@@ -223,7 +235,7 @@ export function RuleForm({
           disabled={pending}
           aria-label="启用此规则"
         />
-        <span className="min-w-0 py-2">
+        <span className="min-w-0 py-3">
           启用此规则（关闭后此事件不再触发推送）
         </span>
       </label>

@@ -309,7 +309,7 @@ it('keeps administrator foil names selected and supports deselection without ali
   await expect
     .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.frontFoilColors)
     .toEqual(['哑金']);
-  await page.getByRole('button', { name: '按此款式创建工单' }).click();
+  await page.getByRole('button', { name: '按此款式新建工单' }).click();
   const id = new URL(
     mocks.push.mock.calls[0]![0],
     'http://localhost',
@@ -343,7 +343,7 @@ it('quotes and transfers the selected finishing for a COATED catalog paper', asy
   await expect
     .poll(() => mocks.quote.mock.calls.at(-1)?.[0].item.lamination)
     .toBe(OrderLamination.SOFT_TOUCH);
-  await page.getByRole('button', { name: '按此款式创建工单' }).click();
+  await page.getByRole('button', { name: '按此款式新建工单' }).click();
   const id = new URL(
     mocks.push.mock.calls[0]![0],
     'http://localhost',
@@ -398,7 +398,7 @@ it('keeps missing prices unknown and passes only item conditions to order creati
   await expect
     .element(page.getByRole('status').getByText('待核价', { exact: true }))
     .toBeVisible();
-  await page.getByRole('button', { name: '按此款式创建工单' }).click();
+  await page.getByRole('button', { name: '按此款式新建工单' }).click();
   expect(mocks.push).toHaveBeenCalledWith(
     expect.stringMatching(/^\/orders\/new\?fromWorkbench=/),
   );

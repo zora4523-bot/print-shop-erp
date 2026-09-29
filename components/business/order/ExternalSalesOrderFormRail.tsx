@@ -156,7 +156,7 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
         {summary.messages.length ? (
           <ActionNotice
             className="mt-4"
-            tone={summary.hasError ? 'error' : 'warning'}
+            tone={summary.hasError ? 'error' : 'primary'}
             title={summary.hasError ? '请核对费用后重试' : '待工厂核价'}
             description={
               <ul className="list-disc space-y-1 pl-4 text-xs">

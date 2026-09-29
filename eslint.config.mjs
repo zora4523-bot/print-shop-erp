@@ -34,6 +34,9 @@ const NATIVE_SELECT_GUARD_MESSAGE =
 const NATIVE_TEXTAREA_GUARD_MESSAGE =
   "Use Textarea from @/components/ui/textarea instead of a raw <textarea> (ui-规范 §3.2).";
 
+const BUTTON_OVERRIDE_GUARD_MESSAGE =
+  "Do not override Button colour or height via className; use variant=\"selected\" / \"destructive\" (ui-规范 §8.2).";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -91,6 +94,23 @@ const eslintConfig = defineConfig([
           message: NATIVE_CHECKBOX_GUARD_MESSAGE,
         },
         {
+          // ui-规范 §8.1：可见输入统一走 Input 原子件（隐藏值、勾选、单选、文件除外）。
+          selector:
+            "JSXOpeningElement[name.name='input']:not(:has(JSXAttribute[name.name='type'][value.value=/^(hidden|checkbox|radio|file)$/]))",
+          message: "Use Input from @/components/ui/input instead of a raw visible <input> (ui-规范 §8.1).",
+        },
+        {
+          // ui-规范 §8.2：选中用 variant="selected"、危险用 destructive，高度由原子件与 44px 兜底决定。
+          selector:
+            "JSXOpeningElement[name.name=/^(Button|PendingButton)$/] > JSXAttribute[name.name='className'] Literal[value=/(^|\\s)(bg-(primary|foreground|destructive)|h-\\d|min-h-0!|!min-h-)/]",
+          message: BUTTON_OVERRIDE_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "CallExpression[callee.name='buttonVariants'] Property[key.name='className'] Literal[value=/(^|\\s)(bg-(primary|foreground|destructive)|h-\\d|min-h-0!|!min-h-)/]",
+          message: BUTTON_OVERRIDE_GUARD_MESSAGE,
+        },
+        {
           selector:
             "JSXOpeningElement[name.name='Link'] > JSXAttribute[name.name='href'] Literal[value=/^\\/api\\//]",
           message: API_LINK_GUARD_MESSAGE,
@@ -109,6 +129,23 @@ const eslintConfig = defineConfig([
           message: NATIVE_TEXTAREA_GUARD_MESSAGE,
         },
       ],
+    },
+  },
+  {
+    // ui-规范 §8.3：页面标题一律经 PageHeader（含 RuleCenterPageHeader）。只有不挂在
+    // 后台 / 师傅端外壳里的独立页面、以及标题原子件本身可以直接写 <h1>。
+    files: ["app/**/*.tsx", "components/business/**/*.tsx", "components/ui-business/**/*.tsx"],
+    ignores: [
+      "**/__tests__/**",
+      "app/global-error.tsx",
+      "app/(auth)/login/page.tsx",
+      "app/account/password/page.tsx",
+      "app/wo/[[]orderNo]/page.tsx",
+      "components/ui-business/PageHeader.tsx",
+      "components/ui-business/EmptyState.tsx",
+    ],
+    rules: {
+      "react/forbid-elements": ["error", { forbid: [{ element: "h1", message: "Use PageHeader for page titles (ui-规范 §8.3)." }] }],
     },
   },
   // Override default ignores of eslint-config-next.

@@ -1,4 +1,5 @@
-import { ContentSkeleton, SectionLoading } from '@/components/ui-business';
+import { ContentSkeleton, FORM_PAGE_WIDTH_CLASS, SectionLoading } from '@/components/ui-business';
+import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export type AdminRouteLoadingVariant = 'list' | 'detail' | 'form';
@@ -32,7 +33,7 @@ export function AdminRouteLoading({
       <section
         data-slot="admin-route-loading"
         data-variant={variant}
-        className={variant === 'form' ? 'w-full max-w-3xl min-w-0 space-y-6' : 'min-w-0 space-y-6'}
+        className={cn(variant === 'form' && FORM_PAGE_WIDTH_CLASS, 'min-w-0 space-y-6')}
       >
         <HeaderSkeleton withBack />
         {variant === 'form' ? (

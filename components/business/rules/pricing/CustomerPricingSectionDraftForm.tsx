@@ -84,7 +84,7 @@ export function CustomerPricingSectionDraftForm({
       onChange={() => setDirty(true)}
     >
       {children}
-      <div className="sticky bottom-3 z-20 mt-4 flex min-w-0 flex-col gap-3 rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+      <div className="sticky bottom-3 z-10 mt-4 flex min-w-0 flex-col gap-3 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <MutationFeedback state={state} />
         <Button
           type="submit"

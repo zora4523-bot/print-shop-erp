@@ -12,19 +12,23 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Table } from '@/components/ui/table';
-import { EmptyState, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, FilterClearLink, TableScrollArea } from '@/components/ui-business';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { cn } from '@/lib/utils';
 import {
+  PriceWorkspaceFilterForm,
   PriceWorkspaceLink,
   PriceWorkspaceNavigationGuardProvider,
 } from './PriceWorkspaceNavigationGuard';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import {
   RulePriceWorkspaceStatusBand,
   type ExternalSalesChargeDraftSummary,
   type ExternalSalesChargeWorkspaceStatus,
 } from './RulePriceWorkspaceStatusBand';
 import { NativeSelect } from '@/components/ui/native-select';
+
+const RULE_PRICE_FILTER_FORM_ID = 'rule-price-filters';
 
 export type ExternalSalesChargePurpose = 'processing' | 'logistics';
 
@@ -274,10 +278,11 @@ function WorkspaceFilters(props: FilterProps) {
   });
 
   return (
-    <form
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <PriceWorkspaceFilterForm
+      id={RULE_PRICE_FILTER_FORM_ID}
       key={filterStateKey}
       action={props.searchAction}
-      method="get"
       role="search"
       aria-label="查找收费项目"
       className="min-w-0 rounded-xl border bg-card p-3 shadow-sm"
@@ -305,7 +310,8 @@ function WorkspaceFilters(props: FilterProps) {
             maxLength={120}
           />
         </div>
-        <Button type="submit" className="min-h-11 shrink-0">
+        {/* 页面主操作在状态栏（新建草稿 / 发布），定位降为 outline（ui-规范 §8.2）。 */}
+        <Button type="submit" variant="outline" className="min-h-11 shrink-0">
           定位
         </Button>
       </div>
@@ -412,6 +418,7 @@ function WorkspaceFilters(props: FilterProps) {
               key={key}
               href={filterHref(props, key)}
               prefetch={false}
+              scroll={false}
               aria-label={`清除筛选：${label}`}
               className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-xs"
             >
@@ -419,16 +426,15 @@ function WorkspaceFilters(props: FilterProps) {
               <X aria-hidden="true" className="size-3" />
             </PriceWorkspaceLink>
           ))}
-          <PriceWorkspaceLink
+          {/* 普通链接也受 PriceWorkspaceNavigationGuardProvider 的文档级拦截保护。 */}
+          <FilterClearLink
             href={props.clearFiltersHref}
-            prefetch={false}
+            formId={RULE_PRICE_FILTER_FORM_ID}
             className="inline-flex min-h-9 shrink-0 items-center px-2 text-xs text-muted-foreground underline"
-          >
-            清除全部
-          </PriceWorkspaceLink>
+          />
         </div>
       ) : null}
-    </form>
+    </PriceWorkspaceFilterForm>
   );
 }
 
@@ -471,28 +477,21 @@ function WorkbenchHeader({
   description?: string;
   basisLabel?: string;
 }) {
+  // 页面标题统一经 PageHeader（ui-规范 §8.3）；计价口径放进 scope 胶囊。
   return (
-    <header className="min-w-0 pb-1">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h1 className="admin-wrap-anywhere text-xl font-semibold tracking-tight">
-          {title ??
-            (purpose === 'processing'
-              ? '客户加工费规则'
-              : '包装、纸箱与快递规则')}
-        </h1>
-        {basisLabel ? (
-          <span className="inline-flex min-h-6 items-center rounded-md border border-foreground px-2 text-xs font-semibold tracking-wide">
-            {basisLabel}
-          </span>
-        ) : null}
-      </div>
-      <p className="admin-wrap-anywhere mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">
-        {description ??
-          (purpose === 'processing'
-            ? '直接查看每个收费项的当前价、数量档与草稿价。'
-            : '物流规则保持独立版本，与加工费分开审阅和发布。')}
-      </p>
-    </header>
+    <RuleCenterPageHeader
+      title={
+        title ??
+        (purpose === 'processing' ? '客户加工费规则' : '包装、纸箱与快递规则')
+      }
+      scope={basisLabel}
+      subtitle={
+        description ??
+        (purpose === 'processing'
+          ? '直接查看每个收费项的当前价、数量档与草稿价。'
+          : '物流规则保持独立版本，与加工费分开审阅和发布。')
+      }
+    />
   );
 }
 
@@ -716,13 +715,11 @@ function PriceMatrix({
         kind="no-result"
         noun="收费项目"
         onClear={
-          <PriceWorkspaceLink
+          <FilterClearLink
             href={clearFiltersHref}
-            prefetch={false}
+            formId={RULE_PRICE_FILTER_FORM_ID}
             className={buttonVariants({ variant: 'outline' })}
-          >
-            清除筛选
-          </PriceWorkspaceLink>
+          />
         }
       />
     ) : (
@@ -870,7 +867,10 @@ function RuleRows({
             prefetch={false}
             aria-current={selected ? 'page' : undefined}
             aria-label={`${selected ? `正在${action}` : action}收费项目：${externalPriceBusinessText(item.name)}`}
-            className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-primary underline underline-offset-4"
+            className={buttonVariants({
+              variant: selected ? 'selected' : 'ghost',
+              size: 'sm',
+            })}
           >
             {selected ? `正在${action}` : action}
             <ChevronRight aria-hidden="true" className="size-4" />

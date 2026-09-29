@@ -15,7 +15,7 @@ import {
 import { ProductCategoryNodesTable } from '@/components/business/product-category/ProductCategoryNodesTable';
 import { ToggleProductCategoryActiveButton } from '@/components/business/product-category/ToggleProductCategoryActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice, FormPageContainer } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -109,7 +109,7 @@ export async function NewProductCategoryCatalogItem({
     });
   return (
     <FormPendingScope>
-    <div className="space-y-6">
+    <FormPageContainer>
       <SupplementOwnership actorId={actor.id} context={supplement ?? null} />
       <RuleCenterPageHeader
         lockBackWhilePending
@@ -127,7 +127,7 @@ export async function NewProductCategoryCatalogItem({
           routeBase={routeBase}
         />
       </section>
-    </div>
+    </FormPageContainer>
     </FormPendingScope>
   );
 }

@@ -113,7 +113,7 @@ function ShipmentFieldsRow({
           htmlFor={`shipment-${shipment.id}-tracking`}
           className="mb-1 block text-xs font-medium"
         >
-          运单号（选填）
+          运单号
         </label>
         <input type="hidden" name="shipmentId" value={shipment.id} />
         <Input

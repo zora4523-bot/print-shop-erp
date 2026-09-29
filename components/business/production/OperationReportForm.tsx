@@ -92,7 +92,7 @@ export function ProgressReportForm({
       nextBatchHref={nextBatchHref(progressStepId, idempotencyKey)}
       remainingQty={remainingQty}
       workOrderProgressRemainingQty={null}
-      explanation="合格数用于推进工序；缺陷数与返工数只做记录，此步骤不计薪。"
+      explanation="合格数用于推进工序；不良数与返工数只做记录，此步骤不计薪。"
       successMessage={
         state?.status === 'success'
           ? state.idempotentReplay
@@ -184,7 +184,7 @@ function ReportFields({
         <div className="grid grid-cols-2 gap-3">
           <QuantityField
             id="defectQty"
-            label="缺陷数"
+            label="不良数"
             unit={quantityUnit}
             defaultValue="0"
             disabled={pending}
@@ -218,7 +218,7 @@ function ReportFields({
         {context.map((line, index) => <p key={index} className="break-words">{line}</p>)}
         <p>合格完成数：{review.completed} {quantityUnit}</p>
         {review.progress !== null && <p>工单件数进度：{review.progress} 个</p>}
-        <p>缺陷数：{review.defect} · 返工数：{review.rework}</p>
+        <p>不良数：{review.defect} · 返工数：{review.rework}</p>
         <p>{rateKey ? '提交后按本次数量记录生产进度和本人提成，需核定的提成由管理员确认。' : '提交后记录本次生产进度，不计入工资。'}</p>
         <div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>确认报工</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(null)}>返回修改</Button></div>
       </section>}

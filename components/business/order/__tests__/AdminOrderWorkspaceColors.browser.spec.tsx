@@ -224,6 +224,13 @@ describe('admin order workspace restrained semantic colors', () => {
         const cards = [...dashboard.querySelectorAll<HTMLElement>('a')];
         expect(cards).toHaveLength(9);
         if (width >= 1280) expect(new Set(cards.map((card) => card.getBoundingClientRect().top)).size).toBe(1);
+        // 任何视口都不出现孤行：每一行的卡片数相同（§8）。
+        const perRow = new Map<number, number>();
+        for (const card of cards) {
+          const top = Math.round(card.getBoundingClientRect().top);
+          perRow.set(top, (perRow.get(top) ?? 0) + 1);
+        }
+        expect(new Set(perRow.values()).size, `${width}px 每行卡片数`).toBe(1);
         expectControlsWithinViewport(width);
         expect(await commands.checkShellAccessibility('[data-testid="order-colors-fixture"]')).toEqual([]);
       });
@@ -281,8 +288,9 @@ describe('admin order workspace restrained semantic colors', () => {
         const number = card.firstElementChild as HTMLElement;
         const label = card.lastElementChild as HTMLElement;
         const expectedToken = signal === 'overdue' ? '--destructive'
-          : ['pending-pricing', 'pending-change', 'on-hold', 'due-today'].includes(signal ?? '') ? '--warning-foreground'
-            : '--foreground';
+          : signal === 'pending-pricing' ? '--primary'
+            : ['pending-change', 'on-hold', 'due-today'].includes(signal ?? '') ? '--warning-foreground'
+              : '--foreground';
         expectTextToken(number, expectedToken);
         expectTextToken(label, '--muted-foreground');
         expectNeutralCard(card);
@@ -291,8 +299,9 @@ describe('admin order workspace restrained semantic colors', () => {
       expectTextToken(rowText('legacy', '待打印'), '--muted-foreground');
       expectTextToken(rowText('legacy', '急单'), '--warning-foreground');
       expectTextToken(rowText('legacy', '2026-09-10'), '--warning-foreground');
-      expectTextToken(rowText('pricing', '待核价 · 缺少专版报价'), '--warning-foreground');
-      expectTextToken(rowText('pricing', '待工厂核价'), '--warning-foreground');
+      // 待工厂核价 = 主强调，不是风险也不是失败（§4.3）。
+      expectTextToken(rowText('pricing', '待核价 · 缺少专版报价'), '--primary');
+      expectTextToken(rowText('pricing', '待工厂核价'), '--primary');
       expectTextToken(rowText('review', '⚠ 第 1 款缺 CDR'), '--warning-foreground');
       expectTextToken(rowText('hold', '等待补充设计文件'), '--warning-foreground');
       expectTextToken(rowText('rejected', '设计文件不符，已驳回'), '--destructive');
@@ -312,12 +321,13 @@ describe('admin order workspace restrained semantic colors', () => {
       const active = dashboard.querySelector<HTMLElement>('a[aria-current="page"]');
       expect(active).not.toBeNull();
       expect(active?.textContent).toContain('待核价');
-      expect(getComputedStyle(active!).borderTopColor).toBe(tokenColor(active!, '--foreground'));
+      // 选中态 = Button variant="selected"：primary 描边 + 淡底 + primary 字（§8.2）。
+      expect(getComputedStyle(active!).borderTopColor).toBe(tokenColor(active!, '--primary'));
       expect(getComputedStyle(active!).backgroundColor).not.toBe(tokenColor(active!, '--card'));
       expect(getComputedStyle(active!).backgroundImage).toBe('none');
       expect(dashboard.querySelectorAll('a[aria-current="page"]')).toHaveLength(1);
       for (const card of dashboard.querySelectorAll<HTMLElement>('a')) {
-        expectTextToken(card.firstElementChild as HTMLElement, '--foreground');
+        expectTextToken(card.firstElementChild as HTMLElement, card === active ? '--primary' : '--foreground');
         if (card !== active) expectNeutralCard(card);
       }
     });

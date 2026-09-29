@@ -102,16 +102,16 @@ export function AdminOrderWorkspace({
             （审查 #38）。表单 key 只跟已应用的可见筛选值走——切队列/看板时未点
             「应用筛选」的输入保留（仍不生效），清除/应用筛选后才按 URL 重置。
             已应用值为空时清除不改变 key，由 OrderFilterClearLink 点击时显式 reset。 */}
-        <div className="flex min-w-0 flex-wrap items-center gap-2 [&_input]:rounded-full [&_select]:rounded-full [&_button]:rounded-full [&_a]:rounded-full">
         <OrderQueuesSection {...{
           query: query, data: data,
         }} />
+        {/* 筛选、应用与切换按钮同一行流式排布，底边对齐（§8.1）；不再用 w-full 行把按钮强行挤到下一行。 */}
         <Form
           key={appliedFilterFormKey(query)}
           id={ORDER_FILTER_FORM_ID}
           action="/orders"
           scroll={false}
-          className="contents"
+          className="flex min-w-0 flex-wrap items-center gap-2"
         >
           {hiddenFilterInputs(params)}
 
@@ -141,7 +141,7 @@ export function AdminOrderWorkspace({
               </option>
             ))}
           </NativeSelect>
-          <div className="relative ml-auto min-w-[200px] flex-1 sm:max-w-60">
+          <div className="relative min-w-[200px] flex-1 sm:max-w-60">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -154,7 +154,6 @@ export function AdminOrderWorkspace({
               className="pl-9"
             />
           </div>
-          <div className="flex w-full flex-wrap items-center gap-2 [&_a]:rounded-full">
           <Button type="submit">应用筛选</Button>
           <Link
             href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
@@ -193,7 +192,21 @@ export function AdminOrderWorkspace({
             {query.starred ? '取消仅星标' : '仅星标'}
             <LinkPendingHint />
           </Link>
-          <Link href="/orders?queue=all&pendingWages=yes" scroll={false} className="relative inline-flex min-h-11 items-center rounded-md border px-3 text-sm">待补录提成<LinkPendingHint /></Link>
+          <Link
+            href={buildTableHref('/orders', {}, adminPendingWagesFilterParams(query))}
+            prefetch={false}
+            scroll={false}
+            aria-current={query.pendingWages ? 'true' : undefined}
+            className={cn(
+              buttonVariants({
+                variant: query.pendingWages ? 'selected' : 'outline',
+              }),
+              'relative',
+            )}
+          >
+            {query.pendingWages ? '取消待补录提成筛选' : '待补录提成'}
+            <LinkPendingHint />
+          </Link>
           <Link
             href={buildTableHref(
               '/orders',
@@ -222,9 +235,7 @@ export function AdminOrderWorkspace({
           {hasUserFilters ? (
             <OrderFilterClearLink href={clearFiltersHref} className={buttonVariants({ variant: 'ghost' })} />
           ) : null}
-          </div>
         </Form>
-        </div>
 
 
         {issues.length > 0 ? (
@@ -330,7 +341,7 @@ function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; 
                 variant: active ? 'selected' : 'outline',
                 size: 'sm',
               }),
-              'relative min-h-10 shrink-0 rounded-full px-3.5 text-sm font-bold shadow-none',
+              'relative shrink-0',
             )}
           >
             {queue.label}
@@ -355,11 +366,13 @@ function AdminOrderDecisionDashboard({
   counts: AdminOrderWorkspacePage['counts']['signals'];
   billingStats: BillingStats;
 }) {
+  // 9 张卡（8 个信号 + 待收款）按容器宽度取 3 列或 9 列：两档都整除，任何视口都不会出现孤行（§8）。
   return (
     <section
       aria-label="工单决定看板"
-      className="flex flex-wrap gap-2.5"
+      className="@container"
     >
+      <div className="grid grid-cols-3 gap-2.5 @min-[56rem]:grid-cols-9">
       {SIGNALS.map((signal) => {
         const active = query.signal === signal.key;
         const count = counts[signal.key];
@@ -379,16 +392,17 @@ function AdminOrderDecisionDashboard({
             scroll={false}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'relative flex !min-w-[104px] flex-col items-start rounded-xl border bg-card px-4 py-2.5 transition-colors hover:border-foreground/60 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none',
-              'border-border hover:border-muted-foreground/50',
-              active && 'border-foreground bg-muted/40',
+              // 选中态只用 Button 的 selected 变体（§8.2）；未选中保持中性卡片。
+              active
+                ? buttonVariants({ variant: 'selected' })
+                : 'border border-border bg-card hover:border-muted-foreground/50',
+              DECISION_CARD_LAYOUT,
             )}
           >
             <span
               className={cn(
                 'block font-sans text-xl font-extrabold tabular-nums',
-                count > 0 && signal.key === 'overdue' && 'text-destructive',
-                count > 0 && ['pending-pricing', 'pending-change', 'on-hold', 'due-today'].includes(signal.key) && 'text-warning-foreground',
+                count > 0 && signalCountClassName(signal.key),
               )}
             >
               {count.toLocaleString('zh-CN')}
@@ -404,23 +418,31 @@ function AdminOrderDecisionDashboard({
         href="/owner/agent-bills?status=CONFIRMED"
         prefetch={false}
         className={cn(
-          'flex !min-w-[104px] flex-col items-start rounded-xl border bg-card px-4 py-2.5 transition-colors hover:border-foreground/60 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none',
-          'border-border hover:border-muted-foreground/50',
+          'border border-border bg-card hover:border-muted-foreground/50',
+          DECISION_CARD_LAYOUT,
         )}
       >
-        <span
-          className={cn(
-            'block font-sans text-base font-semibold tabular-nums',
-          )}
-        >
+        <span className="block max-w-full font-sans text-base font-semibold tabular-nums admin-wrap-anywhere">
           {formatMoney(billingStats.receivableAmount)}
         </span>
         <span className="mt-0.5 block text-xs font-semibold text-muted-foreground">
           待收款 · {billingStats.receivableBillCount.toLocaleString('zh-CN')} 张
         </span>
       </Link>
+      </div>
     </section>
   );
+}
+
+const DECISION_CARD_LAYOUT =
+  'relative flex h-auto min-w-0 flex-col items-start justify-start gap-0 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none';
+
+/** 看板数字的语义色：逾期 = 失败，待核价 = 主强调（§4.3），其余待办 = 风险。 */
+function signalCountClassName(signal: AdminOrderSignal): string | undefined {
+  if (signal === 'overdue') return 'text-destructive';
+  if (signal === 'pending-pricing') return 'text-primary';
+  if (['pending-change', 'on-hold', 'due-today'].includes(signal)) return 'text-warning-foreground';
+  return undefined;
 }
 
 /** 表单只在「已应用的可见筛选值」变化时重挂载，见上方 #38 注释。 */
@@ -454,6 +476,16 @@ export function adminSubmitterFilterParams(
   };
 }
 
+export function adminPendingWagesFilterParams(query: AdminOrderWorkspaceQuery) {
+  return serializeAdminOrderWorkspaceQuery({
+    ...query,
+    queue: 'all',
+    signal: undefined,
+    pendingWages: !query.pendingWages,
+    list: { ...query.list, page: 1 },
+  });
+}
+
 export function adminRejectedFilterParams(query: AdminOrderWorkspaceQuery) {
   const active = query.list.filters.statuses.length === 1
     && query.list.filters.statuses[0] === OrderStatus.REJECTED;
@@ -474,7 +506,6 @@ function OrderWorkspaceHeader({ exportControls }: { exportControls: ReactNode })
   return (
       <PageHeader
         title="工单列表"
-        className="[&_h1]:text-xl [&_h1]:font-extrabold"
         actions={
           <>
             {exportControls}

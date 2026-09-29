@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { Role } from '../../../generated/prisma/enums';
 import type { AccountSummary } from '@/lib/account';
 import {
@@ -89,7 +90,7 @@ export function AccountsTable({
                 <Link
                   href={`/owner/accounts/${a.id}`}
                   prefetch={false}
-                  className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium text-primary underline underline-offset-4 hover:no-underline"
+                  className={buttonVariants({ variant: 'ghost', size: 'sm' })}
                 >
                   编辑账号
                 </Link>
@@ -156,7 +157,7 @@ export function AccountsTable({
                     <Link
                       href={`/owner/accounts/${a.id}`}
                       prefetch={false}
-                      className="text-sm text-primary underline hover:no-underline"
+                      className={buttonVariants({ variant: 'ghost', size: 'sm' })}
                     >
                       编辑
                     </Link>

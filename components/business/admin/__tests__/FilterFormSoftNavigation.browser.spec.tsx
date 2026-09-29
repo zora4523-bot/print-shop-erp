@@ -78,7 +78,7 @@ function toolbar(q: string, type = '') {
   );
 }
 
-it('AdminListToolbar：提交 → 清空 → 字段为空；后退 / 前进时按 URL 重建', async () => {
+it('AdminListToolbar：提交 → 清除筛选 → 字段为空；后退 / 前进时按 URL 重建', async () => {
   show(toolbar(''));
   const q = page.getByRole('textbox');
   const type = page.getByRole('combobox', { name: '类型' });
@@ -87,7 +87,7 @@ it('AdminListToolbar：提交 → 清空 → 字段为空；后退 / 前进时�
   expect(nav.submits.at(-1)?.get('q')).toBe('旧词');
   show(toolbar('旧词', 'CUSTOMER'));
 
-  await page.getByRole('link', { name: '清空', exact: true }).click();
+  await page.getByRole('link', { name: '清除筛选', exact: true }).click();
   expect(nav.clicks.at(-1)).toBe('/owner/parties');
   show(toolbar(''));
   await expect.element(q).toHaveValue('');

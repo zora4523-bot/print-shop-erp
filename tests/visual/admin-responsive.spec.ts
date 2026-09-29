@@ -637,8 +637,19 @@ test.describe('sales workspace', () => {
       await content.focus();
       await expect(content).toBeFocused();
       if (await content.evaluate((element) => element.scrollHeight > element.clientHeight)) {
+        // Chromium 的 End/Home 键盘滚动自带约 150ms 动画（不受 reduced-motion 影响）；
+        // 在 End 动画收尾的窗口内按 Home 会被吞掉、停在底部（2026-09-30 实测
+        // 145–180ms 区间必现）。先等 End 的 scrollend 并确认到底，再按 Home。
+        await content.evaluate((element) => {
+          (element as HTMLElement & { __e2eScrollEnd?: Promise<void> }).__e2eScrollEnd =
+            new Promise((resolve) => element.addEventListener('scrollend', () => resolve(), { once: true }));
+        });
         await page.keyboard.press('End');
+        await content.evaluate((element) => (element as HTMLElement & { __e2eScrollEnd?: Promise<void> }).__e2eScrollEnd);
         await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        await expect
+          .poll(() => content.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
+          .toBeLessThanOrEqual(1);
         await page.keyboard.press('Home');
         await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBe(0);
       }

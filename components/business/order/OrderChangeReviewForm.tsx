@@ -390,7 +390,7 @@ export function OrderChangePricingPreviewPanel({
             >
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
                 <p className="admin-wrap-anywhere min-w-0 font-medium">
-                  {item.operation === 'ADD' ? '新增款式' : '修改款式'}
+                  {item.operation === 'ADD' ? '添加款式' : '修改款式'}
                   {currentItem ? ` #${currentItem.sequence}` : ''} ·{' '}
                   {externalPriceBusinessText(item.name)}
                 </p>
@@ -493,7 +493,7 @@ export function OrderChangeCompactPreview({ preview, currentItems }: {
       <ul data-slot="order-change-summary" className="space-y-2 text-sm">
         {preview.items.map((item) => (
           <li key={`${item.changeIndex}-${item.sourceItemId}`} className="rounded-lg border p-3">
-            <p className="admin-wrap-anywhere font-medium">{item.operation === 'ADD' ? '新增款式' : '修改款式'} · {externalPriceBusinessText(item.name)}</p>
+            <p className="admin-wrap-anywhere font-medium">{item.operation === 'ADD' ? '添加款式' : '修改款式'} · {externalPriceBusinessText(item.name)}</p>
             <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
               <li>数量 {item.operation === 'ADD' ? '' : `${(item.previousQuantity ?? currentItems.find((current) => current.id === item.sourceItemId)?.quantity ?? 0).toLocaleString('zh-CN')} → `}{item.quantity.toLocaleString('zh-CN')} 个</li>
               {item.previousName && item.previousName !== item.name && <li>名称 {externalPriceBusinessText(item.previousName)} → {externalPriceBusinessText(item.name)}</li>}
@@ -684,6 +684,7 @@ function OrderChangeReviewDecisionFields({
         </ConfirmActionController>
         <ConfirmActionController level="L2"
           disabled={rejectDisabled}
+          cancelLabel="暂不拒绝"
           trigger={
             <Button
               type="button"
@@ -694,7 +695,7 @@ function OrderChangeReviewDecisionFields({
             </Button>
           }
           onConfirm={() => submit('DENY')}>
-          <ConfirmActionDialog action="拒绝这项工单修改申请" changes={[]} consequences={rejectionImpactItems} confirmText="确认拒绝申请" />
+          <ConfirmActionDialog action="拒绝这项工单修改申请" changes={[]} consequences={rejectionImpactItems} confirmText="确认拒绝申请" danger />
         </ConfirmActionController>
       </div>
     </>

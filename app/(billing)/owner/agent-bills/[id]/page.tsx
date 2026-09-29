@@ -11,7 +11,7 @@ import { AgentMonthlyBillStatus } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getAgentMonthlyBillDetail } from '@/lib/agent-monthly-billing/query';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
-import { formatMoney } from '@/lib/dashboard/format';
+import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
 import {
   ConfirmAgentMonthlyBillForm,
   CreateAgentMonthlyBillCreditForm,
@@ -19,6 +19,7 @@ import {
 } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
 import { PageHeader, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { OrderStatusSnapshotBadge } from '@/components/business/agent-monthly-billing/OrderStatusSnapshotBadge';
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -128,7 +129,7 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
                     {item.order.customName?.trim() || '未命名工单'}
                   </td>
                   <td className="px-4 py-3 align-top text-xs text-muted-foreground">
-                    {item.orderStatusSnapshot} · v{item.workOrderVersionSnapshot}
+                    <OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /> · v{item.workOrderVersionSnapshot}
                   </td>
                   <td className="px-4 py-3 align-top text-xs text-muted-foreground">
                     {formatDateTimeShanghai(item.settledAtSnapshot)}
@@ -153,8 +154,8 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
                   来源 {row.credit.sourceItem.bill.period} ·{' '}
                   {row.credit.sourceItem.orderNoSnapshot}
                 </span>
-                <strong className="font-sans tabular-nums text-destructive">
-                  {formatMoney(row.amount)}
+                <strong className="font-sans tabular-nums">
+                  {formatMoneyDelta(row.amount)}
                 </strong>
               </li>
             ))}

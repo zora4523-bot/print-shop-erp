@@ -25,11 +25,12 @@ import {
 } from '@/lib/auth/role-labels';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
-import { EmptyState, PageHeader, SectionLoading, FilterClearLink } from '@/components/ui-business';
+import { EmptyState, PageHeader, SectionLoading, FilterClearLink, LinkPendingHint } from '@/components/ui-business';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
 import { parseStrictYmd } from '@/lib/auth/schemas';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 import { formatMoney } from '@/lib/dashboard/format';
 export const metadata = { title: '我的工资' };
@@ -59,8 +60,8 @@ export default async function WorkerSalaryPage({ searchParams }: PageProps) {
     }
     return <div className="min-w-0 space-y-5">
       <nav aria-label="工资类型" className="flex gap-2 rounded-xl border bg-card p-2">
-        <Link href="/worker/salary" scroll={false} aria-current={!history ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg px-4 font-medium ${!history ? 'bg-primary text-primary-foreground' : ''}`}>计件工资</Link>
-        <Link href="/worker/salary?view=history" scroll={false} aria-current={history ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg px-4 font-medium ${history ? 'bg-primary text-primary-foreground' : ''}`}>历史工资档案</Link>
+        <Link href="/worker/salary" scroll={false} aria-current={!history ? 'page' : undefined} className={buttonVariants({ variant: !history ? 'selected' : 'outline', className: 'relative min-h-11 px-4' })}>计件工资<LinkPendingHint /></Link>
+        <Link href="/worker/salary?view=history" scroll={false} aria-current={history ? 'page' : undefined} className={buttonVariants({ variant: history ? 'selected' : 'outline', className: 'relative min-h-11 px-4' })}>历史工资档案<LinkPendingHint /></Link>
       </nav>
       {content}
     </div>;
@@ -161,7 +162,7 @@ async function SettlementList(props: SettlementSectionProps) {
   const settlements = result.rows;
   return (
     <>
-      <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${salaryQuery({ from: explicitFrom, to: explicitTo, status: value })}`} scroll={false} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm ${(sp.status ?? '') === value ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>{label}</Link>)}</nav>
+      <nav aria-label="发放状态" className="flex flex-wrap gap-2">{[['', '全部结算'], ['unpaid', '待发放'], ['paid', '已发放']].map(([value, label]) => <Link key={value} href={`/worker/salary?${salaryQuery({ from: explicitFrom, to: explicitTo, status: value })}`} scroll={false} aria-current={(sp.status ?? '') === value ? 'page' : undefined} className={buttonVariants({ variant: (sp.status ?? '') === value ? 'selected' : 'outline', className: 'relative min-h-11 px-3' })}>{label}<LinkPendingHint /></Link>)}</nav>
       <h2 className="font-semibold">{sp.status === 'unpaid' ? '待发放工资' : sp.status === 'paid' ? '已发放工资' : '已结算工资'}{rangeLabel}</h2>
       {result.productionObligations.length > 0 && <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="生产工资待办"><h2 className="font-semibold">生产工资待办</h2><p className="text-sm text-muted-foreground">以下记录尚未计入已结算工资，管理员核对后处理。</p><ul className="space-y-2">{result.productionObligations.map(item => <li key={item.id} className="min-w-0 break-words text-sm"><Link href={`/worker/orders/${item.orderId}`} className="inline-flex min-h-11 items-center underline">{item.orderName} · {item.label} · v{item.version}</Link><p>{item.status === 'WAGES_DUE' ? '实际生产已核定，工资待补发' : item.status === 'REQUESTED' ? `数量待核定：${item.quantity} 个` : '历史生产待核对'}{item.workDate ? ` · ${item.workDate}` : ` · ${item.periodStart} 至 ${item.periodEnd}`}</p></li>)}</ul></section>}
       {settlements.length === 0 ? (
@@ -442,20 +443,20 @@ function SalaryRangeFilter({
       {status === 'paid' || status === 'unpaid' ? <input type="hidden" name="status" value={status} /> : null}
       <label className="space-y-1">
         <span className="text-sm text-muted-foreground">{fromLabel}</span>
-        <input
+        <Input
           type={inputType}
           name="from"
           defaultValue={from ?? ''}
-          className="min-h-11 w-full rounded-md border bg-background px-3"
+          className="w-full"
         />
       </label>
       <label className="space-y-1">
         <span className="text-sm text-muted-foreground">{toLabel}</span>
-        <input
+        <Input
           type={inputType}
           name="to"
           defaultValue={to ?? ''}
-          className="min-h-11 w-full rounded-md border bg-background px-3"
+          className="w-full"
         />
       </label>
       <div className="flex flex-wrap gap-2 min-[360px]:col-span-2">

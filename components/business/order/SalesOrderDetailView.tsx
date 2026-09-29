@@ -151,7 +151,8 @@ export function SalesOrderDetailView({
         <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <PageHeader
-              back={{ href: '/orders', label: '返回工单列表' }}
+              // 改单页的返回由表单区「返回工单」承担（受离开拦截保护），页头不再重复（§8.3）。
+              back={editForm ? undefined : { href: '/orders', label: '返回工单列表' }}
               title={order.customName?.trim() || '未命名工单'}
               status={
                 <>

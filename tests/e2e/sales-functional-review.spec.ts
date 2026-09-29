@@ -150,7 +150,7 @@ test('管理员保存后，已打开的销售详情可刷新看到名称、备�
     await login(adminPage, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: `/orders/${id}/edit` });
     await adminPage.getByRole('textbox', { name: '工单名称', exact: true }).fill('管理员更新可见工单');
     await adminPage.getByRole('textbox', { name: /工单备注/ }).fill('管理员修改备注\n请核对后发货');
-    await adminPage.getByLabel('包装补充说明（选填）').fill('贴客户标签后封口');
+    await adminPage.getByLabel('包装补充说明', { exact: true }).fill('贴客户标签后封口');
     await adminPage.getByRole('textbox', { name: '收件人', exact: true }).fill('更新收件人');
     await adminPage.getByRole('button', { name: '保存修改…', exact: true }).click();
     const confirm = adminPage.getByRole('button', { name: '保存修改', exact: true });

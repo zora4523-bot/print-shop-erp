@@ -145,7 +145,7 @@ postgres.sequential('warehouse maintenance · real isolated PostgreSQL', () => {
     const [first, second] = await ordered(restoreFirst ? restore : stop, restoreFirst ? stop : restore);
     expect(first!.status).toBe('fulfilled');
     expect(second!.status).toBe(restoreFirst ? 'fulfilled' : 'rejected');
-    if (!restoreFirst && second!.status === 'rejected') expect(String(second!.reason)).toContain('请先恢复所属仓库');
+    if (!restoreFirst && second!.status === 'rejected') expect(String(second!.reason)).toContain('请先启用所属仓库');
     const warehouseOff = await db.warehouse.findUniqueOrThrow({ where: { id: f.warehouse.id } });
     expect(warehouseOff.isActive).toBe(false);
     expect((await db.warehouseLocation.findUniqueOrThrow({ where: { id: f.target.id } })).isActive).toBe(restoreFirst);

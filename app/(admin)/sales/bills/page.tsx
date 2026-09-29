@@ -6,6 +6,7 @@ import { listSalesMonthlyBills } from '@/lib/agent-monthly-billing/sales-query';
 import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PageHeader, EmptyState, TableScrollArea, StatusBadge, StatCard, FilterClearLink } from '@/components/ui-business';
 import { NativeSelect } from '@/components/ui/native-select';
 
@@ -30,7 +31,7 @@ export default async function SalesBillsPage({ searchParams }: { searchParams: P
       <label className="grid gap-1">状态<NativeSelect name="status" defaultValue={filters.status ?? ''}>
         <option value="">全部</option>{Object.entries(SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY).map(([value, entry]) => <option key={value} value={value}>{entry.label}</option>)}
       </NativeSelect></label>
-      <label className="grid gap-1">周期<input name="period" type="month" defaultValue={filters.period ?? ''} className="min-h-11 rounded-md border bg-background px-3" /></label>
+      <label className="grid gap-1">周期<Input name="period" type="month" defaultValue={filters.period ?? ''} className="w-auto" /></label>
       <Button type="submit">筛选</Button><FilterClearLink formId="sales-bill-filters" href="/sales/bills" className={buttonVariants({ variant: 'ghost' })}>清除筛选</FilterClearLink>
     </Form>
     {rows.length === 0 ? <EmptyState title="当前筛选条件下暂无账单" /> : <TableScrollArea label="我的月账单">

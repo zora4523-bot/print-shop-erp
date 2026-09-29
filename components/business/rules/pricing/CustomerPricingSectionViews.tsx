@@ -1,3 +1,4 @@
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -199,37 +200,16 @@ function PricingSectionHeading({
   criticalBasis = false,
   actions,
 }: PricingSectionHeadingProps) {
+  // 分区即页面：标题经 RuleCenterPageHeader / PageHeader（ui-规范 §8.3）。
+  // 计价口径不同于相邻分区时用 primary 强调，不用红色（红色只表示危险 / 失败）。
   return (
-    <header className="min-w-0">
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1
-              id={headingId}
-              className="admin-wrap-anywhere text-lg font-semibold tracking-tight sm:text-xl"
-            >
-              {title}
-            </h1>
-            {basis ? (
-              <Badge
-                variant="outline"
-                className={cn(
-                  'h-auto rounded-md px-2 py-0.5 font-mono text-xs font-bold tracking-wide',
-                  criticalBasis && 'border-destructive text-destructive',
-                )}
-              >
-                {basis}
-              </Badge>
-            ) : null}
-          </div>
-        </div>
-        {actions ? (
-          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
-            {actions}
-          </div>
-        ) : null}
-      </div>
-    </header>
+    <RuleCenterPageHeader
+      titleId={headingId}
+      title={title}
+      scope={basis}
+      scopeEmphasis={criticalBasis}
+      actions={actions}
+    />
   );
 }
 
@@ -590,7 +570,7 @@ export function CustomerMachinePricingSectionView({
             </div>
             <Badge
               variant="outline"
-              className="h-auto w-fit shrink-0 rounded-md px-2 py-0.5 text-xs font-bold text-destructive"
+              className="h-auto w-fit shrink-0 rounded-md border-primary/40 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary"
             >
               默认 0 元 · 可人工添加
             </Badge>

@@ -32,13 +32,13 @@ test('管理员调整计薪次数，旧师傅页面拒绝，后续工资按新�
     await expect(form).toContainText(`${before} 次 → ${next} 次`);
     await form.getByRole('button', { name: '保存计薪次数' }).click();
     await expect(form.getByRole('button', { name: '核对调整' })).toBeVisible();
-    for (const [label, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await report.getByRole('spinbutton', { name: label, exact: true }).fill(value);
+    for (const [label, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['不良数', '0'], ['返工数', '0']]) await report.getByRole('spinbutton', { name: label, exact: true }).fill(value);
     await report.getByRole('button', { name: '提交扫码报工' }).click();
     await report.getByRole('button', { name: '确认报工', exact: true }).click();
     await expect(report.getByRole('alert')).toContainText('计薪次数已调整');
     await worker.reload();
     await expect(report).toContainText(`计薪过版次数：${next} 次`);
-    for (const [label, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await report.getByRole('spinbutton', { name: label, exact: true }).fill(value);
+    for (const [label, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['不良数', '0'], ['返工数', '0']]) await report.getByRole('spinbutton', { name: label, exact: true }).fill(value);
     await report.getByRole('button', { name: '提交扫码报工' }).click();
     await report.getByRole('button', { name: '确认报工', exact: true }).click();
     await expect(report.getByRole('status')).toContainText('已记录本次报工');

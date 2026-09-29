@@ -133,7 +133,7 @@ gates:
 | 场景 | 组件 |
 |---|---|
 | 动作 | `Button`（原生 `<button>` 只允许在 `global-error.tsx`） |
-| 表单 | `Input`、`Textarea`、`Label`、`Checkbox`、`NativeSelect`（新增，**P2-2**；收口前不再复制本地 `selectClass`） |
+| 表单 | `Input`、`Textarea`、`Label`、`Checkbox`、`NativeSelect`（同一套规格见 `components/ui/field-styles.ts`；业务代码禁止原生 `<select>` / `<textarea>` / 可见 `<input>`，eslint 拦截） |
 | 容器 | `Card` 家族；手写卡面允许的唯一字面串是 `rounded-xl border bg-card p-4 shadow-sm`，新代码用 `Card` |
 | 提示 | `Alert` 家族 |
 | 普通模态 | `Dialog` |
@@ -499,6 +499,14 @@ P0-1 已完成，`baseline.json` 的 `money` 待迁移条目为 0；费率与阶
 | 一线表单字段错误未接 `FormMessage` | 12 文件 / 50 处 | **P2-6** |
 | 空态引导整句（带句号） | 约 10 处（`background-jobs/page.tsx:90`、`BomForm.tsx:159,160,270`、`SettingsForm.tsx:297` 等） | 允许（§5.5） |
 | 手写卡面 284 处 / 112 文件、手写通知块 27 文件、裸 `role=status/alert` | — | **收编**，不迁移（§3.2、§5.4） |
+
+### A-9 作废工单警示页的强化样式（§2.2–2.5，有意例外）
+
+| 位置 | 超出刻度的写法 | 原因 | 验证方式 |
+|---|---|---|---|
+| `app/wo/[orderNo]/page.tsx` 的 `ObsoleteWorkOrderAlert`（旧版本二维码落地页） | `font-black`、`tracking-[0.22em]`、`rounded-2xl`、`border-4`、`shadow-2xl`，整页 `bg-destructive` | 车间扫到作废纸单时必须立刻停止生产；这是全系统唯一需要「最高视觉强度」的禁止生产警示，常规字重、圆角、阴影刻度不足以在车间光线和手机小屏下拦住误用 | 颜色只用 `destructive` / `destructive-foreground` 令牌，明暗两套都有定义、无裸色；扫码行为由 `tests/e2e/work-order-single-qr.spec.ts` 断言警示文案。改动此页时在浅色与暗色下各打开一次旧版本二维码链接，人工确认对比度与文字完整（暂无自动化明暗截图） |
+
+**永久例外**，不迁移；其他页面不得援引本条使用同类写法。
 
 ### 工单文案准入与回归（2026-09-12）
 

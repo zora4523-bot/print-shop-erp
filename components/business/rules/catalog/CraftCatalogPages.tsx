@@ -15,7 +15,7 @@ import {
 import { CraftsTable } from '@/components/business/craft/CraftsTable';
 import { ToggleActiveButton } from '@/components/business/craft/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice, FormPageContainer } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
@@ -117,7 +117,7 @@ export async function NewCraftCatalogItem({
   await requirePermission('dict:craft:manage');
   return (
     <FormPendingScope>
-    <div className="space-y-4">
+    <FormPageContainer>
       <RuleCenterPageHeader
         lockBackWhilePending
         title="新建工艺"
@@ -132,7 +132,7 @@ export async function NewCraftCatalogItem({
           routeBase={routeBase}
         />
       </div>
-    </div>
+    </FormPageContainer>
     </FormPendingScope>
   );
 }

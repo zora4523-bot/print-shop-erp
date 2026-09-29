@@ -16,6 +16,7 @@ import {
 } from '@/lib/salary/daily';
 import { getAttendanceSummaries } from '@/lib/attendance';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
 import { EmptyState, PageHeader, StatCard, TableScrollArea, FilterClearLink } from '@/components/ui-business';
@@ -221,11 +222,11 @@ function FilterBar({
     <Form id="salary-daily-filters" key={JSON.stringify([selectedDate, paid ?? '', workerId ?? ''])} action="/owner/salary/daily" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">日期</span>
-        <input
+        <Input
           type="date"
           name="date"
           defaultValue={selectedDate}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="block w-auto min-w-0 max-w-full"
         />
       </label>
       <label className="min-w-0 max-w-full space-y-1">

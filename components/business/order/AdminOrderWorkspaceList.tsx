@@ -141,7 +141,7 @@ function AdminOrderWorkspaceListInner({
         <div className="p-4">
           <TableEmptyState
             variant="compact"
-            title={hasFilters ? '没有符合筛选条件的工单' : '这个队列清空了'}
+            title={hasFilters ? '没有符合筛选条件的工单' : '暂无工单'}
             action={hasFilters ? (
               // 与筛选栏同一个清除入口：显式 reset 筛选表单，避免未提交输入残留。
               <OrderFilterClearLink href={clearFiltersHref} scroll pendingHint={false} className={buttonVariants({ variant: 'outline' })} />
@@ -267,7 +267,10 @@ function AdminOrderRow({
         <p
           className={cn(
             'font-sans text-sm font-semibold tabular-nums',
-            feeAmount.pending && 'text-xs text-warning-foreground',
+            // 待工厂核价 / 金额不完整 = 主强调（§4.3），未报价草稿保持中性。
+            feeAmount.pending && 'text-xs',
+            feeAmount.pending && order.status !== 'DRAFT' && 'text-primary',
+            feeAmount.pending && order.status === 'DRAFT' && 'text-muted-foreground',
           )}
         >
           {feeAmount.label}
@@ -294,7 +297,7 @@ function AdminOrderRow({
           <Link
             href={`/orders/${encodeURIComponent(order.id)}`}
             prefetch={false}
-            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), styles.action, rowActionClassName(order))}
+            className={cn(buttonVariants({ variant: rowActionVariant(order), size: 'sm' }), styles.action)}
           >
             {rowActionLabel(order)}
           </Link>
@@ -415,17 +418,18 @@ export function showOrderProgress(order: AdminOrderWorkspaceRow): boolean {
 
 function rowSummaryClassName(order: AdminOrderWorkspaceRow): string {
   if (order.status === 'REJECTED' || order.progress.foilingOverLimit || order.progress.packingOverLimit) return 'text-destructive';
-  if (order.fee.source === 'PENDING' || order.status === 'ON_HOLD' || order.statusSummary?.startsWith('⚠')) return 'text-warning-foreground';
+  if (order.status === 'ON_HOLD' || order.statusSummary?.startsWith('⚠')) return 'text-warning-foreground';
+  // 待工厂核价不是风险也不是失败（§4.3）。
+  if (order.fee.source === 'PENDING' && order.status !== 'DRAFT') return 'text-primary';
   return 'text-muted-foreground';
 }
 
-function rowActionClassName(order: AdminOrderWorkspaceRow): string {
+/** 需要处理的工单行给主按钮，其余次要按钮；不再用 className 覆写成墨色（§8.2）。 */
+function rowActionVariant(order: AdminOrderWorkspaceRow): 'default' | 'outline' {
   const actionable = order.pendingChangeRequest || order.fee.source === 'PENDING' ||
     ['PENDING_FACTORY', 'SUBMITTED'].includes(order.status) ||
     order.capabilities.confirm || order.capabilities.release || order.capabilities.ship || order.printPending;
-  return actionable
-    ? 'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'
-    : '';
+  return actionable ? 'default' : 'outline';
 }
 
 function rowActionLabel(order: AdminOrderWorkspaceRow): string {

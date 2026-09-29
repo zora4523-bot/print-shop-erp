@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import type { CraftSummary } from '@/lib/craft';
 import { isRetiredCraft } from '@/lib/rules/retired-catalog';
 import {
@@ -61,7 +62,7 @@ export function CraftsTable({
               <Link
                 href={`${editBase}/${c.id}`}
                 prefetch={false}
-                className="text-sm text-primary underline hover:no-underline"
+                className={buttonVariants({ variant: 'ghost', size: 'sm' })}
               >
                 编辑
               </Link>

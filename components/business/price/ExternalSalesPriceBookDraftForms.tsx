@@ -782,7 +782,7 @@ export function PublishCustomerPriceBookDraftForm({
               或价格在 0 元与非零之间、无报价与有报价之间切换，
               以及有效规则新增、移除或启停时，需要单独确认。
             </p>
-            <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
               <Checkbox
                 name="confirmedHighRisk"
                 value="true"
@@ -796,7 +796,7 @@ export function PublishCustomerPriceBookDraftForm({
                   errors.confirmedHighRisk,
                 )}
               />
-              <span className="min-w-0 py-2">
+              <span className="min-w-0 py-3">
                 我已逐条核对高风险变更，确认按当前新规则发布
               </span>
             </label>
@@ -1144,7 +1144,7 @@ function MatchCheckboxGroup<T extends string>({
           (value) => (
             <label
               key={value}
-              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
             >
               <Checkbox
                 name={name}
@@ -1820,7 +1820,7 @@ export function CustomerPriceBookDraftRuleForm({
                 ['match.perFoilPass', '按实际烫金道数乘算', rule.match.perFoilPass],
                 ['match.perPrintColor', '按实际彩印颜色数乘算', rule.match.perPrintColor],
               ].map(([name, label, checked]) => (
-                <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
                   <Checkbox
                     name={String(name)}
                     value="true"
@@ -1900,7 +1900,7 @@ export function CustomerPriceBookDraftRuleForm({
       >
         <legend className="px-1 text-sm font-medium">规则状态</legend>
         <input type="hidden" name="isActive" value="false" />
-        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
           <Checkbox className="-ml-3"
             name="isActive"
             value="true"
@@ -1922,7 +1922,7 @@ export function CustomerPriceBookDraftRuleForm({
               name="blocksAutomaticQuote"
               value="false"
             />
-            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
               <Checkbox className="-ml-3"
                 name="blocksAutomaticQuote"
                 value="true"
