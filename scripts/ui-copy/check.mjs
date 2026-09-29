@@ -52,8 +52,13 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     // 直接处在显示位置（JSX 属性值、作为子节点的 {"…"}）的字面量不是字段键，照常检查
     // （Codex 2026-09-29：`{"finishedAt"}`、`aria-label="finishedAt"` 曾被误豁免）。经常量 /
     // 映射表间接传入的纯标识符仍按字段键豁免，避免把 label 映射的键名误报为外显文案。
-    const directDisplay = ts.isJsxAttribute(node.parent)
-      || (ts.isJsxExpression(node.parent) && (ts.isJsxAttribute(node.parent.parent) || ts.isJsxElement(node.parent.parent) || ts.isJsxFragment(node.parent.parent)));
+    // 穿透括号、三元分支与 && / || / ?? 操作数（它们只是选出哪段文案显示）。
+    let site = node;
+    while (site.parent && (ts.isParenthesizedExpression(site.parent)
+      || (ts.isConditionalExpression(site.parent) && site.parent.condition !== site)
+      || (ts.isBinaryExpression(site.parent) && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(site.parent.operatorToken.kind)))) site = site.parent;
+    const directDisplay = ts.isJsxAttribute(site.parent)
+      || (ts.isJsxExpression(site.parent) && (ts.isJsxAttribute(site.parent.parent) || ts.isJsxElement(site.parent.parent) || ts.isJsxFragment(site.parent.parent)));
     const codeKey = !ts.isJsxText(node) && !directDisplay && /^[A-Za-z0-9_.]+$/.test(text);
     for (const rule of config.bannedPatterns ?? []) {
       if (codeKey && rule.skipCodeKeys) continue;

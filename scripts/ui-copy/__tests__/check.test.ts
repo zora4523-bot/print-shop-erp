@@ -154,6 +154,10 @@ describe('pattern rule precision', () => {
     expect(check('const x = <th>{"finishedAt"}</th>;')).toHaveLength(1);
     expect(check('const x = <button aria-label="finishedAt">x</button>;')).toHaveLength(1);
     expect(check('const x = <p title={"settledTotal"}>x</p>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok ? "finishedAt" : "创建时间"}</span>;')).toHaveLength(1);
+    expect(check('const x = <span>{("finishedAt")}</span>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <button aria-label={ok ? "settledTotal" : "合计"}>x</button>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok && "finishedAt"}</span>;')).toHaveLength(1);
   });
 
   it('ignores inline script source', () => {
