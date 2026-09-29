@@ -16,6 +16,12 @@ export type PageHeaderBack = {
    * 语义与 PendingLink 一致。只在客户端表单持有 pending 时传入。
    */
   pending?: boolean;
+  /**
+   * 站内导航即将发生时调用（Next Link onNavigate；Cmd/Ctrl 新标签打开不触发）。
+   * 有未保存内容时调用 `event.preventDefault()` 取消本次导航，改由调用方弹出
+   * 「放弃修改并离开」确认层——`beforeunload` 拦不住站内跳转。
+   */
+  onNavigate?: (event: { preventDefault(): void }) => void;
 };
 
 /** 页面 H1 的字重与换行（字号按 size 另给）；无权限空态等整页标题复用它，保持同一层级。 */
@@ -64,7 +70,7 @@ export function PageHeader({
       {breadcrumb}
       {back ? (
         back.pending === undefined ? (
-          <Link href={back.href} data-slot="page-header-back" className={BACK_CLASS}>
+          <Link href={back.href} onNavigate={back.onNavigate} data-slot="page-header-back" className={BACK_CLASS}>
             <ChevronLeft aria-hidden="true" className="size-4 shrink-0" />
             {back.label}
           </Link>
@@ -72,6 +78,7 @@ export function PageHeader({
           <PendingLink
             href={back.href}
             pending={back.pending}
+            onNavigate={back.onNavigate}
             data-slot="page-header-back"
             className={BACK_CLASS}
           >

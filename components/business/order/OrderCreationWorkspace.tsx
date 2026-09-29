@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useOrderFormLeaveGuard } from './use-order-form-leave-guard';
+import { PageHeader } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
 import { OrderForm, type OrderFormProps } from './OrderForm';
 import type { OrderCreatedEntry, OrderCreationEditor, OrderEditorSnapshot } from './order-creation-editor';
@@ -153,6 +154,8 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const formVisible = Boolean(active && !(showResult && active.created));
   if (!active) return <p role="status" className="p-4 text-sm text-muted-foreground">正在恢复建单草稿…</p>;
   return <div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
+    {/* 表单（含其页头）隐藏时——完成 / 恢复已保存工单——由工作台给出页面 H1（§8.3）。 */}
+    {!formVisible ? <PageHeader title="新建工单" back={{ href: '/orders', label: '返回工单列表' }} /> : null}
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant="outline" disabled={(!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 添加工单</Button>
@@ -186,6 +189,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
         draftScope={entry.primary ? props.draftScope : `${props.draftScope}:batch:${entry.id}`}
         workbenchTransferId={entry.primary ? props.workbenchTransferId : undefined}
         submissionId={entry.id} initialEditor={initialEditor} registerEditor={registerEditor} active={active}
+        otherOrdersHaveUnsavedFiles={Object.entries(snapshots).some(([id, snapshot]) => id !== entry.id && snapshot.files.some((files) => files.length > 0))}
         lifecycle={{ submissionId: entry.id, retainResult: entries.length > 1, onCreated: (result) => created(entry.id, result),
           onCompleted: (result) => completed(entry.id, result), onBusyChange: (busy) => { if (entry.id === activeId) setSampleBusy(busy); } }} />} />)}
   </div>;

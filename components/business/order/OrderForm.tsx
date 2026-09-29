@@ -39,7 +39,7 @@ import { AdminCreatePriceFields } from './AdminCreatePriceFields';
 import { adminCreatePriceFactsKey, calculateAdminCreatePrice, sumCreateKnownAmounts, adminPackagingPriceFactsKey, calculateAdminPackagingPrice } from '@/lib/order/admin-create-price';
 import { WorkbenchOrderTransfer } from './WorkbenchOrderTransfer';
 import { LocalOrderDrafts } from './LocalOrderDrafts';
-import { ActionNotice } from '@/components/ui-business';
+import { ActionNotice, PageHeader } from '@/components/ui-business';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { orderItemSelectionUpdate, type OrderItemSelectionChange } from '@/lib/order/order-item-selection';
 import { OrderItemProductField } from './order-form-b/OrderItemFields';
@@ -83,6 +83,7 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useOrderFormLeaveConfirm } from './use-order-form-leave-confirm';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
 import {
   DesignFileType,
@@ -227,6 +228,8 @@ export type OrderFormProps = {
    * 此时不登记 editor、不挂离开守卫；草稿自动保存照常（各自独立的 draftScope）。
    */
   active?: boolean;
+  /** 批量工作台：其他工单还有未上传的设计文件（页头返回需确认离开）。 */
+  otherOrdersHaveUnsavedFiles?: boolean;
   lifecycle?: OrderCreationLifecycle;
   workbenchTransferId?: string;
   crafts: readonly CraftOption[];
@@ -654,7 +657,7 @@ export function OrderForm({
   workbenchTransferId,
   initialEditor,
   submissionId,
-  registerEditor, active = true,
+  registerEditor, active = true, otherOrdersHaveUnsavedFiles = false,
   lifecycle,
 }: OrderFormProps) {
   const sampleEditorRef = useRef(initialEditor?.sample);
@@ -918,6 +921,11 @@ export function OrderForm({
     },
     [localDraftPricingScope, localDraftStorageKey],
   );
+  const leaveConfirm = useOrderFormLeaveConfirm({
+    href: '/orders', pendingFileCount: pendingDesignFileCount, otherOrdersHaveUnsavedFiles: active && otherOrdersHaveUnsavedFiles,
+    protectedLeave: shouldProtectOrderFormLeave({ enabled: active, dirty: isDirty, pendingFileCount: pendingDesignFileCount, submitted: Boolean(submittedOrder) }),
+    persistDraft: () => { persistLocalDraftValues(getValues()); },
+  });
 
   useEffect(() => {
     if (!registerEditor || !active) return;
@@ -2615,7 +2623,9 @@ export function OrderForm({
       externalSalesAccounts={externalSalesAccounts} onExternalSalesChange={changeExternalSales} />;
   }
   if (submittedOrder) {
-    return (
+    // 成功页也要有页面 H1（§8.3）；表单页头随表单一起卸载了。
+    return (<>
+      <PageHeader title="新建工单" back={{ href: '/orders', label: '返回工单列表' }} />
       <OrderSubmissionSuccess
         orderNumber={submittedOrder.orderNo}
         statusLabel={
@@ -2636,7 +2646,7 @@ export function OrderForm({
           onClick: () => router.push('/orders'),
         }}
       />
-    );
+    </>);
   }
 
   return (
@@ -2657,6 +2667,7 @@ export function OrderForm({
           onContinue={() => setTransferReady(true)}
         />
       ) : null}
+      {leaveConfirm.dialog}
       {!createdDraft ? (
         <LocalOrderDrafts
           baseKey={existingLocalDraftKey}
@@ -2706,7 +2717,7 @@ export function OrderForm({
           <OrderFormB
             title="新建工单"
             // 页头唯一返回入口；提交 / 上传中锁住，避免中途离开（§8.3）。
-            back={{ href: '/orders', label: '返回工单列表', pending: submitting || uploading }}
+            back={{ href: '/orders', label: '返回工单列表', pending: submitting || uploading, onNavigate: leaveConfirm.onNavigate }}
             settlementLabel={settlementLabel}
             customNameRequired
             designImageRequired
