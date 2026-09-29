@@ -29,6 +29,8 @@ describe('已确认的烫金师傅整单工资', () => {
   });
   it('专版按不同颜色计数，相同颜色出现在两面不翻倍', () => {
     expect(fullFoilColorCount(['亚金', '红色'], ['亚金'])).toBe(2);
+    expect(fullFoilColorCount(['哑金'], ['亚金'])).toBe(1);
+    expect(fullFoilColorCount(['哑金', '红色'], ['亚金', '红金'])).toBe(2);
     expect(fullFoilColorCount(['亚金', '红色', '蓝色'], [])).toBe(3);
   });
   it('缺颜色或超过三个颜色不能默认为单色', () => {

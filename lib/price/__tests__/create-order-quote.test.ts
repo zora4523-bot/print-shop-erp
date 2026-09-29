@@ -87,6 +87,20 @@ function printItem(
 }
 
 describe('calculateCreateOrderQuote · 局部烫金黄金用例', () => {
+  it.each(['PARTIAL', 'FULL'] as const)('rejects duplicate matte-gold aliases before %s pricing', (craft) => {
+    const result = quoteSingle(createGoldenOrderItem({ craft, frontColors: ['哑金', '亚金'] }));
+    expect(result).toMatchObject({ status: 'INVALID_INPUT', submittable: false });
+    expect(result.items[0]?.errors).toContain('同一面的烫金颜色不能重复');
+  });
+
+  it('keeps separate front and back passes for the same matte-gold color', () => {
+    const aliases = quoteSingle(createGoldenOrderItem({ frontColors: ['哑金'], backColors: ['亚金'] }));
+    const identical = quoteSingle(createGoldenOrderItem({ frontColors: ['亚金'], backColors: ['亚金'] }));
+    expect(aliases.status).toBe('QUOTED');
+    expect(aliases.order).toEqual(identical.order);
+    expect(aliases.items[0]?.lines).toEqual(identical.items[0]?.lines);
+  });
+
   it.each(RULE8_PARTIAL_GOLDEN_CASES)(
     '$caseId [$section] $label',
     ({ item, expected }) => {

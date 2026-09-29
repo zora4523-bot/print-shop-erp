@@ -37,6 +37,20 @@ function item(overrides: Record<string, unknown> = {}) {
   };
 }
 
+it('rejects matte-gold aliases in both explicit and legacy single-side pricing facts', () => {
+  for (const colors of [
+    { frontFoilColors: ['哑金', '亚金'], backFoilColors: [], foilColors: ['哑金', '亚金'] },
+    { foilColors: ['哑金', '亚金'] },
+  ]) {
+    const result = createOrderQuoteItemsSchema.safeParse({ items: [item({ ...colors, isDoubleSided: false })] });
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    expect(result.error.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ message: '同一面的烫金颜色不能重复' }),
+    ]));
+  }
+});
+
 function order(overrides: Record<string, unknown> = {}) {
   return {
     customerRef: '测试客户',

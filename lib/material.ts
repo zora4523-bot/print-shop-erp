@@ -1,5 +1,6 @@
 import { acquireWarehouseStockLock } from '@/lib/warehouse-coordination';
 import { isRetiredPaper } from '@/lib/rules/paper-availability';
+import { orderFoilColorOptions } from '@/lib/order/foil-color-identity';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
@@ -304,7 +305,7 @@ export async function listExternalCreateOrderPaperOptions(
 export async function listExternalCreateOrderFoilOptions(
   client: CreateOrderMaterialReadClient = db,
 ): Promise<ExternalCreateOrderFoilOption[]> {
-  return client.material.findMany({
+  const materials = await client.material.findMany({
     where: { category: MaterialCategory.FOIL, isActive: true },
     select: {
       id: true,
@@ -316,6 +317,7 @@ export async function listExternalCreateOrderFoilOptions(
     },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
   });
+  return orderFoilColorOptions(materials);
 }
 
 export async function getMaterialSummary(

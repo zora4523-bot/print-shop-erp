@@ -43,6 +43,17 @@ function validInput(): ExternalCreateOrderSubmitInput {
 }
 
 describe('external create-order command contract', () => {
+  it('rejects two names for the same matte-gold color on one side', () => {
+    const input = validInput();
+    input.styles[0]!.frontColors = ['哑金', '亚金'];
+    const result = externalCreateOrderSubmitSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ['styles', 0, 'frontColors'], message: '同一面的颜色不能重复' }),
+    ]));
+  });
+
   it('accepts canonical business facts without derived counts', () => {
     const result = externalCreateOrderSubmitSchema.safeParse(validInput());
     expect(result.success).toBe(true);

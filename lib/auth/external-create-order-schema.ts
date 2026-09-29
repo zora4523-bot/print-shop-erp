@@ -1,5 +1,6 @@
 import { OrderPackagingMode } from '@/generated/prisma/enums';
 import { MAX_CREATE_ORDER_UNITS_PER_BAG } from '@/lib/order/create-order-packaging';
+import { hasDuplicateFoilColors } from '@/lib/order/foil-color-identity';
 import { z } from 'zod';
 
 export const externalOrderCraftValues = [
@@ -39,7 +40,7 @@ const colorArray = z
   .array(trimmedRequired('烫金颜色', 32))
   .max(3, '每面最多选择 3 种烫金颜色')
   .superRefine((colors, ctx) => {
-    if (new Set(colors).size !== colors.length) {
+    if (hasDuplicateFoilColors(colors)) {
       ctx.addIssue({ code: 'custom', message: '同一面的颜色不能重复' });
     }
   });

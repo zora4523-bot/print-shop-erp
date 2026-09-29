@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ORDER_PURPOSES } from '../../order/purpose';
 import { OrderFoilTechnique, OrderItemPricingRoute, OrderLamination, OrderPackagingMode, OrderProductStructure } from '../../../generated/prisma/enums';
 import { MAX_ORDER_ITEM_FOIL_COLORS } from '../../order/foil-colors';
+import { hasDuplicateFoilColors } from '@/lib/order/foil-color-identity';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '../../order/limits';
 import { MAX_ORDER_ITEM_PRINT_COLORS } from '../../order/print-colors';
 import { MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE, isNewOrderPricingRoute, resolveOrderItemFoilSides } from '../../order/pricing-route';
@@ -202,6 +203,13 @@ function validateOrderItemPricingFacts(
   }
 
   const { frontFoilColors, backFoilColors } = resolveOrderItemFoilSides(item);
+  for (const [field, colors] of [
+    ['frontFoilColors', frontFoilColors], ['backFoilColors', backFoilColors],
+  ] as const) {
+    if (hasDuplicateFoilColors(colors)) {
+      ctx.addIssue({ code: 'custom', path: [field], message: '同一面的烫金颜色不能重复' });
+    }
+  }
   const actualFoilColors = [...frontFoilColors, ...backFoilColors];
   if (
     item.pricingRoute !== OrderItemPricingRoute.COLOR_PRINT &&

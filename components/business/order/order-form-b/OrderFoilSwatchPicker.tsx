@@ -1,6 +1,7 @@
 'use client';
 
 import { foilColorLabel } from '@/lib/order/foil-colors';
+import { foilColorIdentity, uniqueFoilColors } from '@/lib/order/foil-color-identity';
 
 import Image from 'next/image';
 import { ArrowDown, ArrowUp, X } from 'lucide-react';
@@ -78,6 +79,19 @@ const FOIL_TONE_STYLES: Record<OrderFoilSwatchTone, CSSProperties> = {
   },
 };
 
+const COLOR_TONES: Readonly<Record<string, OrderFoilSwatchTone>> = {
+  亚金: 'matte-gold', 浅色: 'light-gold', 红色: 'red', 黑色: 'black',
+  银色: 'silver', 蓝色: 'blue', 透明色: 'clear', 绿色: 'green',
+};
+
+function swatchStyle(option: OrderFoilSwatchOption): CSSProperties | undefined {
+  if (option.color?.trim()) return { background: option.color };
+  const name = foilColorIdentity(option.value);
+  const tone = option.tone ?? (Object.hasOwn(COLOR_TONES, name) ? COLOR_TONES[name] : undefined);
+  // Unknown materials keep the neutral bg-muted surface; only clear foil gets a checkerboard.
+  return tone ? FOIL_TONE_STYLES[tone] : undefined;
+}
+
 export function nextOrderFoilSelection({
   current,
   option,
@@ -89,15 +103,16 @@ export function nextOrderFoilSelection({
   maxSelections: number;
   minimumSelections: number;
 }): string[] {
-  const uniqueCurrent = [...new Set(current)];
+  const uniqueCurrent = uniqueFoilColors(current);
   const maximum = Math.max(1, Math.floor(maxSelections));
   const minimum = Math.min(maximum, Math.max(0, Math.floor(minimumSelections)));
-  const selectedIndex = uniqueCurrent.indexOf(option);
+  const key = foilColorIdentity(option);
+  const selectedIndex = uniqueCurrent.findIndex((color) => foilColorIdentity(color) === key);
 
   if (selectedIndex >= 0) {
     return uniqueCurrent.length <= minimum
       ? uniqueCurrent
-      : uniqueCurrent.filter((value) => value !== option);
+      : uniqueCurrent.filter((value) => foilColorIdentity(value) !== key);
   }
   if (maximum === 1) return [option];
   if (uniqueCurrent.length >= maximum) return uniqueCurrent;
@@ -113,8 +128,8 @@ export function moveOrderFoilSelection({
   option: string;
   direction: 'up' | 'down';
 }): string[] {
-  const next = [...new Set(current)];
-  const fromIndex = next.indexOf(option);
+  const next = uniqueFoilColors(current);
+  const fromIndex = next.findIndex((color) => foilColorIdentity(color) === foilColorIdentity(option));
   const toIndex = fromIndex + (direction === 'up' ? -1 : 1);
   if (fromIndex < 0 || toIndex < 0 || toIndex >= next.length) return next;
   [next[fromIndex], next[toIndex]] = [next[toIndex], next[fromIndex]];
@@ -159,7 +174,7 @@ export function OrderFoilSwatchPicker({
       </legend>
       <div className="flex min-w-0 flex-wrap gap-2">
         {options.map((option) => {
-          const selectedIndex = selected.indexOf(option.value);
+          const selectedIndex = selected.findIndex((color) => foilColorIdentity(color) === foilColorIdentity(option.value));
           const isSelected = selectedIndex >= 0;
           const imageSrc = option.imageSrc?.trim();
           const unavailable =
@@ -187,7 +202,7 @@ export function OrderFoilSwatchPicker({
                   maxSelections: maximum,
                   minimumSelections,
                 });
-                if (next.join('\u0000') !== selected.join('\u0000')) onChange(next);
+                if (next.join('\u0000') !== value.join('\u0000')) onChange(next);
               }}
             >
               <span
@@ -210,11 +225,7 @@ export function OrderFoilSwatchPicker({
                 ) : (
                   <span
                     className="absolute inset-0"
-                    style={
-                      option.color
-                        ? { background: option.color }
-                        : FOIL_TONE_STYLES[option.tone ?? 'clear']
-                    }
+                    style={swatchStyle(option)}
                   />
                 )}
               </span>
