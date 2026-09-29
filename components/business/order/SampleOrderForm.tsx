@@ -3,7 +3,7 @@
 import type { OrderCreationLifecycle } from './order-creation-editor';
 import type { SampleOrderFormState, SampleOrderContext, SavedSampleDraft } from './sample-order-types';
 export type { SampleOrderFormState, SampleOrderContext, SavedSampleDraft } from './sample-order-types';
-import { useId, useRef, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createOrderAction, submitOrderAction } from '@/actions/order';
 import { quoteSampleOrderAction } from '@/actions/create-order-quote';
@@ -105,6 +105,12 @@ export function SampleOrderForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // 上传状态同时上报建单工作台，页头返回在上传中锁定（离开会卸载上传进度）。
+  const onUploadingChange = lifecycle?.onUploadingChange;
+  const reportUploading = useCallback((value: boolean) => {
+    setUploading(value);
+    onUploadingChange?.(value);
+  }, [onUploadingChange]);
   const [salesError, setSalesError] = useState<string | null>(null);
   const salesField = useRef<HTMLSelectElement>(null);
   const sampleItem: CreateOrderInput['items'][number] = {
@@ -323,7 +329,7 @@ export function SampleOrderForm({
               orderItemId={draft.itemIds[0]!}
               designs={[]}
               canEdit
-              onBusyChange={setUploading}
+              onBusyChange={reportUploading}
             />
           ) : null}
           <p className="text-sm">

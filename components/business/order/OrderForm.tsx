@@ -39,7 +39,7 @@ import { AdminCreatePriceFields } from './AdminCreatePriceFields';
 import { adminCreatePriceFactsKey, calculateAdminCreatePrice, sumCreateKnownAmounts, adminPackagingPriceFactsKey, calculateAdminPackagingPrice } from '@/lib/order/admin-create-price';
 import { WorkbenchOrderTransfer } from './WorkbenchOrderTransfer';
 import { LocalOrderDrafts } from './LocalOrderDrafts';
-import { ActionNotice, PageHeader } from '@/components/ui-business';
+import { ActionNotice } from '@/components/ui-business';
 import type { WorkbenchItemQuoteInput } from '@/lib/workbench/item-quote';
 import { orderItemSelectionUpdate, type OrderItemSelectionChange } from '@/lib/order/order-item-selection';
 import { OrderItemProductField } from './order-form-b/OrderItemFields';
@@ -83,7 +83,8 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useOrderFormLeaveConfirm } from './use-order-form-leave-confirm';
+import { useOrderLeaveReport, type LocalDraftSaveFailure } from './order-creation-leave';
+import { OrderCreatedSuccessView } from './OrderCreatedSuccessView';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
 import {
   DesignFileType,
@@ -122,7 +123,6 @@ import {
 import {
   OrderFormB,
   OrderSubmissionReviewDialog,
-  OrderSubmissionSuccess,
   type OrderFormBErrors,
   type OrderSubmissionReviewItem,
 } from './order-form-b';
@@ -160,10 +160,6 @@ import { calculateCreateOrderBagCount } from '@/lib/order/create-order-packaging
 import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
 import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE, ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
-import {
-  shouldProtectOrderFormLeave,
-  useOrderFormLeaveGuard,
-} from './use-order-form-leave-guard';
 import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 export type CraftOption = {
@@ -228,8 +224,6 @@ export type OrderFormProps = {
    * 此时不登记 editor、不挂离开守卫；草稿自动保存照常（各自独立的 draftScope）。
    */
   active?: boolean;
-  /** 批量工作台：其他工单还有未上传的设计文件（页头返回需确认离开）。 */
-  otherOrdersHaveUnsavedFiles?: boolean;
   lifecycle?: OrderCreationLifecycle;
   workbenchTransferId?: string;
   crafts: readonly CraftOption[];
@@ -657,7 +651,7 @@ export function OrderForm({
   workbenchTransferId,
   initialEditor,
   submissionId,
-  registerEditor, active = true, otherOrdersHaveUnsavedFiles = false,
+  registerEditor, active = true,
   lifecycle,
 }: OrderFormProps) {
   const sampleEditorRef = useRef(initialEditor?.sample);
@@ -888,14 +882,7 @@ export function OrderForm({
     (total, queue) => total + queue.length,
     0,
   );
-  useOrderFormLeaveGuard(
-    shouldProtectOrderFormLeave({
-      enabled: active,
-      dirty: isDirty,
-      pendingFileCount: pendingDesignFileCount,
-      submitted: Boolean(submittedOrder),
-    }),
-  );
+  const draftFailureRef = useRef<LocalDraftSaveFailure>('storage');
   const persistLocalDraftValues = useCallback(
     (values: CreateOrderInput) => {
       const savedAt = new Date();
@@ -905,6 +892,7 @@ export function OrderForm({
         savedAt,
       );
       if (!serialized) {
+        draftFailureRef.current = 'unserializable';
         setLocalDraftError('当前表单无法安全序列化，本地草稿未更新。');
         return false;
       }
@@ -915,17 +903,16 @@ export function OrderForm({
         setLocalDraftError(null);
         return true;
       } catch {
+        draftFailureRef.current = 'storage';
         setLocalDraftError('本地草稿保存失败，请不要在创建工单前关闭页面。');
         return false;
       }
     },
     [localDraftPricingScope, localDraftStorageKey],
   );
-  const leaveConfirm = useOrderFormLeaveConfirm({
-    href: '/orders', pendingFileCount: pendingDesignFileCount, otherOrdersHaveUnsavedFiles: active && otherOrdersHaveUnsavedFiles,
-    protectedLeave: shouldProtectOrderFormLeave({ enabled: active, dirty: isDirty, pendingFileCount: pendingDesignFileCount, submitted: Boolean(submittedOrder) }),
-    persistDraft: () => { persistLocalDraftValues(getValues()); },
-  });
+  // 离开保护由工作台统一管理（order-creation-leave）；这里只上报本单状态并取页头返回。
+  const leave = useOrderLeaveReport(submissionId, { active, dirty: isDirty, pendingFileCount: pendingDesignFileCount,
+    submitted: Boolean(submittedOrder), busy: submitting || uploading }, () => (persistLocalDraftValues(getValues()) ? null : draftFailureRef.current));
 
   useEffect(() => {
     if (!registerEditor || !active) return;
@@ -2623,30 +2610,8 @@ export function OrderForm({
       externalSalesAccounts={externalSalesAccounts} onExternalSalesChange={changeExternalSales} />;
   }
   if (submittedOrder) {
-    // 成功页也要有页面 H1（§8.3）；表单页头随表单一起卸载了。
-    return (<>
-      <PageHeader title="新建工单" back={{ href: '/orders', label: '返回工单列表' }} />
-      <OrderSubmissionSuccess
-        orderNumber={submittedOrder.orderNo}
-        statusLabel={
-          submittedOrder.readyForProduction ? '待下发生产' : '待处理'
-        }
-        description={
-          submittedOrder.manualQuote
-            ? '这张单含系统暂时无法定价的参数，工厂核价后会通知你。核价前不会安排生产。'
-            : '工单已提交，资料与费用完整后进入待下发生产。可从详情查看当前进度。'
-        }
-        manualQuote={submittedOrder.manualQuote}
-        primaryAction={{
-          label: '再建一单',
-          onClick: () => window.location.assign('/orders/new'),
-        }}
-        secondaryAction={{
-          label: '返回工单列表',
-          onClick: () => router.push('/orders'),
-        }}
-      />
-    </>);
+    // 成功页只保留页头这一个返回入口（§8.3）；离开保护与提交锁同表单页。
+    return <OrderCreatedSuccessView order={submittedOrder} back={leave.back('/orders', '返回工单列表')} />;
   }
 
   return (
@@ -2667,7 +2632,6 @@ export function OrderForm({
           onContinue={() => setTransferReady(true)}
         />
       ) : null}
-      {leaveConfirm.dialog}
       {!createdDraft ? (
         <LocalOrderDrafts
           baseKey={existingLocalDraftKey}
@@ -2717,7 +2681,7 @@ export function OrderForm({
           <OrderFormB
             title="新建工单"
             // 页头唯一返回入口；提交 / 上传中锁住，避免中途离开（§8.3）。
-            back={{ href: '/orders', label: '返回工单列表', pending: submitting || uploading, onNavigate: leaveConfirm.onNavigate }}
+            back={leave.back('/orders', '返回工单列表')}
             settlementLabel={settlementLabel}
             customNameRequired
             designImageRequired

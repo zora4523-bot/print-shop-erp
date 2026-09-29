@@ -1,10 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useOrderFormLeaveGuard } from './use-order-form-leave-guard';
-import { PageHeader } from '@/components/ui-business';
+import { useOrderCreationLeave } from './order-creation-leave';
+import { PageHeader, PendingLink } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
 import { OrderForm, type OrderFormProps } from './OrderForm';
 import type { OrderCreatedEntry, OrderCreationEditor, OrderEditorSnapshot } from './order-creation-editor';
@@ -65,7 +64,15 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const active = entries.find((entry) => entry.id === activeId);
   const showResult = Boolean(active?.done || active?.recovered);
   const navigationLocked = locked || sampleBusy || Boolean(active?.created && !showResult);
-  useOrderFormLeaveGuard(Object.values(snapshots).some((snapshot) => snapshot.files.some((files) => files.length > 0)));
+  // 离开保护收口在工作台一处：各表单 / 打样入口上报状态，所有站内离开入口经 leave.guard。
+  const leave = useOrderCreationLeave({
+    labelFor: (key) => {
+      if (entries.length <= 1) return '本单';
+      const index = entries.findIndex((entry) => entry.id === key.split(':')[0]);
+      return index < 0 ? '已移除的工单' : `工单 ${index + 1}`;
+    },
+    removedFileCount: removed ? snapshots[removed.id]?.files.flat().length ?? 0 : 0,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -153,9 +160,11 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const liveEntries = entries.filter((entry) => !entry.done && !entry.recovered);
   const formVisible = Boolean(active && !(showResult && active.created));
   if (!active) return <p role="status" className="p-4 text-sm text-muted-foreground">正在恢复建单草稿…</p>;
-  return <div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
+  const resultHref = active.created ? `/orders/${active.created.orderId}${active.created.intent === 'fees' ? '#admin-fee-editor' : ''}` : '';
+  return <leave.Provider value={leave.context}><div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
     {/* 表单（含其页头）隐藏时——完成 / 恢复已保存工单——由工作台给出页面 H1（§8.3）。 */}
-    {!formVisible ? <PageHeader title="新建工单" back={{ href: '/orders', label: '返回工单列表' }} /> : null}
+    {!formVisible ? <PageHeader title="新建工单" back={leave.back('/orders', '返回工单列表')} /> : null}
+    {leave.dialog}
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant="outline" disabled={(!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 添加工单</Button>
@@ -181,7 +190,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
       <h2 className="text-lg font-semibold">{active.done ? '工单已创建' : '工单已保存，请继续完善'}</h2>
       <p>{active.created.orderNo}</p>
       {!active.done ? <p className="text-sm text-muted-foreground">请到工单详情核对文件、费用和提交状态，继续处理已有工单。</p> : null}
-      <Link className="inline-flex min-h-11 items-center underline" href={`/orders/${active.created.orderId}${active.created.intent === 'fees' ? '#admin-fee-editor' : ''}`}>查看工单{active.created.intent === 'fees' ? '并编辑收费' : ''}</Link>
+      <PendingLink className="inline-flex min-h-11 items-center underline" href={resultHref} pending={leave.pending} onNavigate={leave.guard(resultHref)}>查看工单{active.created.intent === 'fees' ? '并编辑收费' : ''}</PendingLink>
     </section> : null}
     <div ref={setSlot} className="min-w-0" data-slot="order-creation-active-form" />
     {liveEntries.map((entry) => <KeptAliveOrderForm key={entry.id} id={entry.id} slot={slot} active={formVisible && entry.id === activeId}
@@ -189,10 +198,9 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
         draftScope={entry.primary ? props.draftScope : `${props.draftScope}:batch:${entry.id}`}
         workbenchTransferId={entry.primary ? props.workbenchTransferId : undefined}
         submissionId={entry.id} initialEditor={initialEditor} registerEditor={registerEditor} active={active}
-        otherOrdersHaveUnsavedFiles={Object.entries(snapshots).some(([id, snapshot]) => id !== entry.id && snapshot.files.some((files) => files.length > 0))}
         lifecycle={{ submissionId: entry.id, retainResult: entries.length > 1, onCreated: (result) => created(entry.id, result),
           onCompleted: (result) => completed(entry.id, result), onBusyChange: (busy) => { if (entry.id === activeId) setSampleBusy(busy); } }} />} />)}
-  </div>;
+  </div></leave.Provider>;
 }
 
 /**

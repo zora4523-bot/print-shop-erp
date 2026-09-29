@@ -10,6 +10,7 @@ import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-asso
 import { WorkbenchCalculator } from '@/components/business/workbench/WorkbenchCalculator';
 import { PageHeader } from '@/components/ui-business';
 import { EMPTY_SAMPLE_FORM, type SampleOrderFormState } from './SampleOrderForm';
+import { useOrderLeaveReport } from './order-creation-leave';
 
 type SamplePurpose = 'SAMPLE_SHIPMENT' | 'PROOF';
 export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: string, initialPurpose?: SamplePurpose | null) {
@@ -51,12 +52,16 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
   externalSalesAccounts?: readonly ExternalSalesAccountOption[];
   onExternalSalesChange?: (externalSalesUserId: string | null) => void;
 }) {
-  // 样品提交中锁住页头返回，与主建单表单一致（§8.3）。
+  // 样品提交或打样文件上传中锁住页头返回（§8.3）；状态上报工作台统一的离开保护。
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const trackedLifecycle: OrderCreationLifecycle | undefined = lifecycle ? {
     ...lifecycle,
     onBusyChange: (value) => { setBusy(value); lifecycle.onBusyChange?.(value); },
+    onUploadingChange: setUploading,
   } : undefined;
+  const leave = useOrderLeaveReport(lifecycle?.submissionId && `${lifecycle.submissionId}:sample`,
+    { active: true, dirty: false, pendingFileCount: 0, submitted: false, busy: busy || uploading });
   const values = form.getValues();
   const sampleForm: SampleOrderFormState = {
     ...EMPTY_SAMPLE_FORM,
@@ -66,7 +71,7 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
     collect: values.isSfCollect ?? false, remark: values.remark ?? '',
   };
   return <section className="space-y-4">
-    <PageHeader title="新建工单" back={{ href: '/orders', label: '返回工单列表', pending: busy }} />
+    <PageHeader title="新建工单" back={leave.back('/orders', '返回工单列表')} />
     <WorkbenchCalculator options={options} crafts={crafts}
       draftScope={`order-create:${draftScope}`}
       externalSalesAccounts={externalSalesAccounts}

@@ -18,7 +18,7 @@ export type { HeroBannerProps } from './HeroBanner';
 
 export { PageHeader } from './PageHeader';
 export { FORM_PAGE_WIDTH_CLASS, FormPageContainer } from './FormPageContainer';
-export type { PageHeaderProps } from './PageHeader';
+export type { PageHeaderBack, PageHeaderProps } from './PageHeader';
 
 export { EmptyState } from './EmptyState';
 export type { EmptyStateKind, EmptyStateProps } from './EmptyState';

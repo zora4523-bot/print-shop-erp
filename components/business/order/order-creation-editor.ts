@@ -31,4 +31,6 @@ export type OrderCreationLifecycle = {
   onCreated: (entry: OrderCreatedEntry) => void;
   onCompleted: (entry: OrderCreatedEntry) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** 打样设计文件上传中（DesignUploadPanel）：页头返回随之锁定。须传稳定引用。 */
+  onUploadingChange?: (uploading: boolean) => void;
 };
