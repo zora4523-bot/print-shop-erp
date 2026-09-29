@@ -14,6 +14,16 @@ import { DesignFileType } from '@/generated/prisma/enums';
 const noop = vi.fn();
 
 describe('OrderFoilSwatchPicker', () => {
+  it('recognizes a saved matte-gold alias instead of selecting a second color', () => {
+    expect(nextOrderFoilSelection({ current: ['哑金'], option: '亚金',
+      maxSelections: 3, minimumSelections: 1 })).toEqual(['哑金']);
+    const html = renderToStaticMarkup(<OrderFoilSwatchPicker id="legacy-gold"
+      value={['哑金']} options={[{ value: '亚金', label: '亚金' }]} onChange={noop} />);
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('aria-label="亚金，第 1 色"');
+    expect(html).not.toContain('background-size:10px 10px');
+  });
+
   it('keeps selection order, respects the minimum, and replaces in single-select mode', () => {
     expect(
       nextOrderFoilSelection({
@@ -134,6 +144,13 @@ describe('OrderFoilSwatchPicker', () => {
 
     expect(html).toContain('background-size:10px 10px');
     expect(html).toContain('background-image:linear-gradient(45deg');
+  });
+
+  it('does not render an unknown material as transparent foil', () => {
+    const html = renderToStaticMarkup(<OrderFoilSwatchPicker id="custom-foil" value={[]}
+      options={[{ value: '品牌色', label: '品牌色' }]} onChange={noop} />);
+    expect(html).not.toContain('background-size:10px 10px');
+    expect(html).not.toContain('background-image:linear-gradient(45deg');
   });
 });
 

@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { MAX_ORDER_ITEM_FOIL_COLORS, NO_FOIL_COLOR } from '../../order/foil-colors';
 import { MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE } from '../../order/pricing-route';
+import { hasDuplicateFoilColors } from '@/lib/order/foil-color-identity';
 
 // HTML checkboxes submit value="on" when checked and omit the field when
 // unchecked — unless the form sets an explicit value. Accept both the
@@ -168,7 +169,7 @@ export const orderItemFoilSideColorsField = z
     `每面烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE} 种`,
   )
   .superRefine((colors, ctx) => {
-    if (new Set(colors).size !== colors.length) {
+    if (hasDuplicateFoilColors(colors)) {
       ctx.addIssue({ code: 'custom', message: '同一面的烫金颜色不能重复' });
     }
     if (colors.includes(NO_FOIL_COLOR)) {

@@ -211,6 +211,21 @@ describe('external create-order options', () => {
     });
   });
 
+  it('projects legacy matte-gold stock and the standard swatch as one order color', async () => {
+    const legacy = { id: 'legacy-stock', code: 'MAT-000001', name: '哑金',
+      displayColor: null, displayImage: null, sortOrder: 0 };
+    const standard = { id: 'mat_foil_matte_gold', code: 'FOIL-MATTE-GOLD', name: '亚金',
+      displayColor: 'gold', displayImage: '/images/order/foil/matte-gold.png', sortOrder: 10 };
+    const materials = [legacy, standard];
+    txMock.material.findMany.mockImplementation(
+      async (args: { where: { category: MaterialCategory; isActive?: boolean } }) =>
+        args.where.category === MaterialCategory.PAPER ? paperRowsForQuery(args.where) : materials,
+    );
+    const result = await readExternalCreateOrderOptions(txMock as never);
+    expect(result.foilColors).toEqual([standard]);
+    expect(materials).toEqual([legacy, standard]);
+  });
+
   it('returns configured FOIL names and display colors without substituting defaults', async () => {
     const configuredFoilColors = [
       {

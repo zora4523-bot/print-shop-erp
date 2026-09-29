@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { hasDuplicateFoilColors } from '@/lib/order/foil-color-identity';
 import {
   decimalValue,
   safeMoney,
@@ -107,6 +108,9 @@ function appendPrintFoilManualPricePolicy(
 
 function validateItem(item: CreateOrderQuoteItemInput): string[] {
   const errors: string[] = [];
+  if (hasDuplicateFoilColors(item.frontColors) || hasDuplicateFoilColors(item.backColors)) {
+    errors.push('同一面的烫金颜色不能重复');
+  }
   if (!item.itemKey.trim()) errors.push('款式标识不能为空');
   if (!Number.isSafeInteger(item.fig) || item.fig < 1) {
     errors.push('fig 必须是正整数');

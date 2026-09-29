@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { foilColorIdentity } from '@/lib/order/foil-color-identity';
 import { z } from 'zod';
 
 const money = z.string().regex(/^\d{1,10}(\.\d{1,4})?$/, '工价须为非负数，最多四位小数');
@@ -35,7 +36,7 @@ export function calculateFoilJobWage(quantity: number, count: number, raw: FoilW
 
 /** FULL counts distinct ink colours, never front/back occurrences. */
 export function fullFoilColorCount(front: readonly string[], back: readonly string[]): number {
-  const colors = new Set([...front, ...back].map((color) => color.trim()).filter(Boolean));
+  const colors = new Set([...front, ...back].map(foilColorIdentity).filter(Boolean));
   if (colors.size < 1 || colors.size > 3) throw new Error('专版须有 1–3 个颜色，请核对款式颜色');
   return colors.size;
 }
