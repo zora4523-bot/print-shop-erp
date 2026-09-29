@@ -11,7 +11,10 @@ vi.mock('@/actions/order', () => ({
   saveOrderManualChargeAction: vi.fn(),
   deleteOrderManualChargeAction: vi.fn(),
 }));
-vi.mock('@/components/ui-business', () => import('@/components/ui-business/ConfirmActionDialog'));
+vi.mock('@/components/ui-business', async () => ({
+  ...await import('@/components/ui-business/ConfirmActionDialog'),
+  ...await import('@/components/ui-business/ActionNotice'),
+}));
 import { OrderCommercialDetailsManager } from '../OrderCommercialDetailsManager';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 

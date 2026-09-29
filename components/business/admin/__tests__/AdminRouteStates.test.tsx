@@ -13,9 +13,24 @@ describe('admin route states', () => {
     expect(html).toContain('data-scope="page"');
     expect(html).toContain('role="alert"');
     expect(html).toContain('重试当前页面');
+    expect(html).toContain('重新加载页面');
     expect(html).toContain('返回首页');
     expect(html).toContain('href="/"');
     expect(html).not.toContain('href="/owner"');
+  });
+
+  it.each([
+    Object.assign(new Error('private chunk path'), { name: 'ChunkLoadError' }),
+    new Error('Loading chunk 123 failed.'),
+    new Error('Failed to load chunk /_next/static/chunks/private.js'),
+    new TypeError('Failed to fetch dynamically imported module: private-url'),
+    new TypeError('Importing a module script failed.'),
+    new TypeError('error loading dynamically imported module: private-url'),
+  ])('offers a document reload for a failed module without exposing internals', (error) => {
+    const html = renderToStaticMarkup(<AdminRouteError error={error} retry={vi.fn()} />);
+    expect(html).toContain('重新加载页面');
+    expect(html).not.toContain('重试当前页面');
+    expect(html).not.toContain(error.message);
   });
 
   it('uses the shared skeleton contract without replacing persistent chrome', () => {
