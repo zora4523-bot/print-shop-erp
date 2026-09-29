@@ -1,4 +1,4 @@
-import { commands, page } from 'vitest/browser';
+import { commands, page, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -13,26 +13,37 @@ vi.mock('@/actions/order', () => ({
 }));
 vi.mock('@/components/ui-business', () => import('@/components/ui-business/ConfirmActionDialog'));
 import { OrderCommercialDetailsManager } from '../OrderCommercialDetailsManager';
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
   save.mockReset().mockResolvedValue({ status: 'error', message: '保存失败，请重试' });
   host = document.createElement('div');
-  host.className = 'admin-viewport bg-background p-4 text-foreground';
+  host.className = 'admin-viewport mx-auto w-full max-w-[880px] bg-background p-4 text-foreground';
   host.dataset.testid = 'plate-fields-fixture';
   document.body.append(host);
   root = createRoot(host);
 });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); document.documentElement.classList.remove('dark'); });
 
-function render(existing = false) {
-  flushSync(() => root.render(<OrderCommercialDetailsManager orderId="order-1" priceRevision={7}
-    manualCharges={[]} allowPlateDetailMaintenance items={[{
+function render(existing = false, embedded = false, multiple = false) {
+  const plate = { id: 'plate-1', sequence: 1, name: '原制版', plateGroupId: 'group-1',
+    specification: '历史规格', quantity: 3, unitPrice: '12.00', amount: '36.00', remark: '原备注', isActive: true };
+  const charge = { id: 'charge-1', status: 'FINALIZED', description: '客户确认打样费用', amount: '25.00',
+    overrideReason: '按客户确认报价', approvalReference: null, category: { code: 'SAMPLE_FEE', name: '打样费' },
+    finalizedBy: { displayName: '管理员' }, finalizedAt: null };
+  const manager = <OrderCommercialDetailsManager orderId="order-1" priceRevision={7} embedded={embedded}
+    manualCharges={multiple ? [charge, { ...charge, id: 'charge-removed', status: 'WAIVED', description: '历史费用'.repeat(12) }] : []}
+    allowPlateDetailMaintenance items={[{
       id: 'item-1', sequence: 1, name: '测试款式', independentPlateEligible: true,
-      plateDetails: existing ? [{ id: 'plate-1', sequence: 1, name: '原制版', plateGroupId: 'group-1',
-        specification: '历史规格', quantity: 3, unitPrice: '12.00', amount: '36.00', remark: '原备注', isActive: true }] : [],
-    }]} />));
+      plateDetails: existing ? [plate, ...(multiple ? [{ ...plate, id: 'plate-removed', sequence: 2, isActive: false }] : [])] : [],
+    }, ...(multiple ? [{ id: 'item-2', sequence: 2, name: '长款式名称ABCDEFGHIJKLMNOPQRSTUVWXYZ'.repeat(3),
+      independentPlateEligible: false, plateDetails: [] }] : [])]} />;
+  flushSync(() => root.render(embedded ? <Disclosure open className="rounded-xl border bg-card">
+    <DisclosureSummary className="px-4 py-4"><h2>版费与其他费用</h2></DisclosureSummary>
+    <div className="px-4 pb-5 pt-2 sm:px-6 sm:pb-6">{manager}</div>
+  </Disclosure> : manager));
   return [...host.querySelectorAll('fieldset')].find((field) => field.textContent?.includes(existing ? '制版明细 #1' : '新增制版明细'))!;
 }
 function fill(field: Element, label: string, value: string) {
@@ -74,23 +85,47 @@ describe('simplified plate detail fields', () => {
     expect(save.mock.calls[0][1]).toMatchObject({ plateDetailId: 'plate-1', quantity: '3',
       plateGroupId: 'group-1', specification: '历史规格', unitPrice: '15.00', expectedPriceRevision: 7 });
   });
+
+  it('keeps an embedded draft through pointer collapse and keyboard expansion', async () => {
+    const field = render(false, true);
+    await page.getByRole('textbox', { name: '制版名称', exact: true }).fill('折叠前的制版');
+    await page.getByRole('heading', { name: '版费与其他费用', exact: true }).click();
+    expect(host.querySelector('details')!.open).toBe(false);
+    const summary = host.querySelector('summary')!;
+    summary.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(host.querySelector('details')!.open).toBe(true);
+    expect(field.querySelector('input')!.value).toBe('折叠前的制版');
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('stacks fields when its container is narrow even on a desktop viewport', async () => {
+    await page.viewport(1280, 800);
+    host.style.width = '420px';
+    const field = render(false, true);
+    const [name, price] = [...field.querySelectorAll('input')].map((input) => input.getBoundingClientRect());
+    expect(price.top).toBeGreaterThan(name.bottom);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(1280);
+  });
 });
 
 for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
   for (const theme of ['light', 'dark']) {
-    it(`${width}×${height} ${theme}: plate fields fit and remain accessible`, async () => {
-      await page.viewport(width, height);
-      document.documentElement.classList.toggle('dark', theme === 'dark');
-      const field = render(true);
-      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-      for (const input of field.querySelectorAll('input, textarea, button')) {
-        const rect = input.getBoundingClientRect();
-        if (!rect.width || !rect.height) continue;
-        expect(rect.left).toBeGreaterThanOrEqual(0);
-        expect(rect.right).toBeLessThanOrEqual(width);
-        expect(rect.height).toBeGreaterThanOrEqual(44);
-      }
-      expect(await commands.checkShellAccessibility('[data-testid="plate-fields-fixture"]')).toEqual([]);
-    });
+    for (const embedded of [false, true]) {
+      it(`${width}×${height} ${theme} ${embedded ? 'embedded' : 'standalone'}: all fee records fit and remain accessible`, async () => {
+        await page.viewport(width, height);
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+        render(true, embedded, true);
+        expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+        for (const input of host.querySelectorAll('input, textarea, select, button, summary')) {
+          const rect = input.getBoundingClientRect();
+          if (!rect.width || !rect.height) continue;
+          expect(rect.left).toBeGreaterThanOrEqual(0);
+          expect(rect.right).toBeLessThanOrEqual(width);
+          expect(rect.height).toBeGreaterThanOrEqual(44);
+        }
+        expect(await commands.checkShellAccessibility('[data-testid="plate-fields-fixture"]')).toEqual([]);
+      });
+    }
   }
 }
