@@ -5,6 +5,7 @@ import { ORDER_PURPOSES } from '../../order/purpose';
 import { OrderFoilTechnique, OrderItemPricingRoute, OrderLamination, OrderPackagingMode, OrderProductStructure } from '../../../generated/prisma/enums';
 import { MAX_ORDER_ITEM_FOIL_COLORS } from '../../order/foil-colors';
 import { hasDuplicateFoilColors } from '@/lib/order/foil-color-identity';
+import { persistedOrderItemFoilSideColorsField } from '@/lib/auth/schemas/shared';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '../../order/limits';
 import { MAX_ORDER_ITEM_PRINT_COLORS } from '../../order/print-colors';
 import { MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE, isNewOrderPricingRoute, resolveOrderItemFoilSides } from '../../order/pricing-route';
@@ -149,6 +150,7 @@ type OrderItemPricingFactsForValidation = Pick<
 function validateOrderItemPricingFacts(
   item: OrderItemPricingFactsForValidation,
   ctx: z.RefinementCtx,
+  requireUniqueColorIdentities = true,
 ): void {
   if (!isNewOrderPricingRoute(item.pricingRoute)) {
     ctx.addIssue({
@@ -206,7 +208,7 @@ function validateOrderItemPricingFacts(
   for (const [field, colors] of [
     ['frontFoilColors', frontFoilColors], ['backFoilColors', backFoilColors],
   ] as const) {
-    if (hasDuplicateFoilColors(colors)) {
+    if (requireUniqueColorIdentities && hasDuplicateFoilColors(colors)) {
       ctx.addIssue({ code: 'custom', path: [field], message: '同一面的烫金颜色不能重复' });
     }
   }
@@ -333,7 +335,7 @@ function validateOrderItemPricingFacts(
  * persisted item, so they cannot bypass the same route invariants enforced
  * when an order is first created.
  */
-export const orderItemPricingFactsSchema = orderItemBaseSchema
+const orderItemPricingFactsBaseSchema = orderItemBaseSchema
   .pick({
     productId: true,
     pricingRoute: true,
@@ -349,8 +351,18 @@ export const orderItemPricingFactsSchema = orderItemBaseSchema
     lamination: true,
     printColors: true,
     isDoubleSided: true,
+  });
+
+export const orderItemPricingFactsSchema = orderItemPricingFactsBaseSchema
+  .superRefine((item, ctx) => validateOrderItemPricingFacts(item, ctx));
+
+/** Only for unchanged persisted facts, after the order domain checks pricing and provenance. */
+export const unchangedOrderItemPricingFactsSchema = orderItemPricingFactsBaseSchema
+  .extend({
+    frontFoilColors: persistedOrderItemFoilSideColorsField.default([]),
+    backFoilColors: persistedOrderItemFoilSideColorsField.default([]),
   })
-  .superRefine(validateOrderItemPricingFacts);
+  .superRefine((item, ctx) => validateOrderItemPricingFacts(item, ctx, false));
 
 const orderItemSchema = orderItemBaseSchema.superRefine((item, ctx) => {
   // The parent command accepts the legacy unclassified route only for a

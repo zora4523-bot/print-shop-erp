@@ -156,7 +156,8 @@ export const orderItemFoilColorsField = orderItemFoilColorsArray(
   `单款式烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS} 种`,
 );
 
-export const orderItemFoilSideColorsField = z
+/** Internal historical reader; new commands additionally require unique color identities. */
+export const persistedOrderItemFoilSideColorsField = z
   .array(
     z
       .string()
@@ -169,7 +170,7 @@ export const orderItemFoilSideColorsField = z
     `每面烫金颜色不超过 ${MAX_ORDER_ITEM_FOIL_COLORS_PER_SIDE} 种`,
   )
   .superRefine((colors, ctx) => {
-    if (hasDuplicateFoilColors(colors)) {
+    if (new Set(colors).size !== colors.length) {
       ctx.addIssue({ code: 'custom', message: '同一面的烫金颜色不能重复' });
     }
     if (colors.includes(NO_FOIL_COLOR)) {
@@ -179,6 +180,9 @@ export const orderItemFoilSideColorsField = z
       });
     }
   });
+
+export const orderItemFoilSideColorsField = persistedOrderItemFoilSideColorsField
+  .refine((colors) => !hasDuplicateFoilColors(colors), '同一面的烫金颜色不能重复');
 
 export function decimalStringToScaledInteger(value: string, scale: number): bigint {
   const negative = value.startsWith('-');

@@ -43,9 +43,10 @@ import type {
   WithdrawOrderChangeRequestInput,
 } from '../auth/schemas';
 import {
-  orderChangeRequestItemsSchema,
   orderItemPricingFactsSchema,
 } from '../auth/schemas';
+import { persistedOrderChangeRequestItemsSchema } from '@/lib/auth/schemas/order-edit';
+import { unchangedOrderItemPricingFactsSchema } from '@/lib/auth/schemas/order-create';
 import { db } from '../db';
 import { listExternalCreateOrderProductOptions } from '../product';
 import { databaseClockNow } from '../background-jobs/clock';
@@ -865,9 +866,10 @@ function normalizeProposedFoilFacts(
   source: FoilFactSource,
 ) {
   if (hasDefinedFoilSides(change)) {
+    const sourceSides = deriveLegacyOrderItemFoilFacts(source);
     return deriveLegacyOrderItemFoilFacts({
-      frontFoilColors: change.frontFoilColors ?? source.frontFoilColors,
-      backFoilColors: change.backFoilColors ?? source.backFoilColors,
+      frontFoilColors: change.frontFoilColors ?? sourceSides.frontFoilColors,
+      backFoilColors: change.backFoilColors ?? sourceSides.backFoilColors,
     });
   }
   if (change.foilColors !== undefined) {
@@ -1110,7 +1112,7 @@ function readProposedChanges(value: Prisma.JsonValue): ProposedItemChange[] {
   if (!container) {
     throw new OrderChangeRequestError('申请数据已损坏，无法审核');
   }
-  const parsed = orderChangeRequestItemsSchema.safeParse(container.items);
+  const parsed = persistedOrderChangeRequestItemsSchema.safeParse(container.items);
   if (!parsed.success) {
     throw new OrderChangeRequestError('申请数据已损坏，无法审核');
   }
@@ -2594,6 +2596,33 @@ function changeAffectsPricing(
   );
 }
 
+/** Only persisted proposals may contain an unchanged echo from an older form.
+ * Check every supplied raw array, including order and aggregate, before suppressing writes.
+ * Callers have already locked the order and checked the request's base version.
+ */
+function preserveUnchangedStoredFoilFacts(
+  changes: ResolvedProposedItemChange[],
+  proposals: ProposedItemChange[],
+  itemById: ReadonlyMap<string, PricingFactGuardItem>,
+): ResolvedProposedItemChange[] {
+  const matches = (provided: string[] | undefined, saved: string[]) =>
+    provided === undefined ||
+    (provided.length === saved.length && provided.every((color, index) => color === saved[index]));
+  return changes.map((change, index) => {
+    if (change.operation !== 'UPDATE' || !change.foilFactsProvided) return change;
+    const source = itemById.get(change.itemId);
+    const proposal = proposals[index];
+    if (!source || !proposal || changeAffectsPricing(change, source)) return change;
+    const sides = deriveLegacyOrderItemFoilFacts(source);
+    if (
+      !matches(proposal.frontFoilColors, sides.frontFoilColors) ||
+      !matches(proposal.backFoilColors, sides.backFoilColors) ||
+      !matches(proposal.foilColors, source.foilColors)
+    ) return change;
+    return { ...change, foilFactsProvided: false };
+  });
+}
+
 type SemanticChangeItem = FoilFactSource & {
   name: string;
   quantity: number;
@@ -3458,6 +3487,8 @@ type MaterializedProductionOperation = {
 
 type PricingFactGuardItem = ProductionFactGuardItem & {
   quantity: number;
+  pack?: number | null;
+  pricingGroup: string | null;
   productId: string | null;
   pricingRoute: import('../../generated/prisma/client').OrderItemPricingRoute;
   productStructure: import('../../generated/prisma/client').OrderProductStructure;
@@ -3521,7 +3552,12 @@ function assertMergedPricingFactsValid(
     }
     return;
   }
-  const parsed = orderItemPricingFactsSchema.safeParse({
+  const canPreserveHistoricalFoil = change.operation === 'UPDATE' &&
+    !change.foilFactsProvided && !changeAffectsPricing(change, item);
+  const factsSchema = canPreserveHistoricalFoil
+    ? unchangedOrderItemPricingFactsSchema
+    : orderItemPricingFactsSchema;
+  const parsed = factsSchema.safeParse({
     productId: change.catalogIdentity
       ? change.catalogIdentity.productId
       : item.productId,
@@ -3880,8 +3916,9 @@ export async function previewOrderChangeRequestPricing(
       itemById,
     );
     const quotedAt = await databaseClockNow(tx);
-    const changes = await resolveProposedChangeCatalogIdentities(
-      tx, normalizedChanges, itemById, quotedAt,
+    const changes = preserveUnchangedStoredFoilFacts(
+      await resolveProposedChangeCatalogIdentities(tx, normalizedChanges, itemById, quotedAt),
+      proposedChanges, itemById,
     );
     await assertProductionFactsReadyForChange(tx, request.orderId, request.order, !hasPricingFactChanges(changes, itemById));
     if (changes.length > 0 && !request.order.shipments.some((shipment) => shipment.sequence === 1)) {
@@ -5798,8 +5835,9 @@ export async function reviewOrderChangeRequest(
       proposedChanges,
       itemById,
     );
-    const changes = await resolveProposedChangeCatalogIdentities(
-      tx, normalizedChanges, itemById, reviewedAt,
+    const changes = preserveUnchangedStoredFoilFacts(
+      await resolveProposedChangeCatalogIdentities(tx, normalizedChanges, itemById, reviewedAt),
+      proposedChanges, itemById,
     );
     const catalogIdentityChanges = buildCatalogIdentityAuditEntries(
       changes,

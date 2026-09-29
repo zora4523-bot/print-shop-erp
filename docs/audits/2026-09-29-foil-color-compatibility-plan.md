@@ -1,13 +1,15 @@
 ---
-status: planned
+status: implemented_locally
 reviewed_on: 2026-09-29
 reviewed_head: 21454527adc7455f1a36af72f22494dd8facab8b
+implementation_base: a721d3642c580c61e8d2ee08e5e9469250051a18
+verified_on: 2026-09-29
 scope: historical foil aliases in order changes and the admin color picker
 ---
 
 # 烫金颜色历史兼容复审与修复任务
 
-本轮完成复审及任务规划，**尚未修改应用代码、实施修复或重新部署**。审查对象为 `26ce3357` 的颜色身份修复，生产合并提交为 `c3908b1c`，本地审查基线为 `21454527`。原发布与验证证据保留在[上线记录](./2026-09-29-foil-color-identity-fix.md)。
+**本地实现及验证已完成，尚未发布。** 第 1 节保留修复前的复审证据，第 6 节记录本次实现和验收。原审查对象为 `26ce3357` 的颜色身份修复，生产合并提交为 `c3908b1c`，本地审查基线为 `21454527`；本次从计划提交 `a721d364` 开始实施。原发布与验证证据保留在[上线记录](./2026-09-29-foil-color-identity-fix.md)。
 
 执行约束来自 [CONTRIBUTING](../../CONTRIBUTING.md)、[编码规范](../编码规范.md)、[工单变更与版本规则](../工单变更与版本规则.md)、[API 工单修改契约](../../API.md#工单修改与价格确认)和[文案与确认](../ui-规范.md#7-文案与确认)。
 
@@ -64,7 +66,7 @@ scope: historical foil aliases in order changes and the admin color picker
 
 不新增数据库迁移或清理脚本，不改已应用迁移，不覆盖生产库，不删除旧材料，不重算历史报价/提成，不把颜色身份等同于库存 SKU。
 
-## 3. 实施任务与顺序（均待实施）
+## 3. 实施任务与顺序（T1–T6 已完成，验收见第 6 节）
 
 ### T1：先固定失败回归
 
@@ -139,11 +141,50 @@ scope: historical foil aliases in order changes and the admin color picker
 
 ## 5. 完成标准与交付边界
 
-- [ ] T1 的历史兼容失败用例全部通过，当前输入重复拒绝仍通过。
-- [ ] 创建、预览、批准、外销真实表单及旧待审读取均覆盖；不是只修管理员一个页面。
-- [ ] 历史事实保留与实际计价变化的边界有正反测试；没有静默去重、重算或数据清理。
-- [ ] 管理员候选色唯一，既存双别名可以明确处理，控件状态和服务端契约一致。
-- [ ] 权限、归属、版本、状态、金额、工资、库存与审计保护通过回归。
-- [ ] 必要门禁、真值文档和修复记录更新完毕，只提交当前任务文件，并自动创建本地修复 commit。
+- [x] T1 的历史兼容失败用例全部通过，当前输入重复拒绝仍通过。
+- [x] 创建、预览、批准、外销真实表单及旧待审读取均覆盖；不是只修管理员一个页面。
+- [x] 历史事实保留与实际计价变化的边界有正反测试；没有静默去重、重算或数据清理。
+- [x] 管理员候选色唯一，既存双别名可以明确处理，控件状态和服务端契约一致。
+- [x] 权限、归属、版本、状态、金额、工资、库存与审计保护通过回归。
+- [x] 必要门禁、真值文档和修复记录更新完毕，仅当前任务文件形成本地修复 commit。
 
-本轮只交付复审与计划文档；应用修复、PR、合并和部署仍为后续工作。生产是否需要处理存量记录，应在后续发布前只读核对，不能直接根据这份计划改数据或用开发库覆盖生产。
+本轮交付本地应用修复、回归测试和文档；PR、合并和部署为后续工作。生产是否需要处理存量记录，应在后续发布前只读核对，不能直接根据这份计划改数据或用开发库覆盖生产。
+
+## 6. 本地实现与验收（2026-09-29）
+
+复核人：Codex。候选为分支 `codex/foil-release-record` 的 `a721d364` 加本任务增量；修复提交为包含本节的 `fix(order): 保留历史烫金事实并补齐改单颜色校验`，其完整 SHA 可由 `git log -1 --format=%H -- docs/audits/2026-09-29-foil-color-compatibility-plan.md` 定位。应用、测试和文档同批提交，未夹带开始时已有的 `.playwright-cli/` 和两份 09-21 未跟踪文档。
+
+### 实现结果
+
+- T1/T2：正式回归覆盖 ADMIN / SALES 创建、预览、批准；保留单别名、同面双别名、其他别名、自定义色、聚合字段旧形态及跨面同色。当前输入保持严格校验，只有领域层在锁内证明颜色来源及计价未变的 UPDATE 使用历史事实校验，仍执行路线和其他事实约束。
+- T3：外部销售未改颜色时省略两面字段；显式把“哑金”换成“亚金”仍提交，不能被身份归一吞掉。管理员原有差量提交行为经真实控件和 Next 提交回归确认。
+- T4：旧申请使用内部结构读取；在版本检查和工单锁内，逐一核对提供的原始正反面、顺序及聚合数组。只有未改变计价的完整原值回显才抑制颜色写回；旧申请 JSON 和 `beforeSnapshot` 保留。另补齐聚合字段旧单只回传一面时的继承，防止遗漏另一面的原事实。
+- T5：管理员候选色按身份唯一，历史选中项保持原名和独立移除；“红色／红金”等显示名相同的历史项也可区分。没有加载即清洗或按别名一并删除。
+- 数量、包装、颜色重排、不同别名、冲突聚合值和 ADD 的反例均保留严格拒绝；明确纠正颜色会进入重新报价。混合申请触发整单报价时，用真实报价引擎确认历史重复仍被拒绝，不能借某款纯改名放行另一款计价修改。
+- API、DATABASE、UI-SYSTEM 已同步。没有 schema、迁移、seed、库存或工资算法变更，没有访问生产数据库。
+
+### 实际验证
+
+写入测试使用专用本地 PostgreSQL 库 `erp_e2e_foil_compat_20260929`，显式隔离并准备账号、目录与价格夹具；没有在共享开发库或生产库造单。E2E 使用 `playwright.release.config.ts` 启动 Next.js **16.3.4 生产构建**，监听 `127.0.0.1:3200`，通知为 mock、jobs 为 inline。构建前停止本地开发服务；验收后已恢复 `127.0.0.1:3000`，live 健康检查返回 200。
+
+| 检查 | 实际命令 / 范围 | 结果 |
+| --- | --- | --- |
+| 修复前回归 | 两个目标文件的历史兼容筛选 | 10 失败、8 通过、182 未匹配跳过；原始证据保留 |
+| 目标单测 | `change-request.test.ts` 与 `OrderChangeRequestForm.business-language.test.tsx` | 最终 232 通过，0 失败 |
+| 全量与覆盖率 | `node node_modules/vitest/vitest.mjs run --maxWorkers=2 --coverage --reporter=default --reporter=json --outputFile=<证据目录>/unit.json` | 721 文件通过、3 文件既有跳过；7,894 项通过、46 项既有跳过，0 失败 |
+| 浏览器组件 | `pnpm test:browser components/business/order/__tests__/AdminOrderEditor.browser.spec.tsx components/business/order/__tests__/OrderChangeForms.browser.spec.tsx` | 78 通过、0 失败；含六视口、明暗主题、overflow、axe、真实键盘及控件提交 |
+| 真正表单流程 | `pnpm exec playwright test --config=playwright.release.config.ts --project=chromium --workers=1 tests/e2e/foil-color-history.spec.ts` | 6/6 通过；管理员触控保存、外销申请与审批、旧申请两种回显恢复、显式重复拒绝，数据库前后值校对 |
+| 静态门禁 | `pnpm lint`、`pnpm typecheck`、`pnpm check:architecture` | 全部通过；lint 0 错误、2 条既有内部导航警告，UI 文案/token 无新增违例 |
+| 生产构建与数据库前置 | release 配置的 Prisma 生成及 Next build；`pnpm test:migrations:fresh`，随后 seed / `pnpm test:e2e:prepare` 仅用于隔离库 | 构建成功；179 条迁移及后置校验通过 |
+
+覆盖率为语句 **86.24%**、分支 **80.28%**、函数 **91.49%**、行 **88.62%**，现有阈值未调整。既有授权、版本、状态、报价、工资与库存回归随全量执行；新历史兼容用例另断言不重新报价、不写颜色/金额字段，以及预览不留审批副作用。E2E 比对单价、款式金额、已确认费用、价格快照、价格版本和历史条数，成功流程监听 `pageerror` 并断言为空。
+
+### 失败记录与验证范围
+
+- 初次全量运行与静态检查并发，出现 21 项超时或时序失败；未修改失败断言、超时阈值或应用逻辑来规避。结束其他重任务后以两 worker 重跑，原失败用例及全量均通过。首轮日志保留，不能把首轮写为通过。
+- 首次浏览器组件运行有一处新用例使用了不正确的可访问名称，按实际控件“第 1 款名称”修正；没有改 UI 文案迎合测试。之后补充显示名冲突回归，最终 78 项通过。
+- 首次 E2E 在夹具准备阶段被数据库金额快照约束拦截，补齐夹具的 `suggestedSubtotal` 与有效快照后重跑 6/6 通过，生产约束没有放宽。
+- 6 项通过的运行中，Next 服务记录过一次 `The destination stream closed early`；用例流程和数据库断言通过，监听的页面异常为空。同一构建附 trace 单独复跑该用例，1/1 通过且未再出现该服务日志；未据此认定具体根因或修改框架行为。
+- 本轮不代表完整发布验收：没有重新执行远端 CI、生产依赖审计、生产副本演练、所有页面像素基线、真实通知/durable worker 或目标环境 smoke；发布前仍按 CONTRIBUTING 对同一发布 SHA 补齐适用项目。生产数据及存量数量本轮未查询。
+
+本次证据目录：`/var/folders/1m/qlr1bwhj2h7ck5qbntt0xdcm0000gn/T/erp-foil-compat-fix-20260929-_4zkp3w7/`。关键文件：`boundary.json`、`regression-before.log`、`unit-first.log`、`unit.log`、`unit.json`、`browser-final.log`、`e2e-fixture-failure.log`、`e2e-complete.log`、`e2e.log`、`lint.log`、`typecheck.log`、`architecture.log`、`fresh.log`、`tested-source-manifest.json`。临时日志、连接配置、生成物与测试报告不提交。
