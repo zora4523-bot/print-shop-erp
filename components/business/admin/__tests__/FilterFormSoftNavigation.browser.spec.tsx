@@ -6,11 +6,13 @@ import { page } from 'vitest/browser';
 import '@/app/globals.css';
 import { Button } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
+import { Input } from '@/components/ui/input';
+import { FilterClearLink } from '@/components/ui-business';
 
 // 模拟 next/form + next/link 的软导航：只拦截提交 / 点击并记录目标，
 // 由测试按「新 URL」重新渲染同一棵树 —— 与真实路由一样，React 按位置复用组件，
 // 非受控字段是否按 URL 重建完全取决于表单 key。
-const nav = vi.hoisted(() => ({ submits: [] as FormData[], clicks: [] as string[] }));
+const nav = vi.hoisted(() => ({ submits: [] as FormData[], clicks: [] as string[], newTabs: [] as string[] }));
 vi.mock('next/form', () => ({
   __esModule: true,
   default: ({ scroll, prefetch, action, ...props }: ComponentProps<'form'> & { scroll?: boolean; prefetch?: boolean }) => {
@@ -21,9 +23,17 @@ vi.mock('next/form', () => ({
 vi.mock('next/link', () => ({
   useLinkStatus: () => ({ pending: false }),
   __esModule: true,
-  default: ({ prefetch, scroll, onClick, href, ...props }: ComponentProps<'a'> & { prefetch?: boolean; scroll?: boolean; href: string }) => {
+  // 与安装版 next/link 一致：先调用户 onClick；带修饰键（新标签打开）时交给浏览器、
+  // 不做客户端导航也不触发 onNavigate；否则先 onNavigate 再导航。
+  default: ({ prefetch, scroll, onClick, onNavigate, href, ...props }: ComponentProps<'a'> & { prefetch?: boolean; scroll?: boolean; href: string; onNavigate?: (event: { preventDefault(): void }) => void }) => {
     void prefetch; void scroll;
-    return <a {...props} href={href} onClick={(event) => { onClick?.(event); event.preventDefault(); nav.clicks.push(href); }} />;
+    return <a {...props} href={href} onClick={(event) => {
+      onClick?.(event);
+      event.preventDefault(); // 测试环境不真正打开新标签
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) { nav.newTabs.push(href); return; }
+      onNavigate?.({ preventDefault() {} });
+      nav.clicks.push(href);
+    }} />;
   },
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -50,7 +60,7 @@ import { AdminOrderWorkspace } from '../../order/AdminOrderWorkspace';
 import { parseAdminOrderWorkspaceQuery } from '@/lib/order/admin-workspace-query';
 
 let host: HTMLElement; let root: Root;
-beforeEach(() => { nav.submits = []; nav.clicks = []; host = document.createElement('main'); document.body.append(host); root = createRoot(host); });
+beforeEach(() => { nav.submits = []; nav.clicks = []; nav.newTabs = []; host = document.createElement('main'); document.body.append(host); root = createRoot(host); });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
 const show = (tree: ReactElement) => flushSync(() => root.render(tree));
 
@@ -139,4 +149,39 @@ it.each([['筛选栏', 0], ['列表空态', 1]] as const)('AdminOrderWorkspace�
   await expect.element(q).toHaveValue('');
   await page.getByRole('button', { name: '应用筛选', exact: true }).click();
   expect(nav.submits.at(-1)?.get('q')).toBe('');
+});
+
+
+// 页面级筛选（薪资、账单、师傅端等）：表单 key 只含已应用值。已应用值为空时填了日期
+// 但没提交，清除前后 key 不变 —— 必须靠 FilterClearLink 在导航时 reset（Codex 复审）。
+function pageFilters(from: string) {
+  return (
+    <form id="page-filters" key={JSON.stringify([from])} onSubmit={(event) => { event.preventDefault(); nav.submits.push(new FormData(event.currentTarget)); }}>
+      <Input aria-label="开始日期" type="date" name="from" defaultValue={from} />
+      <Button type="submit">筛选</Button>
+      <FilterClearLink formId="page-filters" href="/owner/salary/daily" />
+    </form>
+  );
+}
+
+it('页面筛选：已应用值不变时，清除筛选也丢弃未提交输入', async () => {
+  show(pageFilters(''));
+  const from = page.getByLabelText('开始日期');
+  await from.fill('2026-09-01');
+  await page.getByRole('link', { name: '清除筛选', exact: true }).click();
+  expect(nav.clicks.at(-1)).toBe('/owner/salary/daily');
+  show(pageFilters(''));
+  await expect.element(from).toHaveValue('');
+  await page.getByRole('button', { name: '筛选', exact: true }).click();
+  expect(nav.submits.at(-1)?.get('from')).toBe('');
+});
+
+it('页面筛选：Cmd/Ctrl 点击清除筛选在新标签打开，当前页输入保留', async () => {
+  show(pageFilters(''));
+  const from = page.getByLabelText('开始日期');
+  await from.fill('2026-09-01');
+  await page.getByRole('link', { name: '清除筛选', exact: true }).click({ modifiers: ['ControlOrMeta'] });
+  expect(nav.newTabs).toEqual(['/owner/salary/daily']);
+  expect(nav.clicks).toEqual([]);
+  await expect.element(from).toHaveValue('2026-09-01');
 });

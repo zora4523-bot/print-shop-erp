@@ -28,8 +28,7 @@ import {
   PageHeader,
   StatCard,
   StatusBadge,
-  TableScrollArea,
-} from '@/components/ui-business';
+  TableScrollArea, FilterClearLink } from '@/components/ui-business';
 import { formatMoney } from '@/lib/dashboard/format';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -115,7 +114,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       </section>
 
       {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
-      <Form key={JSON.stringify([period ?? '', status ?? '', agentUserId ?? ''])} action="/owner/agent-bills" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+      <Form id="agent-bill-filters" key={JSON.stringify([period ?? '', status ?? '', agentUserId ?? ''])} action="/owner/agent-bills" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
         <label className="space-y-1 text-xs text-muted-foreground">
           <span>账期</span>
           <input
@@ -158,13 +157,12 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         <Button type="submit" size="sm">
           筛选
         </Button>
-        <Link
+        <FilterClearLink formId="agent-bill-filters"
           href="/owner/agent-bills"
-          scroll={false}
           className={buttonVariants({ size: 'sm', variant: 'ghost' })}
         >
           清除筛选
-        </Link>
+        </FilterClearLink>
       </Form>
 
       <AgentMonthlyBillExportControls

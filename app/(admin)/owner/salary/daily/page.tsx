@@ -18,7 +18,7 @@ import { getAttendanceSummaries } from '@/lib/attendance';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
-import { EmptyState, PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard, TableScrollArea, FilterClearLink } from '@/components/ui-business';
 import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '历史日薪档案' };
@@ -218,7 +218,7 @@ function FilterBar({
 }) {
   return (
     // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
-    <Form key={JSON.stringify([selectedDate, paid ?? '', workerId ?? ''])} action="/owner/salary/daily" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <Form id="salary-daily-filters" key={JSON.stringify([selectedDate, paid ?? '', workerId ?? ''])} action="/owner/salary/daily" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">日期</span>
         <input
@@ -258,13 +258,12 @@ function FilterBar({
       <Button type="submit" size="sm">
         筛选
       </Button>
-      <Link
+      <FilterClearLink formId="salary-daily-filters"
         href="/owner/salary/daily"
-        scroll={false}
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
         清除筛选
-      </Link>
+      </FilterClearLink>
     </Form>
   );
 }

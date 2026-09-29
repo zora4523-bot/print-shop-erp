@@ -1,6 +1,5 @@
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Form from 'next/form';
-import Link from 'next/link';
 import { Calculator, FileText } from 'lucide-react';
 import { listHourlyPayrolls, listHourlyPayrollWorkerIds } from '@/lib/salary/hourly-aggregate';
 import { listUsers } from '@/lib/account';
@@ -8,7 +7,7 @@ import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
-import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea, FilterClearLink } from '@/components/ui-business';
 import {
   getAttendanceSummaries,
   parseShanghaiMonth,
@@ -198,7 +197,7 @@ function FilterBar({
 }) {
   return (
     // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
-    <Form key={JSON.stringify([selectedMonth, paid ?? '', workerId ?? ''])} action="/owner/salary/hourly" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <Form id="salary-hourly-filters" key={JSON.stringify([selectedMonth, paid ?? '', workerId ?? ''])} action="/owner/salary/hourly" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
         <label htmlFor="hourly-month" className="text-xs text-muted-foreground">月份</label>
         <input
@@ -242,13 +241,12 @@ function FilterBar({
       <Button type="submit" size="sm">
         筛选
       </Button>
-      <Link
+      <FilterClearLink formId="salary-hourly-filters"
         href="/owner/salary/hourly"
-        scroll={false}
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
         清除筛选
-      </Link>
+      </FilterClearLink>
     </Form>
   );
 }

@@ -14,7 +14,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { EmptyState, PageHeader, StatCard, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard, TableScrollArea, ReceiptNotice, FilterClearLink } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import {
   LockPieceworkSettlementDayForm,
@@ -306,7 +306,7 @@ function FilterBar({
 }) {
   return (
     // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
-    <Form key={JSON.stringify([workDate, status ?? ''])} action="/owner/salary/piecework" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <Form id="salary-piecework-filters" key={JSON.stringify([workDate, status ?? ''])} action="/owner/salary/piecework" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="space-y-1">
         <span className="block text-xs text-muted-foreground">结算日期</span>
         <input
@@ -331,13 +331,12 @@ function FilterBar({
       <Button type="submit" size="sm">
         筛选
       </Button>
-      <Link
+      <FilterClearLink formId="salary-piecework-filters"
         href="/owner/salary/piecework"
-        scroll={false}
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
         清除筛选
-      </Link>
+      </FilterClearLink>
     </Form>
   );
 }

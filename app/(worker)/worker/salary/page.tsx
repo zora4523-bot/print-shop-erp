@@ -25,7 +25,7 @@ import {
 } from '@/lib/auth/role-labels';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { Badge } from '@/components/ui/badge';
-import { EmptyState, PageHeader, SectionLoading } from '@/components/ui-business';
+import { EmptyState, PageHeader, SectionLoading, FilterClearLink } from '@/components/ui-business';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
 import { parseStrictYmd } from '@/lib/auth/schemas';
@@ -437,7 +437,7 @@ function SalaryRangeFilter({
 }) {
   return (
     // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
-    <Form key={JSON.stringify([historical, inputType, from ?? '', to ?? ''])} action="/worker/salary" className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-3 text-sm min-[360px]:grid-cols-2">
+    <Form id="worker-salary-filters" key={JSON.stringify([historical, inputType, from ?? '', to ?? ''])} action="/worker/salary" className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-3 text-sm min-[360px]:grid-cols-2">
       {historical && <input type="hidden" name="view" value="history" />}
       {status === 'paid' || status === 'unpaid' ? <input type="hidden" name="status" value={status} /> : null}
       <label className="space-y-1">
@@ -462,12 +462,12 @@ function SalaryRangeFilter({
         <Button type="submit" className="min-h-11">
           查询范围
         </Button>
-        <Link
+        <FilterClearLink formId="worker-salary-filters"
           href={historical ? '/worker/salary?view=history' : '/worker/salary'}
           className="inline-flex min-h-11 items-center px-3 text-sm underline"
         >
           清除筛选
-        </Link>
+        </FilterClearLink>
       </div>
     </Form>
   );
