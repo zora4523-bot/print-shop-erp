@@ -158,6 +158,12 @@ describe('pattern rule precision', () => {
     expect(check('const x = <span>{("finishedAt")}</span>;')).toHaveLength(1);
     expect(check('const ok = true; const x = <button aria-label={ok ? "settledTotal" : "合计"}>x</button>;')).toHaveLength(1);
     expect(check('const ok = true; const x = <span>{ok && "finishedAt"}</span>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok ? ("finishedAt" as const) : "创建时间"}</span>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok && ("finishedAt" satisfies string)}</span>;')).toHaveLength(1);
+  });
+
+  it('does not treat the left side of && as display copy', () => {
+    expect(check('const ok = true; const x = <span>{(ok ? "finishedAt" : undefined) && "完成时间"}</span>;')).toEqual([]);
   });
 
   it('ignores inline script source', () => {

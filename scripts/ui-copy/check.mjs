@@ -52,11 +52,18 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     // 直接处在显示位置（JSX 属性值、作为子节点的 {"…"}）的字面量不是字段键，照常检查
     // （Codex 2026-09-29：`{"finishedAt"}`、`aria-label="finishedAt"` 曾被误豁免）。经常量 /
     // 映射表间接传入的纯标识符仍按字段键豁免，避免把 label 映射的键名误报为外显文案。
-    // 穿透括号、三元分支与 && / || / ?? 操作数（它们只是选出哪段文案显示）。
+    // 穿透只决定「显示哪段文案」的表达式：括号、类型包装（as / satisfies / ! / <T>）、
+    // 三元的两个分支（不含条件）、|| 与 ?? 的两侧（左侧为真 / 非空时即被显示）、
+    // && 的右侧（左侧只是条件，永远不会显示）。
+    const passesThrough = (child, parent) =>
+      ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) || ts.isSatisfiesExpression(parent)
+      || ts.isNonNullExpression(parent) || ts.isTypeAssertionExpression(parent)
+      || (ts.isConditionalExpression(parent) && parent.condition !== child)
+      || (ts.isBinaryExpression(parent) && (
+        [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(parent.operatorToken.kind)
+        || (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && parent.right === child)));
     let site = node;
-    while (site.parent && (ts.isParenthesizedExpression(site.parent)
-      || (ts.isConditionalExpression(site.parent) && site.parent.condition !== site)
-      || (ts.isBinaryExpression(site.parent) && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(site.parent.operatorToken.kind)))) site = site.parent;
+    while (site.parent && passesThrough(site, site.parent)) site = site.parent;
     const directDisplay = ts.isJsxAttribute(site.parent)
       || (ts.isJsxExpression(site.parent) && (ts.isJsxAttribute(site.parent.parent) || ts.isJsxElement(site.parent.parent) || ts.isJsxFragment(site.parent.parent)));
     const codeKey = !ts.isJsxText(node) && !directDisplay && /^[A-Za-z0-9_.]+$/.test(text);
