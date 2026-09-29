@@ -1524,7 +1524,7 @@ async function prepareSalesOrderDetailState(page: Page) {
     detail.getByRole('link', { name: '下载 PDF', exact: true }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole('navigation', { name: '面包屑导航', exact: true }).getByRole('link', { name: '工单', exact: true }),
+    page.getByRole('navigation', { name: '面包屑导航', exact: true }).getByRole('link', { name: '工单列表', exact: true }),
   ).toHaveAttribute('href', '/orders');
 
   const formSection = page
