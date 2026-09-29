@@ -34,12 +34,12 @@ export default async function WorkerTasksPage({ searchParams }: { searchParams: 
     <div className="min-w-0 space-y-3">
       <PageHeader size="worker" title="生产工序" subtitle="查看已安排的生产，完成后登记。" className="worker-wrap-anywhere" />
 
-      <Suspense key={`jobs|${query}|${sp.productionPage ?? ''}`} fallback={<SectionLoading label="正在加载已安排的生产…" />}>
+      <Suspense key={`jobs|${query}|${sp.productionPage ?? ''}`} fallback={<SectionLoading label="已安排的生产" />}>
         <WorkerProductionJobs actor={actor} query={query} page={sp.productionPage} />
       </Suspense>
       <h2 className="font-semibold">其他可报工工序</h2>
       <WorkerTaskFilters query={query} view={view} />
-      <Suspense key={`ops|${view}|${query}|${sp.page ?? ''}`} fallback={<SectionLoading label="正在加载工序…" />}>
+      <Suspense key={`ops|${view}|${query}|${sp.page ?? ''}`} fallback={<SectionLoading label="工序" />}>
         <OtherOperations actor={actor} view={view} query={query} page={sp.page} />
       </Suspense>
     </div>

@@ -96,6 +96,7 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
         query={q}
         placeholder="搜索编码、名称、联系人、电话、地址、拼音"
         clearHref={buildTableHref(OWNER_PARTIES_PATH, { type, ...contextParams }, {})}
+        filterValues={{ type }}
         hiddenParams={{
           ...contextParams,
           pageSize,

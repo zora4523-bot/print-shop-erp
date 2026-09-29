@@ -2,6 +2,7 @@
 
 import { OrderPurposeBadge } from './OrderPurposeBadge';
 import { OrderRemark } from './OrderRemark';
+import { OrderFilterClearLink } from './OrderFilterClearLink';
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -141,9 +142,14 @@ function AdminOrderWorkspaceListInner({
           <TableEmptyState
             variant="compact"
             title={hasFilters ? '没有符合筛选条件的工单' : '这个队列清空了'}
-            action={<Link href={hasFilters ? clearFiltersHref : '/orders?queue=all'} prefetch={false} className={buttonVariants({ variant: 'outline' })}>
-              {hasFilters ? '清除筛选' : '查看全部工单'}
-            </Link>}
+            action={hasFilters ? (
+              // 与筛选栏同一个清除入口：显式 reset 筛选表单，避免未提交输入残留。
+              <OrderFilterClearLink href={clearFiltersHref} scroll pendingHint={false} className={buttonVariants({ variant: 'outline' })} />
+            ) : (
+              <Link href="/orders?queue=all" prefetch={false} className={buttonVariants({ variant: 'outline' })}>
+                查看全部工单
+              </Link>
+            )}
           />
         </div>
       )}

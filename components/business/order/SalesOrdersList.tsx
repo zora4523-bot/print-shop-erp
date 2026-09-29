@@ -374,6 +374,7 @@ function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
             sequence: item.sequence,
             name: item.name,
             url: item.thumbnail.url,
+            previewUrl: item.thumbnail.previewUrl,
           },
         ]
       : [],
@@ -423,7 +424,7 @@ function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
                   <figure className="overflow-hidden rounded-lg border bg-card">
                     <div className="flex h-[min(56dvh,32rem)] items-center justify-center overflow-hidden bg-muted/40 p-2">
                       <img
-                        src={photo.url}
+                        src={photo.previewUrl}
                         alt={`第 ${photo.sequence} 款 ${photo.name} 的款式照片`}
                         decoding="async"
                         draggable={false}

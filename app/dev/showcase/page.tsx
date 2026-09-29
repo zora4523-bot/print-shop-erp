@@ -573,7 +573,7 @@ function ShowcaseShellSections() {
           title="SectionLoading"
           subtitle="区块级 Suspense fallback：带可读 label 的加载占位。"
         >
-          <SectionLoading label="正在加载最近下载包" />
+          <SectionLoading label="最近下载包" />
         </Section>
 
         <Section

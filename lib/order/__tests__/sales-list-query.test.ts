@@ -18,7 +18,8 @@ const { dbMock, signDesignReadUrlMock } = vi.hoisted(() => ({
     orderChangeRequest: { findMany: vi.fn() },
     craft: { findMany: vi.fn() },
   },
-  signDesignReadUrlMock: vi.fn((url: string) => `signed:${url}`),
+  signDesignReadUrlMock: vi.fn((url: string, _env?: unknown, options?: { thumbnail?: boolean }) =>
+    options?.thumbnail ? `thumb:${url}` : `signed:${url}`),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -203,8 +204,10 @@ describe('sales list query boundary', () => {
       totalQuantity: 2000,
       craftSummary: '局部烫金 · 触感纸',
       needsAction: true,
+      // 列表小图走 160px 缩略图；放大预览用原图（Codex 2026-09-29：预览不能是缩略图）。
       thumbnail: {
-        url: 'signed:https://files.example.test/design.png',
+        url: 'thumb:https://files.example.test/design.png',
+        previewUrl: 'signed:https://files.example.test/design.png',
         fileName: '设计图.png',
       },
       shipment: {

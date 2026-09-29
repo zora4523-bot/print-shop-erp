@@ -24,6 +24,7 @@ export function AdminListToolbar({
   clearHref,
   hiddenParams = {},
   filters,
+  filterValues = {},
 }: {
   action: string;
   query: string;
@@ -31,10 +32,15 @@ export function AdminListToolbar({
   clearHref: string;
   hiddenParams?: TableHrefParams;
   filters?: React.ReactNode;
+  /** `filters` 里非受控控件对应的**已应用**值（如 `{ type }`），参与表单 key。 */
+  filterValues?: TableHrefParams;
 }) {
   return (
     // next/form（审查 #41）：有 JS 时客户端导航 + 预取，无 JS 时仍是原生 GET 提交。
+    // 软导航不会重建非受控字段：key 取全部已应用查询，提交 / 清空 / 后退时字段按 URL 重建，
+    // 否则清空后输入框仍显示旧词，再提交又把旧条件带回来。
     <Form
+      key={adminListToolbarKey(query, hiddenParams, filterValues)}
       action={action}
       className="flex max-w-3xl flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm"
     >
@@ -70,6 +76,20 @@ export function AdminListToolbar({
       {filters ? <div className="flex flex-wrap gap-2">{filters}</div> : null}
     </Form>
   );
+}
+
+/** 规范化已应用查询：空值与 undefined 等价，参数顺序无关。导出供测试。 */
+export function adminListToolbarKey(
+  query: string,
+  hiddenParams: TableHrefParams,
+  filterValues: TableHrefParams,
+): string {
+  const normalize = (params: TableHrefParams) =>
+    Object.entries(params)
+      .filter(([, value]) => value !== null && value !== undefined && value !== '')
+      .map(([key, value]) => [key, String(value)] as const)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([query, normalize(hiddenParams), normalize(filterValues)]);
 }
 
 export function AdminTableCard({

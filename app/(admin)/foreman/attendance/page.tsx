@@ -168,13 +168,19 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                 {EMPLOYMENT_LABELS[selectedWorker.employmentType]}
               </Badge>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7">
+            {/* 员工筛选走 next/form 软导航，React 会按位置复用日历。key 带上员工与月份，
+                切换员工后所有日卡（展开态）与录入面板（useState 初值）整体重建，
+                杜绝用 A 的输入值、B 的 workerId 保存（服务端按 workerId_date upsert）。 */}
+            <div
+              key={`${selectedWorker.id}|${selectedMonth}`}
+              className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7"
+            >
               {dates.map((d) => {
                 const att = attendanceByDate.get(d);
                 const dayOfWeek = new Date(d + 'T00:00:00Z').getUTCDay();
                 return (
                   <Disclosure
-                    key={d}
+                    key={`${selectedWorker.id}|${d}`}
                     className={`min-w-0 rounded-md border p-2 text-xs open:col-span-full ${
                       att ? 'bg-muted/40' : 'bg-background'
                     }`}
@@ -267,7 +273,8 @@ function FilterBar({
   }>;
 }) {
   return (
-    <Form action="/foreman/attendance" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form key={JSON.stringify([selectedMonth, selectedWorkerId ?? ''])} action="/foreman/attendance" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex min-w-0 max-w-full flex-col">
         <label
           htmlFor="attendance-month"

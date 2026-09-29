@@ -88,11 +88,11 @@ export function collectGeometryIssues(): string[] {
     }
     for (const row of rows) {
       if (row.length < 2) continue;
-      const heights = row.map((x) => x.r.height);
+      // 同一对齐行只看底边：等高但上下错开同样是错位（Codex 2026-09-29 指出
+      // 旧的「高度差且底边差」会漏掉等高错位，而共享控件恰恰普遍等高）。
       const bottoms = row.map((x) => x.r.bottom);
-      const dh = Math.max(...heights) - Math.min(...heights);
       const db = Math.max(...bottoms) - Math.min(...bottoms);
-      if (dh > 2 && db > 2) {
+      if (db > 2) {
         issues.push(
           `row-misaligned:${describe(container).replace(/「.*」$/, '')}:${row
             .map((x) => `${describe(x.c)}h${f(x.r.height)}b${f(x.r.bottom)}`)

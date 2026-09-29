@@ -99,7 +99,7 @@ function OperationPieceworkSalaryContent({
   return (
     <section className="min-w-0 space-y-4">
       <SalaryHeader description="按日期查看报工明细。" />
-      <Suspense key={`summary|${settlementKey}`} fallback={<SectionLoading label="正在加载工资汇总…" />}>
+      <Suspense key={`summary|${settlementKey}`} fallback={<SectionLoading label="工资汇总" />}>
         <SettlementSummary {...settlementProps} />
       </Suspense>
       <SalaryRangeFilter
@@ -111,13 +111,13 @@ function OperationPieceworkSalaryContent({
         status={sp.status}
       />
       {invalidRange && <p role="alert" className="text-destructive">开始日期晚于结束日期，请修改后查询。</p>}
-      <Suspense key={`wages|${rangeKey}|${firstParam(sp.wagePage) ?? ''}`} fallback={<SectionLoading label="正在加载生产工资…" />}>
+      <Suspense key={`wages|${rangeKey}|${firstParam(sp.wagePage) ?? ''}`} fallback={<SectionLoading label="生产工资" />}>
         <WorkerProductionWages actor={actor} from={explicitFrom} to={explicitTo} page={sp.wagePage} />
       </Suspense>
-      <Suspense key={`pending|${rangeKey}|${firstParam(sp.pendingPage) ?? ''}`} fallback={<SectionLoading label="正在加载待结算报工…" />}>
+      <Suspense key={`pending|${rangeKey}|${firstParam(sp.pendingPage) ?? ''}`} fallback={<SectionLoading label="待结算报工" />}>
         <WorkerPendingReports actor={actor} from={explicitFrom} to={explicitTo} page={sp.pendingPage} />
       </Suspense>
-      <Suspense key={`list|${settlementKey}`} fallback={<SectionLoading label="正在加载已结算工资…" />}>
+      <Suspense key={`list|${settlementKey}`} fallback={<SectionLoading label="已结算工资" />}>
         <SettlementList {...settlementProps} />
       </Suspense>
     </section>
@@ -436,7 +436,8 @@ function SalaryRangeFilter({
   status?: string;
 }) {
   return (
-    <Form action="/worker/salary" className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-3 text-sm min-[360px]:grid-cols-2">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form key={JSON.stringify([historical, inputType, from ?? '', to ?? ''])} action="/worker/salary" className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-3 text-sm min-[360px]:grid-cols-2">
       {historical && <input type="hidden" name="view" value="history" />}
       {status === 'paid' || status === 'unpaid' ? <input type="hidden" name="status" value={status} /> : null}
       <label className="space-y-1">

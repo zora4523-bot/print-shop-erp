@@ -49,7 +49,12 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     // 模式规则：可见文案里的 camelCase 字段名（finishedAt）与 legacy / v2 / worker 等内部词。
     // 纯标识符字面量（'receiverName'、'match.perFoilColor'）是字段键 / 能力键，只有作为
     // JSX 文本直接渲染时才算外显；带空格或中文的句子则一律检查。
-    const codeKey = !ts.isJsxText(node) && /^[A-Za-z0-9_.]+$/.test(text);
+    // 直接处在显示位置（JSX 属性值、作为子节点的 {"…"}）的字面量不是字段键，照常检查
+    // （Codex 2026-09-29：`{"finishedAt"}`、`aria-label="finishedAt"` 曾被误豁免）。经常量 /
+    // 映射表间接传入的纯标识符仍按字段键豁免，避免把 label 映射的键名误报为外显文案。
+    const directDisplay = ts.isJsxAttribute(node.parent)
+      || (ts.isJsxExpression(node.parent) && (ts.isJsxAttribute(node.parent.parent) || ts.isJsxElement(node.parent.parent) || ts.isJsxFragment(node.parent.parent)));
+    const codeKey = !ts.isJsxText(node) && !directDisplay && /^[A-Za-z0-9_.]+$/.test(text);
     for (const rule of config.bannedPatterns ?? []) {
       if (codeKey && rule.skipCodeKeys) continue;
       for (const match of text.matchAll(new RegExp(rule.pattern, `${rule.flags ?? ''}g`))) {

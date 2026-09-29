@@ -197,7 +197,8 @@ function FilterBar({
   }>;
 }) {
   return (
-    <Form action="/owner/salary/hourly" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form key={JSON.stringify([selectedMonth, paid ?? '', workerId ?? ''])} action="/owner/salary/hourly" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
         <label htmlFor="hourly-month" className="text-xs text-muted-foreground">月份</label>
         <input

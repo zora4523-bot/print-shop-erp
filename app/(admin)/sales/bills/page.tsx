@@ -25,7 +25,8 @@ export default async function SalesBillsPage({ searchParams }: { searchParams: P
       <StatCard label="待支付" value={formatMoney(unpaid)} tone="warning" hint="已确认，待支付" />
       <StatCard label="已结清" value={formatMoney(paid)} tone="success" />
     </div>
-    <Form action="/sales/bills" className="flex flex-wrap items-end gap-3">
+    {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
+    <Form key={JSON.stringify([filters.status ?? '', filters.period ?? ''])} action="/sales/bills" className="flex flex-wrap items-end gap-3">
       <label className="grid gap-1">状态<NativeSelect name="status" defaultValue={filters.status ?? ''}>
         <option value="">全部</option>{Object.entries(SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY).map(([value, entry]) => <option key={value} value={value}>{entry.label}</option>)}
       </NativeSelect></label>

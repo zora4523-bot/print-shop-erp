@@ -92,7 +92,9 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
         />
       </section>
 
+      {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
       <Form
+        key={JSON.stringify([q])}
         action="/foreman/materials"
         className="flex max-w-2xl flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm sm:flex-row"
       >

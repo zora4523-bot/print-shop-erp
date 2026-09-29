@@ -71,7 +71,8 @@ export type SalesOrderListRow = {
   itemCount: number;
   totalQuantity: number;
   craftSummary: string;
-  thumbnail: { url: string; fileName: string } | null;
+  /** url 为 160px 缩略图（列表小图）；previewUrl 为原图（放大预览）。两者都按签名时间桶稳定。 */
+  thumbnail: { url: string; previewUrl: string; fileName: string } | null;
   items: Array<{
     id: string;
     sequence: number;
@@ -80,7 +81,7 @@ export type SalesOrderListRow = {
     specification: string | null;
     paper: string | null;
     crafts: string[];
-    thumbnail: { url: string; fileName: string } | null;
+    thumbnail: { url: string; previewUrl: string; fileName: string } | null;
   }>;
   feeLines: Array<{
     id: string;
@@ -568,6 +569,7 @@ function mapSalesOrderRow(
       thumbnail: design
         ? {
             url: signDesignReadUrl(design.fileUrl, process.env, { thumbnail: true }),
+            previewUrl: signDesignReadUrl(design.fileUrl, process.env),
             fileName: design.fileName,
           }
         : null,

@@ -32,7 +32,17 @@ type Props = {
   };
 };
 
-export function AttendanceRecordDialog({
+/**
+ * 录入值只在 useState 初始化时取自 `existing`。同一位置换了员工或日期
+ * （员工筛选走 next/form 软导航，页面按位置复用组件）必须整体重建，
+ * 否则面板里是上一位员工的数值、保存时却用新的 workerId —— 覆盖别人的考勤。
+ * 这里自带 key，调用方忘记加 key 也不会串写。
+ */
+export function AttendanceRecordDialog(props: Props) {
+  return <AttendanceRecordEditor key={`${props.workerId}|${props.date}`} {...props} />;
+}
+
+function AttendanceRecordEditor({
   workerId,
   workerName,
   workerType,

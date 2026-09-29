@@ -217,7 +217,8 @@ function FilterBar({
   workers: Array<{ id: string; displayName: string; username: string }>;
 }) {
   return (
-    <Form action="/owner/salary/daily" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form key={JSON.stringify([selectedDate, paid ?? '', workerId ?? ''])} action="/owner/salary/daily" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">日期</span>
         <input

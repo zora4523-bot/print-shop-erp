@@ -150,6 +150,12 @@ describe('pattern rule precision', () => {
     expect(check('<th>finishedAt</th>')).toHaveLength(1);
   });
 
+  it('flags identifier literals placed directly in display positions', () => {
+    expect(check('const x = <th>{"finishedAt"}</th>;')).toHaveLength(1);
+    expect(check('const x = <button aria-label="finishedAt">x</button>;')).toHaveLength(1);
+    expect(check('const x = <p title={"settledTotal"}>x</p>;')).toHaveLength(1);
+  });
+
   it('ignores inline script source', () => {
     expect(check('<script>{`localStorage.getItem("x")`}</script>')).toEqual([]);
     expect(check('<Script id="t">{`localStorage.getItem("x")`}</Script>')).toEqual([]);

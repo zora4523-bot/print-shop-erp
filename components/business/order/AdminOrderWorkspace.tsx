@@ -24,6 +24,7 @@ import { AdminOrderWorkspaceList } from './AdminOrderWorkspaceList';
 import styles from './AdminOrderWorkspace.module.css';
 import { OrderQueuePending } from './OrderQueuePending';
 import { OrderQueueResults } from './OrderQueueResults';
+import { ORDER_FILTER_FORM_ID, OrderFilterClearLink } from './OrderFilterClearLink';
 
 const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
   { key: 'todo', label: '待办' },
@@ -99,13 +100,15 @@ export function AdminOrderWorkspace({
       <section className="min-w-0 space-y-2">
         {/* 队列标签条在表单外、不带 key：切换队列时只更新 aria-current，不重挂载
             （审查 #38）。表单 key 只跟已应用的可见筛选值走——切队列/看板时未点
-            「应用筛选」的输入保留（仍不生效），清除/应用筛选后才按 URL 重置。 */}
+            「应用筛选」的输入保留（仍不生效），清除/应用筛选后才按 URL 重置。
+            已应用值为空时清除不改变 key，由 OrderFilterClearLink 点击时显式 reset。 */}
         <div className="flex min-w-0 flex-wrap items-center gap-2 [&_input]:rounded-full [&_select]:rounded-full [&_button]:rounded-full [&_a]:rounded-full">
         <OrderQueuesSection {...{
           query: query, data: data,
         }} />
         <Form
           key={appliedFilterFormKey(query)}
+          id={ORDER_FILTER_FORM_ID}
           action="/orders"
           scroll={false}
           className="contents"
@@ -217,15 +220,7 @@ export function AdminOrderWorkspace({
             <LinkPendingHint />
           </Link>
           {hasUserFilters ? (
-            <Link
-              href={clearFiltersHref}
-              prefetch={false}
-              scroll={false}
-              className={cn(buttonVariants({ variant: 'ghost' }), 'relative')}
-            >
-              清除筛选
-              <LinkPendingHint />
-            </Link>
+            <OrderFilterClearLink href={clearFiltersHref} className={buttonVariants({ variant: 'ghost' })} />
           ) : null}
           </div>
         </Form>

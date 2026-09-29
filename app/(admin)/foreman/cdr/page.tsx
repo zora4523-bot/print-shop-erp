@@ -295,7 +295,9 @@ function DesignBundleStatusBadge({
 
 function FilterBar({ from, to }: { from: string; to: string }) {
   return (
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
     <Form
+      key={JSON.stringify([from, to])}
       id="cdr-filter"
       className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm"
       action="/foreman/cdr"

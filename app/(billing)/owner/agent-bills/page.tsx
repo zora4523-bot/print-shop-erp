@@ -114,7 +114,8 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         </p>
       </section>
 
-      <Form action="/owner/agent-bills" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+      {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
+      <Form key={JSON.stringify([period ?? '', status ?? '', agentUserId ?? ''])} action="/owner/agent-bills" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
         <label className="space-y-1 text-xs text-muted-foreground">
           <span>账期</span>
           <input

@@ -14,7 +14,8 @@ export function WorkerTaskFilters({ query, view }: { query: string; view: string
       {[['paid', '本岗位待做'], ['progress', '共享进度']].map(([value, label]) => <Link key={value} href={`/worker/tasks?${new URLSearchParams({ view: value, q: query })}`} scroll={false} aria-current={view === value ? 'page' : undefined} className={cn(buttonVariants({ variant: view === value ? 'selected' : 'ghost' }), 'relative min-h-11 px-3 font-medium')}>{label}<LinkPendingHint /></Link>)}
       <Link href="/worker/reports" className="inline-flex min-h-11 items-center rounded-md px-3 font-medium">我已报工</Link>
     </nav>
-    <Form action={WORKER_TASKS.href} scroll={false} className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
+    {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
+    <Form key={JSON.stringify([view, query])} action={WORKER_TASKS.href} scroll={false} className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
       <input type="hidden" name="view" value={view} />
       <label className="min-w-0 flex-1"><span className="sr-only">搜索工单或款式</span><input name="q" defaultValue={query} maxLength={100} placeholder="工单号、工单名或款式" className="w-full rounded-md border bg-background px-3 py-2" /></label>
       <Button type="submit">搜索</Button>{query && <Link href={`/worker/tasks?view=${view}`} scroll={false} className="inline-flex min-h-11 items-center underline">清除筛选</Link>}

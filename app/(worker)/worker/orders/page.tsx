@@ -38,7 +38,8 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
     <div className="min-w-0 space-y-4">
       <PageHeader size="worker" title="我的工单" subtitle="展示与你固定计件岗位或共享无计件进度相关的工单。" className="worker-wrap-anywhere" />
 
-      <Form action="/worker/orders" className="flex flex-wrap gap-2 rounded-xl border bg-card p-3"><label className="min-w-0 flex-1"><span className="sr-only">工单号或名称</span><input name="q" defaultValue={sp.q} maxLength={100} placeholder="工单号或名称" className="w-full rounded-md border bg-background px-3 py-2" /></label><Button type="submit">搜索</Button>{sp.q && <Link href="/worker/orders" scroll={false} className="inline-flex min-h-11 items-center underline">清除筛选</Link>}</Form>
+      {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
+      <Form key={JSON.stringify([sp.q ?? ''])} action="/worker/orders" className="flex flex-wrap gap-2 rounded-xl border bg-card p-3"><label className="min-w-0 flex-1"><span className="sr-only">工单号或名称</span><input name="q" defaultValue={sp.q} maxLength={100} placeholder="工单号或名称" className="w-full rounded-md border bg-background px-3 py-2" /></label><Button type="submit">搜索</Button>{sp.q && <Link href="/worker/orders" scroll={false} className="inline-flex min-h-11 items-center underline">清除筛选</Link>}</Form>
       {orders.length === 0 ? (
         <EmptyState
           icon={ClipboardList}

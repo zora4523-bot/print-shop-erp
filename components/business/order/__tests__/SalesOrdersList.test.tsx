@@ -4,9 +4,8 @@ import {
   OrderPricingStatus,
   OrderStatus,
 } from '@/generated/prisma/enums';
-import type { OrderListQuery } from '@/lib/order/list-query';
-import type { SalesOrderListRow } from '@/lib/order/sales-list-query';
 import { SalesOrdersList } from '../SalesOrdersList';
+import { query, row } from './sales-orders-list-fixtures';
 
 describe('SalesOrdersList', () => {
   it('renders the sales card fields without exposing workshop details', () => {
@@ -90,12 +89,14 @@ describe('SalesOrdersList', () => {
   it('有款式照片时提供可访问的画廊预览入口', () => {
     const firstPhoto = {
       url: 'https://static.example.com/styles/dragon-boat-front.jpg',
+      previewUrl: 'https://static.example.com/styles/dragon-boat-front.jpg?full',
       fileName: '端午正面.jpg',
     };
     const order = {
       ...row(),
       thumbnail: {
         url: 'https://static.example.com/orders/work-order.png',
+        previewUrl: 'https://static.example.com/orders/work-order.png?full',
         fileName: '工单.png',
       },
       items: [
@@ -110,6 +111,7 @@ describe('SalesOrdersList', () => {
           name: '端午定制 图2',
           thumbnail: {
             url: 'https://static.example.com/styles/dragon-boat-back.jpg',
+            previewUrl: 'https://static.example.com/styles/dragon-boat-back.jpg?full',
             fileName: '端午背面.jpg',
           },
         },
@@ -139,6 +141,7 @@ describe('SalesOrdersList', () => {
   it('不把打印视觉基线快照当成款式照片', () => {
     const printSnapshot = {
       url: 'https://static.example.com/orders/order-print.png',
+      previewUrl: 'https://static.example.com/orders/order-print.png?full',
       fileName: 'order-print-1-designs-chromium-darwin.png',
     };
     const order = {
@@ -164,78 +167,3 @@ describe('SalesOrdersList', () => {
     expect(html).toContain('暂无款式照片');
   });
 });
-
-function row(): SalesOrderListRow {
-  return {
-    id: 'order-1',
-    orderNo: 'GD-260827-001',
-    customName: '端午定制',
-    status: OrderStatus.SUBMITTED,
-    isUrgent: false,
-    revision: 2,
-    pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
-    totalAmount: '404.30',
-    promisedDate: '2026-08-30',
-    dueAlert: { kind: 'due-soon', days: 3 },
-    updatedAt: '2026-08-27T07:00:00.000Z',
-    receiver: {
-      name: 'Lam',
-      phone: '021-53395199',
-      address: '上海市黄浦区测试路 88 号',
-    },
-    itemCount: 2,
-    totalQuantity: 2000,
-    craftSummary: '局部烫金 · 触感纸',
-    thumbnail: null,
-    items: [
-      {
-        id: 'item-1',
-        sequence: 1,
-        name: '端午定制 图1',
-        quantity: 2000,
-        specification: '大号封 90×165',
-        paper: '触感纸 200g',
-        crafts: ['局部烫金'],
-        thumbnail: null,
-      },
-    ],
-    feeLines: [
-      {
-        id: 'processing',
-        label: '款式加工费',
-        amount: '404.30',
-        estimated: true,
-      },
-      {
-        id: 'plate',
-        label: '制烫金版费',
-        amount: null,
-        estimated: false,
-      },
-    ],
-    pricingAttentionReason: '价格待管理员确认',
-    pendingChangeRequest: {
-      id: 'change-1',
-      type: 'MODIFY',
-      reason: '客户改数量',
-      createdAt: '2026-08-27T07:30:00.000Z',
-    },
-    rejectedChangeRequest: null,
-    shipment: {
-      carrier: '中通',
-      trackingNo: '75312884629891',
-      additionalCount: 0,
-    },
-    needsAction: true,
-  };
-}
-
-function query(): OrderListQuery {
-  return {
-    filters: {} as OrderListQuery['filters'],
-    page: 1,
-    pageSize: 20,
-    sort: 'createdAt',
-    dir: 'desc',
-  };
-}
