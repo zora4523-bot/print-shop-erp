@@ -74,7 +74,7 @@ export function SalesWorkbench({
             <Button
               key={value}
               type="button"
-              variant={section === value ? 'default' : 'ghost'}
+              variant={section === value ? 'selected' : 'ghost'}
               className="min-h-11 whitespace-normal px-2"
               aria-pressed={section === value}
               onClick={() => {
@@ -234,7 +234,7 @@ export function SalesWorkbench({
               type="button"
               key={name}
               className="min-h-11"
-              variant={category === name ? 'secondary' : 'outline'}
+              variant={category === name ? 'selected' : 'outline'}
               aria-pressed={category === name}
               onClick={() => setCategory(name)}
             >

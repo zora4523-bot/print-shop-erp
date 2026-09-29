@@ -20,6 +20,7 @@ import { ToggleActiveButton } from '@/components/business/product/ToggleActiveBu
 import { buttonVariants } from '@/components/ui/button';
 import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { RuleSpecWorkspace } from '@/components/business/rules/catalog/RuleSpecWorkspace';
 import type { ProductCategory } from '@/generated/prisma/enums';
@@ -133,7 +134,7 @@ export async function ProductCatalogList({
             prefetch={false}
             className={buttonVariants()}
           >
-            新增产品资料
+            新建产品资料
           </Link>
         }
       />
@@ -183,7 +184,7 @@ export async function ProductCatalogList({
                     prefetch={false}
                     aria-current={status === value ? 'page' : undefined}
                     className={buttonVariants({
-                      variant: status === value ? 'secondary' : 'ghost',
+                      variant: status === value ? 'selected' : 'ghost',
                       size: 'sm',
                     })}
                   >
@@ -250,14 +251,7 @@ export async function NewProductCatalogItem({
         title="新建产品资料"
         effect="immediate"
         subtitle="本页维护专版和彩印等路线的产品资料。价格及数量档在客户计价规则中维护。"
-        actions={
-          <Link
-            href={routeBase}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            返回列表
-          </Link>
-        }
+        back={{ href: routeBase, label: '返回产品资料' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <ProductForm
@@ -322,17 +316,18 @@ export async function EditProductCatalogItem({
           externalPriceBusinessText(product.name) || '未命名产品'
         }`}
         effect="immediate"
+        back={{ href: routeBase, label: '返回产品资料' }}
+        status={
+          <>
+            <ActiveStatusBadge active={product.isActive} />
+            {isRetired ? <StatusBadge tone="warning">历史 / 已退役</StatusBadge> : null}
+          </>
+        }
         subtitle={
           <>
             {externalPriceBusinessText(product.categoryNode.name) ||
               '未命名分类'}
-            {product.isActive ? ' · 启用' : ' · 停用'}
             {isLegacyCompatibilityObject ? ' · 仅保留历史引用' : ''}
-            {isRetired ? (
-              <StatusBadge tone="warning" className="ml-2">
-                历史 / 已退役
-              </StatusBadge>
-            ) : null}
           </>
         }
       />

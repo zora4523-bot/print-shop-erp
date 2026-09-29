@@ -177,12 +177,12 @@ export function CreateBundleForm({
       <div className="flex flex-wrap items-start justify-between gap-3">
         {selected.size === 0 ? (
           <DisabledReason cause="status" reason="先勾选至少一个工单">
-            <PendingButton pending={isPending} disabled pendingLabel="生成中…">
+            <PendingButton pending={isPending} disabled pendingLabel="正在生成…">
               生成下载包
             </PendingButton>
           </DisabledReason>
         ) : (
-          <PendingButton pending={isPending} pendingLabel="生成中…">
+          <PendingButton pending={isPending} pendingLabel="正在生成…">
             生成下载包
           </PendingButton>
         )}

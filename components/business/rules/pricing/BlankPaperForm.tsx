@@ -56,7 +56,7 @@ export function BlankPaperForm({
   return (
     <form
       action={action}
-      aria-label="新增纸张与规格价格"
+      aria-label="新建纸张与规格价格"
       aria-busy={pending}
       className="space-y-6 rounded-xl border bg-card p-5"
     >

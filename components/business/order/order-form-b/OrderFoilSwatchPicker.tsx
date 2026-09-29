@@ -164,7 +164,7 @@ export function OrderFoilSwatchPicker({
         [statusId, error || hint ? messageId : null].filter(Boolean).join(' ')
       }
     >
-      <legend className="text-xs font-semibold tracking-[0.16em] text-muted-foreground">
+      <legend className="text-xs font-semibold tracking-widest text-muted-foreground">
         {label}
         {maximum > 1 ? (
           <span className="ml-2 font-normal tracking-normal text-muted-foreground">
@@ -185,6 +185,7 @@ export function OrderFoilSwatchPicker({
               type="button"
               variant="ghost"
               aria-pressed={isSelected}
+              data-selected={isSelected ? '' : undefined}
               aria-label={
                 isSelected && maximum > 1
                   ? `${foilColorLabel(option.label)}，第 ${selectedIndex + 1} 色`
@@ -210,7 +211,7 @@ export function OrderFoilSwatchPicker({
                 className={cn(
                   'relative block h-8 w-full overflow-hidden rounded-md border border-border/70 bg-muted transition-[border-color,box-shadow]',
                   isSelected &&
-                    'border-transparent ring-2 ring-foreground ring-offset-1 ring-offset-background',
+                    'border-transparent ring-2 ring-primary ring-offset-1 ring-offset-background',
                 )}
               >
                 {imageSrc ? (

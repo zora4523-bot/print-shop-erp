@@ -118,7 +118,7 @@ export function SalaryRuleSettingsForm({
         </FormMessage>
       ) : null}
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending}>{pending ? '保存中…' : '保存新规则版本'}</Button>
+        <Button type="submit" disabled={pending}>{pending ? '正在保存…' : '保存新规则版本'}</Button>
         <span className="text-xs text-muted-foreground">保存会自动关闭相交的上一版本，不会修改历史工资单。</span>
       </div>
     </form>

@@ -127,7 +127,7 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
     expect(html).toContain('正反面烫金颜色');
     expect(html.match(/data-slot="checkbox"/g)).toHaveLength(2);
     expect(html).toContain('aria-label="选择款式 1：现货大号"');
-    expect(html).toContain('aria-label="本次申请需要新增一款"');
+    expect(html).toContain('aria-label="本次申请需要添加一款"');
     expect(html).toContain('目录规格');
     expect(html).toContain('规格只显示与当前计价路线、纸张和克重一致');
     expect(html).not.toContain('class="size-4 shrink-0"');
@@ -238,8 +238,8 @@ it('packaging membership controls the add-item capability and resets an obsolete
   const props = { orderId: 'order-1', expectedRevision: 4, expectedWorkOrderVersion: 2, items: [sourceItem], catalogProducts };
   const allowed = renderToStaticMarkup(<OrderChangeRequestForm {...props} hasPackagingGroups={false} />);
   const blocked = renderToStaticMarkup(<OrderChangeRequestForm {...props} hasPackagingGroups />);
-  expect(allowed).toContain('本次申请需要新增一款');
-  expect(blocked).not.toContain('本次申请需要新增一款');
+  expect(allowed).toContain('本次申请需要添加一款');
+  expect(blocked).not.toContain('本次申请需要添加一款');
   expect(orderChangeRequestDraftIdentity({ ...props, hasPackagingGroups: true })).not.toBe(orderChangeRequestDraftIdentity({ ...props, hasPackagingGroups: false }));
 });
 
@@ -264,7 +264,7 @@ it('已有地址发货时只提供交期修改：不渲染款式勾选、新增�
   expect(full).toContain('选择款式 1');
   expect(full).toContain('<option value="QTY" selected="">数量</option>');
   expect(dueDateOnly).not.toContain('选择款式 1');
-  expect(dueDateOnly).not.toContain('本次申请需要新增一款');
+  expect(dueDateOnly).not.toContain('本次申请需要添加一款');
   expect(dueDateOnly).not.toContain('<option value="QTY">');
   expect(dueDateOnly).toContain('<option value="DUE_DATE"');
   expect(dueDateOnly).toContain('新的承诺交期');

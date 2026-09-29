@@ -293,7 +293,7 @@ export function AddOrderShipmentForm({
           ) : null}
           <div className="mt-4 flex flex-wrap gap-3">
             <Button type="submit" disabled={blocked}>
-              {pending ? '处理中…' : preview ? '保存地址' : '预览费用'}
+              {pending ? '正在处理…' : preview ? '保存地址' : '预览费用'}
             </Button>
             {preview ? (
               <Button

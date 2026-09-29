@@ -162,6 +162,7 @@ import {
   shouldProtectOrderFormLeave,
   useOrderFormLeaveGuard,
 } from './use-order-form-leave-guard';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 export type CraftOption = {
   id: string;
@@ -2719,7 +2720,7 @@ export function OrderForm({
                   {canAssignExternalSales ? (
                     <div>
                       <Label htmlFor="externalSalesUserId">
-                        关联外部销售（必填）
+                        关联外部销售<RequiredMark />
                       </Label>
                       <select
                         id="externalSalesUserId"
@@ -2912,7 +2913,7 @@ export function OrderForm({
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-xs font-extrabold tracking-[0.2em] text-muted-foreground">
+                      <h2 className="text-xs font-semibold tracking-widest text-muted-foreground">
                         多地址发货
                       </h2>
                       <p className="mt-1.5 text-xs text-muted-foreground">
@@ -2951,7 +2952,7 @@ export function OrderForm({
                       {shipmentsArray.fields.map((shipment, shipmentIndex) => (
                         <li key={shipment.id} className="rounded-xl border p-4">
                           <div className="flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-extrabold">
+                            <h3 className="text-sm font-semibold">
                               地址 {shipmentIndex + 2}
                             </h3>
                             <Button
@@ -3048,7 +3049,7 @@ export function OrderForm({
                             </div>
                           </div>
                           <fieldset className="mt-4">
-                            <legend className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
+                            <legend className="text-xs font-bold tracking-widest text-muted-foreground">
                               款式分配数量
                             </legend>
                             <div className="mt-2 grid min-w-0 grid-cols-1 gap-3 @min-[560px]:grid-cols-2">

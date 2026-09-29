@@ -45,9 +45,9 @@ describe('owner notification page query contract', () => {
     expect(page).toContain('getBackgroundJobHealth().catch(() => null)');
     expect(page).toContain('summarizeSmartBotConnection(backgroundHealth');
     expect(page).toContain('data-slot="notifications-smart-bot-connection"');
-    expect(page).toContain('状态来自当前版本 LIGHT worker 的数据库心跳');
+    expect(page).toContain('此状态来自后台处理进程上报的连接心跳');
     expect(page).toContain("case 'AUTH_FAILED':");
-    expect(page).toContain('请立即轮换或核对 Bot Secret');
+    expect(page).toContain('请立即轮换或核对机器人凭据');
     expect(page).not.toContain('notifications-smart-bot-env-banner');
   });
 });

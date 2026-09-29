@@ -438,7 +438,7 @@ function AdminDecisionForm({
       {formIssue ? <p id="admin-decision-form-help" role="status" className="text-xs text-muted-foreground">{formIssue}</p> : null}
       <div className="flex flex-wrap gap-2">
         <DecisionConfirmation
-          label={pending ? '提交中…' : `确认${actionLabel}`}
+          label={pending ? '正在提交…' : `确认${actionLabel}`}
           title={`${actionLabel}？`}
           impactItems={impactItems}
           confirmLabel={`确认${actionLabel}`}
@@ -916,7 +916,7 @@ function DecisionPanelSection({
       <div data-slot={compact ? 'admin-order-decision-card' : undefined}>
         {compact ? (
           <>
-            <h4 data-slot="admin-order-decision-heading" className="text-sm font-extrabold">
+            <h4 data-slot="admin-order-decision-heading" className="text-sm font-semibold">
               {order.pendingChangeRequest
                 ? order.pendingChangeRequest.type === 'MODIFY'
                   ? '变更申请'

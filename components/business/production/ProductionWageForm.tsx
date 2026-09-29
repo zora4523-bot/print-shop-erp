@@ -24,15 +24,15 @@ export function ProductionWageForm({ jobId, owner, wages, workers }: { jobId: st
       <Input id={`${jobId}-wage-${index}`} aria-label={`${row.name || '协作师傅'}最终提成（元）`} className="min-h-11" type="number" step="0.01" min="0" max="9999999999.99" value={row.amount} required onChange={event => setRows(current => current.map((item, i) => i === index ? { ...item, amount: event.target.value } : item))} />
       {row.revision < 0 && row.workerId !== owner.id && <Button type="button" variant="outline" className="min-h-11" onClick={() => setRows(current => current.filter((_, i) => i !== index))}>移除协作师傅</Button>}
     </div>)}
-    <Button type="button" variant="outline" className="min-h-11" disabled={pending || rows.length >= 20 || state?.ok} onClick={() => setRows(current => [...current, { workerId: '', name: '', amount: '', revision: -1 }])}>增加协作师傅提成</Button>
+    <Button type="button" variant="outline" className="min-h-11" disabled={pending || rows.length >= 20 || state?.ok} onClick={() => setRows(current => [...current, { workerId: '', name: '', amount: '', revision: -1 }])}>添加协作师傅提成</Button>
     <div className="space-y-1"><label htmlFor={`${jobId}-wage-reason`}>金额依据</label><Input id={`${jobId}-wage-reason`} className="min-h-11" value={reason} maxLength={500} required onChange={event => setReason(event.target.value)} /></div>
     </fieldset>
     {reviewing && <section className="space-y-2 rounded-lg border p-3" aria-label="核对提成金额"><h4 className="font-medium">核对最终提成</h4>{rows.map(row => {
       const before = wages.find(wage => wage.workerId === row.workerId)?.amount;
       const difference = new Decimal(row.amount || '0').minus(before || '0');
       return <p key={row.workerId} className="break-words">{row.name}：{before ? formatMoney(before) : '待补录'} → {formatMoney(row.amount)}（变动 {formatMoney(difference)}）</p>;
-    })}<p className="break-words">金额依据：{reason}</p><Button type="button" variant="outline" className="min-h-11" disabled={pending || state?.ok} onClick={() => setReviewing(false)}>返回修改</Button></section>}
-    <Button type="submit" className="min-h-11" disabled={pending || state?.ok}>{!reviewing ? '核对提成' : pending ? '正在登记…' : '登记提成'}</Button>
+    })}<p className="break-words">金额依据：{reason}</p></section>}
+    <div className="flex flex-wrap gap-2"><Button type="submit" className="min-h-11" disabled={pending || state?.ok}>{!reviewing ? '核对提成' : pending ? '正在登记…' : '登记提成'}</Button>{reviewing && <Button type="button" variant="outline" className="min-h-11" disabled={pending || state?.ok} onClick={() => setReviewing(false)}>返回修改</Button>}</div>
     {state && <p role="status" className={state.ok ? 'text-muted-foreground' : 'text-destructive'}>{state.message}</p>}
   </form>;
 }

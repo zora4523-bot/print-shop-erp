@@ -320,9 +320,9 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
     expect(savedNames()).toEqual(['款名 8']);
     await userEvent.keyboard('{ArrowRight}');
     await expect.element(page.getByRole('tab', { name: '设计款 1', exact: true })).toHaveFocus();
-    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
-    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
-    for (const label of ['＋ 增加规格', '移除当前规格']) {
+    await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
+    for (const label of ['＋ 添加规格', '移除当前规格']) {
       const button = [...host.querySelectorAll('button')].find((entry) => entry.textContent === label)!;
       expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
       expect(button.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
@@ -367,7 +367,7 @@ it('a typed design name survives type, paper and specification changes', async (
 it('an added design starts unnamed, stops the order-name following and must be named', async () => {
   await ready('external-sales');
   await orderName().fill('新年红包');
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await expect.element(page.getByRole('tab', { name: /设计款 2/ })).toHaveAttribute('aria-selected', 'true');
   await expect.element(designName()).toHaveValue('');
   expect(savedNames()).toEqual(['新年红包', '']);
@@ -389,7 +389,7 @@ it('an added design starts unnamed, stops the order-name following and must be n
 it('design names must be unique within the order and are reported while typing', async () => {
   await ready('admin');
   await orderName().fill('新年红包');
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await designName().fill(' 新年红包 ');
   await expect.element(designName()).toHaveAttribute('aria-invalid', 'true');
   await expect.element(page.getByText('与其他设计款重名：新年红包', { exact: true })).toBeVisible();
@@ -401,7 +401,7 @@ it('design names must be unique within the order and are reported while typing',
 it('specification rows of one design share its name', async () => {
   await ready('admin');
   await designName().fill('福字款');
-  await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
   expect(savedNames()).toEqual(['福字款', '福字款']);
   await designName().fill('寿字款');
   expect(savedNames()).toEqual(['寿字款', '寿字款']);
@@ -427,7 +427,7 @@ it('typing the order name key by key never takes over a hand-typed design name',
 it('going back to one design that was never named by hand follows the order name again', async () => {
   await ready('external-sales');
   await orderName().fill('A');
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await designName().fill('B');
   await orderName().fill('A2');
   expect(savedNames()).toEqual(['A', 'B']);
@@ -440,7 +440,7 @@ it('going back to one design that was never named by hand follows the order name
 it('renaming an earlier design into a clash is reported on the field being typed', async () => {
   await ready('admin');
   await orderName().fill('A');
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await designName().fill('B');
   await page.getByRole('tab', { name: /^设计款 1/ }).click();
   await designName().fill('b');
@@ -464,9 +464,9 @@ it('administrator draft save blocked only by design names prompts salesperson an
   // Everything a draft needs except the salesperson and design 2's name.
   await page.getByRole('textbox', { name: '收货地址', exact: true })
     .fill('张先生 13800138000 广东省佛山市南海区测试路1号');
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
-  const salesperson = page.getByRole('combobox', { name: '关联外部销售（必填）', exact: true });
+  const salesperson = page.getByRole('combobox', { name: '关联外部销售', exact: true });
   await expect.element(salesperson).toHaveFocus();
   await expect.element(page.getByRole('button', { name: '设计款 2：请填写设计款名称', exact: true })).toBeVisible();
   await expect.element(page.getByText(/请上传设计图/)).not.toBeInTheDocument();
@@ -482,7 +482,7 @@ it('administrator draft save blocked only by design names prompts salesperson an
 it('switching designs shows each design its own name, and a blur never copies it across', async () => {
   await ready('external-sales');
   await designName().fill('福字款');
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await designName().fill('寿字款');
   await page.getByRole('tab', { name: /^设计款 1/ }).click();
   await expect.element(designName()).toHaveValue('福字款');
@@ -496,8 +496,8 @@ it('switching designs shows each design its own name, and a blur never copies it
 it('deleting the design being edited leaves the remaining design showing its own name', async () => {
   await ready('external-sales');
   await designName().fill('福字款');
-  await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await designName().fill('寿字款');
   await page.getByRole('button', { name: '删除设计款', exact: true }).click();
   await expect.element(designName()).toHaveValue('福字款');
@@ -506,7 +506,7 @@ it('deleting the design being edited leaves the remaining design showing its own
   expect(savedNames()).toEqual(['福字款', '福字款']);
 });
 
-it('a design without a group key keeps following after gaining one through ＋ 增加规格', async () => {
+it('a design without a group key keeps following after gaining one through ＋ 添加规格', async () => {
   // A historical / workbench-style row without designGroupKey.
   await ready('external-sales');
   const snapshot = editor!.save();
@@ -519,11 +519,11 @@ it('a design without a group key keeps following after gaining one through ＋ �
 
   await orderName().fill('新年红包');
   await expect.element(designName()).toHaveValue('新年红包');
-  await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
   await designName().fill('福字款');
   await orderName().fill('新年红包二期');
   await page.getByRole('tab', { name: /^设计款 1/ }).click();
-  await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
   await page.getByRole('tab', { name: /^设计款 2/ }).click();
   await page.getByRole('button', { name: '删除设计款', exact: true }).click();
   expect(savedNames()).toEqual(['新年红包二期', '新年红包二期']);

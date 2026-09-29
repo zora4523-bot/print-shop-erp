@@ -49,7 +49,7 @@ afterEach(() => { flushSync(() => root.unmount()); host.remove(); sessionStorage
 
 it('preserves pending edits across switching, removal and undo', async () => {
   await page.getByLabelText('模拟工单名称').fill('第一单');
-  await page.getByRole('button', { name: '＋ 增加工单' }).click();
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
   await page.getByLabelText('模拟工单名称').fill('第二单');
   await page.getByRole('button', { name: '工单 1', exact: true }).click();
   await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('第一单');
@@ -61,7 +61,7 @@ it('preserves pending edits across switching, removal and undo', async () => {
 
 it('locks switching after creation failure and recovers a link to the existing order on reload', async () => {
   await page.getByLabelText('模拟工单名称').fill('已保存');
-  await page.getByRole('button', { name: '＋ 增加工单' }).click();
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
   await page.getByRole('button', { name: '模拟已创建但上传失败' }).click();
   await expect.element(page.getByRole('button', { name: '工单 1', exact: true })).toBeDisabled();
   flushSync(() => root.unmount()); root = createRoot(host); mount();
@@ -73,7 +73,7 @@ it('locks switching after creation failure and recovers a link to the existing o
 
 it('retains earlier success when a later order fails, and resumes the remaining order', async () => {
   await page.getByLabelText('模拟工单名称').fill('第一单');
-  await page.getByRole('button', { name: '＋ 增加工单' }).click();
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
   await page.getByLabelText('模拟工单名称').fill('第二单');
   await page.getByRole('button', { name: '工单 1', exact: true }).click();
   await page.getByRole('button', { name: '模拟创建完成' }).click();
@@ -91,7 +91,7 @@ it('starts a new batch after recovering ten saved orders without deleting server
     created: { orderId: `saved-${index}`, orderNo: `GD-${index}`, intent: 'submit' }, done: index > 0 }));
   sessionStorage.setItem('order-creation-batch:v1:workspace-test:new', JSON.stringify(saved));
   flushSync(() => root.unmount()); root = createRoot(host); mount();
-  await expect.element(page.getByRole('button', { name: '＋ 增加工单' })).toBeDisabled();
+  await expect.element(page.getByRole('button', { name: '＋ 添加工单' })).toBeDisabled();
   await expect.element(page.getByText('本批已达 10 张，全部保存后可开始新一批。')).toBeVisible();
   await page.getByRole('button', { name: '开始新一批', exact: true }).click();
   await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('');
@@ -102,9 +102,9 @@ it('starts a new batch after recovering ten saved orders without deleting server
 });
 
 it('keeps unsaved work when the batch is full', async () => {
-  for (let index = 1; index < 10; index++) await page.getByRole('button', { name: '＋ 增加工单' }).click();
+  for (let index = 1; index < 10; index++) await page.getByRole('button', { name: '＋ 添加工单' }).click();
   await page.getByLabelText('模拟工单名称').fill('尚未保存');
-  await expect.element(page.getByRole('button', { name: '＋ 增加工单' })).toBeDisabled();
+  await expect.element(page.getByRole('button', { name: '＋ 添加工单' })).toBeDisabled();
   await expect.element(page.getByRole('button', { name: '开始新一批', exact: true })).not.toBeInTheDocument();
   await expect.element(page.getByLabelText('模拟工单名称')).toHaveValue('尚未保存');
 });

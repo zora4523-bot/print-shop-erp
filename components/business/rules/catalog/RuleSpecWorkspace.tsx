@@ -162,7 +162,7 @@ export function RuleSpecWorkspace({
                 prefetch={false}
                 aria-current={status === value ? 'page' : undefined}
                 className={buttonVariants({
-                  variant: status === value ? 'secondary' : 'ghost',
+                  variant: status === value ? 'selected' : 'ghost',
                   size: 'sm',
                 })}
               >

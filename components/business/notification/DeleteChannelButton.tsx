@@ -35,7 +35,7 @@ export function DeleteChannelButton({
         reason={disabledReason ?? '当前群仍被规则引用'}
         fixHref="/owner/notifications#notification-rules"
         fixLabel="去规则移除"
-        className="items-end text-right"
+        className="items-end self-start text-right"
       >
         <Button type="button" size="sm" variant="outline" disabled>
           删除
@@ -45,7 +45,7 @@ export function DeleteChannelButton({
   }
 
   return (
-    <div className="flex flex-col items-end gap-2" aria-busy={pending}>
+    <div className="flex flex-col items-end gap-2 self-start" aria-busy={pending}>
       <ConfirmActionController level="L2"
         disabled={pending}
         trigger={
@@ -53,7 +53,7 @@ export function DeleteChannelButton({
             {pending ? (
               <>
                 <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
-                删除中…
+                正在删除…
               </>
             ) : (
               '删除'
@@ -76,7 +76,7 @@ export function DeleteChannelButton({
         <ConfirmActionDialog action={`删除“${channelName}”？`} changes={[]} consequences={[
           '该群配置会从系统中永久删除。',
           '存在规则或历史投递记录时无法删除。',
-        ]} confirmText="删除" />
+        ]} confirmText="永久删除" danger />
       </ConfirmActionController>
       {errorMessage ? (
         <ActionNotice

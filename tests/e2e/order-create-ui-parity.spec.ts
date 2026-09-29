@@ -110,7 +110,7 @@ test('admin submit locates the missing salesperson, reviews the exact manual pri
   const submit = page.getByRole('button', { name: '创建并提交', exact: true });
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   await submit.click();
-  const salesperson = page.getByRole('combobox', { name: '关联外部销售（必填）', exact: true });
+  const salesperson = page.getByRole('combobox', { name: '关联外部销售', exact: true });
   await expect(salesperson).toHaveAttribute('aria-invalid', 'true');
   await expect(page.getByText('请选择关联外部销售').first()).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);

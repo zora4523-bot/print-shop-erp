@@ -23,7 +23,7 @@ test.describe("admin order entry", () => {
     const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
     const ownerId = await getUserIdByUsername(E2E_USERS.owner!.username);
     const recipient = page.getByRole("combobox", {
-      name: "关联外部销售（必填）",
+      name: "关联外部销售",
     });
     await expect(recipient).toBeVisible();
     await expect(page.getByLabel("客户名称/简称", { exact: true })).toHaveCount(
@@ -176,14 +176,14 @@ test.describe("admin order entry", () => {
     });
     const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
     const recipient = page.getByRole("combobox", {
-      name: "关联外部销售（必填）",
+      name: "关联外部销售",
     });
     await expect(recipient).toHaveValue("");
     await page
       .getByRole("textbox", { name: "工单名称", exact: true })
       .fill(`管理员代建 ${Date.now()}`);
-    // 分层建单（64c9a350）没有「复制当前」：「＋ 增加设计款」同样复制当前款并切过去。
-    await page.getByRole("button", { name: "＋ 增加设计款", exact: true }).click();
+    // 分层建单（64c9a350）没有「复制当前」：「＋ 添加设计款」同样复制当前款并切过去。
+    await page.getByRole("button", { name: "＋ 添加设计款", exact: true }).click();
     // 业主 2026-09-26：新增设计款的名称留空、须手动填写，且与第 1 款不重名。
     const secondDesignName = page.getByRole("textbox", { name: "设计款名称", exact: true });
     await expect(secondDesignName).toHaveValue("");

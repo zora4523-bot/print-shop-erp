@@ -17,7 +17,7 @@ type BillFormAction = (
 function Feedback({ state }: { state: AgentMonthlyBillActionResult | null }) {
   if (!state) return null;
   if (state.status === 'success') {
-    return <p className="text-xs text-success">{state.message}</p>;
+    return <p className="text-xs text-success-foreground">{state.message}</p>;
   }
   if (state.status === 'error') {
     return <p className="text-xs text-destructive">{state.message}</p>;
@@ -54,7 +54,7 @@ export function GenerateAgentMonthlyBillsForm({
         />
       </div>
       <Button type="submit" disabled={pending}>
-        {pending ? '生成中…' : '生成或更新草稿'}
+        {pending ? '正在生成…' : '生成或更新草稿'}
       </Button>
       <Feedback state={state} />
     </form>
@@ -79,7 +79,7 @@ export function ConfirmAgentMonthlyBillForm({
     <form action={action} aria-busy={pending} className="space-y-2">
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
       <Button type="submit" disabled={pending}>
-        {pending ? '确认中…' : '确认并冻结账单'}
+        {pending ? '正在确认…' : '确认并冻结账单'}
       </Button>
       <p className="text-xs text-muted-foreground">
         确认后账单不可修改。
@@ -124,7 +124,7 @@ export function MarkAgentMonthlyBillPaidForm({
         </div>
       </div>
       <Button type="submit" disabled={pending}>
-        {pending ? '记录中…' : '标记已收'}
+        {pending ? '正在记录…' : '标记已收'}
       </Button>
       <Feedback state={state} />
     </form>
@@ -178,7 +178,7 @@ export function CreateAgentMonthlyBillCreditForm({
         />
       </div>
       <Button type="submit" variant="outline" disabled={pending} className="self-end">
-        {pending ? '记录中…' : '记录负项'}
+        {pending ? '正在记录…' : '记录负项'}
       </Button>
       <div className="sm:col-span-3">
         <Feedback state={state} />

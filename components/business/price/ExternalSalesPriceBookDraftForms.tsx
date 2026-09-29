@@ -47,6 +47,7 @@ import {
   externalPriceBusinessText,
   externalPriceRuleDisplayName,
 } from '@/lib/price/external-price-display';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 export type CustomerPriceBookDraftRuleContext =
   CustomerPriceRuleDraftEditorDto['context'];
@@ -553,7 +554,7 @@ export function CreateCustomerPriceBookDraftForm({
         </div>
       ) : null}
       <div className="space-y-2">
-        <Label htmlFor={changeReasonId}>调价原因（必填）</Label>
+        <Label htmlFor={changeReasonId}>调价原因<RequiredMark /></Label>
         <textarea
           id={changeReasonId}
           name="changeReason"
@@ -933,13 +934,13 @@ export function DiscardCustomerPriceBookDraftForm({
             className="min-h-11"
             disabled={pending}
           >
-            {pending ? '放弃中…' : '放弃草稿'}
+            {pending ? '正在放弃…' : '放弃草稿'}
           </Button>
         }
         cancelLabel="返回检查">
         <ConfirmActionDialog action="放弃这份价目草稿" changes={[]} consequences={[
           '草稿及其中所有未发布修改将永久删除。',
-        ]} confirmText="确认放弃草稿" />
+        ]} confirmText="确认放弃草稿" danger />
       </ConfirmActionController>
       <MutationFeedback
         state={state}
@@ -993,7 +994,7 @@ export function CancelScheduledCustomerPriceBookForm({
         cancelLabel="保留计划">
         <ConfirmActionDialog action={`取消第 ${version} 版的生效计划？`} changes={[]} consequences={[
           '前一版价格将延续覆盖原计划时段。',
-        ]} confirmText="取消计划" />
+        ]} confirmText="取消计划" danger />
       </ConfirmActionController>
       <MutationFeedback
         state={state}
@@ -1908,7 +1909,7 @@ export function CustomerPriceBookDraftRuleForm({
         <legend className="px-1 text-sm font-medium">规则状态</legend>
         <input type="hidden" name="isActive" value="false" />
         <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-          <Checkbox
+          <Checkbox className="-ml-3"
             name="isActive"
             value="true"
             defaultChecked={rule.isActive}
@@ -1930,7 +1931,7 @@ export function CustomerPriceBookDraftRuleForm({
               value="false"
             />
             <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-              <Checkbox
+              <Checkbox className="-ml-3"
                 name="blocksAutomaticQuote"
                 value="true"
                 defaultChecked={rule.blocksAutomaticQuote}
@@ -1966,7 +1967,7 @@ export function CustomerPriceBookDraftRuleForm({
           className="min-h-11 w-full sm:w-auto"
           disabled={pending}
         >
-          {pending ? '保存中…' : '保存草稿'}
+          {pending ? '正在保存…' : '保存草稿'}
         </Button>
       </div>
     </form>

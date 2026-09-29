@@ -49,7 +49,7 @@ test.describe('administrator workspace', () => {
     const routes: AdminRoute[] = [
       { name: 'discovery-purchase-new', path: '/owner/purchases/new', readyHeading: '新建采购单' },
       { name: 'discovery-parties', path: '/owner/parties?type=suppliers', readyHeading: '客户/供应商' },
-      { name: 'discovery-boms', path: '/owner/boms', readyHeading: 'BOM/用料' },
+      { name: 'discovery-boms', path: '/owner/boms', readyHeading: '用料清单' },
       { name: 'discovery-categories', path: '/owner/rules/product-categories', readyHeading: '产品结构分类 / BOM 分类' },
       { name: 'discovery-rules', path: '/owner/rules', readyHeading: '规则配置中心' },
       { name: 'discovery-outsource', path: '/foreman/outsource', readyHeading: '外协单' },
@@ -63,7 +63,7 @@ test.describe('administrator workspace', () => {
       { name: 'return-empty-dispatch', path: '/orders/production', readyHeading: '安排生产师傅', prepareGateState: async page => {
         await expect(page.getByRole('link', { name: '返回工单列表', exact: true })).toHaveAttribute('href', '/orders');
       } },
-      { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '创建外协单', prepareGateState: async page => {
+      { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '新建外协单', prepareGateState: async page => {
         await expect(page.getByRole('link', { name: '返回工单详情', exact: true })).toHaveAttribute('href', `/orders/${fixture.orderId}`);
       } },
       { name: 'return-specifications', path: '/owner/rules/specifications', readyHeading: '规格目录', prepareGateState: async page => {
@@ -80,7 +80,7 @@ test.describe('administrator workspace', () => {
   });
 
   test('warehouse maintenance controls pass focused light and dark gates', async ({ page }, testInfo) => {
-    const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库作业台', prepareGateState: async (page) => {
+    const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库/库位', prepareGateState: async (page) => {
       const disclosure = page.locator('#admin-main').getByText('仓库与库位设置', { exact: true });
       await disclosure.click();
       const settings = disclosure.locator('..');
@@ -104,13 +104,13 @@ test.describe('administrator workspace', () => {
         await page.reload();
         await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
       } },
-      { name: 'recovery-bom', path: '/owner/boms/new', readyHeading: '新建 BOM', prepareGateState: async (page) => {
+      { name: 'recovery-bom', path: '/owner/boms/new', readyHeading: '新建用料清单', prepareGateState: async (page) => {
         const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
         if (draftsPrepared) {
           await resume.click();
-          await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue('待补物料的用料清单');
+          await expect(page.getByLabel('用料清单名称', { exact: true })).toHaveValue('待补物料的用料清单');
         }
-        await page.getByLabel('BOM 名称', { exact: true }).fill('待补物料的用料清单');
+        await page.getByLabel('用料清单名称', { exact: true }).fill('待补物料的用料清单');
         await page.reload();
         await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
       } },
@@ -252,9 +252,9 @@ test.describe('administrator workspace', () => {
         const tabs = page.getByRole('navigation', { name: '待建工单' });
         await expect(tabs.getByRole('button').first()).toBeVisible();
         while (await tabs.getByRole('button').count() < 10) {
-          await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+          await page.getByRole('button', { name: '＋ 添加工单', exact: true }).click();
         }
-        await expect(page.getByRole('button', { name: '＋ 增加工单', exact: true })).toBeDisabled();
+        await expect(page.getByRole('button', { name: '＋ 添加工单', exact: true })).toBeDisabled();
         await expect(page.getByText('本批已达 10 张，全部保存后可开始新一批。')).toBeVisible();
         const first = tabs.getByRole('button', { name: '工单 1', exact: true });
         if (testInfo.project.use.hasTouch) await first.tap();
@@ -773,7 +773,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'orders',
       path: '/orders',
-      readyHeading: '工单管理',
+      readyHeading: '工单列表',
       prepareGateState: (page) => prepareAdminOrderWorkspaceState(page, data),
     },
     {
@@ -786,7 +786,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
         encodeURIComponent('广东省深圳市南山区科技园长地址压力测试大厦A座12345678901234567890') +
         '&foilColor=' +
         encodeURIComponent('哑金,透明金,客户特殊调色长名称'),
-      readyHeading: '工单管理',
+      readyHeading: '工单列表',
       prepareGateState: (page) => prepareAdminOrderWorkspaceState(page, data),
     },
     {
@@ -804,10 +804,10 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'attendance',
       path: '/foreman/attendance',
-      readyHeading: '员工考勤',
+      readyHeading: '工时录入',
       prepareGateState: prepareAttendanceState,
     },
-    { name: 'inventory', path: '/foreman/materials', readyHeading: '物料库存' },
+    { name: 'inventory', path: '/foreman/materials', readyHeading: '车间用料' },
     { name: 'outsource', path: '/foreman/outsource', readyHeading: '外协单' },
     // 以下四条此前从未被任何门禁访问过。UI 审查在它们上面实测到 axe
     // label / select-name 违规（筛选栏 <label> 没有 htmlFor），修完补进
@@ -825,11 +825,11 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'salary-daily',
       path: '/owner/salary/daily',
-      readyHeading: '历史开机师傅日薪档案',
+      readyHeading: '历史日薪档案',
     },
     { name: 'cdr', path: '/foreman/cdr', readyHeading: 'CDR 汇总下载' },
-    { name: 'accounts', path: '/owner/accounts', readyHeading: '账号管理' },
-    { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
+    { name: 'accounts', path: '/owner/accounts', readyHeading: '用户管理' },
+    { name: 'materials', path: '/owner/materials', readyHeading: '物料' },
     {
       name: 'product-references',
       path: RULE_CENTER_HREFS.productReferences,
@@ -908,7 +908,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'legacy-bills-archive',
       path: '/owner/bills/archive',
-      readyHeading: '历史账单',
+      readyHeading: '历史账单归档',
     },
     {
       name: 'order-changes',
@@ -916,7 +916,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '工单修改申请',
     },
     { name: 'salary', path: '/owner/salary', readyHeading: '薪资总览' },
-    { name: 'warehouses', path: '/owner/warehouses', readyHeading: '仓库作业台' },
+    { name: 'warehouses', path: '/owner/warehouses', readyHeading: '仓库/库位' },
     { name: 'pigsty', path: '/owner/pigsty', readyHeading: 'Pigsty 运维' },
     { name: 'settings', path: '/owner/settings', readyHeading: '系统设置' },
     {
@@ -1049,7 +1049,7 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'sales-orders',
       path: `/orders?q=${encodeURIComponent(data.orderNo)}`,
-      readyHeading: '工单',
+      readyHeading: '工单列表',
       prepareGateState: (page) => prepareSalesOrderListState(page, data),
     },
     {
@@ -1238,7 +1238,7 @@ async function expectSelectedPriceWorkspace(
       name: /^创建(?:加工费|快递与耗材)调价草稿$/,
     });
     await expect(createDraftForm).toBeVisible();
-    await expect(createDraftForm.getByLabel('调价原因（必填）')).toBeVisible();
+    await expect(createDraftForm.getByLabel('调价原因')).toBeVisible();
     await expect(
       createDraftForm.getByRole('button', {
         name: '复制当前价目并开始调价',
@@ -1759,7 +1759,7 @@ async function prepareAdminOrderCreationState(page: Page) {
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
   // DECISIONS 2026-09-24：管理员建单必须挂外部销售，内部建单的「需人工核价的要求」字段随之删除。
   await form
-    .getByRole('combobox', { name: '关联外部销售（必填）', exact: true })
+    .getByRole('combobox', { name: '关联外部销售', exact: true })
     .selectOption({ label: 'E2E 销售 · e2e-sales' });
 
   await form
@@ -1834,8 +1834,8 @@ for (const role of ['owner', 'sales'] as const) {
     const form = page.locator('[data-slot="order-form-b"]');
     await expect(form).toBeVisible();
     for (let index = 0; index < 3; index++) {
-      await form.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
-      if (index < 2) await form.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+      await form.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
+      if (index < 2) await form.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
     }
     const designs = form.getByRole('tablist', { name: '设计款', exact: true });
     const specs = form.getByRole('tablist', { name: '规格明细', exact: true });

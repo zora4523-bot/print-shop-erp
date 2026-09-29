@@ -1,14 +1,12 @@
 'use client';
 
 import type { SupplementContext } from '@/lib/form-drafts/model';
-import { supplementReturnHref } from '@/lib/form-drafts/return-context';
 import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
 
 import { useActionState } from 'react';
 import { ProductCategory } from '../../../generated/prisma/enums';
 import type { ProductCategoryNodeMutationResult } from '@/actions/owner-product-categories.types';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';
@@ -69,7 +67,6 @@ export function ProductCategoryForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
-  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.productCategories;
   const categoryOptions = Object.values(ProductCategory).filter(
     (category) =>
       !RETIRED_PRODUCT_CATEGORIES.has(category) ||
@@ -161,15 +158,8 @@ export function ProductCategoryForm(props: Props) {
 
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? '提交中…' : props.mode === 'create' ? '创建分类' : '保存修改'}
+          {pending ? '正在提交…' : props.mode === 'create' ? '创建分类' : '保存修改'}
         </Button>
-        <PendingLink
-          href={props.supplement ? supplementReturnHref(props.supplement) : routeBase}
-          pending={pending}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          {props.supplement ? '返回原录入' : '返回列表'}
-        </PendingLink>
       </div>
     </form>
   );

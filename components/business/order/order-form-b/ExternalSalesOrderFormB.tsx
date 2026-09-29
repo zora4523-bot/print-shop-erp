@@ -361,9 +361,8 @@ function DesignFileBox({
             <Button
               type="button"
               size="xs"
-              variant="outline"
+              variant="destructive"
               aria-label={`移除${fileLabel}`}
-              className="border-destructive/20 text-destructive hover:bg-destructive/5 hover:text-destructive"
               disabled={disabled}
               onClick={(event) => {
                 event.stopPropagation();
@@ -731,7 +730,7 @@ export function OrderFormB({
       }}
     >
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-extrabold tracking-tight">
+        <h1 className="text-xl font-semibold tracking-tight">
           {title}
         </h1>
         {settlementLabel ? (
@@ -774,10 +773,10 @@ export function OrderFormB({
           <Button
             ref={removeButtonRef}
             type="button"
-            variant="outline"
+            variant="destructive"
             aria-label={`删除第 ${safeActiveIndex + 1} 款`}
             disabled={disabled}
-            className="min-h-11 rounded-lg px-3 py-1.5 text-sm font-semibold text-destructive hover:bg-destructive/5 hover:text-destructive"
+            className="min-h-11 px-3"
             onClick={() => {
               cancelIssueFocus();
               restoreDeleteFocusRef.current = 'design';
@@ -802,13 +801,11 @@ export function OrderFormB({
           <Button
             key={entry.id}
             type="button"
-            variant="outline"
+            variant={safeActiveIndex === index ? 'selected' : 'outline'}
             aria-pressed={safeActiveIndex === index}
             disabled={disabled}
             className={cn(
               'h-auto min-h-11 rounded-lg px-3.5 py-1.5 text-sm font-bold',
-              safeActiveIndex === index &&
-                'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
             )}
             onClick={() => {
               cancelIssueFocus();
@@ -884,8 +881,8 @@ export function OrderFormB({
           {onAddSpecification ? <div className="space-y-3 rounded-t-xl bg-muted/30 px-4 pt-4 @min-[560px]:px-5">
             <div role="group" aria-label="设计款操作" className="flex flex-wrap items-start gap-2">
               <Button type="button" variant="outline" className="min-h-11" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER}
-                onClick={() => { cancelIssueFocus(); onAdd(); }}>＋ 增加设计款</Button>
-              {groups.length > 1 && onRemoveDesign ? <Button type="button" variant="destructive" className="min-h-11 bg-background hover:bg-destructive/5 dark:bg-background dark:hover:bg-destructive/5" ref={removeButtonRef}
+                onClick={() => { cancelIssueFocus(); onAdd(); }}>＋ 添加设计款</Button>
+              {groups.length > 1 && onRemoveDesign ? <Button type="button" variant="destructive" className="min-h-11" ref={removeButtonRef}
                 disabled={disabled} onClick={() => {
                   cancelIssueFocus(); restoreDeleteFocusRef.current = 'design'; onRemoveDesign(safeActiveIndex);
                 }}>删除设计款</Button> : null}
@@ -1043,7 +1040,7 @@ export function OrderFormB({
             {afterShipping}
 
             <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-              <Checkbox
+              <Checkbox className="-ml-3"
                 checked={values.isSfCollect ?? false}
                 disabled={disabled}
                 aria-label="顺丰到付（本单不计快递费）"
@@ -1063,16 +1060,16 @@ export function OrderFormB({
               tabIndex={-1}
               className="mt-5 rounded-xl border border-destructive bg-destructive/5 px-4 py-3.5 text-destructive"
             >
-              <h2 className="text-sm font-extrabold">
+              <h2 className="text-sm font-semibold">
                 还有 {fieldErrors.summary.length} 处需要处理
               </h2>
-              <ul className="mt-2 space-y-0.5 text-xs font-semibold">
+              <ul className="mt-2 text-xs font-semibold">
                 {fieldErrors.summary.map((message, index) => (
                   <li key={`${message}-${index}`}>
                     <Button
                       type="button"
                       variant="link"
-                      className="h-auto! min-h-0! min-w-0! justify-start px-0! py-1 text-left whitespace-normal text-destructive underline underline-offset-2 hover:text-destructive hover:opacity-70"
+                      className="h-auto min-h-11 min-w-0 justify-start px-0 py-1 text-left whitespace-normal text-destructive underline underline-offset-2 hover:text-destructive hover:opacity-70"
                       onClick={() => focusIssue(message)}
                     >
                       {message}

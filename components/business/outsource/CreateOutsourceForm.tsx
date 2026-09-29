@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business';
+import { DisabledReason, PendingLink } from '@/components/ui-business';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -125,8 +125,9 @@ export function CreateOutsourceForm({
         ) : (
           <ul className="space-y-2">
             {items.map((it) => (
-              <li key={it.id} className="flex min-w-0 items-center gap-3 text-sm">
+              <li key={it.id} className="flex min-w-0 items-center gap-1 text-sm">
                 <Checkbox
+                  className="-ml-3"
                   id={`item-${it.id}`}
                   checked={!!selected[it.id]}
                   disabled={pending}
@@ -232,12 +233,18 @@ export function CreateOutsourceForm({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="submit"
-          disabled={pending || chosenIds.length === 0 || supplierName === ''}
-        >
-          {pending ? '提交中…' : '创建外协单'}
-        </Button>
+        {!pending && (chosenIds.length === 0 || supplierName === '') ? (
+          <DisabledReason
+            cause="prerequisite"
+            reason={chosenIds.length === 0 ? '先勾选要外协的款式。' : '先选择外协厂。'}
+          >
+            <Button type="submit" disabled={pending || chosenIds.length === 0 || supplierName === ''}>创建外协单</Button>
+          </DisabledReason>
+        ) : (
+          <Button type="submit" disabled={pending}>
+            {pending ? '正在创建外协单…' : '创建外协单'}
+          </Button>
+        )}
         <PendingLink
           pending={pending}
           href={`/orders/${orderId}`}

@@ -67,7 +67,7 @@ test('管理员新建后编辑完整收费，重载保留且外部销售无入�
   const packing = editor.locator('div.rounded-lg').filter({ has: page.getByRole('heading', { name: '地址 1 · 包装耗材费', exact: true }) });
   await freight.getByLabel('收费金额（元）').fill('6');
   await packing.getByLabel('收费金额（元）').fill('2');
-  await editor.getByLabel('定价依据（必填）').fill('管理员确认全项收费');
+  await editor.getByLabel('定价依据').fill('管理员确认全项收费');
   const db = await database();
   try {
     const before = (await db.query('SELECT "priceRevision", "totalAmount"::text AS total FROM "Order" WHERE id=$1', [orderId])).rows[0];

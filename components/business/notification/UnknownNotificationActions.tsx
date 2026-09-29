@@ -73,7 +73,7 @@ export function UnknownNotificationActions({
           disabled={pending}
           trigger={
             <Button type="button" size="xs" variant="secondary" disabled={pending}>
-              {deliveredPending ? '处理中…' : '确认已送达'}
+              {deliveredPending ? '正在处理…' : '确认已送达'}
             </Button>
           }
           onConfirm={() => setActiveDecision('delivered')}>
@@ -88,7 +88,7 @@ export function UnknownNotificationActions({
             disabled={pending}
             trigger={
               <Button type="button" size="xs" variant="outline" disabled={pending}>
-                {retryPending ? '入队中…' : '确认未送达并重发'}
+                {retryPending ? '正在入队…' : '确认未送达并重发'}
               </Button>
             }
             onConfirm={() => setActiveDecision('retry')}>
@@ -114,7 +114,7 @@ export function UnknownNotificationActions({
           disabled={pending}
           trigger={
             <Button type="button" size="xs" variant="destructive" disabled={pending}>
-              {ignoredPending ? '处理中…' : '忽略'}
+              {ignoredPending ? '正在处理…' : '忽略'}
             </Button>
           }
           reasonLabel="忽略理由"
@@ -122,7 +122,7 @@ export function UnknownNotificationActions({
           onConfirm={() => setActiveDecision('ignored')}>
           <ConfirmActionDialog action="忽略该条结果不明的消息" changes={[]} consequences={[
             '该消息移出待处理列表。',
-          ]} confirmText="忽略" />
+          ]} confirmText="忽略此通知" />
         </ConfirmActionController>
       </div>
 

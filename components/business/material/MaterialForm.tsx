@@ -1,12 +1,9 @@
 'use client';
 
 import type { SupplementContext } from '@/lib/form-drafts/model';
-import { supplementReturnHref } from '@/lib/form-drafts/return-context';
 import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
 
-import Link from 'next/link';
 import { useActionState, useRef } from 'react';
-import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -286,9 +283,6 @@ export function MaterialForm(props: Props) {
         <PendingButton pending={pending} pendingLabel="正在保存物料…">
           {isCreate ? '创建物料' : '保存修改'}
         </PendingButton>
-        <Link href={props.supplement ? supplementReturnHref(props.supplement) : props.routeBase} className={buttonVariants({ variant: 'outline' })}>
-          {props.supplement ? '返回原录入' : '返回列表'}
-        </Link>
       </div>
     </form>
   );

@@ -44,11 +44,18 @@ function isPriceWorkspacePath(pathname: string): boolean {
   );
 }
 
+// 纯视图切换参数（客户计价板块 / 定位某条规则）不改变版本状态，不触发版本
+// 摘要重取（审查 #42）；其余参数（start/purpose/draft 等可能伴随草稿变化）照旧刷新。
+const VIEW_ONLY_PARAMS = new Set(['section', 'focus']);
+
 export function priceWorkspaceNavigationKey(
   pathname: string,
   searchParams: Pick<URLSearchParams, 'toString'>,
 ): string {
-  return `${pathname}?${searchParams.toString()}`;
+  const relevant = new URLSearchParams(searchParams.toString());
+  for (const key of VIEW_ONLY_PARAMS) relevant.delete(key);
+  relevant.sort();
+  return `${pathname}?${relevant.toString()}`;
 }
 
 const RULE_CENTER_MATCH_ITEMS: readonly AdminMenuItem[] =
@@ -92,10 +99,10 @@ function PriceStreamStatus({
         <span>暂无生效版</span>
       )}
       {stream.draftVersion !== null ? (
-        <span className="text-warning">待发布</span>
+        <span className="text-warning-foreground">待发布</span>
       ) : null}
       {stream.scheduledVersion !== null ? (
-        <span className="text-info">待生效</span>
+        <span className="text-info-foreground">待生效</span>
       ) : null}
     </span>
   );

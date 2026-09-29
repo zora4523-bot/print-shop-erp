@@ -69,7 +69,7 @@ export function OrderSubmissionSuccess({
       >
         <Button
           type="button"
-          className="min-h-11 bg-foreground text-background hover:bg-foreground/90"
+          className="min-h-11"
           disabled={primaryAction.disabled}
           onClick={primaryAction.onClick}
         >

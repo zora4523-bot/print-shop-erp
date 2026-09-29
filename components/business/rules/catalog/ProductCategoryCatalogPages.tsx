@@ -112,14 +112,7 @@ export async function NewProductCategoryCatalogItem({
       <RuleCenterPageHeader
         title="新建产品结构分类"
         effect="immediate"
-        actions={
-          <Link
-            href={backHref}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            {supplement ? '返回原录入' : '返回分类列表'}
-          </Link>
-        }
+        back={{ href: backHref, label: supplement ? '返回原录入' : '返回产品结构分类' }}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -161,13 +154,12 @@ export async function EditProductCategoryCatalogItem({
         title={`编辑产品结构分类：${node.name}`}
         effect="immediate"
         subtitle={`${node._count.products} 个产品资料`}
-        actions={
-          <div className="flex items-center gap-2">
+        back={{ href: routeBase, label: '返回产品结构分类' }}
+        status={
+          <>
             <ActiveStatusBadge active={node.isActive} />
-            {isRetired ? (
-              <StatusBadge tone="warning">历史 / 已退役</StatusBadge>
-            ) : null}
-          </div>
+            {isRetired ? <StatusBadge tone="warning">历史 / 已退役</StatusBadge> : null}
+          </>
         }
       />
 

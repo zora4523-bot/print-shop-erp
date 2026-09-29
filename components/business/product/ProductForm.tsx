@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useActionState, useRef } from 'react';
-import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -83,7 +82,6 @@ export function ProductForm(props: Props) {
   const summaryErrors = toProductErrorSummary(errs);
   const missingCategoryNodes = props.categoryNodes.length === 0;
   const defaultCategoryNodeId = initial?.categoryNodeId ?? props.categoryNodes[0]?.id ?? '';
-  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.productReferences;
   const categoryManagementHref =
     props.categoryManagementHref ?? RULE_CENTER_HREFS.productCategories;
 
@@ -271,9 +269,6 @@ export function ProductForm(props: Props) {
         >
           {isCreate ? '创建产品' : '保存修改'}
         </PendingButton>
-        <Link href={routeBase} className={buttonVariants({ variant: 'outline' })}>
-          返回列表
-        </Link>
       </div>
     </form>
   );

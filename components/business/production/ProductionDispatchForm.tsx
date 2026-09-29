@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { ActionNotice, PendingLink } from '@/components/ui-business';
+import { ActionNotice, DisabledReason, PendingLink } from '@/components/ui-business';
 import { publishProductionDispatchAction } from '@/actions/production-dispatch';
 
 type OrderRow = {
@@ -115,7 +115,9 @@ export function ProductionDispatchForm({ orders, actorId }: { orders: OrderRow[]
         </Card>
       ) : (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" className="min-h-11" disabled={!complete || pending} onClick={() => setReviewing(true)}>核对排单</Button>
+          {!complete && !pending ? <DisabledReason cause="prerequisite" reason="每道工序都指派师傅后才能核对排单。">
+            <Button type="button" className="min-h-11" disabled>核对排单</Button>
+          </DisabledReason> : <Button type="button" className="min-h-11" disabled={pending} onClick={() => setReviewing(true)}>核对排单</Button>}
           <Button type="button" variant="outline" className="min-h-11" disabled={pending} onClick={() => {
             localStorage.setItem(draftKey, JSON.stringify(assignments));
             setDraftNotice('草稿已保存到本机');

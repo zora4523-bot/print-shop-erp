@@ -112,7 +112,7 @@ async function expectWorkspace(page: Page, params: Record<string, string>, keys:
   const query = new URLSearchParams({ q: prefix, ...params });
   const response = await page.goto(`/orders?${query}`);
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: '工单管理', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '工单列表', exact: true })).toBeVisible();
   const list = page.getByRole('list', { name: '管理端工单列表', exact: true });
   await expect(list.locator(':scope > li')).toHaveCount(keys.length);
   for (const key of keys) await expect(list.getByText(`后台审查 ${key}`, { exact: true })).toBeVisible();

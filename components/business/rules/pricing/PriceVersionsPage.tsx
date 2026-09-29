@@ -283,7 +283,7 @@ function PurposeGapCard({
     <article className="min-w-0 rounded-xl border bg-background p-4">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-sans text-xs font-semibold tracking-[0.16em] text-muted-foreground">
+          <p className="font-sans text-xs font-semibold tracking-widest text-muted-foreground">
             {meta.code}
           </p>
           <h3 className="mt-1 font-semibold">{meta.label}独立版本流</h3>
@@ -427,7 +427,7 @@ function RulePriceGapWorkspace({
     >
       <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b bg-muted/30 px-4 py-4 sm:px-5">
         <div className="min-w-0">
-          <p className="font-sans text-xs font-semibold tracking-[0.16em] text-muted-foreground">
+          <p className="font-sans text-xs font-semibold tracking-widest text-muted-foreground">
             PENDING WORKSPACE
           </p>
           <h2

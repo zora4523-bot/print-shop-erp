@@ -5,7 +5,7 @@ export function OrderDetailStickyScope({ header, children }: { header: ReactNode
   return <div className="space-y-4" style={{
     '--order-detail-timeline-top': 'calc(var(--admin-header-offset, 0px) + 16px)',
   } as CSSProperties}>
-    <header data-slot="order-page-heading" className="space-y-3 border-b py-3">{header}</header>
+    <div data-slot="order-page-heading" className="space-y-3 border-b py-3">{header}</div>
     {children}
   </div>;
 }

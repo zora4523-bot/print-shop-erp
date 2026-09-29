@@ -397,7 +397,7 @@ function WorkspaceFilters(props: FilterProps) {
               只看本次修改
             </label>
           ) : null}
-          <Button type="submit" variant="secondary" className="min-h-11">
+          <Button type="submit" variant="secondary" className="min-h-11 self-end">
             应用筛选
           </Button>
         </div>
@@ -475,14 +475,14 @@ function WorkbenchHeader({
   return (
     <header className="min-w-0 pb-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h1 className="admin-wrap-anywhere text-xl font-extrabold tracking-tight">
+        <h1 className="admin-wrap-anywhere text-xl font-semibold tracking-tight">
           {title ??
             (purpose === 'processing'
               ? '客户加工费规则'
               : '包装、纸箱与快递规则')}
         </h1>
         {basisLabel ? (
-          <span className="inline-flex min-h-6 items-center rounded-md border border-foreground px-2 text-xs font-extrabold tracking-wide">
+          <span className="inline-flex min-h-6 items-center rounded-md border border-foreground px-2 text-xs font-semibold tracking-wide">
             {basisLabel}
           </span>
         ) : null}
@@ -586,7 +586,7 @@ function SelectedInlineDetail({
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-extrabold tracking-[0.15em] text-muted-foreground uppercase">
+          <div className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
             {editor ? '直接编辑' : '规则详情'}
           </div>
           <h2
@@ -722,7 +722,7 @@ function PriceMatrix({
             prefetch={false}
             className={buttonVariants({ variant: 'outline' })}
           >
-            清除条件
+            清除筛选
           </PriceWorkspaceLink>
         }
       />
@@ -744,7 +744,7 @@ function PriceMatrix({
       <TableScrollArea label="客户计价规则矩阵" className="min-w-0 rounded-xl border bg-card shadow-sm">
         <table className="w-full min-w-[58rem] border-collapse text-sm">
           <thead>
-            <tr className="border-b-2 border-foreground bg-muted/20 text-left text-xs font-extrabold tracking-wide text-muted-foreground">
+            <tr className="border-b-2 border-foreground bg-muted/20 text-left text-xs font-semibold tracking-wide text-muted-foreground">
               <th className="px-3 py-2.5">收费项目</th>
               <th className="px-3 py-2.5">适用范围</th>
               <th className="px-3 py-2.5">数量与档位</th>

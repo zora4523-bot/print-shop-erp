@@ -75,7 +75,7 @@ export function TaskDisputePanel({
             </p>
           ) : null}
           <Button type="submit" disabled={pending} className="min-h-11">
-            {pending ? '提交中…' : '提交异议'}
+            {pending ? '正在提交…' : '提交异议'}
           </Button>
         </form>
       )}

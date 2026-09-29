@@ -1,7 +1,6 @@
 'use client';
 
 import { useActionState, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Download, FileSpreadsheet, X } from 'lucide-react';
 import { requestOrderExportAction, type OrderExportActionResult } from '@/actions/order-export';
@@ -216,17 +215,17 @@ export function OrderExportControls({
                       </p>
                     </div>
                     {item.status === OrderExportStatus.READY ? (
-                      <Link
+                      <a
                         href={`/api/orders/exports/${item.id}`}
-                        prefetch={false}
+                        download
                         className={cn(
                           buttonVariants({ variant: 'outline', size: 'sm' }),
-                          'min-h-11 shrink-0 lg:min-h-8',
+                          'min-h-11 shrink-0',
                         )}
                       >
                         <Download aria-hidden="true" />
                         下载
-                      </Link>
+                      </a>
                     ) : null}
                   </li>
                 ))}

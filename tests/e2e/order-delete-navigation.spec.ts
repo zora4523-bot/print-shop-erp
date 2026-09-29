@@ -6,17 +6,17 @@ for (const role of ['owner', 'sales'] as const) {
     await login(page, { username: E2E_USERS[role].username, password: E2E_PASSWORD, from: '/orders/new' });
     const designName = page.getByRole('textbox', { name: '设计款名称', exact: true });
     await designName.fill('保留同款 A');
-    await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
     await designName.fill('独立款 B');
     await page.getByRole('tab', { name: '设计款 1', exact: true }).click();
-    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
     const specifications = page.getByRole('tablist', { name: '规格明细', exact: true });
     await specifications.getByRole('tab').first().click();
     await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
     await expect(designName).toHaveValue('保留同款 A');
     await expect(specifications.getByRole('tab')).toHaveCount(1);
     await expect(specifications.getByRole('tab')).toBeFocused();
-    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
     const remove = page.getByRole('group', { name: '设计款操作', exact: true })
       .getByRole('button', { name: '删除设计款', exact: true });
     await remove.focus();
@@ -35,7 +35,7 @@ test('建单校验后连续删除设计款，报价更新不抢焦点', async ({
   await login(page, { username: E2E_USERS.sales.username, password: E2E_PASSWORD, from: '/orders/new' });
   const form = page.locator('[data-slot="order-form-b"]');
   const styles = form.getByRole('tablist', { name: '设计款', exact: true });
-  const copy = form.getByRole('button', { name: '＋ 增加设计款', exact: true });
+  const copy = form.getByRole('button', { name: '＋ 添加设计款', exact: true });
   await expect(copy).toBeEnabled();
   for (let index = 1; index < 15; index++) await copy.click();
   await expect(styles.getByRole('tab')).toHaveCount(15);

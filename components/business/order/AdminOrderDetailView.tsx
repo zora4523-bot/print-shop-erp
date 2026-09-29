@@ -9,7 +9,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Copy, FileDown, ImageOff, Penci
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice, StatusBadge, TableEmptyState, useCopyToClipboard } from '@/components/ui-business';
+import { ActionNotice, PageHeader, StatusBadge, TableEmptyState, useCopyToClipboard } from '@/components/ui-business';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY, ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
 import { OrderAmount } from './OrderAmount';
@@ -146,10 +146,11 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
   }}>
     <OrderDetailStickyScope header={<div className={styles.header}>
       <div className={styles.identity}>
-        <OrderPurposeBadge purpose={model.purpose} />
-        <h1 className="admin-wrap-anywhere text-2xl font-semibold">{model.name?.trim() || '未命名工单'}</h1>
-        <StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>
-        {model.isUrgent ? <StatusBadge tone="warning">急单</StatusBadge> : null}
+        <PageHeader className="basis-full" back={{ href: '/orders', label: '返回工单列表' }}
+          eyebrow={<OrderPurposeBadge purpose={model.purpose} />}
+          title={model.name?.trim() || '未命名工单'}
+          status={<><StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>
+            {model.isUrgent ? <StatusBadge tone="warning">急单</StatusBadge> : null}</>} />
         <p id="order-detail-overview" tabIndex={-1} className={cn(styles.meta, highlighted === 'order-detail-overview' && styles.highlight)}><span>业务员：{model.sales ?? '未填'}</span><span>交期：{model.due ?? '未设置'}{model.dueLeft ? ` · ${model.dueLeft}` : ''}</span><span>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')} 个</span></p>
         {!!productionOwners?.length && <p className="basis-full text-sm">生产师傅：{productionOwners.join("、")}</p>}
         <a href="#detail-production-records" className="inline-flex min-h-11 items-center text-sm underline">生产安排与提成</a>
@@ -158,7 +159,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
           <div className="flex flex-wrap items-center gap-3 pb-3">
             <Button type="button" variant="ghost" aria-label="复制工单号" className={styles.number}
               onClick={() => copy(model.no, '工单号')}>{model.no}<Copy aria-hidden="true" className="size-3.5 shrink-0" /></Button>
-            <span className={styles.version}>版本 v{model.version}</span>
+            <span className={styles.version}>第 {model.version} 版</span>
           </div>
         </Disclosure>
       </div>

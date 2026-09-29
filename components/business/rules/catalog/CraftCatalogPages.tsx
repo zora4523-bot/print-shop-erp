@@ -17,6 +17,7 @@ import { ToggleActiveButton } from '@/components/business/craft/ToggleActiveButt
 import { buttonVariants } from '@/components/ui/button';
 import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { parsePositiveInt, type TableHrefParams } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -119,14 +120,7 @@ export async function NewCraftCatalogItem({
         title="新建工艺"
         effect="immediate"
         subtitle="启用后会进入新工单与新规则的工艺选择器。"
-        actions={
-          <Link
-            href={routeBase}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            返回列表
-          </Link>
-        }
+        back={{ href: routeBase, label: '返回工艺' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <CraftForm
@@ -158,17 +152,14 @@ export async function EditCraftCatalogItem({
       <RuleCenterPageHeader
         title={`编辑工艺：${craft.name}`}
         effect="immediate"
-        subtitle={
+        back={{ href: routeBase, label: '返回工艺' }}
+        status={
           <>
-            {craft.isActive ? '启用' : '停用'}
-            {craft.isOutsource ? ' · 外协' : ''}
-            {isRetired ? (
-              <StatusBadge tone="warning" className="ml-2">
-                历史 / 已退役
-              </StatusBadge>
-            ) : null}
+            <ActiveStatusBadge active={craft.isActive} />
+            {isRetired ? <StatusBadge tone="warning">历史 / 已退役</StatusBadge> : null}
           </>
         }
+        subtitle={craft.isOutsource ? '外协工艺' : undefined}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

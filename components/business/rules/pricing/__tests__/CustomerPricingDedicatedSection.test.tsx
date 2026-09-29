@@ -251,7 +251,7 @@ describe('CustomerPricingDedicatedSection', () => {
     data.blankPapers = [{ id: 'paper', label: '160g新纸张', isActive: true, available: true, issue: null }];
     const html = renderToStaticMarkup(<CustomerPricingDedicatedSection workspace={data} createDraftPurpose={null} />);
     expect(html).toContain('新纸张');
-    expect(html).toContain('新增纸张 / 规格');
+    expect(html).toContain('新建纸张 / 规格');
     expect(html).toContain('未启用');
     expect(html).not.toContain('不适用');
     expect([...html.matchAll(/<input/gu)]).toHaveLength(6);

@@ -33,7 +33,7 @@ function render(existing = false) {
       plateDetails: existing ? [{ id: 'plate-1', sequence: 1, name: '原制版', plateGroupId: 'group-1',
         specification: '历史规格', quantity: 3, unitPrice: '12.00', amount: '36.00', remark: '原备注', isActive: true }] : [],
     }]} />));
-  return [...host.querySelectorAll('fieldset')].find((field) => field.textContent?.includes(existing ? '制版明细 #1' : '新增制版明细'))!;
+  return [...host.querySelectorAll('fieldset')].find((field) => field.textContent?.includes(existing ? '制版明细 #1' : '添加制版明细'))!;
 }
 function fill(field: Element, label: string, value: string) {
   const input = [...field.querySelectorAll('label')].find((entry) => entry.textContent?.trim() === label)!.querySelector('input, textarea')!;

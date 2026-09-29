@@ -178,8 +178,8 @@ for (const mode of ['hydrated', 'native'] as const) {
 
       await test.step('历史入口保持归档且没有财务写入表单', async () => {
         await page.goto('/owner/bills/archive');
-        await expect(page.getByRole('heading', { name: '历史账单', exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: /生成月账单|发单|录入付款/u })).toHaveCount(0);
+        await expect(page.getByRole('heading', { name: '历史账单归档', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: /生成月账单|发单|录入收款|录入付款/u })).toHaveCount(0);
         await expect(page.locator('input[name="amount"]')).toHaveCount(0);
       });
       expect(pageErrors).toEqual([]);

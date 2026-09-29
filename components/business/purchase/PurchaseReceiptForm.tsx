@@ -229,7 +229,7 @@ export function PurchaseReceiptForm({
         aria-busy={pending}
         className="min-h-11"
       >
-        {pending ? '提交中…' : '核对并确认收货过账'}
+        {pending ? '正在提交…' : '核对并确认收货过账'}
       </Button>
       <ConfirmActionController level="L2"
         formId={formId}

@@ -31,8 +31,8 @@ export function OrderSpecificationTabs({ id, indexes, items, itemFields, activeI
             label: `${items[index].specification || '选择规格'} · ${items[index].quantity} 个${errors?.items?.[index] ? ' · 待完善' : ''}` }))}
           value={itemFields[activeIndex].id} onChange={(value) => onSelect(itemFields.findIndex((entry) => entry.id === value))} />
       </div>
-      <Button type="button" variant="outline" className="min-h-11" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 增加规格</Button>
-      {indexes.length > 1 ? <Button type="button" variant="destructive" className="min-h-11 bg-background hover:bg-destructive/5 dark:bg-background dark:hover:bg-destructive/5" ref={removeRef} disabled={disabled} onClick={onRemove}>
+      <Button type="button" variant="outline" className="min-h-11" disabled={disabled || items.length >= MAX_ORDER_ITEMS_PER_ORDER} onClick={onAdd}>＋ 添加规格</Button>
+      {indexes.length > 1 ? <Button type="button" variant="destructive" className="min-h-11" ref={removeRef} disabled={disabled} onClick={onRemove}>
         移除当前规格
       </Button> : null}
     </div>

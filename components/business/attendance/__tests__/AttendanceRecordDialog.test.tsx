@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkerType } from '@/generated/prisma/enums';
 import type { AttendanceMutationResult } from '@/actions/foreman-attendance.types';
 
-// 保存成功此前完全没有回执：按钮从「保存中…」变回「保存」就结束了，
+// 保存成功此前完全没有回执：按钮从「正在保存…」变回「保存」就结束了，
 // 读屏器一个字都不播。这里注入 useActionState 的状态，把成功回执
 // （role="status"）和失败提示（role="alert"）互斥的形状钉住。
 const { actionState } = vi.hoisted(() => ({

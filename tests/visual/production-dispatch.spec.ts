@@ -58,9 +58,9 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   try {
     await login(workerPage, { from: `/worker/tasks/${job.id}`, username: E2E_USERS.workerHandPress.username, password: E2E_PASSWORD });
     await expect(workerPage.getByLabel('完成数量')).toHaveValue('1000');
-    await expect(workerPage.getByRole('link', { name: '返回生产工单', exact: true })).toHaveAttribute('href', '/worker/tasks');
+    await expect(workerPage.getByRole('link', { name: '返回工序工单', exact: true })).toHaveAttribute('href', '/worker/tasks');
     await gates(workerPage, info, 'worker-completion');
-    await workerPage.getByRole('link', { name: '返回生产工单', exact: true }).click();
+    await workerPage.getByRole('link', { name: '返回工序工单', exact: true }).click();
     await expect(workerPage).toHaveURL(/\/worker\/tasks$/);
     await expect(workerPage.getByRole('region', { name: '已安排的生产' }).getByRole('link', { name: /排单扫码验收/ }).first()).toBeVisible();
     await expect(workerPage.getByText('暂无待处理工序', { exact: true })).toHaveCount(0);
@@ -81,7 +81,7 @@ test('single owner dispatch, quantity approval, wages and external sales state',
     await expect(page.getByRole('heading', { name: '登记最终提成' })).toBeVisible();
     await page.getByLabel('E2E 开机仔最终提成（元）').fill('190');
     await page.getByLabel('金额依据').fill('核定本次生产最终提成');
-    await page.getByRole('button', { name: '增加协作师傅提成' }).click();
+    await page.getByRole('button', { name: '添加协作师傅提成' }).click();
     await page.getByRole('button', { name: '移除协作师傅' }).click();
     await page.getByRole('button', { name: '核对提成', exact: true }).click();
     await gates(page, info, 'admin-wage-review');

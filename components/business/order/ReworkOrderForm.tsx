@@ -200,8 +200,9 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
             const selected = selectedItems.has(item.id);
             return (
               <li key={item.id} className="min-w-0 rounded-lg border p-3">
-                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
                   <Checkbox
+                    className="-ml-3"
                     checked={selected}
                     disabled={pending}
                     aria-label={`选择重做款式 ${item.sequence}：${item.name}`}
@@ -261,7 +262,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                         {item.crafts.map((craft) => (
                           <label
                             key={craft.id}
-                            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+                            className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
                           >
                             <Checkbox
                               checked={
@@ -307,7 +308,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button ref={submitButtonRef} type="submit" disabled={pending || !canSubmit}>
-          {pending ? '创建中…' : `创建重做单（${selectedCount} 款）`}
+          {pending ? '正在创建…' : `创建重做单（${selectedCount} 款）`}
         </Button>
         <ConfirmActionController level="L2" focusReturnRef={submitButtonRef} open={confirmOpen} onOpenChange={setConfirmOpen} disabled={pending || !canSubmit} onConfirm={submitRework}>
           <ConfirmActionDialog action="创建重做单"

@@ -51,9 +51,9 @@ export function ReferenceImpactSummary({
           <dd className="mt-1 font-sans text-lg font-semibold tabular-nums">
             {item.count} <span className="text-sm font-normal">{item.unit}</span>
           </dd>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          <dd className="mt-1 text-xs leading-5 text-muted-foreground">
             {item.description}
-          </p>
+          </dd>
         </div>
       ))}
     </dl>

@@ -625,7 +625,7 @@ function VersionHeadingActions({
           href="/owner/rules/customer-pricing/blank/new"
           className={cn(buttonVariants({ variant: 'outline' }), 'min-h-11')}
         >
-          新增纸张 / 规格
+          新建纸张 / 规格
         </PriceWorkspaceLink>
       ) : null}
       {sources.map((source) => {
@@ -700,7 +700,7 @@ function VersionStatusBlocks({
       return (
         <div key={source.purpose} className="min-w-0 space-y-1.5">
           {multiple ? (
-            <p className="text-xs font-extrabold tracking-wide text-muted-foreground">
+            <p className="text-xs font-semibold tracking-wide text-muted-foreground">
               {sourcePurposeLabel(workspace, source)}
             </p>
           ) : null}

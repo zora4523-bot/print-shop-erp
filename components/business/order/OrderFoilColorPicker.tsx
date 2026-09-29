@@ -36,7 +36,7 @@ export function OrderFoilColorPicker({
       {allowNone ? (
         <Button
           type="button"
-          variant={selected.length === 0 ? 'secondary' : 'outline'}
+          variant={selected.length === 0 ? 'selected' : 'outline'}
           aria-pressed={selected.length === 0}
           disabled={disabled}
           className="min-h-11 rounded-full px-3 text-xs"
@@ -49,7 +49,7 @@ export function OrderFoilColorPicker({
         <Button
           key={color}
           type="button"
-          variant={selected.includes(color) ? 'secondary' : 'outline'}
+          variant={selected.includes(color) ? 'selected' : 'outline'}
           aria-pressed={selected.includes(color)}
           disabled={
             disabled ||

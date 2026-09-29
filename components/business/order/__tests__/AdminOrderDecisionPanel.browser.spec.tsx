@@ -158,7 +158,7 @@ describe('admin order decisions require review before mutation', () => {
     await expect.element(page.getByRole('spinbutton', { name: '已产数量' })).toBeDisabled();
     await expect.element(page.getByRole('button', { name: '计算参考价', exact: true })).toBeDisabled();
     await expect.element(page.getByRole('textbox', { name: '裁决说明' })).toBeDisabled();
-    await expect.element(page.getByRole('button', { name: '提交中…', exact: true })).toBeDisabled();
+    await expect.element(page.getByRole('button', { name: '正在提交…', exact: true })).toBeDisabled();
 
     const updated = cancellationOrder();
     updated.workOrderVersion += 1;

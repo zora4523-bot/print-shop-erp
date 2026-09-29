@@ -33,7 +33,7 @@ export function RevokeBundleForm({ bundleId }: { bundleId: string }) {
           trigger={
             <PendingButton
               pending={pending}
-              pendingLabel="撤销中…"
+              pendingLabel="正在撤销…"
               variant="outline"
               size="sm"
               className="min-h-9"

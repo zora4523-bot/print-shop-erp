@@ -266,8 +266,10 @@ describe('OrderFormB', () => {
     );
     expect(html).toContain('@min-[560px]:grid-cols-2');
     expect(html).toContain('has-[[data-disabled]]:cursor-not-allowed');
-    expect(html).toContain('dark:bg-foreground');
-    expect(html).toContain('dark:text-background');
+    // 选中态走 Button variant="selected"（品牌描边 + 10% 底），不再用 className 覆写墨色。
+    expect(html).toContain('bg-primary/10');
+    expect(html).toContain('dark:bg-primary/15');
+    expect(html).toContain('aria-pressed="true"');
     const htmlWithMissingSfCollect = render(undefined, {
       isSfCollect: undefined,
     });

@@ -145,7 +145,7 @@ export function SmartBotBindingPanel({
           <PendingButton
             type="button"
             pending={pending}
-            pendingLabel="生成中…"
+            pendingLabel="正在生成…"
             onClick={generateBindingCode}
           >
             生成一次性绑定码

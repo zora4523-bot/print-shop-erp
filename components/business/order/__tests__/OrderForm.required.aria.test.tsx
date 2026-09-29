@@ -90,7 +90,7 @@ describe('OrderForm 必填字段的 required 语义', () => {
     const select = tagWithIdSuffix(html, 'externalSalesUserId');
     expect(select).toContain('required');
     expect(select).toContain('aria-required="true"');
-    expect(html).toContain('关联外部销售（必填）');
+    expect(html).toContain('关联外部销售');
     expect(html).toContain('请选择外部销售');
     expect(html).toContain('外部销售甲 · sales-a');
     expect(html).not.toContain('工厂直接业务');

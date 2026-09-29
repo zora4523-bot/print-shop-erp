@@ -67,7 +67,7 @@ test('BOM 删除首行后补物料与分类，稳定回填第二行并真实保�
   const materialName = `BOM 补料 ${randomUUID()}`;
   const categoryName = `BOM 补分类 ${randomUUID()}`;
   await login(page, { ...owner, from: '/owner/boms/new' });
-  await page.getByLabel('BOM 名称', { exact: true }).fill('两行回填回归');
+  await page.getByLabel('用料清单名称', { exact: true }).fill('两行回填回归');
   await page.getByLabel('适用对象', { exact: true }).selectOption('CATEGORY');
   await page.locator('[name="items.0.materialId"]').selectOption(fixture.materialId);
   await page.locator('[name="items.0.quantity"]').fill('11');
@@ -83,9 +83,9 @@ test('BOM 删除首行后补物料与分类，稳定回填第二行并真实保�
   await page.getByRole('link', { name: '新建分类', exact: true }).click();
   await page.getByLabel('分类名', { exact: true }).fill(categoryName);
   await page.getByRole('button', { name: '创建分类', exact: true }).click();
-  await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue('两行回填回归');
+  await expect(page.getByLabel('用料清单名称', { exact: true })).toHaveValue('两行回填回归');
   await expect(page.getByLabel('产品结构分类', { exact: true }).locator('option:checked')).toContainText(categoryName);
-  await page.getByRole('button', { name: '创建 BOM', exact: true }).click();
+  await page.getByRole('button', { name: '创建用料清单', exact: true }).click();
   await expect(page).toHaveURL(/\/owner\/boms\/(?!new)[a-z0-9_-]+$/i);
   const id = new URL(page.url()).pathname.split('/').at(-1)!;
   await withSupplyChainDb(async (db) => {
@@ -169,7 +169,7 @@ test('复制标签页遇到活跃原页时不自动回填，确认另建后才�
 test('返回物料停用或目标行已删时不误填；旧返回地址不覆盖后来选择', async ({ page }) => {
   const fixture = await seedPurchasePrerequisites();
   await login(page, { ...owner, from: '/owner/boms/new' });
-  await page.getByLabel('BOM 名称', { exact: true }).fill('失效回填保护');
+  await page.getByLabel('用料清单名称', { exact: true }).fill('失效回填保护');
   await page.getByRole('button', { name: '添加物料', exact: true }).click();
   await page.locator('[name="items.1.quantity"]').fill('22');
   await page.getByRole('link', { name: '新建物料', exact: true }).last().click();
@@ -193,7 +193,7 @@ test('返回物料停用或目标行已删时不误填；旧返回地址不覆�
   await withSupplyChainDb((db) => db.query('UPDATE "Material" SET "isActive"=FALSE WHERE id=$1', [fixture.materialId]));
   await page.goto(`${secondHref}&form_entityId=${fixture.materialId}`);
   await expect(page.getByText('补充的资料已停用或不适用，请重新选择', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue('失效回填保护');
+  await expect(page.getByLabel('用料清单名称', { exact: true })).toHaveValue('失效回填保护');
 });
 
 test('创建已提交但响应丢失，恢复只指向原单据；修改过的草稿展示差异并保留原请求键', async ({ page }) => {
@@ -330,7 +330,7 @@ for (const kind of ['purchase-new', 'bom-new'] as const) test(`${kind} 已创建
   const isPurchase = kind === 'purchase-new';
   const path = isPurchase ? '/owner/purchases/new' : '/owner/boms/new';
   const pattern = `**${path}**`;
-  const submitName = isPurchase ? '创建采购单' : '创建 BOM';
+  const submitName = isPurchase ? '创建采购单' : '创建用料清单';
   const categoryId = `recover_${randomUUID().replaceAll('-', '')}`;
   if (!isPurchase) await withSupplyChainDb(async (db) => {
     for (const id of [categoryId, `${categoryId}_another`]) await db.query('INSERT INTO "ProductCategoryNode" (id,path,name,"legacyCategory","updatedAt") VALUES ($1::text,$1::text,$1::text,\'CUSTOM_FLAT_FOIL\',now())', [id]);
@@ -338,7 +338,7 @@ for (const kind of ['purchase-new', 'bom-new'] as const) test(`${kind} 已创建
   await login(page, { ...owner, from: path });
   if (isPurchase) await fillPurchase(page, fixture.supplierId, fixture.materialId);
   else {
-    await page.getByLabel('BOM 名称', { exact: true }).fill('冲突恢复回归');
+    await page.getByLabel('用料清单名称', { exact: true }).fill('冲突恢复回归');
     await page.getByLabel('适用对象', { exact: true }).selectOption('CATEGORY');
     await page.getByLabel('产品结构分类', { exact: true }).selectOption(categoryId);
     await page.locator('[name="items.0.materialId"]').selectOption(fixture.materialId);

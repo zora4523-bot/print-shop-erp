@@ -202,8 +202,8 @@ describe('administrator edit design', () => {
   it('shows the same work-order version as detail and print, not the concurrency revision', async () => {
     mount({ revision: 7, workOrderVersion: 3 });
     await page.getByText('工单信息', { exact: true }).click();
-    await expect.element(page.getByText('GD-260908-001 · v3', { exact: true })).toBeVisible();
-    expect(host.textContent).not.toContain('GD-260908-001 · v7');
+    await expect.element(page.getByText('GD-260908-001 · 第 3 版', { exact: true })).toBeVisible();
+    expect(host.textContent).not.toContain('GD-260908-001 · 第 7 版');
   });
 
   for (const [width, height] of [
@@ -395,7 +395,7 @@ describe('administrator edit design', () => {
       ],
     });
     await page
-      .getByRole('button', { name: '新增款式（沿用第 1 款工艺和纸张）' })
+      .getByRole('button', { name: '添加款式（沿用第 1 款工艺和纸张）' })
       .click();
     await page
       .getByRole('textbox', { name: '第 2 款名称', exact: true })
@@ -429,7 +429,7 @@ describe('administrator edit design', () => {
           products: [{ id: null, source: 'BLANK_PRICE', selectionKey: 'blank:paper:mid',
             category: 'BLANK_STOCK', specification: '中号封80×115', paperType: '160g珠光艳闪', weight: 160, isActive: true }],
         });
-        if (operation === 'ADD') await page.getByRole('button', { name: '新增款式（沿用第 1 款工艺和纸张）' }).click();
+        if (operation === 'ADD') await page.getByRole('button', { name: '添加款式（沿用第 1 款工艺和纸张）' }).click();
         const select = page.getByRole('combobox', { name: '规格', exact: true }).nth(operation === 'ADD' ? 1 : 0);
         await select.selectOptions(select.getByRole('option', { name: '中号封80×115', exact: true }));
         await page.getByRole('button', { name: '保存修改…', exact: true }).click();
@@ -476,9 +476,9 @@ describe('administrator edit design', () => {
 
   it('removes an unsaved added style without deleting the existing order style', async () => {
     mount({ canAdd: true, status: 'DRAFT' });
-    await page.getByRole('button', { name: '新增款式（沿用第 1 款工艺和纸张）' }).click();
+    await page.getByRole('button', { name: '添加款式（沿用第 1 款工艺和纸张）' }).click();
     await page.getByRole('textbox', { name: '第 2 款名称', exact: true }).fill('新增红包');
-    await page.getByRole('button', { name: '移除新增款式', exact: true }).click();
+    await page.getByRole('button', { name: '移除添加的款式', exact: true }).click();
     await expect.element(page.getByRole('region', { name: '第 2 款', exact: true })).not.toBeInTheDocument();
     await expect.element(page.getByRole('textbox', { name: '第 1 款名称', exact: true })).toHaveValue('迎春红包');
     await expect.element(page.getByRole('button', { name: '保存修改…', exact: true })).toBeDisabled();
@@ -667,7 +667,7 @@ describe('administrator edit design', () => {
     await expect.element(page.getByRole('combobox', { name: '规格', exact: true })).toBeDisabled();
     const foil = page.getByRole('group', { name: '第 1 款正面烫金', exact: true });
     await expect.element(foil.getByRole('button', { name: '红金', exact: true })).toBeDisabled();
-    await expect.element(page.getByRole('button', { name: /新增款式（沿用第/ })).not.toBeInTheDocument();
+    await expect.element(page.getByRole('button', { name: /添加款式（沿用第/ })).not.toBeInTheDocument();
     await page.getByRole('textbox', { name: '第 1 款名称', exact: true }).fill('人工核价旧款');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
@@ -722,7 +722,7 @@ describe('administrator edit design', () => {
         { ...item, sequence: 2 },
       ],
     });
-    await page.getByRole('button', { name: /新增款式（沿用第/ }).click();
+    await page.getByRole('button', { name: /添加款式（沿用第/ }).click();
     await page.getByRole('textbox', { name: '第 3 款名称', exact: true }).fill('新增自动计价款');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
     await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
@@ -734,7 +734,7 @@ describe('administrator edit design', () => {
   for (const status of ['SUBMITTED', 'CONFIRMED'] as const) {
     it(`${status}: does not offer a new style whose design files cannot be uploaded at this stage`, async () => {
       mount({ status, canAdd: true });
-      await expect.element(page.getByRole('button', { name: /新增款式（沿用第/ })).not.toBeInTheDocument();
+      await expect.element(page.getByRole('button', { name: /添加款式（沿用第/ })).not.toBeInTheDocument();
       await expect.element(page.getByRole('spinbutton', { name: '数量（个）', exact: true })).toBeEnabled();
       expect(mocks.preview).not.toHaveBeenCalled();
     });
@@ -749,7 +749,7 @@ describe('administrator edit design', () => {
     await page.getByRole('button', { name: '设计图 0', exact: true }).click();
     await expect.element(page.getByRole('button', { name: '上传设计文件', exact: true })).toBeDisabled();
     await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
-    await page.getByRole('button', { name: '返回工单', exact: true }).click();
+    await page.getByRole('button', { name: '返回工单详情', exact: true }).click();
     await expect.element(page.getByRole('alertdialog', { name: '放弃未保存修改并离开', exact: true })).toBeVisible();
     expect(mocks.push).not.toHaveBeenCalled();
     await page.getByRole('button', { name: '继续编辑', exact: true }).click();
@@ -783,8 +783,8 @@ describe('administrator edit design', () => {
     await page.getByRole('textbox', { name: '测试费用金额', exact: true }).fill('30.00');
     try {
       await page.getByRole('button', { name: '保存测试费用', exact: true }).click();
-      await expect.element(page.getByText('费用处理中…', { exact: true })).toBeVisible();
-      await expect.element(page.getByRole('button', { name: '返回工单', exact: true })).toBeDisabled();
+      await expect.element(page.getByText('正在处理费用…', { exact: true })).toBeVisible();
+      await expect.element(page.getByRole('button', { name: '返回工单详情', exact: true })).toBeDisabled();
       await expect.element(page.getByRole('textbox', { name: '工单名称' })).toBeDisabled();
       await expect.element(page.getByText('存在待审批申请', { exact: true })).not.toBeInTheDocument();
     } finally {
@@ -805,7 +805,7 @@ describe('administrator edit design', () => {
     await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('2000');
     try {
       await page.getByRole('button', { name: '保存修改…', exact: true }).click();
-      await expect.element(page.getByRole('button', { name: '处理中…', exact: true })).toBeDisabled();
+      await expect.element(page.getByRole('button', { name: '正在处理…', exact: true })).toBeDisabled();
       await expect.element(page.getByRole('spinbutton', { name: '数量（个）', exact: true })).toBeDisabled();
       await expect.element(page.getByText('存在待审批申请', { exact: true })).not.toBeInTheDocument();
       expect(mocks.preview).toHaveBeenCalledTimes(1);

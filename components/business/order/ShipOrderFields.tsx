@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 
 import type { ShipmentInput } from '@/lib/order/shipping-fields';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 export type { ShipmentInput } from '@/lib/order/shipping-fields';
 
 export function ShipOrderVersionFields({
@@ -137,9 +138,7 @@ function ShipmentFieldsRow({
         >
           {isExternalSales ? '承运商计费重量（kg）' : '快递重量（kg）'}{' '}
           {isExternalSales && !isSfCollect ? (
-            <span aria-hidden="true" className="text-destructive">
-              *
-            </span>
+            <RequiredMark />
           ) : null}
         </label>
         {isSfCollect ? (
@@ -256,9 +255,7 @@ function ExternalSalesShipmentFields({
         >
           对客快递费（元）{' '}
           {!isSfCollect ? (
-            <span aria-hidden="true" className="text-destructive">
-              *
-            </span>
+            <RequiredMark />
           ) : null}
         </label>
         {isSfCollect ? (
@@ -302,9 +299,7 @@ function ExternalSalesShipmentFields({
           className="mb-1 block text-xs font-medium"
         >
           打包耗材费（元）{' '}
-          <span aria-hidden="true" className="text-destructive">
-            *
-          </span>
+          <RequiredMark />
         </label>
         <Input
           id={`shipment-${shipment.id}-packing-fee`}

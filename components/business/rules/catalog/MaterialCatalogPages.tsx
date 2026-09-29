@@ -28,8 +28,9 @@ import { MaterialsTable } from '@/components/business/material/MaterialsTable';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { RulePaperWorkspace } from '@/components/business/rules/catalog/RulePaperWorkspace';
 import { MaterialCategory } from '@/generated/prisma/enums';
@@ -157,7 +158,7 @@ export async function MaterialCatalogList({
         />
       ) : (
         <PageHeader
-          title="物料字典"
+          title="物料"
           actions={
           <>
             <Link
@@ -260,27 +261,13 @@ export async function NewMaterialCatalogItem({
         <RuleCenterPageHeader
           title="新建纸张"
           effect="immediate"
-          actions={
-            <Link
-              href={backHref}
-              className={buttonVariants({ variant: 'outline' })}
-            >
-              {supplement ? '返回原录入' : '返回列表'}
-            </Link>
-          }
+          back={{ href: backHref, label: supplement ? '返回原录入' : '返回纸张' }}
         />
       ) : (
         <PageHeader
           title="新建物料"
           subtitle="默认启用；库存通过出入库维护。"
-          actions={
-          <Link
-            href={backHref}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            {supplement ? '返回原录入' : '返回列表'}
-          </Link>
-          }
+          back={{ href: backHref, label: supplement ? '返回原录入' : '返回物料' }}
         />
       )}
 
@@ -357,25 +344,18 @@ export async function EditMaterialCatalogItem({
             externalPriceBusinessText(material.name) || '未命名纸张'
           }`}
           effect="immediate"
+          back={{ href: routeBase, label: '返回纸张' }}
+          status={<ActiveStatusBadge active={material.isActive} />}
           subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
-          actions={
-            <StatusBadge tone={material.isActive ? 'success' : 'neutral'}>
-              {material.isActive ? '启用' : '停用'}
-            </StatusBadge>
-          }
         />
       ) : (
         <PageHeader
           title={`编辑物料：${
-          externalPriceBusinessText(material.name) ||
-          '未命名物料'
-        }`}
-        subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
-        actions={
-          <StatusBadge tone={material.isActive ? 'success' : 'neutral'}>
-            {material.isActive ? '启用' : '停用'}
-          </StatusBadge>
-        }
+            externalPriceBusinessText(material.name) || '未命名物料'
+          }`}
+          back={{ href: routeBase, label: '返回物料' }}
+          status={<ActiveStatusBadge active={material.isActive} />}
+          subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
         />
       )}
 

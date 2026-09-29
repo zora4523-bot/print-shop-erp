@@ -177,7 +177,7 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
             disabled={busy}
             onClick={() => onAttemptSubmit('draft')}
           >
-            {busy ? '处理中…' : '保存草稿'}
+            {busy ? '正在处理…' : '保存草稿'}
           </Button>
         ) : null}
         {props.allowEditFees ? <Button type="submit" name="creationIntent" value="fees" variant="outline" className="mt-3 min-h-11 w-full" disabled={busy} onClick={() => onAttemptSubmit('submit')}>创建并编辑收费</Button> : null}
@@ -189,7 +189,7 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
           disabled={busy}
           onClick={() => onAttemptSubmit('submit')}
         >
-          {busy ? '处理中…' : '创建并提交'}
+          {busy ? '正在处理…' : '创建并提交'}
         </Button>
       </section>
       {gaps.length ? (

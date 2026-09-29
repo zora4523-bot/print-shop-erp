@@ -16,7 +16,7 @@ test('管理员代外部销售建单保留人工价格并校验改量', async ({
     password: E2E_PASSWORD,
   });
   await page
-    .getByLabel('关联外部销售（必填）')
+    .getByLabel('关联外部销售')
     .selectOption({ label: 'E2E 销售 · e2e-sales' });
   await page
     .getByRole('textbox', { name: '工单名称', exact: true })

@@ -20,10 +20,10 @@ export function ProductionFactReviewForm({ jobId, jobRevision, reviewRevision, m
       <label className="block space-y-1" htmlFor={`${prefix}-related`}><span>关联后续生产登记</span><select id={`${prefix}-related`} name="relatedJobId" required className="min-h-11 w-full rounded-md border bg-background px-3"><option value="">请选择已核对的登记</option>{laterJobs.map(job => <option key={job.id} value={job.id}>{job.label}</option>)}</select></label>
       <label className="block space-y-1" htmlFor={`${prefix}-quantity`}><span>全部已包含的实际数量</span><Input id={`${prefix}-quantity`} name="quantity" type="number" min="1" step="1" required readOnly={quantityLocked} defaultValue={quantity} /></label>
       <label className="block space-y-1" htmlFor={`${prefix}-date`}><span>原实际生产日期</span><Input id={`${prefix}-date`} name="workDate" type="date" required readOnly={!!workDate} defaultValue={workDate} /></label>
-      <label className="flex min-h-11 items-center gap-2"><Checkbox name="confirmedIncluded" value="on" required /><span>已核实旧产量与原师傅原日工资义务均包含在关联登记中</span></label>
+      <label className="flex min-h-11 items-start gap-1"><Checkbox className="-ml-3" name="confirmedIncluded" value="on" required /><span className="py-3">已核实旧产量与原师傅原日工资义务均包含在关联登记中</span></label>
     </>}
     <label className="block space-y-1" htmlFor={`${prefix}-reason`}><span>核对依据</span><Input id={`${prefix}-reason`} name="reason" maxLength={500} required className="min-h-11" /></label>
-    {mode === 'UNPRODUCED' && <label className="flex min-h-11 items-center gap-2"><Checkbox name="notActuallyProduced" value="on" required /><span>已核实该次任务没有实际生产</span></label>}
+    {mode === 'UNPRODUCED' && <label className="flex min-h-11 items-start gap-1"><Checkbox className="-ml-3" name="notActuallyProduced" value="on" required /><span className="py-3">已核实该次任务没有实际生产</span></label>}
     <Button type="submit" variant="outline" className="min-h-11" disabled={pending || state?.ok}>{pending ? '正在保存…' : mode === 'UNPRODUCED' ? '记录未生产依据' : mode === 'OPEN' ? '建立历史核对记录' : mode === 'INCLUDED_LATER' ? '确认已计入后续登记' : '据证关闭待补工资'}</Button>
     {state && <p role="status" className={state.ok ? 'text-muted-foreground' : 'text-destructive'}>{state.message}</p>}
   </form>;

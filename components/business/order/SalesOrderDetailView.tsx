@@ -26,7 +26,7 @@ import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge as UiStatusBadge } from '@/components/ui-business';
+import { PageHeader, StatusBadge as UiStatusBadge } from '@/components/ui-business';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { DesignUploadPanel } from './DesignUploadPanel';
 import { HighlightedRemark } from './HighlightedRemark';
@@ -150,19 +150,18 @@ export function SalesOrderDetailView({
       <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h1 className="admin-wrap-anywhere min-w-0 font-sans text-xl font-semibold tabular-nums">
-                {order.customName?.trim() || '未命名工单'}
-              </h1>
-              <SalesOrderStatusBadge status={order.status} />
-              <OrderPurposeBadge purpose={order.purpose} />
-              {order.isUrgent ? (
-                <UrgentBadge />
-              ) : null}
-              {order.isSfCollect ? (
-                <Badge variant="outline">顺丰到付</Badge>
-              ) : null}
-            </div>
+            <PageHeader
+              back={{ href: '/orders', label: '返回工单列表' }}
+              title={order.customName?.trim() || '未命名工单'}
+              status={
+                <>
+                  <SalesOrderStatusBadge status={order.status} />
+                  <OrderPurposeBadge purpose={order.purpose} />
+                  {order.isUrgent ? <UrgentBadge /> : null}
+                  {order.isSfCollect ? <Badge variant="outline">顺丰到付</Badge> : null}
+                </>
+              }
+            />
             <p className="admin-wrap-anywhere mt-2 text-sm text-muted-foreground">{order.orderNo}</p>
             <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
               第 {order.revision} 版 ·{' '}

@@ -1434,7 +1434,7 @@ export async function selectExternalSalesForAdminOrder(
   label = `${E2E_USERS.sales.displayName} · ${E2E_USERS.sales.username}`,
 ) {
   await page
-    .getByRole('combobox', { name: '关联外部销售（必填）', exact: true })
+    .getByRole('combobox', { name: '关联外部销售', exact: true })
     .selectOption({ label });
 }
 

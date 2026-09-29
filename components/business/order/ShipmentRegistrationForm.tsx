@@ -102,7 +102,7 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
     {props.labels.length > 1 ? <Disclosure><DisclosureSummary className="cursor-pointer py-3 text-sm">历史面单照片（{props.labels.length - 1}）</DisclosureSummary><ul>{props.labels.slice(1).map((label) => <li key={label.id}><a className="block py-3 text-primary underline" target="_blank" rel="noreferrer" href={`/api/orders/${props.orderId}/shipments/${props.shipmentId}/labels/${label.id}`}>{label.createdAt}</a></li>)}</ul></Disclosure> : null}
     {message ? <p role={failed ? 'alert' : 'status'} className={failed ? 'text-sm text-destructive' : 'text-sm'}>{message}</p> : null}
     <div className="flex flex-col gap-2 @[28rem]/shipment-form:flex-row @[28rem]/shipment-form:flex-wrap">
-      <Button type="button" variant="outline" disabled={busy} onClick={() => submit(false)}>{pending ? '保存中…' : '保存物流资料'}</Button>
+      <Button type="button" variant="outline" disabled={busy} onClick={() => submit(false)}>{pending ? '正在保存…' : '保存物流资料'}</Button>
       {!props.shipped ? <ConfirmActionController level="L2" disabled={busy || !ready || !props.canConfirm}
         trigger={<Button type="button" disabled={busy || !ready || !props.canConfirm}>确认该地址已发货</Button>}
         onConfirm={() => submit(true)}>

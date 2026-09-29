@@ -60,7 +60,7 @@ export function PieceworkPriceBookForm({ books, now, personal, cancellationEnabl
     {state && !cancelled && <div role={state.status === 'error' ? 'alert' : undefined}><FormMessage fieldId="piecework-result" tone={state.status}>{state.message}</FormMessage></div>}
     {cancelled && <FormMessage fieldId="piecework-cancellation-result" tone="success">{cancelled.message}</FormMessage>}
     {!draft && canEdit && template && template.effectiveFrom > now && <p className="text-sm">新草稿将沿用待生效的第 {template.version} 版工价；其计划时间为 {formatDateTimeShanghai(new Date(template.effectiveFrom))}。</p>}
-    {!draft && canEdit && <form aria-busy={pending} action={action}><Button type="submit" name="intent" value="create" disabled={pending}>{pending ? '创建中…' : '新建调价草稿'}</Button></form>}
+    {!draft && canEdit && <form aria-busy={pending} action={action}><Button type="submit" name="intent" value="create" disabled={pending}>{pending ? '正在创建…' : '新建调价草稿'}</Button></form>}
     {draft && canEdit && <DraftEditor unifiedReference={unifiedReference} personal={Boolean(personal)} fields={fields} key={`${draft.version}:${draft.updatedAt}`} draft={draft} previous={previous} action={action} pending={pending} fieldErrors={state?.fieldErrors} />}
     <div className="space-y-3">
       {books.filter((b) => b.status !== 'DRAFT').map((book) => <Disclosure key={book.version} className="rounded-lg border p-3" open={cancelled?.id === book.id || ['当前生效', '待生效'].includes(stateLabel(book, now))}>
@@ -110,7 +110,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
         {scheduled && <label className="space-y-1 text-sm" htmlFor="piecework-effective"><span>生效时间（北京时间）</span><Input id="piecework-effective" type="datetime-local" required value={effective} onChange={(e) => setEffective(e.target.value)} /></label>}
       </fieldset>
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" name="intent" value="save" disabled={pending || (scheduled && !validTime)}>{pending ? '处理中…' : '保存草稿'}</Button>
+        <Button type="submit" name="intent" value="save" disabled={pending || (scheduled && !validTime)}>{pending ? '正在处理…' : '保存草稿'}</Button>
         <Button type="button" variant="outline" disabled={pending || dirty || !ready} onClick={() => setReview(true)}>核对并发布</Button>
       </div>
       {dirty && <FormMessage fieldId="piecework-save">请先保存修改再发布。</FormMessage>}
@@ -127,7 +127,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
       </ul>
       <p className="text-sm">生效时间：{draft.effectiveFrom ? formatDateTimeShanghai(new Date(draft.effectiveFrom)) : '发布后立即生效'}。生效后的报工使用新工价，已有工资保持不变。{personal && draft.useUnifiedRates && !unifiedReference && '统一工价尚未发布，计件报工将暂停。'}{!personal && !rateFor(draft, PIECEWORK_RATE_FIELDS[2]) && '未配置入袋工价，入袋报工将暂停。'}{!draft.useUnifiedRates && fields.some((f) => f.key === 'box') && !rateFor(draft, PIECEWORK_RATE_FIELDS[3]) && '未配置装盒工价，装盒报工将暂停。'}</p>
       <input type="hidden" name="version" value={draft.version} /><input type="hidden" name="updatedAt" value={draft.updatedAt} />
-      <div className="flex gap-2"><Button name="intent" value="publish" type="submit" disabled={pending}>{pending ? '发布中…' : '发布工价'}</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(false)}>返回编辑</Button></div>
+      <div className="flex gap-2"><Button name="intent" value="publish" type="submit" disabled={pending}>{pending ? '正在发布…' : '发布工价'}</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(false)}>返回编辑</Button></div>
     </form>}
   </div>;
 }

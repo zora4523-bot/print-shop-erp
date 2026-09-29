@@ -23,6 +23,22 @@ function readEntries(key: string): Entry[] {
   return [{ id: crypto.randomUUID(), primary: true }];
 }
 
+/**
+ * 审查 #47：切换工单标签时，`editor.save()` 必须同步执行——OrderForm 以
+ * `key={active.id}` 挂载，切换后旧表单立即卸载，推迟到空闲就读不到它的状态。
+ * 能推迟的只有 sessionStorage 持久化（条目列表本身没变，只是再落一次盘），
+ * 这里放到空闲回调里，让切换的那一帧只做快照 + 重渲染。
+ * `<Activity>` 保活各张表单已评估、暂不采用：隐藏态会卸载 effect，OrderForm
+ * 的 registerEditor / 草稿自动保存 / 离开守卫都依赖 effect，需改 OrderForm 内部。
+ */
+function whenIdle(task: () => void) {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(task, { timeout: 1000 });
+  } else {
+    window.setTimeout(task, 0);
+  }
+}
+
 /** Each slot uses the existing authorized create/quote/submit flow and a stable command ID. */
 export function OrderCreationWorkspace(props: OrderFormProps) {
   const storageKey = `order-creation-batch:v1:${props.draftScope}:${props.workbenchTransferId ?? 'new'}`;
@@ -127,7 +143,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   return <div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="outline" disabled={(!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 增加工单</Button>
+        <Button type="button" variant="outline" disabled={(!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 添加工单</Button>
         {entries.length > 1 && !active.created ? <Button type="button" variant="outline" disabled={navigationLocked} onClick={removeCurrent}>移除当前工单</Button> : null}
         {removed ? <Button type="button" variant="outline" disabled={navigationLocked || entries.length >= MAX_BATCH_ORDERS}
           onClick={() => { if (!retainCurrent()) return; saveEntries([...entries, removed]); setActiveId(removed.id); setRemoved(null); }}>撤销移除</Button> : null}
@@ -136,9 +152,9 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
       </div>
       <p className="text-xs text-muted-foreground">每张工单独立填写地址、设计款和费用，逐张核对后创建。创建成功后继续下一张。</p>
       <nav aria-label="待建工单" className="flex flex-wrap gap-2">
-        {entries.map((entry, index) => <Button key={entry.id} type="button" variant="outline"
+        {entries.map((entry, index) => <Button key={entry.id} type="button" variant={entry.id === activeId ? 'selected' : 'outline'}
           disabled={!showResult && navigationLocked && entry.id !== activeId} aria-pressed={entry.id === activeId}
-          onClick={() => { if (entry.id !== activeId && retainCurrent()) { saveEntries(entries); setActiveId(entry.id); setLocked(false); } }}>
+          onClick={() => { if (entry.id !== activeId && retainCurrent()) { setActiveId(entry.id); setLocked(false); whenIdle(() => saveEntries(entriesRef.current)); } }}>
           工单 {index + 1}{entry.done ? ' · 已完成' : entry.created ? ' · 已保存' : ''}
         </Button>)}
       </nav>
@@ -147,7 +163,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
       {canStartNextBatch && entries.some((entry) => !entry.done) ? <p className="text-sm text-muted-foreground">工单均已保存，未完成的上传或提交可从工单详情继续。</p> : null}
     </section>
     {showResult && active.created ? <section className="space-y-3 rounded-xl border bg-card p-5" role="status">
-      <h1 className="text-xl font-semibold">{active.done ? '工单已创建' : '工单已保存，请继续完善'}</h1>
+      <h2 className="text-lg font-semibold">{active.done ? '工单已创建' : '工单已保存，请继续完善'}</h2>
       <p>{active.created.orderNo}</p>
       {!active.done ? <p className="text-sm text-muted-foreground">请到工单详情核对文件、费用和提交状态，继续处理已有工单。</p> : null}
       <Link className="inline-flex min-h-11 items-center underline" href={`/orders/${active.created.orderId}${active.created.intent === 'fees' ? '#admin-fee-editor' : ''}`}>查看工单{active.created.intent === 'fees' ? '并编辑收费' : ''}</Link>

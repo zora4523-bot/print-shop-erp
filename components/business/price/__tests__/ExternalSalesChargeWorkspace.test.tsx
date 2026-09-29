@@ -461,7 +461,7 @@ describe('RulePriceWorkbench', () => {
     });
     expect(noResultHtml).toContain('data-kind="no-result"');
     expect(noResultHtml).toContain('没有匹配的收费项目');
-    expect(noResultHtml).toContain('清除条件');
+    expect(noResultHtml).toContain('清除筛选');
     expect(noResultHtml).toContain(
       'href="/owner/rules/customer-pricing?purpose=processing"',
     );

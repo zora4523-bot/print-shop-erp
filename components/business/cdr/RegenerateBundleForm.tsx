@@ -50,7 +50,7 @@ export function RegenerateBundleForm({
       ))}
       <PendingButton
         pending={pending}
-        pendingLabel="重新生成中…"
+        pendingLabel="正在重新生成…"
         variant="outline"
         size="sm"
         className="min-h-9"

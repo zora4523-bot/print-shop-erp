@@ -206,7 +206,7 @@ function PricingSectionHeading({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h1
               id={headingId}
-              className="admin-wrap-anywhere text-lg font-extrabold tracking-tight sm:text-xl"
+              className="admin-wrap-anywhere text-lg font-semibold tracking-tight sm:text-xl"
             >
               {title}
             </h1>
@@ -317,7 +317,7 @@ function FormulaNote({ children }: { children: ReactNode }) {
 
 function CardSectionLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="border-b pb-2 text-xs font-extrabold tracking-[0.14em] text-muted-foreground">
+    <div className="border-b pb-2 text-xs font-semibold tracking-widest text-muted-foreground">
       {children}
     </div>
   );
@@ -396,13 +396,13 @@ export function CustomerBlankPricingSectionView({
           <Table label="局部烫金空白封现货单价矩阵" style={{ minWidth: minimumWidth }}>
             <TableHeader>
               <TableRow className="border-b-2 border-foreground hover:bg-transparent">
-                <TableHead className="w-44 px-4 text-xs font-extrabold tracking-wide text-muted-foreground">
+                <TableHead className="w-44 px-4 text-xs font-semibold tracking-wide text-muted-foreground">
                   纸张 · 克重
                 </TableHead>
                 {columns.map((column) => (
                   <TableHead
                     key={column.key}
-                    className="min-w-28 px-2 text-right text-xs font-extrabold tracking-wide text-muted-foreground"
+                    className="min-w-28 px-2 text-right text-xs font-semibold tracking-wide text-muted-foreground"
                   >
                     {column.label}
                   </TableHead>
@@ -486,7 +486,7 @@ function ParameterRow({
         step={step}
         className="w-[110px] shrink-0"
       />
-      <span className="w-12 shrink-0 text-xs font-extrabold text-muted-foreground">
+      <span className="w-12 shrink-0 text-xs font-semibold text-muted-foreground">
         {unit}
       </span>
     </div>
@@ -557,13 +557,13 @@ export function CustomerMachinePricingSectionView({
             <FormulaNote>
               当前参数试算：1,000 个双面 = 2,000 次 ×{' '}
               {rateNumber === null ? '待定' : decimalLabel(rateNumber)} ={' '}
-              <strong className="text-destructive">
+              <strong className="font-semibold text-foreground">
                 {currencyLabel(exampleAtJump)}
               </strong>
               <span aria-hidden="true">　·　</span>
               999 个三色 = 3 次过版 ×{' '}
               {flatNumber === null ? '待定' : decimalLabel(flatNumber)} ={' '}
-              <strong className="text-destructive">
+              <strong className="font-semibold text-foreground">
                 {currencyLabel(exampleBelowJump)}
               </strong>
             </FormulaNote>
@@ -648,7 +648,7 @@ export function CustomerTiersPricingSectionView({
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-semibold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档位</span>
                   <span role="columnheader">数量范围</span>
@@ -673,7 +673,7 @@ export function CustomerTiersPricingSectionView({
                       key={row.key}
                       className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                     >
-                      <span role="cell" className="font-extrabold">
+                      <span role="cell" className="font-semibold">
                         {row.name}
                       </span>
                       <span
@@ -731,7 +731,7 @@ function AdjustmentRows({
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-bold">
               <span className="admin-wrap-anywhere">{row.label}</span>
               {row.isNew ? (
-                <Badge className="h-auto rounded-md border border-warning/40 bg-warning/10 px-1.5 py-0 text-xs font-extrabold text-warning-foreground">
+                <Badge className="h-auto rounded-md border border-warning/40 bg-warning/10 px-1.5 py-0 text-xs font-semibold text-warning-foreground">
                   新增 · 未发布
                 </Badge>
               ) : null}
@@ -748,7 +748,7 @@ function AdjustmentRows({
             step={row.unit === '元/个' ? '0.005' : undefined}
             className="w-[110px] shrink-0"
           />
-          <span className="w-12 shrink-0 text-xs font-extrabold text-muted-foreground">
+          <span className="w-12 shrink-0 text-xs font-semibold text-muted-foreground">
             {row.unit}
           </span>
         </div>
@@ -825,13 +825,13 @@ export function CustomerPrintPricingSectionView({
           <Table label="彩印阶梯整单总价矩阵" style={{ minWidth: minimumWidth }}>
             <TableHeader>
               <TableRow className="border-b-2 border-foreground hover:bg-transparent">
-                <TableHead className="w-40 px-4 text-xs font-extrabold tracking-wide text-muted-foreground">
+                <TableHead className="w-40 px-4 text-xs font-semibold tracking-wide text-muted-foreground">
                   纸张 规格
                 </TableHead>
                 {columns.map((column) => (
                   <TableHead
                     key={column.key}
-                    className="w-16 px-1 text-right text-xs font-extrabold tracking-wide text-muted-foreground"
+                    className="w-16 px-1 text-right text-xs font-semibold tracking-wide text-muted-foreground"
                   >
                     {column.label}
                   </TableHead>
@@ -1040,7 +1040,7 @@ export function CustomerShipPricingSectionView({
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-semibold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档</span>
                   <span role="columnheader">范围（推导）</span>
@@ -1060,7 +1060,7 @@ export function CustomerShipPricingSectionView({
                     key={tier.key}
                     className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                   >
-                    <span role="cell" className="font-extrabold">
+                    <span role="cell" className="font-semibold">
                       {tier.name ?? `第${index + 1}档`}
                     </span>
                     <span
@@ -1103,12 +1103,12 @@ export function CustomerShipPricingSectionView({
           <div className="px-4 pb-4 pt-1 sm:px-5">
             <FormulaNote>
               当前参数：8,000 = 分段 + 查余量 ={' '}
-              <strong className="text-destructive">
+              <strong className="font-semibold text-foreground">
                 {currencyLabel(carton8k, 0)}
               </strong>
               <span aria-hidden="true">　·　</span>
               10,000 ={' '}
-              <strong className="text-destructive">
+              <strong className="font-semibold text-foreground">
                 {currencyLabel(carton10k, 0)}
               </strong>
             </FormulaNote>
@@ -1168,7 +1168,7 @@ export function CustomerShipPricingSectionView({
                     key={zone.key}
                     className="grid grid-cols-[34px_minmax(19rem,1fr)_100px_100px_70px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                   >
-                    <span role="cell" className="font-extrabold">
+                    <span role="cell" className="font-semibold">
                       {zone.name}
                     </span>
                     <span
@@ -1205,11 +1205,11 @@ export function CustomerShipPricingSectionView({
           <div className="px-4 pb-4 pt-2 sm:px-5">
             <FormulaNote>
               试算：2,000个 160g → 上海{' '}
-              <strong className="text-destructive">
+              <strong className="font-semibold text-foreground">
                 {currencyLabel(shanghai, 1)}
               </strong>{' '}
               · 甘肃{' '}
-              <strong className="text-destructive">
+              <strong className="font-semibold text-foreground">
                 {currencyLabel(gansu, 1)}
               </strong>
             </FormulaNote>

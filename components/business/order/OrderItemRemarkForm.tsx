@@ -33,7 +33,7 @@ export function OrderItemRemarkForm({ orderId, itemId, sequence, version, initia
     {state?.status === 'success' ? <FormMessage fieldId={`${id}-saved`} tone="success">已保存</FormMessage> : null}
     {auxiliary.blocked ? <p className="text-sm text-muted-foreground">请先保存其他修改，再修改款式备注。</p> : null}
     <Button type="submit" className="min-h-11" disabled={pending || auxiliary.blocked || !dirty}>
-      {pending ? '保存中…' : '保存款式备注'}
+      {pending ? '正在保存…' : '保存款式备注'}
     </Button>
   </form>;
 }

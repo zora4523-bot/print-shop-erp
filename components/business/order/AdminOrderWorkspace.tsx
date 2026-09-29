@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Search, Star } from 'lucide-react';
@@ -17,7 +18,7 @@ import { cn } from '@/lib/utils';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PageHeader } from '@/components/ui-business';
+import { LinkPendingHint, PageHeader } from '@/components/ui-business';
 import { AdminOrderWorkspaceList } from './AdminOrderWorkspaceList';
 import styles from './AdminOrderWorkspace.module.css';
 import { OrderQueuePending } from './OrderQueuePending';
@@ -95,11 +96,20 @@ export function AdminOrderWorkspace({
       />
 
       <section className="min-w-0 space-y-2">
-        <form key={JSON.stringify(params)} action="/orders" className="flex min-w-0 flex-wrap items-center gap-2 [&_input]:rounded-full [&_select]:rounded-full [&_button]:rounded-full [&_a]:rounded-full">
-          {hiddenFilterInputs(params)}
+        {/* 队列标签条在表单外、不带 key：切换队列时只更新 aria-current，不重挂载
+            （审查 #38）。表单 key 只跟已应用的可见筛选值走——切队列/看板时未点
+            「应用筛选」的输入保留（仍不生效），清除/应用筛选后才按 URL 重置。 */}
+        <div className="flex min-w-0 flex-wrap items-center gap-2 [&_input]:rounded-full [&_select]:rounded-full [&_button]:rounded-full [&_a]:rounded-full">
         <OrderQueuesSection {...{
           query: query, data: data,
         }} />
+        <Form
+          key={appliedFilterFormKey(query)}
+          action="/orders"
+          scroll={false}
+          className="contents"
+        >
+          {hiddenFilterInputs(params)}
 
           <select
             name="submitterId"
@@ -145,10 +155,12 @@ export function AdminOrderWorkspace({
           <Link
             href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
             prefetch={false}
+            scroll={false}
             aria-current={rejectedFilterActive ? 'true' : undefined}
-            className={buttonVariants({ variant: rejectedFilterActive ? 'secondary' : 'outline' })}
+            className={cn(buttonVariants({ variant: rejectedFilterActive ? 'selected' : 'outline' }), 'relative')}
           >
             {rejectedFilterActive ? '取消已驳回筛选' : '已驳回 / 待补正'}
+            <LinkPendingHint />
           </Link>
           <Link
             href={buildTableHref(
@@ -161,12 +173,13 @@ export function AdminOrderWorkspace({
               ),
             )}
             prefetch={false}
+            scroll={false}
             aria-current={query.starred ? 'true' : undefined}
             className={cn(
               buttonVariants({
-                variant: query.starred ? 'secondary' : 'outline',
+                variant: query.starred ? 'selected' : 'outline',
               }),
-              'shrink-0',
+              'relative shrink-0',
             )}
           >
             <Star
@@ -174,8 +187,9 @@ export function AdminOrderWorkspace({
               className={cn(query.starred && 'fill-warning text-warning')}
             />
             {query.starred ? '取消仅星标' : '仅星标'}
+            <LinkPendingHint />
           </Link>
-          <Link href="/orders?queue=all&pendingWages=yes" className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm">待补录提成</Link>
+          <Link href="/orders?queue=all&pendingWages=yes" scroll={false} className="relative inline-flex min-h-11 items-center rounded-md border px-3 text-sm">待补录提成<LinkPendingHint /></Link>
           <Link
             href={buildTableHref(
               '/orders',
@@ -189,24 +203,32 @@ export function AdminOrderWorkspace({
               ),
             )}
             prefetch={false}
+            scroll={false}
             aria-current={query.unbilled ? 'true' : undefined}
-            className={buttonVariants({
-              variant: query.unbilled ? 'secondary' : 'outline',
-            })}
+            className={cn(
+              buttonVariants({
+                variant: query.unbilled ? 'selected' : 'outline',
+              }),
+              'relative',
+            )}
           >
             {query.unbilled ? '取消仅未出账' : '仅未出账'}
+            <LinkPendingHint />
           </Link>
           {hasUserFilters ? (
             <Link
               href={clearFiltersHref}
               prefetch={false}
-              className={buttonVariants({ variant: 'ghost' })}
+              scroll={false}
+              className={cn(buttonVariants({ variant: 'ghost' }), 'relative')}
             >
               清除筛选
+              <LinkPendingHint />
             </Link>
           ) : null}
           </div>
-        </form>
+        </Form>
+        </div>
 
 
         {issues.length > 0 ? (
@@ -305,14 +327,14 @@ function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; 
             key={queue.key}
             href={buildTableHref('/orders', {}, serializeAdminOrderWorkspaceQuery(target))}
             prefetch={false}
+            scroll={false}
             aria-current={active ? 'page' : undefined}
             className={cn(
               buttonVariants({
-                variant: active ? 'default' : 'outline',
+                variant: active ? 'selected' : 'outline',
                 size: 'sm',
               }),
-              'min-h-10 shrink-0 rounded-full px-3.5 text-sm font-bold shadow-none',
-              active && 'bg-foreground text-background hover:bg-foreground/90',
+              'relative min-h-10 shrink-0 rounded-full px-3.5 text-sm font-bold shadow-none',
             )}
           >
             {queue.label}
@@ -320,6 +342,7 @@ function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; 
               {data.counts.queues[queue.key].toLocaleString('zh-CN')}
             </span>
             <OrderQueuePending label={queue.label} />
+            <LinkPendingHint />
           </Link>
         );
       })}
@@ -357,9 +380,10 @@ function AdminOrderDecisionDashboard({
               serializeAdminOrderWorkspaceQuery(target),
             )}
             prefetch={false}
+            scroll={false}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'flex !min-w-[104px] flex-col items-start rounded-xl border bg-card px-4 py-2.5 transition-colors hover:border-foreground/60 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none',
+              'relative flex !min-w-[104px] flex-col items-start rounded-xl border bg-card px-4 py-2.5 transition-colors hover:border-foreground/60 focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none',
               'border-border hover:border-muted-foreground/50',
               active && 'border-foreground bg-muted/40',
             )}
@@ -376,6 +400,7 @@ function AdminOrderDecisionDashboard({
             <span className="mt-0.5 block text-xs font-semibold text-muted-foreground">
               {signal.label}
             </span>
+            <LinkPendingHint />
           </Link>
         );
       })}
@@ -400,6 +425,12 @@ function AdminOrderDecisionDashboard({
       </Link>
     </section>
   );
+}
+
+/** 表单只在「已应用的可见筛选值」变化时重挂载，见上方 #38 注释。 */
+export function appliedFilterFormKey(query: AdminOrderWorkspaceQuery): string {
+  const f = query.list.filters;
+  return JSON.stringify([f.q ?? '', f.submitterId ?? '', f.craftIds[0] ?? '']);
 }
 
 function hiddenFilterInputs(
@@ -446,7 +477,7 @@ export function adminRejectedFilterParams(query: AdminOrderWorkspaceQuery) {
 function OrderWorkspaceHeader({ exportControls }: { exportControls: ReactNode }) {
   return (
       <PageHeader
-        title="工单管理"
+        title="工单列表"
         className="[&_h1]:text-xl [&_h1]:font-extrabold"
         actions={
           <>

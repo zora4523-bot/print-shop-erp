@@ -19,10 +19,6 @@ export function CraftsTable({
   crafts: CraftSummary[];
   editBase?: string;
 }) {
-  if (crafts.length === 0) {
-    return null;
-  }
-
   return (
     <Table label="工艺字典列表">
       <TableHeader>

@@ -55,7 +55,7 @@ export function AttendanceRecordDialog({
   // useActionState 在新一轮 action 完成前会保留上一轮 state。
   // 如果上次也是 success，新一轮成功后文字完全相同，live region
   // 没有 DOM 变化就不会再播报。pending 时卸载旧 outcome，完成后
-  // 重新挂载，同时避免在「保存中…」旁还显示过期的「已保存」。
+  // 重新挂载，同时避免在「正在保存…」旁还显示过期的「已保存」。
   const state = pending ? null : recordState;
 
   const usesHourlyFields = workerType === WorkerType.PACKER;
@@ -188,7 +188,7 @@ export function AttendanceRecordDialog({
         />
       </label>
 
-      {/* 保存成功此前没有任何回执：按钮从「保存中…」变回「保存」就完了。
+      {/* 保存成功此前没有任何回执：按钮从「正在保存…」变回「保存」就完了。
 
           注意这里**不需要** router.refresh()。Server Action 里的
           revalidatePath('/foreman/attendance') 会让服务端在 action 响应上
@@ -223,7 +223,7 @@ export function AttendanceRecordDialog({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" onClick={onSave} disabled={pending}>
-          {pending ? '保存中…' : '保存'}
+          {pending ? '正在保存…' : '保存'}
         </Button>
         <Button
           type="button"

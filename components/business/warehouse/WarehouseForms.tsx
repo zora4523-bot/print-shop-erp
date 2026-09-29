@@ -68,7 +68,7 @@ function WarehouseCreateForm() {
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
-      <h2 className="text-base font-semibold">新增仓库</h2>
+      <h2 className="text-base font-semibold">新建仓库</h2>
       <FormErrorSummary errors={summaryErrors} />
       <TextField
         id="warehouse-name"
@@ -141,7 +141,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
-      <h2 className="text-base font-semibold">新增库位</h2>
+      <h2 className="text-base font-semibold">新建库位</h2>
       <FormErrorSummary errors={summaryErrors} />
       <div className="space-y-2">
         <Label htmlFor="location-warehouse">所属仓库</Label>
@@ -173,7 +173,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
           <ActionNotice
             tone="warning"
             title="缺少启用仓库"
-            description="请先在左侧创建仓库，再新增库位。"
+            description="请先在左侧创建仓库，再新建库位。"
           />
         ) : null}
       </div>

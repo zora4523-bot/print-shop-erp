@@ -5,8 +5,7 @@ import { emptyPurchaseDraft, type FormDraftContext } from '@/lib/form-drafts/mod
 import { useFormDraft } from '@/components/business/form-drafts/useFormDraft';
 import { DraftIdentityFields, DraftNotice, SupplementLink } from '@/components/business/form-drafts/FormDraftControls';
 import type { PurchaseMutationResult } from '@/actions/owner-purchases.types';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { SupplierPartyOption } from '@/lib/party';
@@ -193,15 +192,8 @@ export function PurchaseOrderForm({
 
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={pending || draft.blocked || prerequisitesMissing}>
-          {pending ? '提交中…' : '创建采购单'}
+          {pending ? '正在提交…' : '创建采购单'}
         </Button>
-        <PendingLink
-          href="/owner/purchases"
-          pending={pending}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          返回列表
-        </PendingLink>
       </div>
     </form>
   );

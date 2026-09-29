@@ -90,7 +90,7 @@ function TierActivationControl({
         aria-label={`${quantityFormatter.format(quantity)} 个价格档${active ? '启用' : '停用'}`}
         className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
       >
-        <Checkbox
+        <Checkbox className="-ml-3"
           checked={active}
           disabled={disabled}
           onCheckedChange={onChange}
@@ -806,7 +806,7 @@ export function ExternalSalesPriceTierGroupEditor({
                       inputMode="decimal"
                       autoComplete="off"
                       disabled={pending}
-                      className="min-h-11 min-w-0 pl-7 text-right font-sans tabular-nums @min-[31rem]:h-10 @min-[31rem]:!min-h-10"
+                      className="min-h-11 min-w-0 pl-7 text-right font-sans tabular-nums"
                       pattern="(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?"
                       required
                       aria-required="true"

@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 type PillOption<T extends string | number> = {
   value: T;
   label: string;
@@ -9,13 +10,7 @@ type PillOption<T extends string | number> = {
   disabled?: boolean;
 };
 
-export function RequiredMark() {
-  return (
-    <span aria-hidden="true" className="ml-0.5 font-bold text-destructive">
-      *
-    </span>
-  );
-}
+export { RequiredMark };
 
 export function FieldLabel({
   htmlFor,
@@ -29,7 +24,7 @@ export function FieldLabel({
   return (
     <label
       htmlFor={htmlFor}
-      className="mb-2 block text-xs font-bold tracking-[0.16em] text-muted-foreground"
+      className="mb-2 block text-xs font-bold tracking-widest text-muted-foreground"
     >
       {children}
       {required ? <RequiredMark /> : null}
@@ -101,7 +96,7 @@ export function PillPicker<T extends string | number>({
       aria-invalid={Boolean(error)}
       aria-describedby={error ? messageId : undefined}
     >
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
+      <legend className="mb-2 text-xs font-bold tracking-widest text-muted-foreground">
         {label}
         {required ? <RequiredMark /> : null}
         {note ? (
@@ -118,14 +113,12 @@ export function PillPicker<T extends string | number>({
               key={String(option.value)}
               id={`${id}-${String(option.value)}`}
               type="button"
-              variant="outline"
+              variant={selected ? 'selected' : 'outline'}
               aria-pressed={selected}
               disabled={disabled || option.disabled}
               className={cn(
                 'h-auto min-h-11 min-w-11 rounded-full px-3.5 py-1.5 text-sm font-semibold',
                 option.detail && 'flex-col gap-0 py-1',
-                selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
               )}
               onClick={() => onChange(option.value)}
             >
@@ -162,7 +155,7 @@ export function Group({
       aria-label={title}
       className={appearance === 'plain' ? 'min-w-0' : cn('border-t pt-4', first ? 'border-0 pt-0' : 'mt-4')}
     >
-      <h2 className={appearance === 'plain' ? 'mb-4 text-base font-semibold text-foreground' : 'mb-3.5 text-xs font-extrabold tracking-[0.2em] text-muted-foreground'}>
+      <h2 className={appearance === 'plain' ? 'mb-4 text-base font-semibold text-foreground' : 'mb-3.5 text-xs font-semibold tracking-widest text-muted-foreground'}>
         {title}
       </h2>
       {description ? <p className="-mt-2 mb-4 text-sm text-muted-foreground">{description}</p> : null}

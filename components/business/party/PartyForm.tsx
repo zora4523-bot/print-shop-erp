@@ -1,16 +1,13 @@
 'use client';
 
 import type { SupplementContext } from '@/lib/form-drafts/model';
-import { supplementReturnHref } from '@/lib/form-drafts/return-context';
 import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
 
-import Link from 'next/link';
 import { useActionState, useState, type ChangeEvent } from 'react';
 import { ReceiverAddressPasteField } from '@/components/business/order/ReceiverAddressPasteField';
 import { applyParsedReceiverFact, stripProvincePrefix } from '@/lib/order/receiver-address-paste';
 import { PartyType } from '../../../generated/prisma/enums';
 import type { PartyMutationResult } from '@/actions/owner-parties.types';
-import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -113,10 +110,6 @@ export function PartyForm(props: Props) {
       ? (props.initialType ?? PartyType.CUSTOMER)
       : props.initial.type;
   const supplement = props.supplement;
-  const backHref = supplement ? supplementReturnHref(supplement) :
-    props.mode === 'create' && props.returnTo
-      ? props.returnTo
-      : '/owner/parties';
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
   const generalError = visibleState?.status === 'error' ? visibleState.message : null;
@@ -328,9 +321,6 @@ export function PartyForm(props: Props) {
         <PendingButton pending={pending} pendingLabel="正在保存客户/供应商…">
           {props.mode === 'create' ? '创建客户/供应商' : '保存修改'}
         </PendingButton>
-        <Link href={backHref} className={buttonVariants({ variant: 'outline' })}>
-          {supplement ? '返回原录入' : props.mode === 'create' && props.returnTo ? '返回采购单' : '返回列表'}
-        </Link>
       </div>
     </form>
   );

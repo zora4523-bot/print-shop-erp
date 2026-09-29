@@ -567,7 +567,7 @@ function mapSalesOrderRow(
         .filter((name): name is string => Boolean(name)),
       thumbnail: design
         ? {
-            url: signDesignReadUrl(design.fileUrl),
+            url: signDesignReadUrl(design.fileUrl, process.env, { thumbnail: true }),
             fileName: design.fileName,
           }
         : null,

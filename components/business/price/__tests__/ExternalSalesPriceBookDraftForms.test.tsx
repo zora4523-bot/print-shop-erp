@@ -399,7 +399,7 @@ describe('CreateCustomerPriceBookDraftForm', () => {
 
     expect(html).toContain('发起调价');
     expect(html).toContain('草稿发布前不影响当前报价');
-    expect(html).toContain('调价原因（必填）');
+    expect(html).toContain('调价原因');
     expect(html).toContain('开始调价');
     expect(html).not.toContain('复制当前价目');
 
@@ -424,7 +424,7 @@ describe('CreateCustomerPriceBookDraftForm', () => {
     );
 
     expect(html).toContain('aria-label="创建入袋费调价草稿"');
-    expect(html).toContain('调价原因（必填）');
+    expect(html).toContain('调价原因');
     expect(html).toContain('开始调价');
     expect(html).not.toContain('草稿发布前不影响当前报价');
     expect(html).not.toContain('<p class="text-sm font-medium">发起调价</p>');

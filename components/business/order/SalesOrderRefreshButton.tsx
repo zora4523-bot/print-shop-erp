@@ -13,7 +13,7 @@ export function SalesOrderRefreshButton() {
       aria-label="刷新工单详情" aria-busy={pending}
       onClick={() => startTransition(() => router.refresh())}>
       <RefreshCw aria-hidden="true" />
-      {pending ? '刷新中…' : '刷新'}
+      {pending ? '正在刷新…' : '刷新'}
     </Button>
   );
 }

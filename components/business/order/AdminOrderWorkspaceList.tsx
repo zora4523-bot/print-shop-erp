@@ -109,8 +109,17 @@ function AdminOrderWorkspaceListInner({
     >
       {orders.length > 0 ? (
         <>
-          <div className="flex min-h-8 items-center gap-2 px-3 text-xs font-medium text-muted-foreground">
-            <OrderListPageSelection />
+          {/* 与行同一套列模板 / 内边距 / 紧凑勾选尺寸，「选择本页」和行勾选框同列同尺寸（审查 #17）。 */}
+          <div
+            data-slot="admin-order-selection-header"
+            className={cn(
+              styles.selectionHeader,
+              'grid min-h-8 min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-x-3 border border-transparent px-3.5 text-xs font-medium text-muted-foreground @min-[960px]:grid-cols-[1.75rem_minmax(0,1fr)]',
+            )}
+          >
+            <div className="flex flex-col items-center">
+              <OrderListPageSelection />
+            </div>
             <span>选择本页</span>
           </div>
           <ul aria-label="管理端工单列表" className="space-y-2">
@@ -347,6 +356,10 @@ function OrderThumbnail({ order }: { order: AdminOrderWorkspaceRow }) {
         <img
           src={order.thumbnail.url}
           alt={order.thumbnail.fileName}
+          width={34}
+          height={46}
+          loading="lazy"
+          decoding="async"
           className="size-full rounded-md object-cover"
         />
       ) : (

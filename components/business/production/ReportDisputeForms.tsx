@@ -13,7 +13,7 @@ export function ReportDisputeForm({ reportId }: { reportId: string }) {
     </label>
     <p className="text-sm text-muted-foreground">提交后由管理员核对，不直接更改报工或工资。</p>
     {state && <p role={state.status === 'error' ? 'alert' : 'status'}>{state.message}</p>}
-    <Button disabled={pending || state?.status === 'success'} type="submit">{pending ? '提交中…' : '提交问题'}</Button>
+    <Button disabled={pending || state?.status === 'success'} type="submit">{pending ? '正在提交…' : '提交问题'}</Button>
   </form>;
 }
 export function ReportDisputeReviewForm({ disputeId }: { disputeId: string }) {

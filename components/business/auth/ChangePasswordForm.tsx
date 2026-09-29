@@ -53,7 +53,7 @@ export function ChangePasswordForm() {
       ) : null}
 
       <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? '提交中…' : '更新密码'}
+        {pending ? '正在提交…' : '更新密码'}
       </Button>
     </form>
   );

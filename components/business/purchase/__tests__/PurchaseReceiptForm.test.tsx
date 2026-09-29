@@ -120,7 +120,7 @@ describe('PurchaseReceiptForm L2 confirmation', () => {
 
     const html = renderReceipt();
     expect(html).toMatch(/<form[^>]*aria-busy="true"/);
-    expect(html).toContain('提交中…');
+    expect(html).toContain('正在提交…');
     expect(html).not.toContain('剩余数量已经变化');
   });
 });

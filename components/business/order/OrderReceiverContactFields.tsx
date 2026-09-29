@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 type Props = {
   idPrefix?: string;
@@ -76,9 +77,7 @@ export function OrderReceiverContactFields({
           <Label htmlFor={field.id}>
             {field.label}
             {field.required ? (
-              <span aria-hidden="true" className="text-destructive">
-                *
-              </span>
+              <RequiredMark />
             ) : null}
           </Label>
           <Input

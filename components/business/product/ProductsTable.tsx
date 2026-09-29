@@ -29,10 +29,6 @@ export function ProductsTable({
   label?: string;
   categoryHeading?: string;
 }) {
-  if (products.length === 0) {
-    return null;
-  }
-
   return (
     <Table label={label}>
       <TableHeader>

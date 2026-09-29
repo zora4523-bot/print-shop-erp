@@ -210,7 +210,7 @@ function ReportFields({
           </p>
         ) : null}
         <Button type="submit" disabled={pending} className="min-h-13 w-full">
-          {pending ? '提交中…' : '提交扫码报工'}
+          {pending ? '正在提交…' : '提交扫码报工'}
         </Button>
       </fieldset>
       {review && <section aria-label="核对本次报工" className="space-y-3 rounded-lg border bg-muted/20 p-4 text-sm">

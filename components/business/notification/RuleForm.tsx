@@ -1,5 +1,6 @@
 'use client';
 
+import { AMOUNT_PAYLOAD_FIELD, payloadFieldLabel } from './payload-field-labels';
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { buttonVariants } from '@/components/ui/button';
@@ -91,6 +92,7 @@ export function RuleForm({
             <span key={f}>
               {i > 0 ? '、' : ' '}
               <code className="rounded-md bg-muted px-1">{`{${f}}`}</code>
+              {payloadFieldLabel(f) ? `（${payloadFieldLabel(f)}）` : null}
             </span>
           ))}
         </p>
@@ -99,11 +101,11 @@ export function RuleForm({
             （如默认 `金额：¥{totalAmount}` →&ldquo;金额：¥1,234.56&rdquo;）。
             避免 owner 误以为占位符已含 ¥。 */}
         {payloadFields.some((f) =>
-          /^totalAmount$/.test(f),
+          f === AMOUNT_PAYLOAD_FIELD,
         ) ? (
           <p className="text-xs text-muted-foreground">
-            金额类占位符（<code className="rounded-md bg-muted px-1">totalAmount</code>
-            ）只是千分位数字，<strong>不含</strong>货币符号。需要 ¥ 请在模板里手写。
+            金额类占位符（<code className="rounded-md bg-muted px-1">{`{${AMOUNT_PAYLOAD_FIELD}}`}</code>
+            总金额）只是千分位数字，<strong>不含</strong>货币符号。需要 ¥ 请在模板里手写。
           </p>
         ) : null}
       </div>
@@ -232,7 +234,7 @@ export function RuleForm({
       ) : null}
 
       <div className="flex items-center gap-2">
-        <PendingButton pending={pending} pendingLabel="保存中…">
+        <PendingButton pending={pending} pendingLabel="正在保存…">
           保存修改
         </PendingButton>
         <Link

@@ -46,6 +46,31 @@ describe('rule center workspace UI', () => {
     );
   });
 
+  it('does not refetch the version summary for view-only section/focus switches', () => {
+    expect(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=blank&focus=r1'),
+      ),
+    ).toBe(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=foil'),
+      ),
+    );
+    expect(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=blank&start=1&purpose=processing'),
+      ),
+    ).not.toBe(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=blank'),
+      ),
+    );
+  });
+
   it('keeps the overview as a real route instead of aliasing a price editor', () => {
     expect(RULE_CENTER_HREFS.root).toBe('/owner/rules');
     expect(RULE_CENTER_HREFS.root).not.toBe(

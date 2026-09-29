@@ -55,14 +55,14 @@ export function LockPieceworkSettlementForm({
       <ConfirmActionController level="L2"
         trigger={
           <Button type="button" size="sm" disabled={pending}>
-            {pending ? '锁定中…' : '锁定结算'}
+            {pending ? '正在锁定…' : '锁定结算'}
           </Button>
         }
         formId={formId}
         disabled={pending}>
         <ConfirmActionDialog action={`结算 ${reporterName} ${workDate} 的计件工资`} changes={[{label: `${reportCount} 条报工`, old: "未结算", new: formatMoney(amount)}]} consequences={[
           '锁定后不能删除或重建明细；更正须通过追加冲正报工处理。',
-        ]} confirmText="锁定" />
+        ]} confirmText="锁定结算" />
       </ConfirmActionController>
       {error ? (
         <ActionNotice tone="error" title="锁定失败" description={error} />
@@ -95,7 +95,7 @@ export function LockPieceworkSettlementDayForm({
       <ConfirmActionController level="L2"
         trigger={
           <Button type="button" disabled={pending || candidateCount === 0}>
-            {pending ? '锁定中…' : `锁定当日全部（${candidateCount} 人）`}
+            {pending ? '正在锁定…' : `锁定当日全部（${candidateCount} 人）`}
           </Button>
         }
         formId={formId}
@@ -140,7 +140,7 @@ export function MarkPieceworkSettlementPaidForm({
       <ConfirmActionController level="L2"
         trigger={
           <Button type="button" size="sm" disabled={pending}>
-            {pending ? '处理中…' : '标记已发'}
+            {pending ? '正在处理…' : '标记已发'}
           </Button>
         }
         formId={formId}

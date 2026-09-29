@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { updateOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY';
 
@@ -244,7 +245,7 @@ export function EditOrderForm({
       {!designLayout ? (
         <div className="flex items-center gap-3">
           <Button type="submit" className="min-h-11" disabled={pendingLocked}>
-            {pending ? '保存中…' : '保存'}
+            {pending ? '正在保存…' : '保存'}
           </Button>
           <Link
             href={`/orders/${orderId}`}
@@ -360,8 +361,9 @@ function OrderDeliveryFieldsSection({
               </div>
               {addressChanged && !isSfCollect ? (
                 <div className="rounded-md border border-warning/40 p-3">
-                  <label className="flex min-h-11 items-center gap-2 text-sm">
+                  <label className="flex min-h-11 items-center gap-1 text-sm">
                     <Checkbox
+                      className="-ml-3"
                       checked={row.sameDestination}
                       disabled={pendingLocked || disabled || !row.destinationProvince}
                       onCheckedChange={(checked) =>
@@ -536,8 +538,9 @@ function OrderBasicFieldsSection({
           />
         )}
         {!isShippingOnly && (
-          <label className="flex min-h-11 cursor-pointer items-center gap-2 sm:col-span-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+          <label className="flex min-h-11 cursor-pointer items-center gap-1 sm:col-span-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
             <Checkbox
+              className="-ml-3"
               id="isUrgent"
               name="isUrgent"
               value="on"
@@ -600,9 +603,7 @@ function Field({
       <Label htmlFor={name} className="text-sm text-muted-foreground">
         {label}
         {required ? (
-          <span aria-hidden="true" className="ml-0.5 text-destructive">
-            *
-          </span>
+          <RequiredMark />
         ) : null}
       </Label>
       {multiline ? (

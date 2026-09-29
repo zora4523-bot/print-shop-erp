@@ -116,7 +116,7 @@ export function OrderSubmissionReviewContent({
   headingHint = '重点核对数量与规格。',
   backLabel = '返回修改',
   confirmLabel = '确认无误，提交',
-  confirmPendingLabel = '提交中…',
+  confirmPendingLabel = '正在提交…',
   confirmPending = false,
   confirmDisabled = false,
   className,
@@ -136,7 +136,7 @@ export function OrderSubmissionReviewContent({
       )}
     >
       <header className="shrink-0 border-b px-5 pb-4 pt-5 sm:px-6">
-        <p className="text-xs font-semibold tracking-[0.2em] text-muted-foreground">
+        <p className="text-xs font-semibold tracking-widest text-muted-foreground">
           提交前复核
         </p>
         <h2
@@ -160,7 +160,7 @@ export function OrderSubmissionReviewContent({
             >
               <h3
                 id={`${headingId}-${item.id}`}
-                className="mb-3 border-b pb-2 text-xs font-semibold tracking-[0.18em] text-muted-foreground"
+                className="mb-3 border-b pb-2 text-xs font-semibold tracking-widest text-muted-foreground"
               >
                 {multiItem
                   ? `第 ${item.number} 款 / 共 ${items.length} 款`
@@ -171,7 +171,7 @@ export function OrderSubmissionReviewContent({
                 <div
                   className="rounded-xl border-2 border-foreground p-3.5"
                 >
-                  <p className="text-xs font-bold tracking-[0.18em] text-muted-foreground">
+                  <p className="text-xs font-bold tracking-widest text-muted-foreground">
                     数量
                   </p>
                   <p className="mt-1 text-3xl font-bold leading-none tracking-tight">
@@ -202,7 +202,7 @@ export function OrderSubmissionReviewContent({
                       'border-destructive bg-destructive/5',
                   )}
                 >
-                  <p className="text-xs font-bold tracking-[0.18em] text-muted-foreground">
+                  <p className="text-xs font-bold tracking-widest text-muted-foreground">
                     规格
                   </p>
                   <p className="mt-1 text-3xl font-bold leading-none tracking-tight">
@@ -286,14 +286,14 @@ export function OrderSubmissionReviewContent({
                 <p
                   className={cn(
                     'shrink-0 pt-2 text-sm font-bold tabular-nums',
-                    manualQuote && 'text-xs text-destructive',
+                    manualQuote && 'text-xs text-primary',
                   )}
                 >
                   {item.amountLabel}
                 </p>
               </div>
               {manualQuote ? (
-                <div className="mt-3 border-l-4 border-destructive bg-destructive/5 px-3 py-2 text-xs font-semibold leading-relaxed text-destructive">
+                <div className="mt-3 border-l-4 border-primary bg-primary/5 px-3 py-2 text-xs font-semibold leading-relaxed text-primary">
                   人工核价：{item.manualQuoteReasons?.join('；')}
                 </div>
               ) : null}
@@ -308,7 +308,7 @@ export function OrderSubmissionReviewContent({
         <section aria-labelledby={`${headingId}-shipping`} className="mt-6">
           <h3
             id={`${headingId}-shipping`}
-            className="mb-3 border-b pb-2 text-xs font-semibold tracking-[0.18em] text-muted-foreground"
+            className="mb-3 border-b pb-2 text-xs font-semibold tracking-widest text-muted-foreground"
           >
             收货与快递
           </h3>
@@ -359,7 +359,7 @@ export function OrderSubmissionReviewContent({
               'text-right text-2xl font-bold tracking-tight tabular-nums',
               'whitespace-pre-line',
               totalRequiresManualQuote &&
-                'max-w-xs text-sm leading-relaxed text-destructive',
+                'max-w-xs text-sm leading-relaxed text-primary',
             )}
           >
             {totalLabel}
@@ -382,11 +382,7 @@ export function OrderSubmissionReviewContent({
         </Button>
         <Button
           type="button"
-          className={cn(
-            'min-h-11 bg-foreground text-background hover:bg-foreground/90',
-            totalRequiresManualQuote &&
-              'bg-destructive text-background hover:bg-destructive/90',
-          )}
+          className="min-h-11"
           disabled={confirmDisabled || confirmPending}
           onClick={onConfirm}
         >

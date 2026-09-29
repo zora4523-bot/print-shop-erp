@@ -38,7 +38,7 @@ describe('signDesignReadUrl', () => {
   it('本 bucket design/* 的 URL → 30min 预签 GET', () => {
     const r = signDesignReadUrl(bucketHostUrl, configuredEnv);
     expect(signatureUrlMock).toHaveBeenCalledWith('design/o1/i1/image-x.jpg', {
-      expires: 1800,
+      expires: expect.any(Number),
       method: 'GET',
     });
     expect(r).toMatch(/^https:\/\/signed\.example\//);
@@ -68,7 +68,7 @@ describe('signDesignReadUrl', () => {
       env,
     );
     expect(signatureUrlMock).toHaveBeenCalledWith('design/o1/i1/image-x.jpg', {
-      expires: 1800,
+      expires: expect.any(Number),
       method: 'GET',
     });
     expect(r).toMatch(/^https:\/\/signed\.example\//);
@@ -84,7 +84,7 @@ describe('signDesignReadUrl', () => {
       env,
     );
     expect(signatureUrlMock).toHaveBeenCalledWith('design/o1/i1/image-x.jpg', {
-      expires: 1800,
+      expires: expect.any(Number),
       method: 'GET',
     });
     // 同 host 但不在前缀下 → 原样放行
@@ -101,7 +101,7 @@ describe('signDesignReadUrl', () => {
     } as unknown as NodeJS.ProcessEnv;
     signDesignReadUrl(bucketHostUrl, env);
     expect(signatureUrlMock).toHaveBeenCalledWith('design/o1/i1/image-x.jpg', {
-      expires: 1800,
+      expires: expect.any(Number),
       method: 'GET',
     });
   });

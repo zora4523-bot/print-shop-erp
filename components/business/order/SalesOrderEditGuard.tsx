@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Button } from '@/components/ui/button';
-import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog';
+import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { useAdminOrderLeaveGuard, type PendingOrderEditorNavigation } from './use-admin-order-leave-guard';
 
 /** Snapshot actual controls, including unnamed controls and files in auxiliary forms. */
@@ -12,6 +11,9 @@ export function orderEditFormFingerprint(form: HTMLElement): string {
     return [input.value, input instanceof HTMLInputElement ? input.checked : null];
   }));
 }
+
+const SALES_EDIT_NOTICE_CLASS = 'sales-edit-notice';
+const SALES_EDIT_NOTICE_SELECTOR = '[data-sales-edit-notice],.sales-edit-notice';
 
 /** One page boundary for all forms, triggers, portalled dialogs, and navigation. */
 export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
@@ -32,7 +34,7 @@ export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
     const guardedForm = (form: HTMLElement) => root.current?.contains(form) || Boolean(form.closest('[role="dialog"],[role="alertdialog"]'));
     const sync = () => {
       for (const form of document.querySelectorAll<HTMLElement>('form,[role="dialog"],[role="alertdialog"]')) {
-        if (!form.closest('[data-sales-edit-notice]') && guardedForm(form) && !baselines.current.has(form)) baselines.current.set(form, orderEditFormFingerprint(form));
+        if (!form.closest(SALES_EDIT_NOTICE_SELECTOR) && guardedForm(form) && !baselines.current.has(form)) baselines.current.set(form, orderEditFormFingerprint(form));
       }
       for (const form of baselines.current.keys()) {
         if (!form.isConnected) { baselines.current.delete(form); dirtyForms.current.delete(form); }
@@ -61,7 +63,7 @@ export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
       });
     };
     const stop = (event: Event) => { event.preventDefault(); event.stopImmediatePropagation(); setNotice({}); };
-    const isNotice = (target: Element) => Boolean(target.closest('[data-sales-edit-notice]'));
+    const isNotice = (target: Element) => Boolean(target.closest(SALES_EDIT_NOTICE_SELECTOR));
     const hasOtherDraft = (form: HTMLElement | null) => Array.from(dirtyForms.current).some((owner) => owner !== form);
     const click = (event: MouseEvent) => {
       if (!(event.target instanceof Element) || isNotice(event.target)) return;
@@ -128,15 +130,20 @@ export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
 
   return <div ref={root} className="space-y-4">
     {children}
-    <AlertDialog open={notice !== null} onOpenChange={(open) => { if (!open) setNotice(null); }}>
-      <AlertDialogContent data-sales-edit-notice>
-        <AlertDialogTitle>{notice?.navigation ? '离开编辑页？' : '请先保存当前修改'}</AlertDialogTitle>
-        <AlertDialogDescription>{notice?.navigation ? '离开后，本页未保存的修改将丢失。' : '当前内容尚未保存。请保存后再操作其他功能。'}</AlertDialogDescription>
-        <AlertDialogFooter>
-          <Button variant="outline" onClick={() => setNotice(null)}>继续编辑</Button>
-          {notice?.navigation ? <Button variant="destructive" onClick={() => { const pending = notice.navigation; dirtyForms.current.clear(); setNotice(null); pending?.resume(); }}>放弃修改并离开</Button> : null}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmActionController level="L2"
+      open={notice !== null}
+      onOpenChange={(open) => { if (!open) setNotice(null); }}
+      className={SALES_EDIT_NOTICE_CLASS}
+      cancelLabel="继续编辑"
+      onConfirm={() => {
+        const pending = notice?.navigation;
+        if (pending) dirtyForms.current.clear();
+        setNotice(null);
+        pending?.resume();
+      }}>
+      {notice?.navigation
+        ? <ConfirmActionDialog action="离开编辑页？" changes={[]} consequences={['离开后，本页未保存的修改将丢失。']} confirmText="放弃修改并离开" danger />
+        : <ConfirmActionDialog action="请先保存当前修改" changes={[]} consequences={['当前内容尚未保存。请保存后再操作其他功能。']} confirmText="知道了" />}
+    </ConfirmActionController>
   </div>;
 }

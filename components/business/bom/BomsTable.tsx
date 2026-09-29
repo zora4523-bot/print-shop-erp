@@ -38,12 +38,8 @@ export function BomsTable({
   boms: BomSummary[];
   categoryLabelById: Record<string, string>;
 }) {
-  if (boms.length === 0) {
-    return null;
-  }
-
   return (
-    <Table label="BOM 列表">
+    <Table label="用料清单列表">
       <TableHeader>
         <TableRow>
           <TableHead>BOM</TableHead>

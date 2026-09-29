@@ -176,7 +176,7 @@ export function PriceWorkspaceNavigationGuardProvider({
         <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
           `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
           '已保存的价目和已发布版本保持不变。',
-        ]} confirmText="放弃修改并离开" />
+        ]} confirmText="放弃修改并离开" danger />
       </ConfirmActionController>
     </NavigationGuardContext.Provider>
   );
@@ -283,7 +283,7 @@ export function PriceWorkspaceLink({
         <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
           `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
           '已保存的价目和已发布版本保持不变。',
-        ]} confirmText="放弃修改并离开" />
+        ]} confirmText="放弃修改并离开" danger />
       </ConfirmActionController>
     </>
   );

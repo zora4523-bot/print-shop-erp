@@ -139,6 +139,7 @@ export function OutsourceActions({
           />
           <ConfirmActionController level="L2"
             formId={cancelFormId}
+            cancelLabel="保留外协单"
             disabled={cancelPending}
             trigger={
               <Button
@@ -155,7 +156,7 @@ export function OutsourceActions({
               '外协单将进入已取消终态，不能再标记回货或记录付款。',
               '系统会重新核对关联工单的生产完工条件。',
               '关联工单和这张外协单的历史记录不会被删除。',
-            ]} confirmText="取消外协单" />
+            ]} confirmText="取消外协单" danger />
           </ConfirmActionController>
         </div>
       ) : null}

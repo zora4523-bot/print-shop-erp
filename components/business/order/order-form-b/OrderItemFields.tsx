@@ -157,7 +157,7 @@ function FoilSideFields({
 
   return (
     <fieldset className="mt-5 min-w-0" aria-label="烫金颜色">
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
+      <legend className="mb-2 text-xs font-bold tracking-widest text-muted-foreground">
         烫金颜色
       </legend>
       <div className="rounded-xl bg-muted/30 p-3.5">
@@ -237,7 +237,7 @@ function SpecialTechnique({
   ] as const;
   return (
     <fieldset className="mt-5">
-      <legend className="mb-2 text-xs font-bold tracking-[0.16em] text-muted-foreground">
+      <legend className="mb-2 text-xs font-bold tracking-widest text-muted-foreground">
         特殊工艺
       </legend>
       <div className="flex flex-wrap gap-1.5">
@@ -248,13 +248,11 @@ function SpecialTechnique({
               key={option.value}
               id={`${id}-${option.value}`}
               type="button"
-              variant="outline"
+              variant={selected ? 'selected' : 'outline'}
               aria-pressed={selected}
               disabled={disabled}
               className={cn(
                 'h-auto min-h-11 min-w-11 rounded-full px-3.5 py-1.5 text-sm font-semibold',
-                selected &&
-                  'border-foreground bg-foreground text-background hover:bg-foreground hover:text-background dark:border-foreground dark:bg-foreground dark:text-background dark:hover:bg-foreground dark:hover:text-background',
               )}
               onClick={() =>
                 onChange(selected ? OrderFoilTechnique.FLAT : option.value)
@@ -474,7 +472,7 @@ export function OrderItemSpecificationFields({
         {allowCustomSize &&
         item.pricingRoute === OrderItemPricingRoute.CUSTOM_SINGLE_FLAT_FOIL ? (
           <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-            <Checkbox
+            <Checkbox className="-ml-3"
               checked={customSizeSelected}
               disabled={disabled}
               aria-label="改尺寸（转管理员终价）"

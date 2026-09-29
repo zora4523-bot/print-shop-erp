@@ -92,7 +92,7 @@ export function OutsourceAmountForm({
           />
         </div>
         <Button type="submit" disabled={pending} className="min-h-11">
-          {pending ? '保存中…' : currentAmount === null ? '确认金额' : '保存更正'}
+          {pending ? '正在保存…' : currentAmount === null ? '确认金额' : '保存更正'}
         </Button>
       </div>
       {state?.status === 'invalid' ? (

@@ -75,7 +75,7 @@ export function SettingsForm({
         ) : null}
 
         <Button type="submit" disabled={pending}>
-          {pending ? '保存中…' : '保存设置'}
+          {pending ? '正在保存…' : '保存设置'}
         </Button>
       </fieldset>
     </form>
@@ -313,7 +313,7 @@ function ManagementNotificationRoutingField({
                       : null;
                     const option = (
                       <label
-                        className="flex min-h-10 cursor-pointer items-center gap-1 rounded-md pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+                        className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
                       >
                         <Checkbox
                           name={`${prefix}.channelIds`}

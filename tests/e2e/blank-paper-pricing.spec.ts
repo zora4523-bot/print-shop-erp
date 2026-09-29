@@ -60,10 +60,10 @@ test('空白封新增、矩阵与纸张页：六视口明暗、触控、键盘�
       ui.on('pageerror', (error) => errors.push(error.message));
       try {
         await ui.goto('/owner/rules/customer-pricing/blank/new');
-        await expect(ui.locator('[aria-current=page]').filter({ hasText: '新增纸张与规格价格' })).toBeVisible();
+        await expect(ui.locator('[aria-current=page]').filter({ hasText: '新建纸张与规格价格' })).toBeVisible();
         // A streamed React response can temporarily retain a hidden copy in S:1.
         // Accessible roles select the mounted form, not that hidden payload.
-        const form = ui.getByRole('form', { name: '新增纸张与规格价格', exact: true });
+        const form = ui.getByRole('form', { name: '新建纸张与规格价格', exact: true });
         await expect(form).toHaveCount(1);
         const newPaper = form.getByRole('radio', { name: '新建纸张', exact: true });
         const middlePrice = form.getByRole('spinbutton', { name: '中号封单价', exact: true });

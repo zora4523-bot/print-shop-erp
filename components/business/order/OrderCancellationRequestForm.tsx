@@ -91,7 +91,7 @@ export function OrderCancellationRequestForm({
         variant="destructive"
         disabled={pending || reason.trim().length === 0}
       >
-        {pending ? '提交中…' : '提交取消申请'}
+        {pending ? '正在提交…' : '提交取消申请'}
       </Button>
     </form>
   );

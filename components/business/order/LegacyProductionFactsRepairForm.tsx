@@ -42,7 +42,7 @@ export function LegacyProductionFactsRepairForm({ facts, canRepair }: Props) {
           {Object.values(OrderPackagingMode).map((mode) => <option key={mode} value={mode}>{PACKAGING_MODE_LABELS[mode]}</option>)}
         </select>{fieldError('packagingMode')}
       </label> : null}
-      <PendingButton pending={pending} pendingLabel="保存中…">保存生产资料</PendingButton>
+      <PendingButton pending={pending} pendingLabel="正在保存…">保存生产资料</PendingButton>
     </fieldset>
     {state?.status === 'error' ? <p role="alert" className="text-sm text-destructive">{state.message}</p> : null}
     {state?.status === 'invalid' ? <p role="alert" className="text-sm text-destructive">{Object.values(errors).flat().join('；')}</p> : null}

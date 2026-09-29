@@ -8,6 +8,7 @@ import type { OrderMutationResult } from '@/actions/order.types';
 import { OrderStatus } from '@/generated/prisma/enums';
 import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 import { isFulfillmentPricingStatus } from '@/lib/order/fulfillment-pricing-policy';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 type Props = {
   orderId: string;
@@ -238,7 +239,7 @@ export function SfCollectToggleForm({
       ) : null}
       <Button type="submit" size="sm" variant="outline" disabled={pending}>
         {pending
-          ? '处理中…'
+          ? '正在处理…'
           : requiresShippedChargeCorrection
             ? '确认取消并重新核算应收'
             : currentValue
@@ -272,13 +273,6 @@ export function SfCollectToggleForm({
 const selectClass =
   'flex min-h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
-function RequiredMark() {
-  return (
-    <span aria-hidden="true" className="text-destructive">
-      *
-    </span>
-  );
-}
 
 function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;

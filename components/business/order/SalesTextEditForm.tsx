@@ -18,6 +18,6 @@ export function SalesTextEditForm({ orderId, targetId, field, version, value, la
     {/* 有改动时父级按 editVersion 重挂载本表单、页面文字随之更新；只有「没变化」
         这一种结果不会引起任何可见变化，所以必须在这里明确说出来。 */}
     {state?.saved ? <ActionNotice tone={state.changed ? 'success' : 'info'} title={state.changed ? `${label}已保存` : `${label}没有变化，未保存`} /> : null}
-    <Button type="submit" size="sm" disabled={busy}>{pending ? '保存中…' : `保存${label}`}</Button>
+    <Button type="submit" size="sm" disabled={busy}>{pending ? '正在保存…' : `保存${label}`}</Button>
   </form>;
 }

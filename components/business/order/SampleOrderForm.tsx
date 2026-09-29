@@ -481,8 +481,9 @@ function SampleOrderFields({
               ))}
             </NativeSelect>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="col-span-full flex min-h-11 items-center gap-1">
             <Checkbox
+              className="-ml-3"
               id={`${uid}-collect`}
               checked={collect}
               onCheckedChange={(value) => change('collect', value === true)}

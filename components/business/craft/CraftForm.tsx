@@ -1,9 +1,8 @@
 'use client';
 
 import { useActionState } from 'react';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
@@ -50,7 +49,6 @@ export function CraftForm(props: Props) {
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
-  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.crafts;
   const hasUnassignedFieldError = Object.entries(errs).some(
     ([field, messages]) =>
       !['name', 'sortOrder'].includes(field) && Boolean(messages?.length),
@@ -114,15 +112,8 @@ export function CraftForm(props: Props) {
 
       <div className="flex gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? '提交中…' : isCreate ? '创建工艺' : '保存修改'}
+          {pending ? '正在提交…' : isCreate ? '创建工艺' : '保存修改'}
         </Button>
-        <PendingLink
-          href={routeBase}
-          pending={pending}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          返回列表
-        </PendingLink>
       </div>
     </form>
   );

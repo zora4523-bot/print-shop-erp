@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ActionNotice } from '@/components/ui-business';
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 import { adminFeeRows, feeEditorCommand, feeEditorTotal } from '@/lib/order/admin-fee-draft';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 function errorMessage(result: PreviewOrderPricingReviewResult | FinalizeOrderPricingMutationResult | null) {
   if (result?.status === 'error') return result.message;
@@ -46,7 +47,7 @@ export function AdminOrderFeeEditor({ orderId, canEditCommercial = false }: { or
             <div className="flex flex-wrap gap-2"><Button type="button" variant="ghost" className="min-h-11" disabled={field.reference === null} onClick={() => setValues((current) => ({ ...current, [field.key]: field.reference! }))}>采用参考价</Button><Button type="button" variant="ghost" className="min-h-11" onClick={() => setValues((current) => ({ ...current, [field.key]: '0' }))}>免收</Button></div>
           </div>)}</div>
         </div>)}
-        <label className="block space-y-1 text-sm"><span>定价依据（必填）</span><Textarea maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+        <label className="block space-y-1 text-sm"><span>定价依据<RequiredMark /></span><Textarea aria-required="true" maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         <p className="break-words text-sm" aria-live="polite">工单总额：{formatMoney(preview.currentTotalAmount)} → {total === null ? '待填写' : formatMoney(total)}</p>
         <div className="flex flex-wrap gap-2"><Button type="button" className="min-h-11" disabled={!reason.trim() || total === null} onClick={() => startTransition(() => saveAction(feeEditorCommand(preview, values, reason)))}>{busy ? '正在保存…' : '保存收费'}</Button><Button type="button" className="min-h-11" variant="outline" onClick={() => { setValues({}); setReason(''); }}>还原输入</Button></div>
       </fieldset> : null}

@@ -185,7 +185,7 @@ export function ChannelForm(props: Props) {
       ) : null}
 
       <div className="flex items-center gap-2">
-        <PendingButton pending={pending} pendingLabel="保存中…">
+        <PendingButton pending={pending} pendingLabel="正在保存…">
           {isCreate ? '创建通知目标' : '保存修改'}
         </PendingButton>
         <Link

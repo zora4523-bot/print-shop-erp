@@ -25,7 +25,7 @@ export function SubmitOrderButton({ orderId, purpose }: { orderId: string; purpo
       <form action={formAction} aria-busy={pending}>
         <Button type="submit" disabled={pending}>
           {pending
-            ? '提交中…'
+            ? '正在提交…'
             : state?.status === 'quote_changed'
               ? '确认最新报价并提交'
               : '提交工单'}

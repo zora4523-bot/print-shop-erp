@@ -142,7 +142,7 @@ function ManualChargeEditor({
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">
-          {charge ? charge.category.name : '新增订单级费用'}
+          {charge ? charge.category.name : '添加订单级费用'}
         </p>
         {charge ? (
           <Badge variant={removed ? 'outline' : 'secondary'}>
@@ -259,7 +259,7 @@ function ManualChargeEditor({
               )
             }
           >
-            {savePending ? '保存中…' : charge ? '保存修改' : '添加费用'}
+            {savePending ? '正在保存…' : charge ? '保存修改' : '添加费用'}
           </Button>
           {charge ? (
             <div className="space-y-2 border-t pt-3">
@@ -285,7 +285,7 @@ function ManualChargeEditor({
                         variant="outline"
                         disabled={!removeReason.trim() || disabled}
                       >
-                        {deletePending ? '移除中…' : '移除并保留历史'}
+                        {deletePending ? '正在移除…' : '移除并保留历史'}
                       </Button>
                     }
                     onConfirm={() =>
@@ -381,7 +381,7 @@ function PlateDetailEditor({
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium">
-          {detail ? `制版明细 #${detail.sequence}` : '新增制版明细'}
+          {detail ? `制版明细 #${detail.sequence}` : '添加制版明细'}
         </p>
         {Number.isFinite(calculatedAmount) ? (
           <span className="font-sans text-xs tabular-nums">
@@ -447,7 +447,7 @@ function PlateDetailEditor({
           )
         }
       >
-        {savePending ? '保存中…' : detail ? '保存制版修改' : '添加制版明细'}
+        {savePending ? '正在保存…' : detail ? '保存制版修改' : '添加制版明细'}
       </Button>
       {detail ? (
         <div className="space-y-2 border-t pt-3">
@@ -473,7 +473,7 @@ function PlateDetailEditor({
                   variant="outline"
                   disabled={!removeReason.trim() || disabled}
                 >
-                  {deletePending ? '移除中…' : '移除并保留历史'}
+                  {deletePending ? '正在移除…' : '移除并保留历史'}
                 </Button>
               }
               onConfirm={() =>

@@ -306,7 +306,7 @@ describe('ShipOrderForm external-sales charge fields', () => {
     );
 
     expect(html).toMatch(/<form[^>]*aria-busy="true"/);
-    expect(html).toContain('处理中…');
+    expect(html).toContain('正在处理…');
     expect(html).not.toContain('工单状态已经变化');
   });
 });

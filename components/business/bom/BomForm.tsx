@@ -5,8 +5,7 @@ import { emptyBomDraft, type FormDraftContext, type BomDraft } from '@/lib/form-
 import { useFormDraft } from '@/components/business/form-drafts/useFormDraft';
 import { DraftIdentityFields, DraftNotice, SupplementLink } from '@/components/business/form-drafts/FormDraftControls';
 import type { BomMutationResult } from '@/actions/owner-boms.types';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
@@ -105,7 +104,7 @@ export function BomForm({ action, products, categories, materials, papers, draft
           id="name"
           value={payload.name}
           onChange={(value) => change('name', value)}
-          label="BOM 名称"
+          label="用料清单名称"
           disabled={disabled}
           error={errs.name?.[0]}
         />
@@ -305,15 +304,8 @@ export function BomForm({ action, products, categories, materials, papers, draft
 
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={pending || draft.blocked || missingTarget || missingMaterials}>
-          {pending ? '提交中…' : '创建 BOM'}
+          {pending ? '正在创建用料清单…' : '创建用料清单'}
         </Button>
-        <PendingLink
-          href="/owner/boms"
-          pending={pending}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          返回列表
-        </PendingLink>
       </div>
     </form>
   );

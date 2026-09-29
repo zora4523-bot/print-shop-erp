@@ -6,7 +6,7 @@ import { confirmHistoricalBlankPriceAction } from '@/actions/historical-blank-pr
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { ConfirmActionController, ConfirmActionDialog, DisabledReason } from '@/components/ui-business';
 
 type Props = {
   orderId: string;
@@ -32,7 +32,9 @@ export function HistoricalBlankPriceEditor(props: Props) {
           <Input inputMode="decimal" value={value} placeholder="待核价" disabled={pending}
             onChange={(event) => setDrafts((previous) => ({ ...previous, [item.id]: event.target.value }))} />
         </label>
-        <ConfirmActionController level="L3" reasonLabel="定价依据" disabled={pending || !value.trim()}
+        {!value.trim() && !pending ? <DisabledReason cause="prerequisite" reason="先填写材料单价。">
+          <Button variant="outline" disabled>确认材料单价</Button>
+        </DisabledReason> : <ConfirmActionController level="L3" reasonLabel="定价依据" disabled={pending}
           trigger={<Button variant="outline">确认材料单价</Button>}
           onConfirm={(reason) => startTransition(async () => {
             const result = await confirmHistoricalBlankPriceAction({ orderId: props.orderId, itemId: item.id,
@@ -45,7 +47,7 @@ export function HistoricalBlankPriceEditor(props: Props) {
             changes={[{ label: item.label, old: item.unitPrice ? `${item.unitPrice} 元 / 个` : '待核价', new: `${value} 元 / 个` }]}
             consequences={['当前单价未启用时，原款式重算使用此材料单价；本次不改变已确认工单金额。']}
             confirmText="确认材料单价" />
-        </ConfirmActionController>
+        </ConfirmActionController>}
       </div>;
     })}
   </Disclosure>;

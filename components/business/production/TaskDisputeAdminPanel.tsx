@@ -170,7 +170,7 @@ function TaskDisputeReviewForm({
           disabled={pending}
           size="sm"
         >
-          {pending ? '处理中…' : '确认已解决'}
+          {pending ? '正在处理…' : '确认已解决'}
         </Button>
         <Button
           type="submit"

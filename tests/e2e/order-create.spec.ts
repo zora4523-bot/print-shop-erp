@@ -130,7 +130,7 @@ test.describe('创建工单 — golden path', () => {
 
     await page.getByRole('textbox', { name: '工单名称' }).fill(customName);
     // 业主 2026-09-24：管理员建单必须选择一个外部销售。
-    const recipient = page.getByLabel('关联外部销售（必填）');
+    const recipient = page.getByLabel('关联外部销售');
     await expect(recipient).toHaveValue('');
     await recipient.selectOption({ label: 'E2E 销售 · e2e-sales' });
     await expect(page.locator('input[name="customerRef"]')).toHaveCount(0);
@@ -513,7 +513,7 @@ test('管理员新增空白封正确提交目标规格，缺分袋资料仍拒�
     await db.query(`INSERT INTO "OrderShipmentLine" (id,"shipmentId","orderItemId",quantity) VALUES ($1,$2,$3,1000)`,
       [`${orderId}-line`, `${orderId}-shipment`, `${orderId}-item`]);
     await login(page, { from: `/orders/${orderId}/edit`, username: owner.username, password: E2E_PASSWORD });
-    await page.getByRole('button', { name: '新增款式（沿用第 1 款工艺和纸张）', exact: true }).click();
+    await page.getByRole('button', { name: '添加款式（沿用第 1 款工艺和纸张）', exact: true }).click();
     await page.getByLabel('第 2 款名称', { exact: true }).fill('新增大号款');
     await page.getByLabel('规格', { exact: true }).nth(1).selectOption({ label: '大号封90×165' });
     const requests: string[] = [];

@@ -78,6 +78,7 @@ export function CancelPurchaseReceiptButton({
           </Button>
         }
         formId={formId}
+        cancelLabel="保留过账"
         reasonLabel="取消理由"
         reasonName="reason"
         reasonPlaceholder="例如：供应商送错物料，已确认退回"
@@ -86,7 +87,7 @@ export function CancelPurchaseReceiptButton({
           receiptNo,
           purchaseNo,
           items,
-        })} confirmText="取消并反向出库" />
+        })} confirmText="取消并反向出库" danger />
       </ConfirmActionController>
       {error ? (
         <ActionNotice

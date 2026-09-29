@@ -97,7 +97,7 @@ export function RecordPaymentForm({
     paymentMethod: '收款方式',
     referenceNo: '流水号',
     remark: '备注',
-    idempotencyKey: '付款请求',
+    idempotencyKey: '收款请求',
   };
   const fieldErrors = state?.status === 'invalid' ? state.fieldErrors : {};
   const errorSummary: FormErrorSummaryItem[] = Object.entries(fieldErrors).flatMap(
@@ -121,7 +121,7 @@ export function RecordPaymentForm({
     const amount = Number(amountInput.value);
     const remaining = Number(remainingAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
-      amountInput.setCustomValidity('付款金额必须大于 0');
+      amountInput.setCustomValidity('收款金额必须大于 0');
     } else if (!Number.isFinite(remaining) || amount - remaining > 0.0001) {
       amountInput.setCustomValidity(`本次最多可录入 ${remainingAmount}`);
     }
@@ -220,7 +220,7 @@ export function RecordPaymentForm({
           className="min-h-11"
           onClick={prepareConfirmation}
         >
-          {pending ? '正在录入…' : '核对并录入付款'}
+          {pending ? '正在录入收款…' : '核对并录入收款'}
         </Button>
       </div>
       <ConfirmActionController level="L2"
@@ -234,19 +234,19 @@ export function RecordPaymentForm({
         }}>
         <ConfirmActionDialog action="录入这笔收款" changes={[]} consequences={
           preview ? paymentImpactItems(preview, remainingAmount) : []
-        } confirmText="录入付款" />
+        } confirmText="录入收款" />
       </ConfirmActionController>
       {visibleState?.status === 'success' ? (
         <ActionNotice
           tone="success"
-          title="付款流水已录入"
+          title="收款流水已录入"
           description={`已付 ${formatMoney(visibleState.newPaidAmount)} / ${formatMoney(visibleState.totalAmount)} · ${visibleState.billStatus === 'FULLY_PAID' ? '账单已结清' : '账单部分结清'}`}
         />
       ) : null}
       {visibleState?.status === 'error' ? (
         <ActionNotice
           tone="error"
-          title="付款流水未录入"
+          title="收款流水未录入"
           description={visibleState.message}
         />
       ) : null}

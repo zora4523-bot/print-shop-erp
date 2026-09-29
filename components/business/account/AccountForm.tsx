@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState, useState } from 'react';
 // Browser-safe enum imports — /client pulls @prisma/client runtime (needs
 // `node:module`) which Turbopack refuses to bundle for the client graph.
@@ -11,7 +10,6 @@ import {
   MachineType,
   EmploymentType,
 } from '../../../generated/prisma/enums';
-import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -359,9 +357,6 @@ export function AccountForm(props: Props) {
         <PendingButton pending={pending} pendingLabel="正在保存账号…">
           {isCreate ? '创建账号' : '保存修改'}
         </PendingButton>
-        <Link href="/owner/accounts" className={buttonVariants({ variant: 'outline' })}>
-          返回列表
-        </Link>
       </div>
     </form>
   );

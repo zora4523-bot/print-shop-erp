@@ -1,7 +1,6 @@
 'use client';
 
 import { useActionState, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import {
@@ -174,17 +173,17 @@ export function AgentMonthlyBillExportControls({
                       {definition.label}
                     </StatusBadge>
                     {item.status === AgentMonthlyBillExportStatus.READY ? (
-                      <Link
+                      <a
                         href={`/api/owner/agent-bills/exports/${item.id}`}
-                        prefetch={false}
+                        download
                         className={cn(
                           buttonVariants({ variant: 'outline', size: 'sm' }),
-                          'min-h-9',
+                          'min-h-11',
                         )}
                       >
                         <Download aria-hidden="true" />
                         下载
-                      </Link>
+                      </a>
                     ) : null}
                   </div>
                 </li>

@@ -215,7 +215,7 @@ describe('complete order editing', () => {
     await submit.click();
     await expect.element(account).toBeDisabled();
     expect((account.element() as HTMLSelectElement).value, 'pending value').toBe('sales-2');
-    await expect.element(page.getByRole('button', { name: '保存中…', exact: true })).toBeDisabled();
+    await expect.element(page.getByRole('button', { name: '正在保存…', exact: true })).toBeDisabled();
     expect(save).toHaveBeenCalledOnce();
     finish({ status: 'invalid', fieldErrors: { externalSalesUserId: ['账号不可用，请重新选择。'] } });
     await expect.element(account).toBeEnabled();

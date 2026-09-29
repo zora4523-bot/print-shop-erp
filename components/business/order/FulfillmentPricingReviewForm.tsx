@@ -204,7 +204,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
               );
             })}
             <Button type="submit" variant="outline" disabled={pending || auxiliary.blocked || (!isPricingPending && target === currentValue && (target || !edited))}>
-              {pending ? '处理中…' : '预览费用差额'}
+              {pending ? '正在处理…' : '预览费用差额'}
             </Button>
           </fieldset>
           {quote ? (

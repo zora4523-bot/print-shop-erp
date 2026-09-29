@@ -135,7 +135,7 @@ describe('工作台关注列表预览', () => {
   it('待发货突出上海跨日等待、工单名称与承诺交期，外部销售保留在完整列表', async () => {
     const html = renderToStaticMarkup(await scenarios[0].render(false));
     expect(html).toContain('完工后待发 1 天');
-    expect(html).toContain('今日到期');
+    expect(html).toContain('今天到期');
     expect(html).toContain('2026/09/08');
     expect(html).toContain('href="/orders/shipment-1"');
     expect(html).toContain('待发名称-1');
@@ -174,7 +174,7 @@ describe('工作台关注列表预览', () => {
       resultPromise: Promise.resolve({ ...pagination, rows: [row], total: 1, hasMore: false }),
     }));
     expect(html).toContain('未设交期');
-    expect(html).not.toContain('今日到期');
+    expect(html).not.toContain('今天到期');
   });
 
   it('读取失败继续抛给区域错误边界，不能伪装成空态', async () => {

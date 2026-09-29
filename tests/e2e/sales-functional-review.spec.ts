@@ -409,7 +409,7 @@ test('驳回展示补正原因和图稿入口，暂停可申请取消，包装�
   await expect(page.locator('input[type=file]').first()).toBeAttached();
   await page.goto(`/orders/${held}#change-request`);
   await expect(page.getByText('请修正第1款文字', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('本次申请需要新增一款')).toHaveCount(0);
+  await expect(page.getByLabel('本次申请需要添加一款')).toHaveCount(0);
   await page.locator('#change-request').getByLabel('取消原因').fill('客户申请暂停后取消');
   await page.getByRole('button', { name: '提交取消申请', exact: true }).click();
   await expect(page.getByRole('button', { name: '撤回申请', exact: true })).toBeVisible();
@@ -544,7 +544,7 @@ test('销售文字字段直接保存且统一保护拦截开关刷新路由和�
   await page.getByRole('button', { name: '取消工单', exact: true }).click();
   await page.getByRole('textbox', { name: /取消原因/ }).fill('未保存的取消原因');
   await page.keyboard.press('Escape');
-  await expect(page.locator('[data-sales-edit-notice]')).toContainText('请先保存当前修改');
+  await expect(page.locator('.sales-edit-notice')).toContainText('请先保存当前修改');
   await page.getByRole('button', { name: '继续编辑', exact: true }).click();
   await expect(page.getByRole('textbox', { name: /取消原因/ })).toHaveValue('未保存的取消原因');
   const after = await readOrder(id);

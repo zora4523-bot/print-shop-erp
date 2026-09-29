@@ -35,7 +35,7 @@ export function TestChannelButton({
         reason={disabledReason ?? '当前群不可测试'}
         fixHref={`/owner/notifications/channels/${channelId}`}
         fixLabel={disabledFixLabel ?? '去启用通知目标'}
-        className="items-end text-right"
+        className="items-end self-start text-right"
       >
         <Button type="button" size="sm" variant="secondary" disabled>
           测试
@@ -45,13 +45,13 @@ export function TestChannelButton({
   }
 
   return (
-    <div className="flex flex-col items-end gap-2" aria-busy={pending}>
+    <div className="flex flex-col items-end gap-2 self-start" aria-busy={pending}>
       <PendingButton
         type="button"
         size="sm"
         variant="secondary"
         pending={pending}
-        pendingLabel="发送中…"
+        pendingLabel="正在发送…"
         title="发送测试消息（测试模式下不会实际发送）"
         onClick={() => {
           setResult(null);

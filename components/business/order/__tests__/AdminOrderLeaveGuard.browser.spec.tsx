@@ -41,7 +41,7 @@ function Fixture() {
       {blocked ? (
         <div role="dialog" aria-label="离开确认">
           <Button onClick={() => setBlocked(null)}>继续编辑</Button>
-          <Button onClick={() => { blocked.resume(); setBlocked(null); }}>放弃并离开</Button>
+          <Button onClick={() => { blocked.resume(); setBlocked(null); }}>放弃修改并离开</Button>
         </div>
       ) : null}
     </>
@@ -94,7 +94,7 @@ describe('admin order draft navigation', () => {
 
   it.each(['previous-entry', 'forward-entry'])('resumes %s by original entry key after confirmation', async (key) => {
     traversal(key, new URL('/orders/destination', location.href).href);
-    await page.getByRole('button', { name: '放弃并离开' }).click();
+    await page.getByRole('button', { name: '放弃修改并离开' }).click();
     expect(navigation.traverseTo).toHaveBeenCalledExactlyOnceWith(key);
     // Replaying the traversal must not reopen the confirmation dialog.
     expect(traversal(key, new URL('/orders/destination', location.href).href).defaultPrevented).toBe(false);
@@ -103,7 +103,7 @@ describe('admin order draft navigation', () => {
   it('replays a confirmed link once and preserves its own navigation handler', async () => {
     await page.getByRole('link', { name: '另一张工单' }).click();
     expect(pushed).not.toHaveBeenCalled();
-    await page.getByRole('button', { name: '放弃并离开' }).click();
+    await page.getByRole('button', { name: '放弃修改并离开' }).click();
     expect(pushed).toHaveBeenCalledExactlyOnceWith('/orders/another-order');
   });
 

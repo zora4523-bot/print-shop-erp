@@ -9,6 +9,7 @@ import type {
 import { cn } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LinkPendingHint } from '@/components/ui-business';
 
 const SALES_TABS: Array<{
   id: 'all' | SalesOrderListView;
@@ -77,31 +78,31 @@ export function SalesOrderListFilters({
                 key={tab.id}
                 href={href}
                 prefetch={false}
+                scroll={false}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors',
-                  active
-                    ? 'border-foreground bg-foreground text-background'
-                    : 'bg-background hover:border-foreground/50 hover:bg-muted',
+                  buttonVariants({ variant: active ? 'selected' : 'outline' }),
+                  'relative min-h-9 shrink-0 gap-1.5 rounded-full px-3 text-sm',
                   tab.id === 'todo' &&
                     !active &&
                     summary.todo > 0 &&
-                    'border-destructive/40 text-destructive',
+                    'border-warning/40 text-warning-foreground',
                 )}
               >
                 {tab.label}
                 <span
                   className={cn(
                     'rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground',
-                    active && 'bg-background/15 text-background',
+                    active && 'bg-primary/15 text-primary',
                     tab.id === 'todo' &&
                       summary.todo > 0 &&
                       !active &&
-                      'bg-destructive/10 text-destructive',
+                      'bg-warning/10 text-warning-foreground',
                   )}
                 >
                   {summary[tab.count]}
                 </span>
+                <LinkPendingHint />
               </Link>
             );
           })}

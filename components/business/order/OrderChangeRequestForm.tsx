@@ -391,8 +391,9 @@ function ExistingOrderItemChanges({
         );
         return (
           <div key={item.id} className="min-w-0 rounded-lg border p-3">
-            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
               <Checkbox
+                className="-ml-3"
                 checked={current.selected}
                 disabled={pending}
                 aria-label={`选择款式 ${item.sequence}：${externalPriceBusinessText(item.name)}`}
@@ -775,14 +776,14 @@ function OrderChangeRequestDraftForm({
 
       {hasItems && !hasPackagingGroups ? <fieldset className="min-w-0 rounded-lg border p-3">
         <legend className="px-1 text-sm font-medium">增加款式</legend>
-        <label className="flex min-h-11 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-          <Checkbox
+        <label className="flex min-h-11 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+          <Checkbox className="-ml-3"
             checked={addEnabled}
             disabled={pending}
-            aria-label="本次申请需要新增一款"
+            aria-label="本次申请需要添加一款"
             onCheckedChange={setAddEnabled}
           />
-          <span className="text-sm">本次申请需要新增一款</span>
+          <span className="text-sm">本次申请需要添加一款</span>
         </label>
         {addEnabled ? (
           <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
@@ -896,7 +897,7 @@ function OrderChangeRequestDraftForm({
       <StateMessage state={state} />
       <Button type="submit" disabled={pending || !canSubmit} className="min-h-11">
         {pending
-          ? '提交中…'
+          ? '正在提交…'
           : `提交修改申请${selectedChanges.length ? `（${selectedChanges.length} 款）` : ''}`}
       </Button>
     </form>

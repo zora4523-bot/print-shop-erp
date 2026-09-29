@@ -41,7 +41,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { EmptyState, useCopyToClipboard } from '@/components/ui-business';
+import { EmptyState, StatusBadge, useCopyToClipboard } from '@/components/ui-business';
+import { promisedDateAlertDefinition } from '@/lib/ui/status-registry';
 import { SalesOrderStatusBadge } from './SalesOrderStatusBadge';
 import { SalesOrderProgress } from './SalesOrderProgress';
 import { UrgentBadge } from './UrgentBadge';
@@ -240,7 +241,7 @@ function SalesOrderCard({
       className={cn(
         'grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-xl border bg-background p-3 transition-colors hover:border-foreground/30 sm:grid-cols-[3.25rem_minmax(0,1fr)_auto] sm:px-4',
         order.needsAction &&
-          'border-destructive/50 bg-linear-to-r from-destructive/8 via-background to-background',
+          'border-warning/60 bg-linear-to-r from-warning/10 via-background to-background',
       )}
     >
       <OrderThumbnail order={order} />
@@ -295,7 +296,7 @@ function SalesOrderCard({
         </div>
 
         {order.pricingAttentionReason ? (
-          <p className="mt-2 border-l-2 border-destructive pl-2 text-xs font-medium text-destructive">
+          <p className="mt-2 border-l-2 border-primary pl-2 text-xs font-medium text-primary">
             {order.pricingAttentionReason}
           </p>
         ) : null}
@@ -353,7 +354,7 @@ function SalesOrderCard({
           href={`/orders/${order.id}`}
           prefetch={false}
           className={cn(
-            buttonVariants({ variant: order.needsAction ? 'destructive' : 'outline', size: 'sm' }),
+            buttonVariants({ variant: order.needsAction ? 'default' : 'outline', size: 'sm' }),
             'min-h-9 px-3',
           )}
         >
@@ -393,6 +394,10 @@ function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
             <img
               src={coverPhoto.url}
               alt=""
+              width={52}
+              height={72}
+              loading="lazy"
+              decoding="async"
               className="size-full rounded-md object-cover transition-transform duration-200 group-hover:scale-105 motion-reduce:transition-none"
             />
           </DialogTrigger>
@@ -461,25 +466,17 @@ function isStylePhotoFileName(fileName: string) {
   );
 }
 
-// 逾期 danger、临期 warning——与 lib/ui/status-registry.ts 的
-// PROMISED_DATE_ALERT_REGISTRY 同口径（§6：两档必须能区分开）。
+// 逾期 / 临期的文案与色调统一取自 lib/ui/status-registry 的
+// promisedDateAlertDefinition（§6：业务组件不写本地 tone 类名）。
 function DueDate({ order }: { order: SalesOrderListRow }) {
   if (!order.promisedDate) return <span>交货未设置</span>;
   const shortDate = order.promisedDate.slice(5);
-  if (order.dueAlert?.kind === 'overdue') {
+  if (order.dueAlert) {
+    const definition = promisedDateAlertDefinition(order.dueAlert.kind, order.dueAlert.days);
     return (
-      <span className="rounded-md bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
-        交货 {shortDate} · 已超 {order.dueAlert.days} 天
-      </span>
-    );
-  }
-  if (order.dueAlert?.kind === 'due-soon') {
-    return (
-      <span className="font-medium text-warning-foreground">
-        交货 {shortDate} ·{' '}
-        {order.dueAlert.days === 0
-          ? '今天到期'
-          : `剩 ${order.dueAlert.days} 天`}
+      <span className="inline-flex flex-wrap items-center gap-1">
+        交货 {shortDate}
+        <StatusBadge tone={definition.tone}>{definition.label}</StatusBadge>
       </span>
     );
   }
@@ -534,7 +531,7 @@ function SalesOrderDrawer({
         <DrawerSection title="进度">
           <SalesOrderProgress status={order.status} />
           {order.pricingAttentionReason ? (
-            <p className="mt-3 border-l-2 border-destructive pl-3 text-xs font-medium text-destructive">
+            <p className="mt-3 border-l-2 border-primary pl-3 text-xs font-medium text-primary">
               {order.pricingAttentionReason}
             </p>
           ) : null}
@@ -570,6 +567,10 @@ function SalesOrderDrawer({
                     <img
                       src={item.thumbnail.url}
                       alt={item.thumbnail.fileName}
+                      width={36}
+                      height={48}
+                      loading="lazy"
+                      decoding="async"
                       className="size-full object-cover"
                     />
                   ) : (
@@ -749,7 +750,7 @@ function DrawerSection({
 }) {
   return (
     <section className="mb-6 last:mb-0">
-      <h3 className="mb-2 border-b pb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <h3 className="mb-2 border-b pb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         {title}
       </h3>
       {children}
