@@ -721,3 +721,28 @@ it.each([
     host.remove();
   }
 });
+
+it('外销只改历史双别名款式的名称时，真实提交不回传颜色', async () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    createActionMock.mockResolvedValue({ status: 'success', message: '已提交' });
+    flushSync(() => root.render(<OrderChangeRequestForm
+      orderId="order-alias" expectedRevision={2} expectedWorkOrderVersion={1}
+      items={[{ ...requestItem, frontFoilColors: ['哑金', '亚金'], foilColors: ['哑金', '亚金'] }]}
+      catalogProducts={[]}
+    />));
+    await page.getByRole('checkbox', { name: '选择款式 1：珠光红包' }).click();
+    await page.getByRole('textbox', { name: '款式名称', exact: true }).fill('客户更正名称');
+    await page.getByRole('textbox', { name: '修改原因', exact: true }).fill('核对名称');
+    await page.getByRole('button', { name: /^提交修改申请/ }).click();
+    await expect.poll(() => createActionMock.mock.calls.length).toBe(1);
+    expect(createActionMock.mock.calls[0][1].items).toEqual([{
+      operation: 'UPDATE', itemId: requestItem.id, name: '客户更正名称', quantity: 1000,
+    }]);
+  } finally {
+    flushSync(() => root.unmount());
+    host.remove();
+  }
+});

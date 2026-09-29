@@ -7,6 +7,7 @@ import { SalesOrderEditor } from '@/components/business/order/SalesOrderEditor';
 import { AddOrderShipmentForm } from '@/components/business/order/AddOrderShipmentForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+import { ChevronDown } from 'lucide-react';
 import { AdminOrderEditor } from '@/components/business/order/AdminOrderEditor';
 import { deriveLegacyOrderItemFoilFacts } from '@/lib/order/pricing-route';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
@@ -139,9 +140,13 @@ function EditorFeesSection({
       <OrderSavedConfiguration order={order} canEditDesigns={false} feesOnly />
       {external && !pending && 'priceRevision' in order ? (
         <Disclosure className="rounded-xl border bg-card">
-          <DisclosureSummary className="px-4 py-3">版费与其他费用</DisclosureSummary>
-          <div className="border-t p-4">
+          <DisclosureSummary className="justify-between gap-3 px-4 py-4 sm:px-6">
+            <h2 className="text-base font-semibold">版费与其他费用</h2>
+            <ChevronDown aria-hidden="true" className="size-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+          </DisclosureSummary>
+          <div className="px-4 pb-5 pt-2 sm:px-6 sm:pb-6">
             <OrderCommercialDetailsManager
+              embedded
               orderId={order.id}
               priceRevision={Number(order.priceRevision)}
               allowPlateDetailMaintenance={!pricingPending}

@@ -65,8 +65,8 @@ type OrderItemChangePayload =
       targetProductId?: string;
       targetBlankIdentity?: { paperType: string; paperWeightGsm: number; specification: string };
       specification?: string;
-      frontFoilColors: string[];
-      backFoilColors: string[];
+      frontFoilColors?: string[];
+      backFoilColors?: string[];
     }
   | {
       operation: 'ADD';
@@ -314,6 +314,12 @@ export function buildSelectedOrderItemChanges(
       current.targetProductId !== item.productId ||
       current.specification !== (item.specification ?? '');
     const targetProductId = current.targetProductId;
+    const sourceFoil = resolveOrderItemFoilSides(item);
+    const frontFoilColors = splitColors(current.frontFoilColors);
+    const backFoilColors = splitColors(current.backFoilColors);
+    const foilChanged =
+      !hasSameColorSet(frontFoilColors, sourceFoil.frontFoilColors) ||
+      !hasSameColorSet(backFoilColors, sourceFoil.backFoilColors);
     if (
       specificationChanged &&
       ((!targetProductId && item.pricingRoute !== 'STOCK_BLANK') || !current.specification.trim())
@@ -335,8 +341,7 @@ export function buildSelectedOrderItemChanges(
               specification: current.specification,
             }
           : {}),
-        frontFoilColors: splitColors(current.frontFoilColors),
-        backFoilColors: splitColors(current.backFoilColors),
+        ...(foilChanged ? { frontFoilColors, backFoilColors } : {}),
       },
     ];
   });
