@@ -80,9 +80,9 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <SupplementOwnership actorId={actor.id} context={supplement} />
-      {supplement ? <Link href={supplementReturnHref(supplement)} className={buttonVariants({ variant: 'outline' })}>返回原录入</Link> : null}
       <PageHeader
         title="客户/供应商"
+        back={supplement ? { href: supplementReturnHref(supplement), label: '返回原录入' } : undefined}
         actions={
           <Link href={supplement ? supplementCreateHref(supplement) : '/owner/parties/new'} className={buttonVariants()}>
             新建客户/供应商

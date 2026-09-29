@@ -375,7 +375,7 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('排产');
     expect(labels).not.toContain('外协');
     expect(labels).not.toContain('我的 Dashboard');
-    expect(labels).toContain('创建工单');
+    expect(labels).toContain('新建工单');
     expect(labels).toContain('我的工单');
     expect(labels).toContain('我的账单');
     expect(labels).not.toContain('报价查询');

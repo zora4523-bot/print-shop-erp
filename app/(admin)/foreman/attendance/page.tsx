@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { Users } from 'lucide-react';
 import { EmploymentType, WorkerType } from '@/generated/prisma/enums';
@@ -17,7 +18,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 import { formatDateInputShanghai } from '@/lib/format/dates';
 
-export const metadata = { title: '员工考勤' };
+export const metadata = { title: '工时录入' };
 
 type PageProps = {
   searchParams: Promise<{
@@ -102,7 +103,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
   return (
     <div className="space-y-6">
       <PageHeader
-        title="员工考勤"
+        title="工时录入"
         subtitle={
           <>
             按半天记录上班和请假；时薪岗位另填工时。
@@ -265,7 +266,7 @@ function FilterBar({
   }>;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <Form action="/foreman/attendance" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex min-w-0 max-w-full flex-col">
         <label
           htmlFor="attendance-month"
@@ -309,7 +310,7 @@ function FilterBar({
       <Button type="submit" size="sm">
         切换
       </Button>
-    </form>
+    </Form>
   );
 }
 

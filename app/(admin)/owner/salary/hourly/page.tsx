@@ -1,4 +1,5 @@
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
+import Form from 'next/form';
 import Link from 'next/link';
 import { Calculator, FileText } from 'lucide-react';
 import { listHourlyPayrolls, listHourlyPayrollWorkerIds } from '@/lib/salary/hourly-aggregate';
@@ -75,13 +76,13 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
           label="记录数"
           value={`${salaryPage.total} 条`}
           icon={FileText}
-          tone="info"
+          tone="neutral"
         />
         <UiStatCard
           label="实发合计"
           value={formatMoney(totalSalary)}
           icon={Calculator}
-          tone="primary"
+          tone="neutral"
         />
         <UiStatCard
           label="未发合计"
@@ -195,7 +196,7 @@ function FilterBar({
   }>;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <Form action="/owner/salary/hourly" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
         <label htmlFor="hourly-month" className="text-xs text-muted-foreground">月份</label>
         <input
@@ -241,10 +242,11 @@ function FilterBar({
       </Button>
       <Link
         href="/owner/salary/hourly"
+        scroll={false}
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
-        清除
+        清除筛选
       </Link>
-    </form>
+    </Form>
   );
 }

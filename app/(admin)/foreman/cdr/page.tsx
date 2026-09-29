@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -97,10 +98,7 @@ export default async function ForemanCdrPage({
       </ErrorBoundary>
 
       <p className="text-xs text-muted-foreground">
-        提示：生成下载包后请尽快发送外协。链接 24 小时后自动失效，过期需重新生成。{' '}
-        <Link href="/owner" className="underline">
-          ← 返回管理后台
-        </Link>
+        提示：生成下载包后请尽快发送外协。链接 24 小时后自动失效，过期需重新生成。
       </p>
     </div>
   );
@@ -297,7 +295,7 @@ function DesignBundleStatusBadge({
 
 function FilterBar({ from, to }: { from: string; to: string }) {
   return (
-    <form
+    <Form
       id="cdr-filter"
       className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm"
       action="/foreman/cdr"
@@ -329,6 +327,6 @@ function FilterBar({ from, to }: { from: string; to: string }) {
       <Button type="submit" size="sm">
         刷新候选工单
       </Button>
-    </form>
+    </Form>
   );
 }

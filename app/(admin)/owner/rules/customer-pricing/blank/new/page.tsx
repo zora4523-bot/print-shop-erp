@@ -4,10 +4,11 @@ import { getCustomerPriceSectionWorkspace } from '@/lib/price/customer-price-sec
 import { listExternalCreateOrderPaperOptions } from '@/lib/material';
 import { blankPaperFact } from '@/lib/price/blank-paper';
 import { BlankPaperForm } from '@/components/business/rules/pricing/BlankPaperForm';
-import { PageHeader } from '@/components/ui-business';
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
+import { FormPage } from '@/app/_components/FormPage';
 import { buttonVariants } from '@/components/ui/button';
 
-export const metadata = { title: '新增纸张与规格价格' };
+export const metadata = { title: '新建纸张与规格价格' };
 
 export default async function NewBlankPaperPage() {
   await requirePermission('dict:price:manage');
@@ -19,17 +20,10 @@ export default async function NewBlankPaperPage() {
     (source) => source.purpose === 'PROCESSING',
   )?.draft;
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader
-        title="新增纸张与规格价格"
-        actions={
-          <Link
-            href="/owner/rules/customer-pricing?section=blank"
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            返回价格表
-          </Link>
-        }
+    <FormPage>
+      <RuleCenterPageHeader
+        title="新建纸张与规格价格"
+        back={{ href: '/owner/rules/customer-pricing?section=blank', label: '返回客户计价规则' }}
       />
       {draft ? (
         <BlankPaperForm
@@ -58,6 +52,6 @@ export default async function NewBlankPaperPage() {
           </Link>
         </div>
       )}
-    </div>
+    </FormPage>
   );
 }

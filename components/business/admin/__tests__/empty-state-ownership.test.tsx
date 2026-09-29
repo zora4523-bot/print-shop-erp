@@ -24,11 +24,16 @@ describe('list empty-state ownership', () => {
   });
 
   it('does not let paginated table bodies create a second empty state', () => {
-    expect(renderToStaticMarkup(<ProductsTable products={[]} />)).toBe('');
-    expect(renderToStaticMarkup(<CraftsTable crafts={[]} />)).toBe('');
-    expect(
+    // 空时保留表头（ui 审查 #44：不再返回 null 留下空壳），空态仍只由 AdminTableCard 负责。
+    for (const html of [
+      renderToStaticMarkup(<ProductsTable products={[]} />),
+      renderToStaticMarkup(<CraftsTable crafts={[]} />),
       renderToStaticMarkup(<BomsTable boms={[]} categoryLabelById={{}} />),
-    ).toBe('');
+    ]) {
+      expect(html).toContain('<thead');
+      expect(html).not.toMatch(/<tbody[^>]*>[\s\S]*<tr/);
+      expect(html).not.toContain('data-slot="empty-state"');
+    }
   });
 
   it('keeps a standalone owner for the unpaginated account list', () => {

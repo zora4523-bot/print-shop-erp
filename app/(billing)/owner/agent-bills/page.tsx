@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import Form from 'next/form';
 import Link from 'next/link';
 import {
   Banknote,
@@ -74,6 +75,14 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       <PageHeader
         title="代理商月度账单"
         subtitle="按结算月份归集外部销售工单。"
+        actions={
+          <Link
+            href="/owner/bills/archive"
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            历史账单归档
+          </Link>
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -87,7 +96,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
           label="待收账单"
           value={`${stats.receivableBillCount} 张`}
           icon={ReceiptText}
-          tone="primary"
+          tone="warning"
         />
         <StatCard
           label="未出账已结算工单"
@@ -104,7 +113,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         </p>
       </section>
 
-      <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+      <Form action="/owner/agent-bills" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
         <label className="space-y-1 text-xs text-muted-foreground">
           <span>账期</span>
           <input
@@ -149,17 +158,12 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         </Button>
         <Link
           href="/owner/agent-bills"
-          className={buttonVariants({ size: 'sm', variant: 'outline' })}
-        >
-          清空
-        </Link>
-        <Link
-          href="/owner/bills/archive"
+          scroll={false}
           className={buttonVariants({ size: 'sm', variant: 'ghost' })}
         >
-          历史账单
+          清除筛选
         </Link>
-      </form>
+      </Form>
 
       <AgentMonthlyBillExportControls
         requestKey={randomUUID()}
@@ -180,7 +184,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       {result.rows.length === 0 ? (
         <EmptyState
           icon={Inbox}
-          title="当前筛选无 v2 账单"
+          title="当前筛选下暂无账单"
           description="请选择已结束的月份生成账单。"
         />
       ) : (
@@ -254,7 +258,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       />
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileClock className="size-4" />
-        legacy Bill 保留原 finishedAt / 部分收款语义，不与本页数字混算。
+        历史账单归档保留原完成时间与部分收款记录，不与本页数字混算。
       </p>
     </div>
   );

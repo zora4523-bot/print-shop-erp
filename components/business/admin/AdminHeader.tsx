@@ -31,9 +31,9 @@ export function AdminHeader({
   return (
     <header
       data-slot="admin-header"
-      className="admin-safe-inline admin-safe-top sticky top-0 z-10 flex min-h-14 min-w-0 items-center gap-2 border-b bg-card py-1 sm:gap-3"
+      className="admin-safe-inline admin-safe-top sticky top-0 z-20 flex min-h-14 min-w-0 items-center gap-2 border-b bg-card py-1 sm:gap-3"
     >
-      <SidebarTrigger className="size-11 shrink-0 rounded-lg" />
+      <SidebarTrigger className="size-11 shrink-0" />
       <div className="min-w-0 flex-1">
         <AdminBreadcrumb />
       </div>

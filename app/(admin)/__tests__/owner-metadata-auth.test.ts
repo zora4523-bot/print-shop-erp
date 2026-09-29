@@ -102,12 +102,12 @@ describe('owner 详情页 metadata 权限边界', () => {
     ).resolves.toEqual({ title: '产品资料' });
     await expect(
       generateBomMetadata({ params: Promise.resolve({ id: 'bom-private' }) }),
-    ).resolves.toEqual({ title: 'BOM/用料' });
+    ).resolves.toEqual({ title: '用料清单' });
     await expect(
       generateAccountMetadata({
         params: Promise.resolve({ id: 'account-private' }),
       }),
-    ).resolves.toEqual({ title: '账号管理' });
+    ).resolves.toEqual({ title: '用户管理' });
 
     expect(getProductSummaryMock).not.toHaveBeenCalled();
     expect(getBomDetailMock).not.toHaveBeenCalled();
@@ -124,12 +124,12 @@ describe('owner 详情页 metadata 权限边界', () => {
     ).resolves.toEqual({ title: '产品资料' });
     await expect(
       generateBomMetadata({ params: Promise.resolve({ id: 'bom-private' }) }),
-    ).resolves.toEqual({ title: 'BOM/用料' });
+    ).resolves.toEqual({ title: '用料清单' });
     await expect(
       generateAccountMetadata({
         params: Promise.resolve({ id: 'account-private' }),
       }),
-    ).resolves.toEqual({ title: '账号管理' });
+    ).resolves.toEqual({ title: '用户管理' });
 
     expect(getProductSummaryMock).not.toHaveBeenCalled();
     expect(getBomDetailMock).not.toHaveBeenCalled();
@@ -153,7 +153,7 @@ describe('owner 详情页 metadata 权限边界', () => {
 
     await expect(
       generateBomMetadata({ params: Promise.resolve({ id: 'bom-1' }) }),
-    ).resolves.toEqual({ title: '通用红包用料 v2 · BOM/用料' });
+    ).resolves.toEqual({ title: '通用红包用料 v2 · 用料清单' });
     expect(getBomDetailMock).toHaveBeenCalledOnce();
     expect(getBomDetailMock).toHaveBeenCalledWith('bom-1');
   });
@@ -164,7 +164,7 @@ describe('owner 详情页 metadata 权限边界', () => {
 
     await expect(
       generateAccountMetadata({ params: Promise.resolve({ id: 'account-1' }) }),
-    ).resolves.toEqual({ title: '编辑 王师傅 · 账号管理' });
+    ).resolves.toEqual({ title: '编辑 王师傅 · 用户管理' });
     expect(getUserSummaryMock).toHaveBeenCalledOnce();
     expect(getUserSummaryMock).toHaveBeenCalledWith('account-1');
   });

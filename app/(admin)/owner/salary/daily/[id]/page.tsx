@@ -35,15 +35,15 @@ const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const session = await getSession();
   if (!session || !hasPermission('salary:view:all', session.user.role)) {
-    return { title: '计件工资' };
+    return { title: '历史日薪档案' };
   }
 
   const { id } = await params;
   const salary = await getDailySalaryPageData(id);
   return {
     title: salary
-      ? `${salary.worker.displayName} ${formatDateShanghai(salary.date)} · 计件工资`
-      : '计件工资记录不存在',
+      ? `${salary.worker.displayName} ${formatDateShanghai(salary.date)} · 历史日薪档案`
+      : '历史日薪记录不存在',
   };
 }
 
@@ -59,20 +59,18 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
         subtitle="历史日薪明细"
+        back={{ href: '/owner/salary/daily', label: '返回历史日薪档案' }}
+        status={<PaymentStatusBadge isPaid={salary.isPaid} />}
         actions={
           <div className="flex gap-2">
-            <Link
+            <a
               href={`/api/salary/piecework/export?date=${salaryDateKey}&workerId=${salary.workerId}`}
               className={buttonVariants({ variant: 'outline' })}
+            
+              download
             >
               导出 Excel
-            </Link>
-            <Link
-              href="/owner/salary/daily"
-              className={buttonVariants({ variant: 'ghost' })}
-            >
-              返回列表
-            </Link>
+            </a>
           </div>
         }
       />
@@ -97,7 +95,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="font-semibold">历史人工调整</h2>
         <p className="mb-4 text-xs text-muted-foreground">
-          仅展示旧账本已保存的奖金、扣款或差错修正；不再提供新增或改写入口。
+          仅展示旧账本已保存的奖金、扣款或差错修正；不再提供添加或改写入口。
         </p>
         {salary.adjustments.length > 0 ? (
           <ul className="divide-y border-t text-sm">

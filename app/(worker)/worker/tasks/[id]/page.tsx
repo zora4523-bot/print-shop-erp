@@ -10,7 +10,6 @@ import { listWorkerTaskDisputes } from '@/lib/production/task-dispute';
 import { TaskDisputePanel } from '@/components/business/production/TaskDisputePanel';
 import Decimal from 'decimal.js';
 import Link from 'next/link';
-import { buttonVariants } from '@/components/ui/button';
 import { notFound, redirect } from 'next/navigation';
 import {
   PieceworkOperationType,
@@ -33,7 +32,7 @@ import {
 import { DesignImageGallery } from '@/components/business/order/DesignImageGallery';
 import { HighlightedRemark } from '@/components/business/order/HighlightedRemark';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
-import { StatusBadge } from '@/components/ui-business';
+import { PageHeader, StatusBadge } from '@/components/ui-business';
 import { signDesignReadUrl } from '@/lib/oss/read-url';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -97,36 +96,26 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
     ).toString();
     return (
       <div className="min-w-0 space-y-5">
-        <header className="worker-wrap-anywhere min-w-0 space-y-1">
-          <Link href={`/worker/orders/${operation.orderId}`} className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>
-            返回工单选择工序
-          </Link>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-sans text-sm tabular-nums">
-              {operation.orderNo}
+        <PageHeader
+          size="worker"
+          className="worker-wrap-anywhere"
+          back={{ href: `/worker/orders/${operation.orderId}`, label: '返回工序工单' }}
+          eyebrow={<span className="font-sans tabular-nums">{operation.orderNo}</span>}
+          status={<>{operation.isUrgent ? <UrgentBadge /> : null}<OperationStatusBadge status={operation.status} /></>}
+          title={`${OPERATION_LABELS[operation.operationType]}${operation.operationType === PieceworkOperationType.PACKING
+            ? operation.sources.flatMap((source) => source.packagingGroup
+              ? [` · 包装组 #${source.packagingGroup.sequence}`]
+              : []).join('')
+            : ''}`}
+          subtitle={<>
+            {operation.customName ? <span className="block text-sm font-semibold text-foreground">{operation.customName}</span> : null}
+            <span className="block">
+              计划 {operation.plannedCompletedQty}
+              {operation.operationType === PieceworkOperationType.PACKING ? ' 袋' : ' 个'}
+              {operation.promisedDate ? ` · 交期 ${formatDateShanghai(operation.promisedDate)}` : ''}
             </span>
-            {operation.isUrgent ? <UrgentBadge /> : null}
-            <OperationStatusBadge status={operation.status} />
-          </div>
-          <h1 className="text-lg font-semibold">
-            {OPERATION_LABELS[operation.operationType]}
-            {operation.operationType === PieceworkOperationType.PACKING
-              ? operation.sources.flatMap((source) => source.packagingGroup
-                ? [` · 包装组 #${source.packagingGroup.sequence}`]
-                : []).join('')
-              : ''}
-          </h1>
-          {operation.customName ? (
-            <p className="text-sm font-semibold">{operation.customName}</p>
-          ) : null}
-          <p className="text-sm text-muted-foreground">
-            计划 {operation.plannedCompletedQty}
-            {operation.operationType === PieceworkOperationType.PACKING ? ' 袋' : ' 个'}
-            {operation.promisedDate
-              ? ` · 交期 ${formatDateShanghai(operation.promisedDate)}`
-              : ''}
-          </p>
-        </header>
+          </>}
+        />
 
         <WorkerOperationSources sources={operation.sources} />
 
@@ -164,7 +153,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
           <dl className="mt-3 grid grid-cols-2 gap-3">
             <Metric label="合格完成" value={operation.completedQty} />
             <Metric label="计划数量" value={operation.plannedCompletedQty} />
-            <Metric label="缺陷记录" value={operation.defectQty} />
+            <Metric label="不良记录" value={operation.defectQty} />
             <Metric label="返工记录" value={operation.reworkQty} />
             <Metric
               label={
@@ -209,29 +198,21 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
     ).toString();
     return (
       <div className="min-w-0 space-y-5">
-        <header className="worker-wrap-anywhere min-w-0 space-y-1">
-          <Link href={`/worker/orders/${progress.orderId}`} className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>
-            返回工单选择工序
-          </Link>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-sans text-sm tabular-nums">
-              {progress.orderNo}
+        <PageHeader
+          size="worker"
+          className="worker-wrap-anywhere"
+          back={{ href: `/worker/orders/${progress.orderId}`, label: '返回工序工单' }}
+          eyebrow={<span className="font-sans tabular-nums">{progress.orderNo}</span>}
+          status={<>{progress.isUrgent ? <UrgentBadge /> : null}<OperationStatusBadge status={progress.status} /><StatusBadge tone="neutral">进度·不计薪</StatusBadge></>}
+          title={progress.craftName}
+          subtitle={<>
+            <span className="block text-foreground">#{progress.orderItemSequence} · {progress.orderItemName}</span>
+            <span className="block">
+              计划 {progress.plannedQty} 个
+              {progress.promisedDate ? ` · 交期 ${formatDateShanghai(progress.promisedDate)}` : ''}
             </span>
-            {progress.isUrgent ? <UrgentBadge /> : null}
-            <OperationStatusBadge status={progress.status} />
-            <StatusBadge tone="neutral">进度·不计薪</StatusBadge>
-          </div>
-          <h1 className="text-lg font-semibold">{progress.craftName}</h1>
-          <p className="text-sm">
-            #{progress.orderItemSequence} · {progress.orderItemName}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            计划 {progress.plannedQty} 个
-            {progress.promisedDate
-              ? ` · 交期 ${formatDateShanghai(progress.promisedDate)}`
-              : ''}
-          </p>
-        </header>
+          </>}
+        />
 
         {progress.status === ProductionOperationStatus.PENDING ||
         progress.status === ProductionOperationStatus.IN_PROGRESS ? (
@@ -254,7 +235,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
           <dl className="mt-3 grid grid-cols-2 gap-3">
             <Metric label="合格完成" value={progress.completedQty} />
             <Metric label="计划数量" value={progress.plannedQty} />
-            <Metric label="缺陷记录" value={progress.defectQty} />
+            <Metric label="不良记录" value={progress.defectQty} />
             <Metric label="返工记录" value={progress.reworkQty} />
           </dl>
           <p className="mt-3 text-sm text-muted-foreground">
@@ -362,27 +343,21 @@ function LegacyTaskDetail({
 }) {
   return (
     <div className="min-w-0 space-y-5">
-      <header className="worker-wrap-anywhere space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-sans text-sm tabular-nums">
-            {task.orderItem.order.orderNo}
-          </span>
-          {task.orderItem.order.isUrgent ? <UrgentBadge /> : null}
-          <StatusBadge tone="neutral">历史任务</StatusBadge>
-        </div>
-        <h1 className="text-lg font-semibold">
-          #{task.orderItem.sequence} · {task.orderItem.name}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {task.craft.name} · 此记录来自旧派工流程，仅供查阅
-        </p>
-      </header>
+      <PageHeader
+        size="worker"
+        className="worker-wrap-anywhere"
+        back={{ href: '/worker/salary?view=history', label: '返回历史日薪档案' }}
+        eyebrow={<span className="font-sans tabular-nums">{task.orderItem.order.orderNo}</span>}
+        status={<>{task.orderItem.order.isUrgent ? <UrgentBadge /> : null}<StatusBadge tone="neutral">历史任务</StatusBadge></>}
+        title={`#${task.orderItem.sequence} · ${task.orderItem.name}`}
+        subtitle={`${task.craft.name} · 此记录来自旧派工流程，仅供查阅`}
+      />
       <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
         <h2 className="font-semibold">历史完工记录</h2>
         <dl className="mt-3 grid grid-cols-2 gap-3">
           <Metric label="计划数量" value={task.plannedQty} />
           <Metric label="合格数" value={task.completedQty} />
-          <Metric label="缺陷数" value={task.defectQty} />
+          <Metric label="不良数" value={task.defectQty} />
           <Metric label="返工数" value={task.reworkQty} />
           {task.workerType === WorkerType.MACHINE ? (
             <Metric label="历史计件金额" value={formatMoney(task.pieceworkAmount)} />

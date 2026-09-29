@@ -38,7 +38,7 @@ import { listRecentStockTransfers } from '@/lib/stock-transfer';
 import { getWarehouseDashboard } from '@/lib/warehouse';
 
 export const metadata = {
-  title: '仓库作业台',
+  title: '仓库/库位',
 };
 
 type WarehouseDashboardPromise = ReturnType<typeof getWarehouseDashboard>;
@@ -59,7 +59,7 @@ export default async function OwnerWarehousesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="仓库作业台"
+        title="仓库/库位"
         subtitle="库存仅在收货过账后增加。"
         actions={
           <Link href="/owner/materials/count" className={buttonVariants()}>
@@ -130,11 +130,11 @@ async function WarehouseDashboardContent({
   return (
     <>
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <StatCard label="启用仓库" value={`${dashboard.metrics.warehouseCount}`} icon={Warehouse} tone="info" />
-        <StatCard label="启用库位" value={`${dashboard.metrics.activeLocationCount}`} icon={MapPin} tone="info" />
-        <StatCard label="有库存库位" value={`${dashboard.metrics.stockPositionCount}`} icon={PackageCheck} tone="primary" />
-        <StatCard label="待收货明细" value={`${dashboard.metrics.pendingReceiptLineCount}`} icon={PackageOpen} tone={dashboard.metrics.pendingReceiptLineCount ? 'warning' : 'success'} />
-        <StatCard label="今日收货单" value={`${dashboard.metrics.todayReceiptCount}`} icon={History} tone="success" />
+        <StatCard label="启用仓库" value={`${dashboard.metrics.warehouseCount}`} icon={Warehouse} tone="neutral" />
+        <StatCard label="启用库位" value={`${dashboard.metrics.activeLocationCount}`} icon={MapPin} tone="neutral" />
+        <StatCard label="有库存库位" value={`${dashboard.metrics.stockPositionCount}`} icon={PackageCheck} tone="neutral" />
+        <StatCard label="待收货明细" value={`${dashboard.metrics.pendingReceiptLineCount}`} icon={PackageOpen} tone={dashboard.metrics.pendingReceiptLineCount ? 'warning' : 'neutral'} />
+        <StatCard label="今日收货单" value={`${dashboard.metrics.todayReceiptCount}`} icon={History} tone="neutral" />
         <StatCard
           label="库存一致性"
           value={integrityOk ? '正常' : `${dashboard.metrics.integrityMismatchCount} 项异常`}

@@ -1,5 +1,6 @@
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Decimal from 'decimal.js';
+import Form from 'next/form';
 import Link from 'next/link';
 import { Archive, Calculator, Download, FileText } from 'lucide-react';
 import { MachineType } from '@/generated/prisma/enums';
@@ -62,7 +63,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="历史开机师傅日薪档案"
+        title="历史日薪档案"
         subtitle="历史日薪记录"
         actions={
           <div className="flex flex-wrap gap-2">
@@ -71,15 +72,16 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               className={buttonVariants({ variant: 'outline' })}
             >
               <Archive className="mr-2 size-4" />
-              新工序计件
+              工序计件结算
             </Link>
-            <Link
+            <a
               href={`/api/salary/piecework/export?date=${selectedDate}${sp.workerId ? `&workerId=${encodeURIComponent(sp.workerId)}` : ''}`}
               className={buttonVariants({ variant: 'outline' })}
+              download
             >
               <Download className="mr-2 size-4" />
               导出历史记录
-            </Link>
+            </a>
           </div>
         }
       />
@@ -101,7 +103,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           label="历史未发合计"
           value={formatMoney(unpaidActual)}
           icon={Calculator}
-          tone="neutral"
+          tone="warning"
         />
       </div>
 
@@ -214,7 +216,7 @@ function FilterBar({
   workers: Array<{ id: string; displayName: string; username: string }>;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <Form action="/owner/salary/daily" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">日期</span>
         <input
@@ -256,10 +258,11 @@ function FilterBar({
       </Button>
       <Link
         href="/owner/salary/daily"
+        scroll={false}
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
-        清除
+        清除筛选
       </Link>
-    </form>
+    </Form>
   );
 }

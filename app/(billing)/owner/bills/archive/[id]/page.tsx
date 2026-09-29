@@ -4,8 +4,7 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { getAdminBillDetail } from '@/lib/bill';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
-import { buttonVariants } from '@/components/ui/button';
-import { TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { BillStatusBadge } from '@/components/business/bill/BillStatusBadge';
 
@@ -24,33 +23,24 @@ export default async function LegacyBillArchiveDetailPage({ params, searchParams
   return (
     <div className="space-y-6">
       <ReceiptNotice receipt={receipt} messages={{ issued: () => ({ title: '账单已出账', description: '账单已发出，进入应收跟进。' }) }} />
-      <div>
-        <Link href="/owner/bills/archive" className="text-sm text-muted-foreground hover:underline">
-          ← 历史账单
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold">
-          {bill.period} · #{bill.sequence} · {bill.salesUser.displayName}
-        </h1>
-        <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <BillStatusBadge status={bill.status} />
-          <span>
-            发单 {formatDateTimeShanghai(bill.issuedAt)} · 结清{' '}
-            {formatDateTimeShanghai(bill.paidAt)}
-          </span>
-        </p>
-      </div>
+      <PageHeader
+        title={`${bill.period} · #${bill.sequence} · ${bill.salesUser.displayName}`}
+        subtitle={`发单 ${formatDateTimeShanghai(bill.issuedAt)} · 结清 ${formatDateTimeShanghai(bill.paidAt)}`}
+        back={{ href: '/owner/bills/archive', label: '返回历史账单归档' }}
+        status={<BillStatusBadge status={bill.status} />}
+      />
       <section className="grid gap-4 rounded-xl border bg-card p-5 shadow-sm sm:grid-cols-3">
         <Amount label="历史总额" value={String(bill.totalAmount)} />
         <Amount label="历史已收" value={String(bill.paidAmount)} />
         <Amount label="期初 / 手工差额" value={String(bill.openingAmount)} />
       </section>
-      <TableScrollArea label="Legacy 账单成员" className="rounded-xl border bg-card shadow-sm">
+      <TableScrollArea label="历史账单工单明细" className="rounded-xl border bg-card shadow-sm">
         <table className="w-full text-sm">
           <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-2 text-left">工单</th>
               <th className="px-4 py-2 text-left">工单名称</th>
-              <th className="px-4 py-2 text-left">finishedAt</th>
+              <th className="px-4 py-2 text-left">完成时间</th>
               <th className="px-4 py-2 text-right">历史成员金额</th>
             </tr>
           </thead>
@@ -89,9 +79,6 @@ export default async function LegacyBillArchiveDetailPage({ params, searchParams
           </ul>
         )}
       </section>
-      <Link href="/owner/bills/archive" className={buttonVariants({ variant: 'outline' })}>
-        返回归档列表
-      </Link>
     </div>
   );
 }

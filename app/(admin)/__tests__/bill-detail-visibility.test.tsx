@@ -143,7 +143,7 @@ describe('bill detail visibility boundary', () => {
     const html = renderToStaticMarkup(await LegacyBillArchiveDetailPage({ params: Promise.resolve({ id: 'bill-1' }) }));
     expect(requirePermissionMock).toHaveBeenCalledWith('bill:view:all');
     const headers = [...html.matchAll(/<th class="px-4 py-2 text-left">([^<]*)<\/th>/g)].map((match) => match[1]);
-    expect(headers).toEqual(['工单', '工单名称', 'finishedAt']);
+    expect(headers).toEqual(['工单', '工单名称', '完成时间']);
     const nameCells = [...html.matchAll(/<td class="px-4 py-3">([^<]*)<\/td>/g)].map((match) => match[1]);
     expect(nameCells).toEqual(['中秋礼盒', '未命名工单']);
     for (const customer of ['外部客户甲', '外部客户乙']) expect(html).not.toContain(customer);

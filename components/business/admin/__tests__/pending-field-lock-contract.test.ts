@@ -41,7 +41,8 @@ describe('pending mutation field locks', () => {
         findOpeningElements(source, 'Link'),
         `${relativePath} must not leave an unguarded Next.js Link in the pending form`,
       ).toEqual([]);
-      expect(guardedLinks.length).toBeGreaterThan(0);
+      // 表单底部的「返回列表」已删除（与页头 PageHeader back 重复，ui 审查批次 B/C），
+      // 表单内若仍有链接，必须全部经 PendingLink 并跟随 pending。
       for (const guardedLink of guardedLinks) {
         expect(jsxExpressionAttribute(guardedLink, 'pending')).toBe('pending');
       }

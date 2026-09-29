@@ -242,7 +242,8 @@ it('规则中心入口与折叠按钮合为一行，键盘折叠后仍可进入�
   toggle.element().focus();
   await userEvent.keyboard('{Enter}');
   expect(document.querySelector('[aria-label="规则配置中心子菜单"]')).toBeNull();
-  await expect.element(page.getByRole('link', { name: '规则配置中心', exact: true })).toBeVisible();
+  // 面包屑现在保留父级「规则配置中心」，这里断言的是侧栏入口。
+  await expect.element(page.getByRole('link', { name: '规则配置中心', exact: true }).and(page.elementLocator(document.querySelector('[data-sidebar="menu-button"][href="/owner/rules"]')!))).toBeVisible();
   expect(JSON.parse(localStorage.getItem('print-shop-erp:admin-sidebar-collapsed')!)).toMatchObject({ 规则: true });
   expect(await commands.checkShellAccessibility()).toEqual([]);
   await userEvent.keyboard(' ');

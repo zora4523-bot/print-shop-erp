@@ -36,7 +36,7 @@ describe('detail no-data empty-state ownership', () => {
       group: '(billing)',
       file: ['owner', 'bills', 'archive', '[id]'],
       start: '历史收款记录</h2>',
-      end: '<Link href="/owner/bills/archive"',
+      end: '</section>',
       title: '暂无收款流水',
     },
     {

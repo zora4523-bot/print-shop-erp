@@ -46,7 +46,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const settlement = await getPageData(id);
   return {
     title: settlement
-      ? `${settlement.reporter.displayName} ${formatDateShanghai(settlement.workDate)} · 工序计件`
+      ? `${settlement.reporter.displayName} ${formatDateShanghai(settlement.workDate)} · 工序计件结算`
       : '计件结算不存在',
   };
 }
@@ -66,20 +66,18 @@ export default async function PieceworkSettlementDetailPage({
       <PageHeader
         title={`${settlement.reporter.displayName} · ${workDate}`}
         subtitle="已结算报工明细"
+        back={{ href: `/owner/salary/piecework?date=${workDate}`, label: '返回工序计件结算' }}
+        status={<SettlementStatus status={settlement.status} />}
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link
+            <a
               href={`/api/salary/piecework-settlements/export?from=${workDate}&to=${workDate}&workerId=${settlement.reporterId}`}
               className={buttonVariants({ variant: 'outline' })}
+            
+              download
             >
               导出新账本
-            </Link>
-            <Link
-              href={`/owner/salary/piecework?date=${workDate}`}
-              className={buttonVariants({ variant: 'ghost' })}
-            >
-              返回列表
-            </Link>
+            </a>
           </div>
         }
       />

@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import {
   ArrowDown,
@@ -32,13 +33,14 @@ export function AdminListToolbar({
   filters?: React.ReactNode;
 }) {
   return (
-    <form
+    // next/form（审查 #41）：有 JS 时客户端导航 + 预取，无 JS 时仍是原生 GET 提交。
+    <Form
       action={action}
       className="flex max-w-3xl flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm"
     >
       <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
+          <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             name="q"
             defaultValue={query}
@@ -47,7 +49,8 @@ export function AdminListToolbar({
           />
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="submit">搜索</Button>
+          {/* 页头「新建X」是页面唯一主按钮，工具栏搜索降为 outline（审查 #36）。 */}
+          <Button type="submit" variant="outline">搜索</Button>
           {query ? (
             <Link
               href={clearHref}
@@ -65,7 +68,7 @@ export function AdminListToolbar({
         ),
       )}
       {filters ? <div className="flex flex-wrap gap-2">{filters}</div> : null}
-    </form>
+    </Form>
   );
 }
 

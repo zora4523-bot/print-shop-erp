@@ -17,8 +17,7 @@ import {
   CreateAgentMonthlyBillCreditForm,
   MarkAgentMonthlyBillPaidForm,
 } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
-import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge, TableScrollArea } from '@/components/ui-business';
+import { PageHeader, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -31,25 +30,19 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Link href="/owner/agent-bills" className="text-sm text-muted-foreground hover:underline">
-            ← 代理商月度账单
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold">
-            {bill.period} · {bill.agentDisplayNameSnapshot}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            账单账号 {bill.agentUsernameSnapshot} · 成员 {bill.items.length} 单
-          </p>
-        </div>
-        <StatusBadge
-          tone={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}
-          dot={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].dot}
-        >
-          {AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}
-        </StatusBadge>
-      </div>
+      <PageHeader
+        title={`${bill.period} · ${bill.agentDisplayNameSnapshot}`}
+        subtitle={`账单账号 ${bill.agentUsernameSnapshot} · 成员 ${bill.items.length} 单`}
+        back={{ href: '/owner/agent-bills', label: '返回代理商月度账单' }}
+        status={
+          <StatusBadge
+            tone={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}
+            dot={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].dot}
+          >
+            {AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}
+          </StatusBadge>
+        }
+      />
 
       <section className="grid gap-4 rounded-xl border bg-card p-5 shadow-sm sm:grid-cols-3">
         <Amount label="成员小计" value={String(bill.memberSubtotal)} />
@@ -169,9 +162,6 @@ export default async function AgentMonthlyBillDetailPage({ params }: PageProps) 
         </section>
       ) : null}
 
-      <Link href="/owner/agent-bills" className={buttonVariants({ variant: 'outline' })}>
-        返回列表
-      </Link>
     </div>
   );
 }

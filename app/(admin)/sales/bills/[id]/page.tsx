@@ -8,22 +8,25 @@ import { getSalesMonthlyBill } from '@/lib/agent-monthly-billing/sales-query';
 import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
-import { StatusBadge, TableScrollArea } from '@/components/ui-business';
-import { buttonVariants } from '@/components/ui/button';
+import { PageHeader, StatusBadge, TableScrollArea } from '@/components/ui-business';
 
 type Props = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Props) {
   const session = await getSession();
-  if (session?.user.role !== Role.SALES) return { title: '账单' };
+  if (session?.user.role !== Role.SALES) return { title: '我的对客应付账单' };
   const bill = await getSalesBillTitleRef((await params).id, session.user.id);
-  return { title: bill ? `${bill.period} 月账单` : '账单' };
+  return { title: bill ? `${bill.period} 月账单 · 我的对客应付账单` : '我的对客应付账单' };
 }
 export default async function SalesBillDetailPage({ params }: Props) {
   const actor = await requirePermission('bill:view:self');
   const bill = await getSalesMonthlyBill(actor, (await params).id);
   if (!bill) notFound();
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{bill.period} 月账单</h1><StatusBadge tone={SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}>{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}</StatusBadge><Link href="/sales/bills" className={buttonVariants({ variant: 'outline' })}>返回账单</Link></div>
+    <PageHeader
+      title={`${bill.period} 月账单`}
+      back={{ href: '/sales/bills', label: '返回我的对客应付账单' }}
+      status={<StatusBadge tone={SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}>{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}</StatusBadge>}
+    />
     {bill.status === 'DRAFT' ? <p className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">本月账单仍在整理中，金额未定稿；以管理员确认后的金额为准。</p> : null}
     <dl className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
       <div><dt>工单合计</dt><dd>{formatMoney(bill.memberSubtotal)}</dd></div><div><dt>抵扣金额</dt><dd>{formatMoney(bill.adjustmentAmount)}</dd></div><div><dt>应付合计</dt><dd className="font-semibold">{formatMoney(bill.totalAmount)}</dd></div>

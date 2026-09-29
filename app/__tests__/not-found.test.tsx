@@ -13,3 +13,14 @@ describe('root not-found UI', () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1);
   });
 });
+
+describe('admin shell not-found UI', () => {
+  it('returns through the role dispatcher instead of /owner', async () => {
+    const { default: AdminNotFound } = await import('@/app/(admin)/not-found');
+    const html = renderToStaticMarkup(<AdminNotFound />);
+
+    expect(html).toContain('href="/"');
+    expect(html).not.toContain('href="/owner"');
+    expect(html).toContain('返回首页');
+  });
+});

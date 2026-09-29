@@ -1,10 +1,9 @@
 import { readSupplementContext, supplementReturnHref } from '@/lib/form-drafts/return-context';
 import { SupplementOwnership } from '@/components/business/form-drafts/FormDraftControls';
-import Link from 'next/link';
 import { PartyType } from '@/generated/prisma/enums';
 import { createPartyAction } from '@/actions/owner-parties';
 import { PartyForm } from '@/components/business/party/PartyForm';
-import { buttonVariants } from '@/components/ui/button';
+import { FormPage } from '@/app/_components/FormPage';
 import { PageHeader } from '@/components/ui-business';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -39,18 +38,11 @@ export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
   const backHref = supplement ? supplementReturnHref(supplement) : returnTo ?? '/owner/parties';
 
   return (
-    <div className="space-y-6">
+    <FormPage>
       <SupplementOwnership actorId={actor.id} context={supplement} />
       <PageHeader
         title="新建客户/供应商"
-        actions={
-          <Link
-            href={backHref}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            {supplement ? '返回原录入' : returnTo ? '返回采购单' : '返回列表'}
-          </Link>
-        }
+        back={{ href: backHref, label: supplement ? '返回原录入' : returnTo ? '返回新建采购单' : '返回客户/供应商' }}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -62,6 +54,6 @@ export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
           supplement={supplement}
         />
       </section>
-    </div>
+    </FormPage>
   );
 }

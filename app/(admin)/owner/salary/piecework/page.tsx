@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import Form from 'next/form';
 import Link from 'next/link';
 import { Calculator, Download, FileText } from 'lucide-react';
 import {
@@ -88,13 +89,15 @@ export default async function PieceworkSettlementPage({
         subtitle="按员工和日期查看计件工资。"
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link
+            <a
               href={`/api/salary/piecework-settlements/export?from=${workDate}&to=${workDate}`}
               className={buttonVariants({ variant: 'outline' })}
+            
+              download
             >
               <Download className="mr-2 size-4" />
               导出新账本
-            </Link>
+            </a>
             <Link
               href="/owner/salary/daily"
               className={buttonVariants({ variant: 'ghost' })}
@@ -110,7 +113,7 @@ export default async function PieceworkSettlementPage({
           label="已锁定记录"
           value={`${data.settlements.length} 条`}
           icon={FileText}
-          tone="info"
+          tone="neutral"
           hint={`合计 ${formatMoney(lockedTotal)}`}
         />
         <StatCard
@@ -123,7 +126,7 @@ export default async function PieceworkSettlementPage({
           label="待锁定报工人"
           value={`${data.candidates.length} 人`}
           icon={Calculator}
-          tone={data.candidates.length > 0 ? 'primary' : 'neutral'}
+          tone={data.candidates.length > 0 ? 'warning' : 'neutral'}
         />
       </div>
 
@@ -301,7 +304,7 @@ function FilterBar({
   status?: PieceworkSettlementStatus;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    <Form action="/owner/salary/piecework" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="space-y-1">
         <span className="block text-xs text-muted-foreground">结算日期</span>
         <input
@@ -328,11 +331,12 @@ function FilterBar({
       </Button>
       <Link
         href="/owner/salary/piecework"
+        scroll={false}
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
-        清除
+        清除筛选
       </Link>
-    </form>
+    </Form>
   );
 }
 

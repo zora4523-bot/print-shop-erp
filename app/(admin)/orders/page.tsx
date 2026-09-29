@@ -26,7 +26,7 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       {user.role !== Role.ADMIN ? (
         <PageHeader
-          title="工单"
+          title="工单列表"
           actions={
             canCreate ? (
               <Link href="/orders/new" className={buttonVariants()}>

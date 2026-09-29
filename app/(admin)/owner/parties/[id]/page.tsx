@@ -6,7 +6,9 @@ import { notFound } from 'next/navigation';
 import { updatePartyAction } from '@/actions/owner-parties';
 import { PartyForm } from '@/components/business/party/PartyForm';
 import { TogglePartyActiveButton } from '@/components/business/party/TogglePartyActiveButton';
-import { PageHeader, StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { PageHeader, ReceiptNotice } from '@/components/ui-business';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
+import { FormPage } from '@/app/_components/FormPage';
 import { readReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -57,21 +59,15 @@ export default async function EditOwnerPartyPage({ params, searchParams }: PageP
   const receipt = readReceipt(query);
 
   return (
-    <div className="space-y-6">
+    <FormPage>
       <SupplementOwnership actorId={actor.id} context={supplement} />
-      {supplement ? <div className="flex flex-wrap gap-3">
-        <Link href={supplementReturnHref(supplement)} className={buttonVariants({ variant: 'outline' })}>返回原录入</Link>
-        {party.isActive && party.type !== 'CUSTOMER' ? <Link href={supplementReturnHref(supplement, party.id)} className={buttonVariants()}>选用该供应商并返回</Link> : null}
-      </div> : null}
       <ReceiptNotice receipt={receipt} noun="往来单位" />
       <PageHeader
         title={`编辑客户/供应商：${party.name}`}
         subtitle={`${PARTY_TYPE_LABELS[party.type]} · 编码 ${party.code}`}
-        actions={
-          <StatusBadge tone={party.isActive ? 'success' : 'neutral'}>
-            {party.isActive ? '启用' : '停用'}
-          </StatusBadge>
-        }
+        back={supplement ? { href: supplementReturnHref(supplement), label: '返回原录入' } : { href: '/owner/parties', label: '返回客户/供应商' }}
+        status={<ActiveStatusBadge active={party.isActive} />}
+        actions={supplement && party.isActive && party.type !== 'CUSTOMER' ? <Link href={supplementReturnHref(supplement, party.id)} className={buttonVariants()}>选用该供应商并返回</Link> : undefined}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -93,6 +89,6 @@ export default async function EditOwnerPartyPage({ params, searchParams }: PageP
           currentlyActive={party.isActive}
         />
       </section>
-    </div>
+    </FormPage>
   );
 }

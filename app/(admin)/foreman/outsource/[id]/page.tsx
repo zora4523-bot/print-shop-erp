@@ -6,6 +6,7 @@ import { OutsourceStatus } from '@/generated/prisma/enums';
 import { getOutsourceOrderDetail } from '@/lib/outsource';
 import { isTerminalOutsourceStatus } from '@/lib/outsource/status-machine';
 import {
+  PageHeader,
   StatusBadge as UiStatusBadge,
   TableEmptyState,
 } from '@/components/ui-business';
@@ -72,12 +73,11 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={row.supplierName} />
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="admin-wrap-anywhere text-xl font-semibold">
-            外协单 · {row.supplierName}
-          </h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        back={{ href: '/foreman/outsource', label: '返回外协单' }}
+        title={`外协单 · ${row.supplierName}`}
+        subtitle={
+          <>
             工单号：
             {row.order ? (
               <Link
@@ -89,15 +89,17 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
             ) : (
               '—'
             )}
-          </p>
-        </div>
-        <UiStatusBadge
-          tone={statusDefinition.tone}
-          dot={statusDefinition.dot}
-        >
-          {statusDefinition.label}
-        </UiStatusBadge>
-      </div>
+          </>
+        }
+        status={
+          <UiStatusBadge
+            tone={statusDefinition.tone}
+            dot={statusDefinition.dot}
+          >
+            {statusDefinition.label}
+          </UiStatusBadge>
+        }
+      />
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
         <h2 className="text-base font-semibold">基本信息</h2>

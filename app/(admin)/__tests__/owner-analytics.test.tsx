@@ -55,8 +55,7 @@ describe('经营概览页面', () => {
     expect(requirePermissionMock).toHaveBeenCalledWith('report:all');
     const header = findElements(result, (element) => element.type === PageHeader)[0];
     expect(header?.props.title).toBe('经营概览');
-    const links = findElements(header?.props.actions as ReactNode, (element) => element.props.href === '/owner');
-    expect(links).toHaveLength(1);
+    expect(header?.props.back).toEqual({ href: '/owner', label: '返回工作台' });
     expect(findElements(result, (element) => element.type === OwnerAnalytics)).toHaveLength(1);
     expect(getProductionTrendMock).not.toHaveBeenCalled();
     expect(getSalesRankingMock).not.toHaveBeenCalled();

@@ -9,6 +9,7 @@ import { formatUnitPrice } from '@/lib/format/unit-price';
 import { REPORT_OPERATION_LABELS } from '@/lib/salary/report-display';
 import { LogoutButton } from '@/components/business/auth/LogoutButton';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
+import { PageHeader } from '@/components/ui-business';
 
 export const metadata = { title: '我的账号' };
 const RATE_UNITS = { PARTIAL: 'PER_PASS', FULL: 'PER_PIECE', PACKING: 'PER_BAG' } as const;
@@ -23,7 +24,7 @@ export default async function WorkerAccountPage() {
     try { rate = await resolveReporterPieceworkRate(db, user.id, lane, RATE_UNITS[lane], await databaseClockNow(db)); }
     catch (e) { if (!(e instanceof PieceworkPricingError)) throw e; error = e.message; }
   }
-  return <div className="space-y-5"><header><h1 className="text-xl font-semibold">我的账号</h1></header>
+  return <div className="space-y-5"><PageHeader size="worker" title="我的账号" />
     <section className="space-y-2 rounded-xl border bg-card p-4"><h2 className="font-semibold">{user.displayName}</h2><p>{lane ? REPORT_OPERATION_LABELS[lane] : workerLabel}</p></section>
     {lane && <section className="space-y-3 rounded-xl border bg-card p-4"><h2 className="font-semibold">当前适用工价</h2>{error ? <p role="status">{error}</p> : rate && <><p>{rate.source === 'PERSONAL' ? '个人工价' : '统一工价'} · 第 {rate.book.version} 版</p><p>计件单价：{formatUnitPrice(rate.rule.amount.toString())}/{UNIT_LABELS[lane]}</p>{rate.rule.smallOrderAmount != null && rate.rule.setupAmount != null && <><p>小单（≤1000 个，含装版）：{formatUnitPrice(rate.rule.smallOrderAmount.toString())}/{lane === 'FULL' ? '色' : '次'}</p><p>大单装版费：{formatUnitPrice(rate.rule.setupAmount.toString())}/{lane === 'FULL' ? '色' : '次'}</p></>}</>}</section>}
     <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-card p-4"><Link href="/account/password" className="inline-flex min-h-11 items-center underline">修改密码</Link><LogoutButton /></section>

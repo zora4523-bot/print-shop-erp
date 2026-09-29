@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -16,7 +17,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { PageHeader, StatCard, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 
-export const metadata = { title: '物料库存' };
+export const metadata = { title: '车间用料' };
 
 type PageProps = {
   searchParams: Promise<{ q?: string | string[] }>;
@@ -45,7 +46,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="物料库存"
+        title="车间用料"
         subtitle="查看库存、出入库和库存金额。"
         actions={
           <Link href="/foreman/materials/new" className={buttonVariants()}>
@@ -91,7 +92,7 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
         />
       </section>
 
-      <form
+      <Form
         action="/foreman/materials"
         className="flex max-w-2xl flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm sm:flex-row"
       >
@@ -109,13 +110,14 @@ export default async function ForemanMaterialsPage({ searchParams }: PageProps) 
           {q ? (
             <Link
               href="/foreman/materials"
+              scroll={false}
               className={buttonVariants({ variant: 'outline' })}
             >
-              清空
+              清除筛选
             </Link>
           ) : null}
         </div>
-      </form>
+      </Form>
 
       <TableScrollArea label="物料库存列表" className="rounded-xl border bg-card shadow-sm">
         <table className="w-full min-w-[1080px] text-sm">

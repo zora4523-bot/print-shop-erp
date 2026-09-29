@@ -23,6 +23,7 @@ import {
   DisabledReason,
   EmptyState,
   EnvNotice,
+  ErrorBoundary,
   ErrorState,
   FormErrorSummary,
   FormMessage,
@@ -31,14 +32,18 @@ import {
   NavCard,
   PageHeader,
   PendingButton,
+  PendingLink,
+  ReceiptNotice,
+  SectionLoading,
   StatCard,
   StatusBadge,
   TableEmptyState,
+  TableScrollArea,
   TerminalReadOnlyBanner,
   TONES,
   formMessageA11yProps,
 } from '@/components/ui-business';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
@@ -502,23 +507,131 @@ export default function ShowcasePage() {
         </div>
       </Section>
 
-      <Section title="PageHeader" subtitle="本页顶部就在用。">
-        <div className="rounded-xl border bg-card p-6">
-          <PageHeader
-            title="工单列表"
-            subtitle="按角色范围显示 / 支持日期 / 客户 / 状态多维过滤。"
-            actions={
-              <a
-                href="#"
-                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
-              >
-                新建工单
-              </a>
-            }
-          />
-        </div>
-      </Section>
+      <ShowcaseShellSections />
     </main>
+  );
+}
+
+/** 页面外壳与导航反馈示例（PageHeader 槽位、回执、加载、导航忙碌、横滚表格、错误边界）。 */
+function ShowcaseShellSections() {
+  return (
+    <>
+        <Section
+          title="PageHeader"
+          subtitle="本页顶部就在用。二级页用返回槽（唯一返回入口）、单据状态进状态槽、作用域胶囊进眉标槽；师傅端用紧凑尺寸。"
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-card p-6">
+              <PageHeader
+                title="工单列表"
+                subtitle="按角色范围显示 / 支持日期 / 客户 / 状态多维过滤。"
+                actions={
+                  <a href="#" className={buttonVariants()}>
+                    新建工单
+                  </a>
+                }
+              />
+            </div>
+            <div className="rounded-xl border bg-card p-6">
+              <PageHeader
+                back={{ href: '/dev/showcase', label: '返回工单列表' }}
+                eyebrow={
+                  <>
+                    <StatusBadge tone="info">全厂适用</StatusBadge>
+                    <StatusBadge tone="neutral">立即生效</StatusBadge>
+                  </>
+                }
+                title="WO-20260929-001"
+                subtitle="客户：示例客户 · 交期 2026-10-08"
+                status={<StatusBadge tone="warning">待排产</StatusBadge>}
+                actions={
+                  <a href="#" className={buttonVariants({ variant: 'outline' })}>
+                    编辑工单
+                  </a>
+                }
+              />
+            </div>
+            <div className="max-w-sm rounded-xl border bg-card p-4">
+              <PageHeader
+                size="worker"
+                back={{ href: '/dev/showcase', label: '返回我的任务' }}
+                title="报工"
+                subtitle="师傅端 H5 统一 20px 标题。"
+              />
+            </div>
+          </div>
+        </Section>
+
+        <Section
+          title="ReceiptNotice"
+          subtitle="保存后跳转到新页面时，读取地址栏回执并播报保存结果。"
+        >
+          <ReceiptNotice receipt={{ created: '1' }} noun="工单" />
+        </Section>
+
+        <Section
+          title="SectionLoading"
+          subtitle="区块级 Suspense fallback：带可读 label 的加载占位。"
+        >
+          <SectionLoading label="正在加载最近下载包" />
+        </Section>
+
+        <Section
+          title="PendingLink"
+          subtitle="导航中的链接显示忙碌态，忙碌状态由调用方提供。"
+        >
+          <div className="flex flex-wrap gap-3">
+            <PendingLink href="/dev/showcase" pending={false} className={buttonVariants({ variant: 'outline' })}>
+              空闲
+            </PendingLink>
+            <PendingLink href="/dev/showcase" pending className={buttonVariants({ variant: 'outline' })}>
+              跳转中
+            </PendingLink>
+          </div>
+        </Section>
+
+        <Section
+          title="TableScrollArea"
+          subtitle="窄屏横向滚动的表格容器，label 作为可访问名称。"
+        >
+          <TableScrollArea label="示例宽表" className="rounded-xl border bg-card">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+                <tr>
+                  {['工单号', '客户', '款式', '数量', '交期', '状态'].map((h) => (
+                    <th key={h} className="px-4 py-2 text-left">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="px-4 py-2 font-sans tabular-nums">WO-001</td>
+                  <td className="px-4 py-2">示例客户</td>
+                  <td className="px-4 py-2">烫金红包</td>
+                  <td className="px-4 py-2 font-sans tabular-nums">5,000</td>
+                  <td className="px-4 py-2 font-sans tabular-nums">2026-10-08</td>
+                  <td className="px-4 py-2"><StatusBadge tone="info">生产中</StatusBadge></td>
+                </tr>
+              </tbody>
+            </table>
+          </TableScrollArea>
+        </Section>
+
+        <Section
+          title="ErrorBoundary"
+          subtitle="区块级错误边界：子树渲染失败时只替换本区块为 ErrorState（scope=section）并提供重试；正常时透明渲染子内容。"
+        >
+          <ErrorBoundary
+            scope="section"
+            title="最近下载包暂时无法加载"
+            description="请重试加载该区块，其它区域不受影响。"
+          >
+            <div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
+              子内容正常渲染时，边界不可见。
+            </div>
+          </ErrorBoundary>
+        </Section>
+    </>
   );
 }
 

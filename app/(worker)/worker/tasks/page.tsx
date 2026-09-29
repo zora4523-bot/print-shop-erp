@@ -4,10 +4,11 @@ import { WorkerTaskFilters } from '@/components/business/production/WorkerTaskFi
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { listWorkerTaskPage } from '@/lib/production/worker-task-page';
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { Inbox } from 'lucide-react';
 import { PieceworkOperationType } from '@/generated/prisma/enums';
 import { requireSession } from '@/lib/auth/session';
-import { EmptyState, StatusBadge } from '@/components/ui-business';
+import { EmptyState, PageHeader, SectionLoading, StatusBadge } from '@/components/ui-business';
 import { Badge } from '@/components/ui/badge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { formatDateShanghai } from '@/lib/format/dates';
@@ -27,21 +28,30 @@ export default async function WorkerTasksPage({ searchParams }: { searchParams: 
   const view = sp.view === 'progress' ? 'progress' : 'paid';
   const { user } = await requireSession();
   const actor = { id: user.id, role: user.role };
-  const page = await listWorkerTaskPage(actor, { view, q: query, page: sp.page });
-  const { operations, progressSteps } = page;
+  // 两块取数互不依赖：各自一个 Suspense 分区并行加载，key 随筛选变化以重新显示加载态。
 
   return (
     <div className="min-w-0 space-y-3">
-      <header className="worker-wrap-anywhere">
-        <h1 className="text-lg font-semibold">生产工序</h1>
-        <p className="text-sm text-muted-foreground">
-          查看已安排的生产，完成后登记。
-        </p>
-      </header>
+      <PageHeader size="worker" title="生产工序" subtitle="查看已安排的生产，完成后登记。" className="worker-wrap-anywhere" />
 
-      <WorkerProductionJobs actor={actor} query={query} page={sp.productionPage} />
+      <Suspense key={`jobs|${query}|${sp.productionPage ?? ''}`} fallback={<SectionLoading label="正在加载已安排的生产…" />}>
+        <WorkerProductionJobs actor={actor} query={query} page={sp.productionPage} />
+      </Suspense>
       <h2 className="font-semibold">其他可报工工序</h2>
       <WorkerTaskFilters query={query} view={view} />
+      <Suspense key={`ops|${view}|${query}|${sp.page ?? ''}`} fallback={<SectionLoading label="正在加载工序…" />}>
+        <OtherOperations actor={actor} view={view} query={query} page={sp.page} />
+      </Suspense>
+    </div>
+  );
+}
+
+async function OtherOperations({ actor, view, query, page: pageParam }: { actor: Parameters<typeof listWorkerTaskPage>[0]; view: 'paid' | 'progress'; query: string; page?: string }) {
+  const page = await listWorkerTaskPage(actor, { view, q: query, page: pageParam });
+  const { operations, progressSteps } = page;
+
+  return (
+    <>
       {operations.length === 0 && progressSteps.length === 0 ? (
         <EmptyState
           icon={Inbox}
@@ -134,6 +144,6 @@ export default async function WorkerTasksPage({ searchParams }: { searchParams: 
         </ul>
       )}
       {page.pageCount > 1 && <AdminPagination basePath="/worker/tasks" {...page} queryParams={{ q: query, view }} />}
-    </div>
+    </>
   );
 }

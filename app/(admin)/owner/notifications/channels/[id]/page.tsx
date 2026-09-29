@@ -1,3 +1,5 @@
+import { PageHeader } from '@/components/ui-business';
+import { FormPage } from '@/app/_components/FormPage';
 import { notFound } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { ChannelForm } from '@/components/business/notification/ChannelForm';
@@ -24,8 +26,8 @@ export default async function EditChannelPage({
   if (!channel) notFound();
   if (channel.transport !== 'WECOM_SMART_BOT') {
     return (
-      <div className="mx-auto max-w-xl space-y-6">
-        <h1 className="text-xl font-semibold">旧版通知目标</h1>
+      <FormPage>
+        <PageHeader title="旧版通知目标" back={{ href: '/owner/notifications', label: '返回推送配置' }} />
         <LegacyNotificationChannels
           open
           channels={[{
@@ -34,7 +36,7 @@ export default async function EditChannelPage({
             isActive: channel.isActive,
           }]}
         />
-      </div>
+      </FormPage>
     );
   }
 
@@ -44,13 +46,12 @@ export default async function EditChannelPage({
   const boundAt = channel.smartBotBoundAt?.toISOString() ?? null;
 
   return (
-    <div className="mx-auto max-w-xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">编辑通知目标</h1>
-        <p className="text-sm text-muted-foreground">
-          修改展示名称和启停状态。通知目标标识与传输方式不可修改。
-        </p>
-      </div>
+    <FormPage>
+      <PageHeader
+        title="编辑通知目标"
+        subtitle="修改展示名称和启停状态。通知目标标识与传输方式不可修改。"
+        back={{ href: '/owner/notifications', label: '返回推送配置' }}
+      />
       <ChannelForm
         mode="edit"
         action={action}
@@ -71,6 +72,6 @@ export default async function EditChannelPage({
         targetMasked={targetMasked}
         boundAt={boundAt}
       />
-    </div>
+    </FormPage>
   );
 }
