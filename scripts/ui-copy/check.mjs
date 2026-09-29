@@ -86,8 +86,12 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     if (ts.isIdentifier(node)) return value(resolve(node));
     if (ts.isTemplateExpression(node)) { record(node.head, node.head.text); for (const s of node.templateSpans) { value(s.expression); record(s.literal, s.literal.text); } return; }
     if (ts.isConditionalExpression(node)) { value(node.whenTrue); value(node.whenFalse); return; }
+    // 类型包装在运行时被擦除：只看表达式，不扫类型里的字面量（`"草稿" as "草稿" | "DRAFT"`）。
+    if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node) || ts.isTypeAssertionExpression(node) || ts.isParenthesizedExpression(node)) return value(node.expression);
     if (ts.isBinaryExpression(node)) {
-      if ([ts.SyntaxKind.PlusToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.AmpersandAmpersandToken].includes(node.operatorToken.kind)) { value(node.left); value(node.right); }
+      // && 的左侧只是条件，永远不会显示；|| / ?? 左侧为真 / 非空时即被显示；+ 拼接两侧都显示。
+      if (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) value(node.right);
+      else if ([ts.SyntaxKind.PlusToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(node.operatorToken.kind)) { value(node.left); value(node.right); }
       return;
     }
     if (ts.isPropertyAssignment(node)) {

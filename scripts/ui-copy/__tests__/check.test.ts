@@ -164,6 +164,16 @@ describe('pattern rule precision', () => {
 
   it('does not treat the left side of && as display copy', () => {
     expect(check('const ok = true; const x = <span>{(ok ? "finishedAt" : undefined) && "完成时间"}</span>;')).toEqual([]);
+    expect(check('const ok = true; const x = <span>{(ok ? "DRAFT" : undefined) && "草稿"}</span>;')).toEqual([]);
+    expect(check('const ok = true; const x = <span>{(ok ? "worker 状态" : undefined) && "处理中"}</span>;')).toEqual([]);
+    // || 的左侧为真时会被显示，仍需检查。
+    expect(check('const x = <span>{"DRAFT" || "草稿"}</span>;')).toHaveLength(1);
+  });
+
+  it('ignores literals that only appear in erased type positions', () => {
+    expect(check('const x = <span>{"草稿" satisfies "草稿" | "DRAFT"}</span>;')).toEqual([]);
+    expect(check('const x = <span>{"草稿" as "草稿" | "DRAFT"}</span>;')).toEqual([]);
+    expect(check('const x = <span>{"DRAFT" as string}</span>;')).toHaveLength(1);
   });
 
   it('ignores inline script source', () => {
