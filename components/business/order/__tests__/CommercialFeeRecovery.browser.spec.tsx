@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { commands, page } from 'vitest/browser';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { Button } from '@/components/ui/button';
 import '@/app/globals.css';
 
 const actions = vi.hoisted(() => ({ save: vi.fn(), remove: vi.fn(), plate: vi.fn(), removePlate: vi.fn() }));
@@ -27,7 +28,7 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
 function Harness({ children }: { children: ReactNode }) {
   const auxiliary = useOrderEditorAuxiliaryController(false);
   return <OrderEditorAuxiliaryContext.Provider value={auxiliary.context}>
-    <button disabled={auxiliary.dirty || auxiliary.pending}>保存工单资料</button>{children}
+    <Button type="button" disabled={auxiliary.dirty || auxiliary.pending}>保存工单资料</Button>{children}
   </OrderEditorAuxiliaryContext.Provider>;
 }
 let host: HTMLDivElement;

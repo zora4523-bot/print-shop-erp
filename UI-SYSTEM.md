@@ -564,6 +564,8 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 
 恢复补强基于 `4d0c1c31` 的本次工作区增量验证：原实现的连接失败用例已复现整页错误；修复后浏览器组件测试 66 项、单元与契约测试 22 项、真实页面 E2E 3 项通过，无跳过。E2E 使用本次源码重新构建的 `next build/start`、独立端口 3215 和经预检的 `erp_e2e_fee_recovery_20260929` 专用测试库，分别模拟请求未送达、成功入库后响应丢失和详情脚本加载失败；核对数据库记录、输入保留、新标签页入口和手动重新加载。六视口明暗主题、44px 触控、overflow、axe、类型、架构、UI 文案／令牌及 ESLint 检查通过（2 条既存导航警告）。Vitest 与 ESLint 显式排除 `.claude/` 下的另一份完整 checkout，未修改项目门禁配置。命令、工作区补丁及日志归档在 `/var/folders/1m/qlr1bwhj2h7ck5qbntt0xdcm0000gn/T/erp-action-recovery-20260929-q749q1pt`。本次为局部恢复验收，未运行完整发布矩阵，也未部署生产。
 
+2026-09-29 合并检查补充：[PR #31 首轮 Quality](https://github.com/zora4523-bot/print-shop-erp/actions/runs/36577764981) 对 `718ba15c` 的全量单测报告为 7,899 通过、1 失败、46 既有跳过。唯一失败是 `CommercialFeeRecovery.browser.spec.tsx` 的测试夹具使用原生按钮，被全仓共享按钮检查拦截；改为共享 `Button`，保留互锁断言及原检查范围，没有新增原生按钮豁免。本地复验 `button-components.test.ts` 1 项和费用恢复浏览器组件 20 项通过，目标 ESLint、typecheck 通过（Node 24.15.0、pnpm 10.33.1）；首轮未覆盖该全仓检查的局部通过记录不代表完整合并门禁通过。修正后仍以 PR 最新候选的完整检查结果作为合并依据。
+
 ### 师傅报工与工资明细（2026-09-17）
 
 `OperationReportForm` 与共享进度表单复用 `ReportFields`：本次完成数和工单件数进度为空，缺陷与返工数为 0；先填写，再核对实际数量、提交影响，最后确认报工。返回修改保留输入，提交期间禁用操作。
