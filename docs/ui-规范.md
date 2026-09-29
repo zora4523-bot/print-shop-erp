@@ -381,6 +381,36 @@ gates:
 - 颜色不是唯一信息通道。
 - 未经人工确认，不运行 `--update-snapshots` 接受差异。
 
+### 8.1 控件对齐与勾选（2026-09-29）
+
+- 管理端与师傅端外壳内，`globals.css` 给所有可交互控件兜底 `min-height: 44px`；源码里的 `h-*` 不等于渲染高度。禁止用 `min-h-0!`、`!min-h-*` 绕过兜底。Dialog / AlertDialog / Sheet 内容挂在 body 上，原子件自带 `touch-viewport`，业务不再手补。
+- 表单原子件（Input、Textarea、NativeSelect）同一规格：`rounded-md`、同一内距、同一焦点圈、同一 `aria-invalid` 错误态、同一只读态。只读用原子件的 `read-only` 样式，不在调用处手写底色。
+- 输入框内图标一律 `top-1/2 -translate-y-1/2` 垂直居中。
+- 网格或筛选栏里，按钮与带标签的字段底边对齐（`items-end` / `self-end`）。
+- 勾选框 + 文字：`gap-1`；单行 `items-center`，多行说明 `items-start` 且勾选框与首行居中；与同列字段左对齐时抵消触控盒 12px 透明边（写法见 `OrderForm.tsx` 急单字段）。表头全选框与行勾选框同列同尺寸。
+- 必填标记只用一个组件；一张表单内只标必填或只标选填，不混用。
+
+### 8.2 选中态、按钮顺序与动词（2026-09-29，业主确认）
+
+- 选中态只有一种：`Button variant="selected"`（primary 描边 + 淡底 + primary 字），标签条、分段按钮、筛选胶囊、单选胶囊通用；`EditorTabs` 与之一致。禁止用 className 把 Button 覆写成 `bg-foreground` / `bg-primary` / `bg-destructive`。
+- 红色只表达危险或失败：确认层红色由 `danger` 决定，与 L2 / L3 级别无关；「取消X」类确认层的取消按钮不得叫「取消」（默认「暂不取消」，或写具体对象如「保留采购单」）。
+- 按钮顺序：弹窗与确认层「取消在左、主操作在右」；页内表单与核对步骤主操作在左。
+- 动词口径：页头入口「新建X」，表单提交「创建X」，表单内加一行「添加X」，不用「新增」；删除 = 永久删除记录，移除 = 从当前单据拿掉；清空条件统一「清除筛选」；提交中统一「正在X…」；离开拦截统一「放弃修改并离开」。
+- 下载文件的链接用原生 `<a href download>`，不用 `next/link`（生产环境视口预取会请求导出接口）。
+
+### 8.2.1 层级与浮层阴影刻度（2026-09-29）
+
+- z-index 只用：页内吸顶/粘性 `z-10`，头部与侧栏 `z-20`，下拉 / Popover / Tooltip `z-40`，遮罩与 Dialog / Sheet `z-50`，实时播报 `z-60`。不写 `z-[…]`。
+- 阴影：卡片与粘性栏 `shadow-xs` / `shadow-sm`，下拉 / Popover / Tooltip `shadow-md`，Dialog / Sheet / AlertDialog `shadow-lg`；暗色靠边框分层。
+
+### 8.3 页面外壳与命名（2026-09-29）
+
+- 所有页面标题经 `PageHeader`（含规则中心）；二级页通过 `back` 槽提供唯一返回入口，表单底部不再重复「返回列表」（取消按钮仍可保留在表单操作区）。例外：表单自带「提交中锁定」的返回（`PendingLink`，如新建外协单）时，返回留在表单操作区，页头不再给 `back`——仍然只有一个入口。`back` 槽目前是普通链接，不随提交锁定。
+- 状态经 `PageHeader` 的 `status` 槽用 `StatusBadge` 表达，不写在副标题文字里。
+- 同一页面在侧栏、面包屑、H1、`<title>` 的名称同源；面包屑窄屏保留父级，不出现无意义占位。
+- 表单页内容最大宽度统一（`FormPage` 档），列表与详情全宽。
+- 切换型链接（标签、筛选、队列）加 `scroll={false}` 并提供即时 pending 反馈（`LinkPendingHint`）；分页链接保持默认。
+
 ## 9. 禁止模式
 
 - 页面内新建另一套状态药丸、空态、loading、pending、金额 formatter 或确认层。
@@ -456,7 +486,7 @@ P0-1 已完成，`baseline.json` 的 `money` 待迁移条目为 0；费率与阶
 | 类别 | 处数 | 迁移项 |
 |---|---|---|
 | Sheet 头部 safe-area 表达式 | `components/business/order/SalesOrdersList.tsx:543,772`（`pt-[max(1rem,env(top))] pr-[max(4rem,calc(3rem+env(right)))]`，为关闭按钮预留） | 布局参数，豁免 |
-| CSS Module 非 token 圆角 | `AdminOrderDetailView.module.css:23,90,112`（`50%` / `99px` 胶囊）、`AdminOrderWorkspace.module.css:67`（3px 进度条） | 无对应 token，豁免 |
+| CSS Module 非 token 圆角 | `AdminOrderDetailView.module.css:23,90,112`（`50%` / `99px` 胶囊）、`AdminOrderWorkspace.module.css` 桌面紧凑勾选框指示器 3px 圆角（2026-09-29 复核：原登记的「:67 进度条」已不存在） | 无对应 token，豁免 |
 
 ### A-8 组件重复（§3、§6，lint 不检测）
 
