@@ -338,7 +338,7 @@ function baseOrder(): AdminOrderWorkspaceRow {
       quoteToken: `create-order-quote-v2:${'a'.repeat(64)}`, hasVersionDiff: false,
     },
     priceComparisonError: null, confirmationPreflight: { ok: true, issues: [] },
-    capabilities: { confirm: false, reject: false, hold: false, resume: false, release: false, ship: false, settle: false, createPrint: false, markPrinted: false, reviewChange: false },
+    capabilities: { confirm: false, reject: false, hold: false, resume: false, release: false, ship: false, settle: false, createPrint: false, markPrinted: false, reviewChange: false, completeProduction: false },
     billing: null, pendingChangeRequest: null, printPending: false, pendingPrintJobId: null, trackingNo: null,
     progress: { orderTotal: '1000', foilingProgress: '0', packingProgress: '0', foilingOverLimit: false, packingOverLimit: false, packingAhead: false, stagnant: false, stagnationDays: 0, firstClaimedAt: null },
     logs: [],

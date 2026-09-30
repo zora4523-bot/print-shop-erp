@@ -112,3 +112,70 @@ test('single owner dispatch, quantity approval, wages and external sales state',
     expect(errors).toEqual([]);
   } finally { await workerContext.close(); }
 });
+
+test('admin batch-completes dispatched production at plan from the order list', async ({ page }, info) => {
+  test.setTimeout(120000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const fixture = await seedProductionDispatchFixture();
+  await login(page, { from: `/orders/production?ids=${fixture.id}` });
+  await page.getByRole('combobox', { name: '局部烫金 · 1000 个' }).selectOption(fixture.workerId);
+  await page.getByRole('button', { name: '核对排单' }).click();
+  await page.getByRole('button', { name: '发布排单', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('已安排 1 张工单');
+  // 业主 2026-10-01：师傅没点完成时，管理员在工单列表批量按计划数量完成。
+  await page.goto(`/orders?queue=all&q=${fixture.id}`);
+  await page.getByRole('checkbox', { name: new RegExp(`选择工单 .*${fixture.id}`) }).check();
+  const batch = page.getByRole('region', { name: '工单批量操作' });
+  await batch.getByRole('button', { name: /批量完成生产/ }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('师傅：E2E 开机仔');
+  await expect(dialog).toContainText('生产日期记为今天');
+  await gates(page, info, 'batch-complete-confirm');
+  await dialog.getByRole('button', { name: '确认完成生产' }).click();
+  await expect(page.getByText('已按计划数量登记生产完成').first()).toBeVisible();
+  const job = await withDb(async db => (await db.query<{ status: string; recordSource: string; completedQty: string }>('SELECT status, "recordSource", "completedQty"::text AS "completedQty" FROM "ProductionJob" WHERE "orderId"=$1', [fixture.id])).rows[0]);
+  expect(job).toEqual({ status: 'COMPLETED', recordSource: 'ADMIN_BATCH', completedQty: '1000.000' });
+  const wage = await withDb(async db => (await db.query<{ amount: string | null }>('SELECT w.amount::text AS amount FROM "ProductionWage" w JOIN "ProductionJob" j ON j.id=w."jobId" WHERE j."orderId"=$1', [fixture.id])).rows);
+  expect(wage).toHaveLength(1);
+  expect(wage[0].amount).not.toBeNull();
+  expect((await withDb(async db => (await db.query<{ status: string }>('SELECT status FROM "Order" WHERE id=$1', [fixture.id])).rows[0])).status).toBe('PACKING');
+  expect(errors).toEqual([]);
+});
+
+test('confirming the first address ships and registers the unreported production at plan', async ({ page }, info) => {
+  test.setTimeout(120000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const fixture = await seedProductionDispatchFixture();
+  await withDb(async db => {
+    for (const sequence of [1, 2]) {
+      await db.query(`INSERT INTO "OrderShipment" (id,"orderId",sequence,"receiverName","receiverPhone","receiverAddress","destinationProvince","updatedAt") VALUES ($1,$2,$3,$4,'13800138000',$5,'广东',NOW())`,
+        [`${fixture.id}-ship-${sequence}`, fixture.id, sequence, `收件人${sequence}`, `广东省佛山市测试路${sequence}号`]);
+      await db.query(`INSERT INTO "OrderShipmentLine" (id,"shipmentId","orderItemId",quantity) VALUES ($1,$2,$3,500)`, [`${fixture.id}-line-${sequence}`, `${fixture.id}-ship-${sequence}`, `${fixture.id}-item`]);
+    }
+  });
+  await login(page, { from: `/orders/production?ids=${fixture.id}` });
+  await page.getByRole('combobox', { name: '局部烫金 · 1000 个' }).selectOption(fixture.workerId);
+  await page.getByRole('button', { name: '核对排单' }).click();
+  await page.getByRole('button', { name: '发布排单', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('已安排 1 张工单');
+  // 业主 2026-10-01：师傅没扫码报工，管理员填运单号确认发货即视为生产完成。
+  await page.goto(`/orders/${fixture.id}`);
+  const delivery = page.locator('#detail-delivery-records');
+  const first = delivery.locator('li').filter({ has: page.getByRole('textbox', { name: '运单号', exact: true }) }).nth(0);
+  await expect(first.getByText('确认发货时将按计划数量代师傅登记并计提成')).toBeVisible();
+  await first.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO-PLANNED-1');
+  await first.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('ZTO');
+  await first.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('将按计划数量代师傅登记生产完成并计提成：E2E 开机仔（局部烫金 1000 个）');
+  await gates(page, info, 'ship-completes-production-confirm');
+  await dialog.getByRole('button', { name: '确认发货', exact: true }).click();
+  await expect.poll(() => withDb(async db => (await db.query<{ status: string }>('SELECT status FROM "OrderShipment" WHERE id=$1', [`${fixture.id}-ship-1`])).rows[0].status)).toBe('SHIPPED');
+  const job = await withDb(async db => (await db.query<{ status: string; recordSource: string }>('SELECT status, "recordSource" FROM "ProductionJob" WHERE "orderId"=$1', [fixture.id])).rows[0]);
+  expect(job).toEqual({ status: 'COMPLETED', recordSource: 'SHIPMENT_AUTO' });
+  expect((await withDb(async db => (await db.query('SELECT 1 FROM "ProductionWage" w JOIN "ProductionJob" j ON j.id=w."jobId" WHERE j."orderId"=$1 AND w.amount IS NOT NULL', [fixture.id])).rowCount))).toBe(1);
+  expect((await withDb(async db => (await db.query<{ status: string }>('SELECT status FROM "Order" WHERE id=$1', [fixture.id])).rows[0])).status).toBe('PACKING');
+  expect(errors).toEqual([]);
+});

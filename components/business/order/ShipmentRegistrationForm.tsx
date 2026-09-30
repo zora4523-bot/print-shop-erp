@@ -14,6 +14,8 @@ export type ShipmentRegistrationProps = {
   revision: number; editVersion: number; workOrderVersion: number; priceRevision: number;
   trackingNo: string | null; carrierCode: string | null; carrierName: string | null;
   shipped: boolean; canConfirm: boolean; disabledReason: string | null;
+  /** Pending single-owner jobs this confirmation registers at plan (DECISIONS 2026-10-01). */
+  autoCompletion?: string[] | null;
   chargeable?: boolean;
   lastPending: boolean; amount: string; labels: { id: string; createdAt: string }[];
 };
@@ -107,10 +109,14 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
         trigger={<Button type="button" disabled={busy || !ready || !props.canConfirm}>确认该地址已发货</Button>}
         onConfirm={() => submit(true)}>
         <ConfirmActionDialog action="确认该地址已发货" changes={[{ label: '运单号', old: props.trackingNo || '未填', new: tracking }]}
-          consequences={props.lastPending ? props.chargeable === false ? ['全部地址将标记已发货，工单自动结算；结算后不可再编辑，本单免收费'] : [`全部地址将标记已发货，工单自动结算，应收 ${props.amount} 元进入账单；结算后不可再编辑，尚未收款`] : ['该地址标记已发货，其他地址继续待发货']}
+          consequences={[
+            ...(props.autoCompletion?.length ? [`将按计划数量代师傅登记生产完成并计提成：${props.autoCompletion.join('、')}`] : []),
+            ...(props.lastPending ? props.chargeable === false ? ['全部地址将标记已发货，工单自动结算；结算后不可再编辑，本单免收费'] : [`全部地址将标记已发货，工单自动结算，应收 ${props.amount} 元进入账单；结算后不可再编辑，尚未收款`] : ['该地址标记已发货，其他地址继续待发货']),
+          ]}
           confirmText="确认发货" />
       </ConfirmActionController> : null}
     </div>
     {!props.shipped && !props.canConfirm && props.disabledReason ? <p className="text-xs text-muted-foreground">{props.disabledReason}</p> : null}
+    {!props.shipped && props.canConfirm && props.autoCompletion?.length ? <p className="text-xs text-muted-foreground">生产尚未登记完成；确认发货时将按计划数量代师傅登记并计提成。</p> : null}
   </div>;
 }

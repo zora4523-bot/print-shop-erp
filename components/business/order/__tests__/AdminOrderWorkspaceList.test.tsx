@@ -414,7 +414,7 @@ function row(): AdminOrderWorkspaceRow {
       settle: false,
       createPrint: false,
       markPrinted: false,
-      reviewChange: false,
+      reviewChange: false, completeProduction: false,
     },
     billing: null,
     pendingChangeRequest: null,

@@ -131,8 +131,10 @@ import { SalesOrderDetailView } from '@/components/business/order/SalesOrderDeta
 import {
   orderShippingAvailability,
   orderShippingBlocker,
+  shipmentCompletesPlannedProduction,
   orderShippingRecoveryHref,
 } from '@/lib/order/shipping-availability';
+import { getPlannedCompletionPreview } from '@/lib/production/planned-completion';
 import { outsourceCoverageApplies } from '@/lib/outsource/coverage';
 import { canShowAdminDirectCancel } from '@/lib/order/direct-cancel';
 
@@ -353,12 +355,17 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     order.uncoveredOutsourceItems.length > 0 ||
     !order.outsourceOrders.some((row) => row.status !== OutsourceStatus.CANCELLED)
   );
+  // 业主 2026-10-01：单人流程确认发货时按计划数量代师傅登记完成。
+  const plannedCompletionPreview = order.simpleProduction && (order.status === OrderStatus.RELEASED || order.status === OrderStatus.FOILING)
+    ? await getPlannedCompletionPreview(order.id, order.workOrderVersion) : null;
   const shippingFacts = {
       isAdministrator: canShipOrSettle,
       status: order.status,
       incompleteProductionCount,
       hasLiveOutsource,
       hasOutsourceGap,
+      plannedCompletion: plannedCompletionPreview ? { pendingJobs: plannedCompletionPreview.pendingJobs.length,
+        requestedJobs: plannedCompletionPreview.requestedCount, unassignedUnits: plannedCompletionPreview.unassignedUnits } : null,
       isPricingPending,
       hasShipment: order.shipments.length > 0,
       hasPendingChange: Boolean(pendingChangeRequest),
@@ -366,6 +373,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const { canShip, disabledReason: shipDisabledReason } = orderShippingAvailability(shippingFacts);
   const shippingRecoveryHref = orderShippingRecoveryHref(shippingFacts);
   const shippingBlocker = orderShippingBlocker(shippingFacts);
+  const shipmentAutoCompletion = canShip && plannedCompletionPreview && shipmentCompletesPlannedProduction(shippingFacts)
+    ? plannedCompletionPreview.pendingJobs.map((job) => `${job.workerName}（${job.label} ${job.plannedQty} 个）`) : null;
   const cancelImpact = orderCancelImpact({
     pendingProductionCount,
     inProgressProductionCount,
@@ -771,7 +780,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                       orderId={order.id} shipmentId={shipment.id} version={shipment.registrationVersion}
                       revision={order.revision} editVersion={order.editVersion} workOrderVersion={order.workOrderVersion} priceRevision={priceRevision ?? 0}
                       trackingNo={shipment.trackingNo} carrierCode={shipment.carrierCode} carrierName={shipment.carrierName}
-                      shipped={shipment.status === 'SHIPPED'} canConfirm={canShip} disabledReason={shipDisabledReason}
+                      shipped={shipment.status === 'SHIPPED'} canConfirm={canShip} disabledReason={shipDisabledReason} autoCompletion={shipmentAutoCompletion}
                       lastPending={order.shipments.filter((row) => row.status !== 'SHIPPED').length === 1}
                       chargeable={isChargeableOrder}
                       amount={order.confirmedFee !== null ? formatMoneyPlain(order.confirmedFee) : '待核价'}

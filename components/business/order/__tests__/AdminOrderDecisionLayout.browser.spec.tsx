@@ -231,7 +231,7 @@ function orderFixture(): AdminOrderWorkspaceRow {
     confirmationPreflight: { ok: false, issues: ['当前有待处理修改申请'] },
     capabilities: {
       confirm: false, reject: false, hold: false, resume: false, release: false,
-      ship: false, settle: false, createPrint: false, markPrinted: false, reviewChange: true,
+      ship: false, settle: false, createPrint: false, markPrinted: false, reviewChange: true, completeProduction: false,
     },
     billing: null,
     pendingChangeRequest: { id: 'drawer-request-1', type: 'MODIFY', reason: '客户增加数量并调整规格', createdAt: '2026-09-07T02:00:00.000Z' },

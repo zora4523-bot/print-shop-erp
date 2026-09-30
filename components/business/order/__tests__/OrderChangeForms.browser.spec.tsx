@@ -171,7 +171,7 @@ function decisionOrder(): AdminOrderWorkspaceRow {
       settle: false,
       createPrint: false,
       markPrinted: false,
-      reviewChange: true,
+      reviewChange: true, completeProduction: false,
     },
     billing: null,
     pendingChangeRequest: {

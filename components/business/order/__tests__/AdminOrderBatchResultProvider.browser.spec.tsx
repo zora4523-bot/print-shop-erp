@@ -44,6 +44,7 @@ function reviewedOrders(): BatchOrderSnapshot[] {
     workOrderVersion: 2,
     pendingPrintJobId: null,
     confirmedFee: '1234.50',
+    productionOwners: [],
     eligible: index !== 6,
     reason: index === 6 ? '存在待审批申请，请先打开工单处理变更' : null,
   }));

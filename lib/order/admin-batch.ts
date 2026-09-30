@@ -13,12 +13,14 @@ import {
   OrderPrintJobError,
 } from './print-jobs';
 import { InvalidOrderTransitionError } from './status-machine';
+import { completeOrderProductionAtPlan, PlannedCompletionError } from '../production/planned-completion';
 
 export const ADMIN_ORDER_BATCH_COMMANDS = [
   'RELEASE_AND_CREATE_PRINT',
   'CREATE_PRINT',
   'MARK_PRINTED',
   'SETTLE',
+  'COMPLETE_PRODUCTION',
 ] as const;
 
 export type AdminOrderBatchCommand =
@@ -117,7 +119,8 @@ function skipped(
   if (
     error instanceof AdminOrderWorkflowError ||
     error instanceof OrderPrintJobError ||
-    error instanceof ProductionOperationMaterializationError
+    error instanceof ProductionOperationMaterializationError ||
+    error instanceof PlannedCompletionError
   ) {
     return {
       orderId,
@@ -193,6 +196,17 @@ export async function runAdminOrderBatch(
           }
           await markOrderPrintRequestPrinted(
             { requestJobId: item.requestJobId, idempotencyKey },
+            actor,
+          );
+          break;
+        case 'COMPLETE_PRODUCTION':
+          // 业主 2026-10-01：按计划数量代师傅登记完成并计提成，逐单一个事务。
+          await completeOrderProductionAtPlan(
+            {
+              orderId: item.orderId,
+              expectedRevision: item.expectedRevision,
+              expectedWorkOrderVersion: item.expectedWorkOrderVersion,
+            },
             actor,
           );
           break;
