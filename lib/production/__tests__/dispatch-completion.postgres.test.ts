@@ -113,6 +113,26 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(await db.productionWageEntry.count({ where: { wage: { jobId: f.job.id } } })).toBe(1);
     expect((await db.productionOperation.findFirstOrThrow({ where: { orderId: f.order.id, operationType: 'PACKING' } })).status).toBe('PENDING');
   });
+  it('holds a per-item redistribution with an unchanged total for approval instead of completing it', async () => {
+    const f = await fixture();
+    const owner = await newWorker(); // A pending request would block the shared worker's later settlement cases.
+    const craft = await db.craft.findUniqueOrThrow({ where: { code: 'FLAT_FOIL_PARTIAL' } });
+    const second = await db.orderItem.create({ data: { orderId: f.order.id, name: '验收款B', sequence: 2, quantity: 1000, craft: 'PARTIAL', pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL', productStructure: 'STANDARD_ENVELOPE', foilTechnique: 'FLAT', frontFoilColors: ['亚金'], crafts: [craft.id], paperType: '珠光纸' } });
+    await db.orderPackagingGroup.create({ data: { orderId: f.order.id, sequence: 2, mode: 'SINGLE_STYLE', actualBagCount: 1000, lines: { create: { orderItemId: second.id, unitsPerBag: 1 } } } });
+    const { targets } = await currentDispatchTargets(db, f.order.id);
+    await publishProductionDispatch({ requestKey: randomUUID(), orders: [{ ...f.request.orders[0], assignments: Object.fromEntries(targets.map(target => [target.key, owner.id])) }] }, admin);
+    const job = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id } });
+    expect((job.snapshot as { items: unknown[] }).items).toHaveLength(2);
+    expect(job.plannedQty.toString()).toBe('2000');
+    const [first] = f.order.items;
+    const skewed = { ...completion(job, '2000'), itemQuantities: { [first.id]: '0', [second.id]: '2000' } };
+    await expect(registerProductionCompletion(skewed, owner)).rejects.toThrow('数量修改原因');
+    await registerProductionCompletion({ ...skewed, reason: '只做了 B 款' }, owner);
+    const pending = await db.productionJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(pending.status).toBe('REQUESTED');
+    expect(await db.productionWage.count({ where: { jobId: job.id } })).toBe(0);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('RELEASED');
+  });
   it('holds altered quantity without wages, rejects bypass, then approves exactly once', async () => {
     const f = await assigned();
     await registerProductionCompletion({ ...completion(f.job, '990'), reason: '核对实际成品' }, worker);
