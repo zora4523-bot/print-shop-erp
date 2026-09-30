@@ -914,7 +914,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'agent-monthly-bills-alias',
       path: '/owner/bills',
-      readyHeading: '代理商月度账单',
+      readyHeading: '外部销售月账单',
     },
     {
       name: 'legacy-bills-archive',

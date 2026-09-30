@@ -792,7 +792,7 @@ async function* itemRows(
           item.workOrderVersionSnapshot,
           moneyText(item.settledFeeSnapshot),
           dateTime(item.settledAtSnapshot),
-          item.orderNameAtSettlement ? '结算时名称' : '导出时名称',
+          item.orderNameAtSettlement ? '出账时名称' : '导出时名称',
         ];
       }
     }

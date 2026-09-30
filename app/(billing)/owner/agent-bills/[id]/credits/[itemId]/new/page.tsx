@@ -9,6 +9,8 @@ import { CreateAgentMonthlyBillCreditForm } from '@/components/business/agent-mo
 import { PageHeader } from '@/components/ui-business';
 import { formatMoney } from '@/lib/dashboard/format';
 
+export const metadata = { title: '录入抵扣' };
+
 export default async function CreditPage({ params }: { params: Promise<{ id: string; itemId: string }> }) {
   await requirePermission('bill:manage');
   const { id, itemId } = await params;

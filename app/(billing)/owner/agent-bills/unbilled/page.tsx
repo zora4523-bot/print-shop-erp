@@ -10,6 +10,8 @@ import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { Input } from '@/components/ui/input';
 import { Button, buttonVariants } from '@/components/ui/button';
 
+export const metadata = { title: '未出账工单' };
+
 export default async function UnbilledOrdersPage({ searchParams }: { searchParams: Promise<AgentBillSearchParams> }) {
   await requirePermission('bill:view:all');
   const { period, page } = parseAgentBillFilters(await searchParams);

@@ -1,3 +1,4 @@
+import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import Link from 'next/link';
 import Decimal from 'decimal.js';
 import type { getAgentBillDashboard } from '@/lib/agent-monthly-billing/dashboard-query';
@@ -13,8 +14,8 @@ function percent(value: string, max: Decimal) {
 export function BillDashboard({ data, accounts, expanded }: { expanded: boolean; data: Data; accounts: Array<{ id: string; displayName: string }> }) {
   const monthMax = Decimal.max(0, ...data.periods.map((row) => new Decimal(row.total)));
   const accountMax = Decimal.max(0, ...data.accounts.map((row) => new Decimal(row.amount)));
-  return <details className="min-w-0 rounded-xl border bg-card p-4" open={expanded}>
-    <summary className="min-h-11 cursor-pointer py-2 font-semibold">账单概览</summary>
+  return <Disclosure className="min-w-0 rounded-xl border bg-card p-4" open={expanded}>
+    <DisclosureSummary className="min-h-11 cursor-pointer py-2 font-semibold">账单概览</DisclosureSummary>
     <p className="mb-4 text-sm text-muted-foreground">全部外部销售，不受下方筛选影响。按结算账期展示当前金额，已结清金额不代表该月实际收款。</p>
     <div className="grid min-w-0 gap-6 xl:grid-cols-2">
       <section className="min-w-0 space-y-3" aria-label="最近十二个账期金额">
@@ -42,14 +43,14 @@ export function BillDashboard({ data, accounts, expanded }: { expanded: boolean;
         </li>)}</ul> : <p className="text-sm text-muted-foreground">暂无待收账单</p>}
       </section>
     </div>
-    <details className="mt-4">
-      <summary className="min-h-11 cursor-pointer py-2 text-sm">查看账期数据表</summary>
+    <Disclosure className="mt-4">
+      <DisclosureSummary className="min-h-11 cursor-pointer py-2 text-sm">查看账期数据表</DisclosureSummary>
       <TableScrollArea label="账期金额数据"><table className="w-full text-sm"><thead><tr>
         <th className="p-2 text-left">账期</th><th className="p-2 text-right">待收</th><th className="p-2 text-right">已结清</th><th className="p-2 text-right">草稿</th>
       </tr></thead><tbody>{data.periods.map((row) => <tr key={row.period} className="border-t">
         <td className="p-2"><Link className="inline-flex min-h-11 items-center underline" href={buildTableHref(list, {}, { period: row.period })}>{row.period}</Link></td>
         <td className="p-2 text-right tabular-nums">{formatMoney(row.confirmed)}</td><td className="p-2 text-right tabular-nums">{formatMoney(row.paid)}</td><td className="p-2 text-right tabular-nums">{formatMoney(row.draft)}</td>
       </tr>)}</tbody></table></TableScrollArea>
-    </details>
-  </details>;
+    </Disclosure>
+  </Disclosure>;
 }

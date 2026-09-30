@@ -285,8 +285,19 @@ PDF 补强验证：`node --import tsx scripts/pdf-lifecycle-check.ts` 在本机�
 1. 查询基础：两端账期、状态筛选共用解析与查询条件，管理员列表和导出共用条件；销售所有权来自登录账号。分页及按状态金额汇总在同一 RepeatableRead 事务中读取，汇总覆盖全部筛选记录，草稿不计入应收。已实现，定向 24 项测试和类型检查通过；Claude Code 返回 429 周额度限制，外部审查待完成。
 2. 月账单列表及操作：统一业务文案、按剩余金额录入抵扣的独立页面、保留筛选返回路径，生成/确认/收款/抵扣刷新两端页面。已实现并通过定向测试和类型检查；Claude Code 再次返回 429，审查待完成。
 3. 关联明细：工单结算事实、抵扣来源及分配使用只读 Sheet，收款事实直接展示，销售查询显式排除内部原因和人员。已实现，22 项定向测试与类型检查通过；Claude Code 返回 429，审查待完成。
-4. 历史依据：新增可空 settlementDetailSnapshot，后续生成/确认保存结算名称、加工费及对客收费分项；旧账单不回填，缺依据提示按原结算总额核对。导出保留名称依据，新字段兼容旧任务。隔离 PostgreSQL 迁移及 84 项领域/页面/并发测试通过；Claude Code 429，审查待完成。
+4. 历史依据：新增可空 settlementDetailSnapshot，后续生成/确认保存出账时名称、加工费及对客收费分项；旧账单不回填，缺依据提示按原结算总额核对。导出保留名称依据，新字段兼容旧任务。隔离 PostgreSQL 迁移及 84 项领域/页面/并发测试通过；Claude Code 429，审查待完成。
 5. 可视化：最近 12 个上海账期的当前金额、前 10 位外部销售待收分布、待确认及未出账定位入口。图表链接与列表/导出共用账期、状态和账号条件，附账期数据表；筛选后折叠概览，优先展示列表。7 项定向测试和类型检查通过；Claude Code 返回 429，审查待完成。
-6. 综合验收：两端权限、账务边界、响应式与浏览器交互。待执行。
+6. 综合验收：已验证两端权限、账务边界、响应式与浏览器交互。修复生成月份随筛选变化、抵扣页面包屑中间路径、空操作表头，并统一使用 Disclosure；导出明确名称是在出账时采集。最终 Claude Code 调用仍为 429，外部审查待完成。
 
 参考项目为本地 `历史订单/finance-dashboard`（f2c96d8）；仅借鉴列表、关联浏览和筛选联动，不导入其历史数据或混用其收支口径。保留整单收款、零元自动结清、不可变账单及跨月抵扣规则；历史归档独立展示。
+
+
+本批验收基线为 `90e7ead6`，功能提交 `4e3c0ba0`、`1e623659`、`37b90c48`、`c99c79ff`、`b9f06dc8`，加本节所在验收提交；工作树 `codex/order-leave-recovery`，未推送、未部署生产。
+
+- `DATABASE_URL=<隔离测试库> pnpm exec vitest run --maxWorkers=2`：733 文件、7972 用例通过；原有 7 文件、133 用例跳过，不计通过。最后的导出文案、面包屑和页面回归定向重跑 4 文件、107 用例通过。
+- `pnpm typecheck`、`pnpm lint`、`pnpm check:architecture` 通过。lint 保留 global-error.tsx 与 OrderCreatedSuccessView.tsx 的 2 条既有导航警告，0 错误；UI 文案/令牌均 0 违例。
+- 按本文件隔离前置准备 `erp_e2e_pdf_ready_0930` 后，`pnpm exec playwright test tests/e2e/bill-flow.spec.ts tests/e2e/bill-workspace.spec.ts --config=playwright.release.config.ts --project=chromium`：真实 production build/start，4 条用例通过。覆盖原生无 JS、脚本延迟、生成/冻结/整单收款/重放、跨月抵扣、零元自动结清、历史费用与名称保护、越权拒绝、内部原因隔离、未出账定位和筛选返回。
+- 综合用例在 375、393、768、1024、1280、1920 宽度及明暗主题检查管理员概览/数据表/列表和销售明细 Sheet 的 root overflow、axe、44px 关闭目标与焦点返回。通过真实主题菜单切换并等待动画结束，避免中途取色；另以触控 tap 打开/关闭 Sheet 重跑综合用例，1 条通过。未将桌面模拟声明为真机或 WebKit 验收。
+- `pnpm test:migrations:fresh` 在显式隔离空库 `erp_billing_fresh_20260930_175727` 通过全部 181 个迁移及后置条件。本地开发库先备份，再应用待执行的账单依据及 PDF 能力两个可空新增字段迁移；没有覆写旧业务数据。
+- 本次日志在 `/tmp/erp-billing-0930/`（全量 `full-unit-db.log`、最终 `final-typecheck.log` / `final-lint.log`、浏览器 `e2e-acceptance.log` / `e2e-touch.log`、空库 `fresh-migrations.log`）。浏览器图片与 trace 由 Playwright 写入忽略目录 `test-results/release/`。
+- 每项任务后均调用 Claude Code（`--model opus --effort high --permission-mode plan`），任务 6 最终再次调用仍返回 `api_error_status: 429`、周额度耗尽，未实际开始模型审查。`claude-task1.json` 至 `claude-task6-final.json` 留存调用结果；不能将自主复核与自动化测试写作 Claude 审查通过。

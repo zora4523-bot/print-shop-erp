@@ -77,6 +77,7 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     '/owner/rules/customer-pricing/blank/new': '新建纸张与规格价格',
     '/orders': '工单列表',
     '/orders/new': '新建工单',
+    '/owner/agent-bills/unbilled': '未出账工单',
     '/owner/bills/archive': '历史账单归档',
     '/owner/materials/count': '库存盘点',
     '/orders/production': '安排生产师傅',
@@ -181,8 +182,11 @@ export function buildBreadcrumbCrumbs(
   segments.forEach((seg, i) => {
     const href = '/' + segments.slice(0, i + 1).join('/');
     const isLast = i === segments.length - 1;
+    const isBillCredit = segments[0] === 'owner' && segments[1] === 'agent-bills' && segments[3] === 'credits';
+    if (isBillCredit && (i === 3 || i === 4)) return;
     if (!isLast && SKIPPED_BREADCRUMB_PATHS.has(href)) return;
     const label =
+      (isBillCredit && isLast ? '录入抵扣' : undefined) ??
       BREADCRUMB_PATH_LABELS[href] ??
       (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
       resolveSegmentLabel(seg, entityLabel, isLast ? pageHeading : null, href);

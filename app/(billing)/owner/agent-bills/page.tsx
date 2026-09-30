@@ -97,7 +97,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       </div>
       <BillDashboard data={dashboard} accounts={accounts} expanded={!period && !status && !agentUserId} />
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <GenerateAgentMonthlyBillsForm defaultPeriod={period ?? previousShanghaiMonth()} />
+        <GenerateAgentMonthlyBillsForm key={period ?? previousShanghaiMonth()} defaultPeriod={period ?? previousShanghaiMonth()} />
         <p className="mt-2 text-xs text-muted-foreground">
           仅可选择已结束的月份。
         </p>
@@ -202,7 +202,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                 <th className="px-4 py-2 text-right">账单金额</th>
                 <th className="px-4 py-2 text-center">状态</th>
                 <th className="px-4 py-2 text-left">锁定 / 结清</th>
-                <th className="px-4 py-2" />
+                <th className="px-4 py-2 text-right">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y">

@@ -395,6 +395,6 @@ pnpm db:studio
 
 ### 外部销售账单结算依据（2026-09-30）
 
-`20260930100000_agent_bill_settlement_detail` 添加可空 JSONB `AgentMonthlyBillItem.settlementDetailSnapshot`。只在生成/更新草稿及最终确认时写入 schemaVersion、结算时工单名称、加工费与对客收费名称/金额，分项以 Decimal 核对结算总额。既有 `AgentMonthlyBillItem_parent_draft_guard` 覆盖整行，已确认账单仍禁止修改。历史确认账单保留 NULL，不以当前工单反填。
+`20260930100000_agent_bill_settlement_detail` 添加可空 JSONB `AgentMonthlyBillItem.settlementDetailSnapshot`。只在生成/更新草稿及最终确认时写入 schemaVersion、出账时工单名称、加工费与对客收费名称/金额，分项以 Decimal 核对结算总额。既有 `AgentMonthlyBillItem_parent_draft_guard` 覆盖整行，已确认账单仍禁止修改。历史确认账单保留 NULL，不以当前工单反填。
 
-先迁移数据库，再启动新 Web/worker；旧代码可忽略新列，回退不删除字段。导出任务 schemaVersion 保持兼容，只添加可选名称依据标记；已排队旧导出继续使用请求时保存的内容。新增字段不包含内部成本、工资、调价审批原因。2026-09-30 已在隔离本地 PostgreSQL 应用此迁移，未部署生产。
+先迁移数据库，再启动新 Web/worker；旧代码可忽略新列，回退不删除字段。导出任务 schemaVersion 保持兼容，只添加可选名称依据标记；已排队旧导出继续使用请求时保存的内容。新增字段不包含内部成本、工资、调价审批原因。2026-09-30 已在隔离测试库和备份后的本地开发库应用此迁移，未部署生产。名称采集于生成/确认账单，不声称能够还原此前结算当天的名称。

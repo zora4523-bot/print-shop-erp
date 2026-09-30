@@ -77,7 +77,7 @@ describe('bill detail visibility boundary', () => {
     getSalesMonthlyBillMock.mockResolvedValue({
       id: 'bill-1', period: '2026-08', status: 'PAID', memberSubtotal: '500.00', adjustmentAmount: '0.00', totalAmount: '500.00', confirmedAt: paidAt, paidAt,
       internalNote: '内部财务甲', adjustments: [],
-      items: [{ id: 'item', orderNoSnapshot: '20260801-0001', customerRefSnapshot: '外部客户甲', workOrderVersionSnapshot: 2, settledFeeSnapshot: '500.00', settledAtSnapshot: finishedAt,
+      items: [{ credits: [], id: 'item', orderNoSnapshot: '20260801-0001', customerRefSnapshot: '外部客户甲', workOrderVersionSnapshot: 2, settledFeeSnapshot: '500.00', settledAtSnapshot: finishedAt,
         order: { customName: '中秋礼盒', totalAmount: '9999.00', costs: '内部成本' } }],
     });
     const html = renderToStaticMarkup(await SalesBillDetailPage({ params: Promise.resolve({ id: 'bill-1' }) }));
@@ -96,13 +96,13 @@ describe('bill detail visibility boundary', () => {
     getSalesMonthlyBillMock.mockResolvedValue({
       id: 'bill-1', period: '2026-08', status: 'CONFIRMED', memberSubtotal: '500.00', adjustmentAmount: '0.00', totalAmount: '500.00', confirmedAt: paidAt, paidAt: null,
       receipt: null, adjustments: [],
-      items: [{ id: 'item', orderId: 'order-1', orderNoSnapshot: '20260801-0001', customerRefSnapshot: '外部客户甲', orderStatusSnapshot: 'SETTLED', workOrderVersionSnapshot: 2, settledFeeSnapshot: '500.00', settledAtSnapshot: finishedAt,
+      items: [{ credits: [], id: 'item', orderId: 'order-1', orderNoSnapshot: '20260801-0001', customerRefSnapshot: '外部客户甲', orderStatusSnapshot: 'SETTLED', workOrderVersionSnapshot: 2, settledFeeSnapshot: '500.00', settledAtSnapshot: finishedAt,
         order: { customName: '   ' } }],
     });
     const html = renderToStaticMarkup(await SalesBillDetailPage({ params: Promise.resolve({ id: 'bill-1' }) }));
     const row = html.match(/<tr class="border-t">[\s\S]*?<\/tr>/)?.[0] ?? '';
     const cells = [...row.matchAll(/<td class="p-3">([\s\S]*?)<\/td>/g)].map((match) => match[1]);
-    expect(cells[1]).toBe('未命名工单');
+    expect(cells[1]).toBe('未命名工单<span class="block text-xs text-muted-foreground">当前名称</span>');
     expect(html).not.toContain('外部客户甲');
   });
 
@@ -114,16 +114,16 @@ describe('bill detail visibility boundary', () => {
       memberSubtotal: '800.00', adjustmentAmount: '0.00', totalAmount: '800.00',
       confirmedAt: paidAt, paidAt: null, receipt: null, adjustments: [],
       items: [
-        { id: 'item-1', orderNoSnapshot: '20260801-0001', customerRefSnapshot: '外部客户甲', orderStatusSnapshot: 'SETTLED', workOrderVersionSnapshot: 2, settledFeeSnapshot: '500.00', settledAtSnapshot: finishedAt, order: { customName: '中秋礼盒' } },
-        { id: 'item-2', orderNoSnapshot: '20260801-0002', customerRefSnapshot: '外部客户乙', orderStatusSnapshot: 'SETTLED', workOrderVersionSnapshot: 1, settledFeeSnapshot: '300.00', settledAtSnapshot: finishedAt, order: { customName: null } },
+        { credits: [], id: 'item-1', orderNoSnapshot: '20260801-0001', customerRefSnapshot: '外部客户甲', orderStatusSnapshot: 'SETTLED', workOrderVersionSnapshot: 2, settledFeeSnapshot: '500.00', settledAtSnapshot: finishedAt, order: { customName: '中秋礼盒' } },
+        { credits: [], id: 'item-2', orderNoSnapshot: '20260801-0002', customerRefSnapshot: '外部客户乙', orderStatusSnapshot: 'SETTLED', workOrderVersionSnapshot: 1, settledFeeSnapshot: '300.00', settledAtSnapshot: finishedAt, order: { customName: null } },
       ],
     });
     const html = renderToStaticMarkup(await AgentMonthlyBillDetailPage({ params: Promise.resolve({ id: 'agent-bill-1' }) }));
     expect(requirePermissionMock).toHaveBeenCalledWith('bill:view:all');
     const headers = [...html.matchAll(/<th class="px-4 py-2 text-left">([^<]*)<\/th>/g)].map((match) => match[1]);
     expect(headers).toEqual(['工单', '工单名称', '状态 / 纸单版本', '结算时间']);
-    const nameCells = [...html.matchAll(/<td class="px-4 py-3 align-top">([^<]*)<\/td>/g)].map((match) => match[1]);
-    expect(nameCells).toEqual(['中秋礼盒', '未命名工单']);
+    const nameCells = [...html.matchAll(/<td class="px-4 py-3 align-top">([^<]*<span class="block text-xs text-muted-foreground">当前名称<\/span>)<\/td>/g)].map((match) => match[1].replace(/<[^>]+>/g, ""));
+    expect(nameCells).toEqual(['中秋礼盒当前名称', '未命名工单当前名称']);
     for (const customer of ['外部客户甲', '外部客户乙', '客户']) expect(html).not.toContain(customer);
   });
 
