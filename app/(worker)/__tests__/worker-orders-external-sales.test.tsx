@@ -22,6 +22,7 @@ vi.mock('next/navigation', () => ({
     throw new Error('NOT_FOUND');
   },
 }));
+vi.mock('@/components/business/production/WorkerProductionJobs', () => ({ WorkerProductionJobs: () => null }));
 vi.mock('@/components/business/production/WorkerOrderTaskList', () => ({
   WorkerOrderTaskList: () => null,
 }));

@@ -37,6 +37,7 @@ vi.mock('@/lib/worker-portal', () => ({
   getWorkerPieceworkSettlementDetail: getWorkerPieceworkSettlementMock,
   getWorkerHourlyPayrollDetail: getWorkerHourlySalaryMock,
 }));
+vi.mock('@/components/business/production/WorkerProductionJobs', () => ({ WorkerProductionJobs: () => null }));
 vi.mock('@/lib/attendance', () => ({
   getAttendanceSummaries: vi.fn(),
 }));

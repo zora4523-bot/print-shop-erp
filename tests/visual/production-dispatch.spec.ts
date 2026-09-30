@@ -57,7 +57,9 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   workerPage.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   try {
     await login(workerPage, { from: `/worker/tasks/${job.id}`, username: E2E_USERS.workerHandPress.username, password: E2E_PASSWORD });
-    await expect(workerPage.getByLabel('完成数量')).toHaveValue('1000');
+    // 师傅默认一键按计划数量完成，不显示数量输入（业主 2026-10-01）。
+    await expect(workerPage.getByRole('button', { name: '完成生产', exact: true })).toBeVisible();
+    await expect(workerPage.getByLabel('实际完成数量')).toBeHidden();
     await expect(workerPage.getByRole('link', { name: '返回工序工单', exact: true })).toHaveAttribute('href', '/worker/tasks');
     await gates(workerPage, info, 'worker-completion');
     await workerPage.getByRole('link', { name: '返回工序工单', exact: true }).click();
@@ -65,10 +67,12 @@ test('single owner dispatch, quantity approval, wages and external sales state',
     await expect(workerPage.getByRole('region', { name: '已安排的生产' }).getByRole('link', { name: /排单扫码验收/ }).first()).toBeVisible();
     await expect(workerPage.getByText('暂无待处理工序', { exact: true })).toHaveCount(0);
     await gates(workerPage, info, 'worker-tasks');
+    await expect(workerPage.getByRole('region', { name: '已安排的生产' }).getByRole('button', { name: '完成生产', exact: true }).first()).toBeVisible();
     await workerPage.goto(`/worker/tasks/${job.id}`);
-    await workerPage.getByLabel('完成数量').fill('990');
-    await workerPage.getByLabel('数量修改原因（修改数量时必填）').fill('核实实际成品');
-    await workerPage.getByRole('button', { name: '登记完成', exact: true }).click();
+    await workerPage.getByText('实际数量与计划不一致？上报数量').click();
+    await workerPage.getByLabel('实际完成数量').fill('990');
+    await workerPage.getByLabel('数量修改原因').fill('核实实际成品');
+    await workerPage.getByRole('button', { name: '提交数量审批', exact: true }).click();
     await expect(workerPage.getByRole('status')).toContainText('数量待审批');
     expect(await withDb(async db => (await db.query('SELECT id FROM "ProductionWage" WHERE "jobId"=$1', [job.id])).rowCount)).toBe(0);
     // The result link already opened this exact URL. Reload to fetch the worker's
