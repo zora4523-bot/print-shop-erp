@@ -62,6 +62,7 @@ describe('startWorkerHeartbeat', () => {
       'v1',
       null,
       null,
+      null,
     ]);
     expect(values.some((value) => value instanceof Date)).toBe(false);
   });
@@ -82,6 +83,7 @@ describe('startWorkerHeartbeat', () => {
       'v1',
       'CONNECTING',
       smartBotBotDigest,
+      null,
     ]);
 
     smartBotStatus = 'CONNECTED';
@@ -93,6 +95,7 @@ describe('startWorkerHeartbeat', () => {
       'v1',
       'CONNECTED',
       smartBotBotDigest,
+      null,
     ]);
   });
 
@@ -106,6 +109,7 @@ describe('startWorkerHeartbeat', () => {
       'worker-heavy-1',
       BackgroundJobQueue.HEAVY,
       'v1',
+      null,
       null,
       null,
     ]);

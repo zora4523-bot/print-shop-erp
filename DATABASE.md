@@ -388,3 +388,7 @@ pnpm db:studio
 通知日志保留为运行记录，应用层不再允许重试 / 重发（见 API.md「已删除功能的历史任务与通知」）。
 生产执行前的只读预查 SQL 见 [部署指南](./docs/部署指南.md#删除客服--清废厨师的三条迁移2026-09-24)。
 以后删除列或表时，同一迁移或紧随的前向迁移必须清理对应脱敏策略。
+
+### PDF 能力迁移（2026-09-30）
+
+`20260930160000_pdf_worker_capability` 仅向 BackgroundWorkerHeartbeat 添加 nullable Boolean `pdfReady`，无默认 true、无业务表回填。新 HEAVY 上报动态能力，旧代码的 INSERT/UPDATE 不受可空列影响；旧进程的 NULL 心跳不可满足新 jobs gate。先执行新增前向迁移，再切换 Web/worker；不修改既有 migration，不改历史工单/产物/尝试记录。回退代码可忽略新增列，不需删除列。

@@ -18,6 +18,7 @@ export type BackgroundJobHealth = {
     version: string;
     smartBotStatus: SmartBotConnectionStatusType | null;
     smartBotBotDigest: string | null;
+    pdfReady?: boolean | null;
     lastSeenAt: Date;
   }>;
   /** Active smart-bot destinations; hashes stay internal and are never returned by health routes. */
@@ -77,6 +78,7 @@ export async function getBackgroundJobHealth(): Promise<BackgroundJobHealth> {
       select: {
         queue: true,
         version: true,
+        pdfReady: true,
         smartBotStatus: true,
         smartBotBotDigest: true,
         lastSeenAt: true,
@@ -338,6 +340,7 @@ export function assessBackgroundJobHealth(
       }
     }
   }
+  if (options.requireWorkers && !hasReadyPdfWorker(health, options.expectedVersion)) warnings.push('pdf-worker-unavailable');
   if (health.staleRunning > 0) warnings.push('stale-running-jobs');
   // 死信按类型分成两条告警码。通知/通道测试死信**不**进 alerts：企业微信中断一次就
   // 能产出上百条，让它把 /api/health/jobs 打成 503 等于用一次第三方抖动掩盖
@@ -488,6 +491,7 @@ function isActionableBackgroundJobWarning(warning: string): boolean {
   return (
     warning.endsWith('worker-missing') ||
       warning.endsWith('worker-version-mismatch') ||
+      warning === 'pdf-worker-unavailable' ||
       warning === 'stale-running-jobs' ||
       warning === 'dead-jobs-last-24h' ||
       warning === 'smart-bot-auth-failed' ||
@@ -497,6 +501,11 @@ function isActionableBackgroundJobWarning(warning: string): boolean {
       warning === 'smart-bot-not-configured' ||
       warning === 'smart-bot-identity-mismatch'
   );
+}
+
+export function hasReadyPdfWorker(health: BackgroundJobHealth, expectedVersion?: string): boolean {
+  return health.activeWorkers.some((worker) => worker.queue === BackgroundJobQueue.HEAVY &&
+    worker.pdfReady === true && (!expectedVersion || worker.version === expectedVersion));
 }
 
 function ageMs(date: Date | null, now: Date): number | null {

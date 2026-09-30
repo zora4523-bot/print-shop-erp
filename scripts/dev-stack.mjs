@@ -82,7 +82,7 @@ async function waitForWorkers(env, stopped) {
     await client.query("SET TIME ZONE 'UTC'");
     const deadline = Date.now() + 60_000;
     while (!stopped() && Date.now() < deadline) {
-      const result = await client.query('SELECT DISTINCT queue FROM "BackgroundWorkerHeartbeat" WHERE version = $1 AND "lastSeenAt" > now() - interval \'30 seconds\'', [env.APP_VERSION]);
+      const result = await client.query('SELECT DISTINCT queue FROM "BackgroundWorkerHeartbeat" WHERE version = $1 AND (queue != \'HEAVY\' OR "pdfReady" IS TRUE) AND "lastSeenAt" > now() - interval \'30 seconds\'', [env.APP_VERSION]);
       if (result.rows.some((row) => row.queue === 'LIGHT') && result.rows.some((row) => row.queue === 'HEAVY')) return;
       await new Promise((resolveWait) => setTimeout(resolveWait, 500));
     }

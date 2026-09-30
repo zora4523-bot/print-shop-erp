@@ -1,5 +1,7 @@
 import { PERMISSIONS } from '@/lib/auth/permissions-dict';
 import { pdfFailure, pdfRetryUrl, pdfStatusResponse, type PdfStatus } from '@/lib/pdf/status-response';
+import { orderPdfMode } from '@/lib/pdf/mode.mjs';
+import { logPdfFailure } from '@/lib/pdf/diagnostics';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { NextAuthRequest } from 'next-auth';
@@ -73,8 +75,8 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   if (requestUrl.searchParams.getAll('jobId').length > 1 || (requestedJobId !== null && (!/^[A-Za-z0-9_-]{1,64}$/.test(requestedJobId) || backgroundJobsMode() !== 'durable'))) {
     return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });
   }
-  const renderMode = process.env.PDF_ORDER_MODE || 'direct';
-  if (!['direct', 'queued'].includes(renderMode)) {
+  const renderMode = orderPdfMode();
+  if (!renderMode) {
     return pdfStatusPage({ title: 'PDF 生成服务暂不可用', message: '打印配置异常，请联系管理员；也可以使用网页打印。', code: 'PDF_CONFIGURATION_INVALID', status: 503, retryUrl: pdfRetryUrl(_req.url) });
   }
   let pdf: Buffer;
@@ -123,7 +125,6 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       return pdfStatusPage({
         title: 'PDF 生成失败',
         ...pdfFailure(result.errorCode),
-        status: 500,
         retryUrl: pdfRetryUrl(_req.url),
       });
     }
@@ -138,6 +139,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       });
     }
   } else {
+    const started = performance.now();
     try {
       pdf = await renderDirectOrderPdf({
         orderId: id, actorId: session.user.id, actorRole: session.user.role, snapshotKey, baseUrl,
@@ -147,11 +149,10 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     } catch (error) {
       // Log a fixed event only: renderer exceptions can contain paths, URLs and secrets.
       if (_req.signal.aborted) return new Response(null, { status: 499, headers: { 'Cache-Control': 'private, no-store' } });
-      console.error('[order-pdf] PDF_GENERATION_FAILED');
+      const failure = logPdfFailure(error, { mode: 'direct', stage: 'render', started });
       return pdfStatusPage({
         title: 'PDF 生成失败',
-        ...pdfFailure(error instanceof Error ? error.name : null),
-        status: error instanceof Error && error.name === 'PdfBusyError' ? 503 : 500,
+        ...failure,
         retryUrl: pdfRetryUrl(_req.url),
       });
     }

@@ -2953,6 +2953,7 @@ model BackgroundWorkerHeartbeat {
   version           String
   smartBotStatus    SmartBotConnectionStatus?
   smartBotBotDigest String?                   @db.Char(64)
+  pdfReady          Boolean?
   startedAt         DateTime
   lastSeenAt        DateTime
 

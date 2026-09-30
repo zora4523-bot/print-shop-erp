@@ -61,6 +61,7 @@ export default async function BackgroundJobsPage() {
           {health.activeWorkers.length ? health.activeWorkers.map((worker, index) => (
             <Badge key={`${worker.queue}-${index}`} variant="outline">
               {backgroundJobQueueLabel(worker.queue)} · {formatDateTimeShanghai(worker.lastSeenAt)}
+              {worker.queue === 'HEAVY' ? ` · PDF ${worker.pdfReady === true ? '可用' : worker.pdfReady === false ? '暂不可用' : '状态未知'}` : ''}
             </Badge>
           )) : <span className="text-destructive">未检测到在线的后台处理进程</span>}
         </div>

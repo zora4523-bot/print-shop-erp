@@ -9,11 +9,12 @@ export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
 //
 // Reuse is opt-in during HEAVY worker bootstrap; Web/inline rendering stays isolated.
 import { PdfBrowserPool } from './browser-pool';
+import { PDF_WORKER_RENDER_BUDGET_MS, pdfLaunchOptions } from './launch-options';
 let workerPool: PdfBrowserPool | undefined;
 export function enableWorkerPdfBrowserReuse() {
   workerPool ??= new PdfBrowserPool(async () => {
     const { default: puppeteer } = await import('puppeteer');
-    return puppeteer.launch({ headless: true, timeout: 20_000, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    return puppeteer.launch(pdfLaunchOptions());
   });
 }
 export async function closeWorkerPdfBrowser() {
@@ -25,6 +26,7 @@ export async function closeWorkerPdfBrowser() {
 export type RenderPdfOptions = {
   html: string;
   requireArtwork?: boolean;
+  onArtworkUnavailable?: () => void;
   // Extra `page.pdf()` flags. The work-order paper invariants below (A4,
   // background graphics, CSS page size, and zero Puppeteer margins) always
   // win so preview and downloaded PDF cannot drift apart.
@@ -42,33 +44,26 @@ export type RenderPdfOptions = {
 
 export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
   if (workerPool && !opts.browser && !opts.launch) {
-    const signal = AbortSignal.any([...(opts.signal ? [opts.signal] : []), AbortSignal.timeout(60_000)]);
-    return workerPool.run((browser, context) => renderHtmlToPdf({ ...opts, browser, context, signal }), signal);
+    return workerPool.run(
+      (browser, context, signal) => renderHtmlToPdf({ ...opts, browser, context, signal }),
+      { ...(opts.signal ? { signal: opts.signal } : {}), budgetMs: PDF_WORKER_RENDER_BUDGET_MS },
+    );
   }
   const puppeteer = await import('puppeteer');
-  const browser =
-    opts.browser ??
-    (await puppeteer.default.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      ...opts.launch,
-    }));
-
-  let page: Page;
-  try {
-    const expectedVersion = process.env.PDF_CHROMIUM_VERSION;
-    if (expectedVersion && (await browser.version()).split('/').pop() !== expectedVersion) {
-      throw new PdfBrowserVersionMismatchError();
-    }
-    page = await (opts.context ?? browser).newPage();
-  } catch (error) {
-    if (!opts.browser) await browser.close();
-    throw error;
+  if (!opts.browser) {
+    const pool = new PdfBrowserPool(() => puppeteer.default.launch({ ...pdfLaunchOptions(), ...opts.launch }));
+    try {
+      return await pool.run((browser, context, signal) => renderHtmlToPdf({ ...opts, browser, context, signal }),
+        { signal: opts.signal, budgetMs: PDF_WORKER_RENDER_BUDGET_MS });
+    } finally { await pool.close(); }
   }
-  const abortRender = () => {
-    void page.close().catch(() => undefined);
-    if (!opts.browser) void browser.close().catch(() => undefined);
-  };
+  const browser = opts.browser;
+  const expectedVersion = process.env.PDF_CHROMIUM_VERSION;
+  if (expectedVersion && (await browser.version()).split('/').pop() !== expectedVersion) {
+    throw new PdfBrowserVersionMismatchError();
+  }
+  const page: Page = await (opts.context ?? browser).newPage();
+  const abortRender = () => { void page.close().catch(() => undefined); };
   opts.signal?.addEventListener('abort', abortRender, { once: true });
   try {
     opts.signal?.throwIfAborted();
@@ -102,8 +97,9 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
       : null);
     if (pagination !== null && pagination !== 'ready') throw new PrintLayoutOverflowError();
     opts.signal?.throwIfAborted();
-    if (opts.requireArtwork && await page.evaluate(() => document.querySelector('.thumb.image-failed') !== null)) {
-      throw new PrintArtworkUnavailableError();
+    if ((opts.requireArtwork || opts.onArtworkUnavailable) && await page.evaluate(() => document.querySelector('.thumb.image-failed') !== null)) {
+      if (opts.requireArtwork) throw new PrintArtworkUnavailableError();
+      opts.onArtworkUnavailable?.();
     }
     const pdf = await page.pdf({
       ...opts.pdf,
@@ -121,11 +117,6 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     // renders. Swallow errors so a page-close failure doesn't mask
     // the original thrown error on the PDF path.
     await page.close().catch(() => undefined);
-    // Only close the browser we launched. A caller-provided browser
-    // is someone else's to dispose of (e.g. tests sharing one).
-    if (!opts.browser) {
-      await browser.close();
-    }
   }
 }
 

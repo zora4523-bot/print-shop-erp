@@ -131,3 +131,12 @@ it('rejects failed uploaded artwork before producing a cacheable PDF', async () 
   expect(page.pdf).not.toHaveBeenCalled();
   expect(page.close).toHaveBeenCalledOnce();
 });
+
+it('preserves the warning PDF contract while reporting incomplete artwork to the cache', async () => {
+  const { browser, page } = renderHarness();
+  vi.mocked(page.evaluate).mockResolvedValueOnce('ready').mockResolvedValueOnce('ready').mockResolvedValueOnce(true);
+  const unavailable = vi.fn();
+  await renderHtmlToPdf({ html: '<html></html>', browser, onArtworkUnavailable: unavailable });
+  expect(unavailable).toHaveBeenCalledOnce();
+  expect(page.pdf).toHaveBeenCalledOnce();
+});

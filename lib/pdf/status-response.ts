@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 /** Public allowlist: never interpolate renderer diagnostics or persisted error text. */
-export function pdfFailure(code: string | null) {
+function failureDetails(code: string | null) {
   switch (code) {
     case 'PdfBusyError': return { code: 'PDF_BUSY', message: '当前下载较多，请稍后重试；也可以使用网页打印。' };
     case 'PdfBrowserUnavailableError': return { code: 'PDF_BROWSER_UNAVAILABLE', message: 'PDF 浏览器未就绪，可以使用网页打印，或联系管理员检查服务。' };
@@ -16,12 +16,20 @@ export function pdfFailure(code: string | null) {
   }
 }
 
+export function pdfFailure(code: string | null) {
+  const failure = failureDetails(code);
+  const status = ['PDF_BUSY', 'PDF_BROWSER_UNAVAILABLE', 'PDF_FONT_UNAVAILABLE',
+    'PDF_STORAGE_UNAVAILABLE', 'PDF_BROWSER_VERSION_MISMATCH'].includes(failure.code) ? 503 : 500;
+  return { ...failure, status };
+}
+
 export type PdfStatus = {
   title: string;
   message: string;
   status: number;
   retryUrl: string;
   code?: string;
+  requestId?: string;
 };
 type Presentation = { orderId: string; operator: boolean; json: boolean };
 
@@ -78,7 +86,7 @@ setTimeout(poll, 3000);
 export function pdfStatusResponse(input: PdfStatus, view: Presentation): Response {
   const pending = input.status === 202;
   const payload = { state: pending ? 'pending' : 'failed', title: input.title, message: input.message, code: input.code, retryUrl: input.retryUrl };
-  const headers = { 'Cache-Control': 'private, no-store', ...(pending ? { 'Retry-After': '3' } : {}) };
+  const headers = { 'Cache-Control': 'private, no-store', ...(input.requestId ? { 'X-Request-Id': input.requestId } : {}), ...(pending ? { 'Retry-After': '3' } : {}) };
   if (view.json) return Response.json(payload, { status: input.status, headers });
   const id = encodeURIComponent(view.orderId);
   const script = pending ? `<script>${POLL_SCRIPT}</script>` : '';

@@ -23,7 +23,7 @@ function inlineHealth() {
     status: 'ok', mode: 'inline', time: '2026-09-10T00:00:00.000Z',
     jobs: { pending: { LIGHT: 0, HEAVY: 0 }, running: 0,
       staleRunning: 0, deadLast24h: 0, deadNotificationLast24h: 0 },
-    smartBot: { status: null, required: false, configurationValid: true,
+    pdf: { ready: true }, smartBot: { status: null, required: false, configurationValid: true,
       identityMatch: null, operational: true, recoveryWaitMs: 0 },
     alerts: [], warnings: [],
   };
@@ -38,13 +38,13 @@ describe('deploy jobs health gate', () => {
     { alerts: undefined }, { warnings: {} }, { alerts: ['smart-bot-auth-failed'] },
     { warnings: ['unreviewed-warning'] },
     ...Object.keys(inlineHealth().smartBot).map((field) => ({
-      smartBot: { ...inlineHealth().smartBot, [field]: undefined },
+      pdf: { ready: true }, smartBot: { ...inlineHealth().smartBot, [field]: undefined },
     })),
-    { smartBot: { ...inlineHealth().smartBot, required: true } },
-    { smartBot: { ...inlineHealth().smartBot, configurationValid: false } },
-    { smartBot: { ...inlineHealth().smartBot, identityMatch: false } },
-    { smartBot: { ...inlineHealth().smartBot, operational: false } },
-    { smartBot: { ...inlineHealth().smartBot, recoveryWaitMs: 100 } },
+    { pdf: { ready: true }, smartBot: { ...inlineHealth().smartBot, required: true } },
+    { pdf: { ready: true }, smartBot: { ...inlineHealth().smartBot, configurationValid: false } },
+    { pdf: { ready: true }, smartBot: { ...inlineHealth().smartBot, identityMatch: false } },
+    { pdf: { ready: true }, smartBot: { ...inlineHealth().smartBot, operational: false } },
+    { pdf: { ready: true }, smartBot: { ...inlineHealth().smartBot, recoveryWaitMs: 100 } },
   ])('rejects incomplete or inconsistent optional inline null health %#', (overrides) => {
     expect(assessDeployJobsGate({ ...inlineHealth(), ...overrides }, {
       runtimeEnvironment: 'development',
@@ -73,7 +73,7 @@ describe('deploy jobs health gate', () => {
       expect(
         assessDeployJobsGate({
           status: 'alert',
-          smartBot: smartBot(status),
+          pdf: { ready: true }, smartBot: smartBot(status),
           alerts: ['an-actionable-alert'],
         }),
       ).toEqual({
@@ -90,7 +90,7 @@ describe('deploy jobs health gate', () => {
     expect(
       assessDeployJobsGate({
         status: 'alert',
-        smartBot: smartBot('CONNECTED'),
+        pdf: { ready: true }, smartBot: smartBot('CONNECTED'),
         alerts: ['dead-jobs-last-24h'],
       }),
     ).toEqual({
@@ -105,7 +105,7 @@ describe('deploy jobs health gate', () => {
   it.each(['CONNECTING', 'DISCONNECTED'])(
     'observes but does not accept required transient state %s',
     (status) => {
-      expect(assessDeployJobsGate({ smartBot: smartBot(status) })).toEqual({
+      expect(assessDeployJobsGate({ pdf: { ready: true }, smartBot: smartBot(status) })).toEqual({
         ok: true,
         ready: false,
         reason: 'smart-bot-not-ready',
@@ -117,7 +117,7 @@ describe('deploy jobs health gate', () => {
 
   it('immediately blocks NOT_CONFIGURED when an active destination requires the connector', () => {
     expect(
-      assessDeployJobsGate({ smartBot: smartBot('NOT_CONFIGURED') }),
+      assessDeployJobsGate({ pdf: { ready: true }, smartBot: smartBot('NOT_CONFIGURED') }),
     ).toEqual({
       ok: false,
       ready: false,
@@ -130,7 +130,7 @@ describe('deploy jobs health gate', () => {
   it('accepts an optional unconfigured connector', () => {
     expect(
       assessDeployJobsGate({
-        smartBot: smartBot('NOT_CONFIGURED', {
+        pdf: { ready: true }, smartBot: smartBot('NOT_CONFIGURED', {
           required: false,
           identityMatch: null,
           operational: true,
@@ -151,7 +151,7 @@ describe('deploy jobs health gate', () => {
   ] as const)('blocks required %s=false', (field, value, reason) => {
     expect(
       assessDeployJobsGate({
-        smartBot: smartBot('CONNECTED', {
+        pdf: { ready: true }, smartBot: smartBot('CONNECTED', {
           [field]: value,
           operational: false,
         }),
@@ -168,7 +168,7 @@ describe('deploy jobs health gate', () => {
   it('waits while a required matching identity has not published a heartbeat yet', () => {
     expect(
       assessDeployJobsGate({
-        smartBot: smartBot('CONNECTING', {
+        pdf: { ready: true }, smartBot: smartBot('CONNECTING', {
           identityMatch: null,
           operational: false,
         }),
@@ -184,8 +184,8 @@ describe('deploy jobs health gate', () => {
 
   it.each([
     {},
-    { smartBot: {} },
-    { smartBot: { status: 'A_FUTURE_UNREVIEWED_STATUS' } },
+    { pdf: { ready: true }, smartBot: {} },
+    { pdf: { ready: true }, smartBot: { status: 'A_FUTURE_UNREVIEWED_STATUS' } },
   ])('fails closed when smart-bot health is not observable', (body) => {
     expect(assessDeployJobsGate(body)).toEqual({
       ok: false,
@@ -199,7 +199,7 @@ describe('deploy jobs health gate', () => {
   it('CLI exits non-zero for a fatal status without echoing the response body', async () => {
     const response = JSON.stringify({
       status: 'alert',
-      smartBot: smartBot('AUTH_FAILED'),
+      pdf: { ready: true }, smartBot: smartBot('AUTH_FAILED'),
       internal: 'must-not-be-printed',
     });
     const result = await runGateCli(response);
@@ -229,7 +229,7 @@ describe('deploy jobs health gate', () => {
     ],
   ])('CLI emits the bounded deploy-loop token %#', async (state, token) => {
     const result = await runGateCli(
-      JSON.stringify({ smartBot: state }),
+      JSON.stringify({ pdf: { ready: true }, smartBot: state }),
       ['--status-only'],
     );
 
@@ -241,7 +241,7 @@ describe('deploy jobs health gate', () => {
   it('CLI treats an observed identity mismatch as immediately actionable', async () => {
     const result = await runGateCli(
       JSON.stringify({
-        smartBot: smartBot('CONNECTED', {
+        pdf: { ready: true }, smartBot: smartBot('CONNECTED', {
           identityMatch: false,
           operational: false,
         }),
@@ -293,3 +293,7 @@ function runGateCli(
     child.stdin.end(input);
   });
 }
+
+it.each([undefined, { ready: false }, { ready: null }])('rejects old or unavailable PDF capability: %j', (pdf) => {
+  expect(assessDeployJobsGate({ mode: 'durable', pdf, smartBot: smartBot('CONNECTED') })).toMatchObject({ ok: false, reason: 'pdf-worker-unavailable' });
+});

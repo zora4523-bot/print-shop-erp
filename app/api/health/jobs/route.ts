@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   assessBackgroundJobHealth,
+  hasReadyPdfWorker,
   classifyBackgroundJobAlerts,
   getBackgroundJobHealth,
   summarizeSmartBotConnection,
@@ -65,6 +66,7 @@ export async function GET(): Promise<Response> {
         status: report.level,
         time: health.observedAt.toISOString(),
         mode,
+        pdf: { ready: mode === 'durable' ? hasReadyPdfWorker(health, version) : null },
         jobs: {
           pending: health.pending,
           running: health.running,

@@ -44,6 +44,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
     WECOM_SMART_BOT_SECRET: 'e2e-only-smart-bot-secret',
     CDR_BUNDLE_MOCK_MODE: 'true',
     BACKGROUND_JOBS_MODE: 'inline',
+    PDF_ORDER_MODE: 'direct',
     AUTH_SECRET: 'e2e-only-auth-secret-for-isolated-release-tests',
     AUTH_TRUST_HOST: 'true',
     AUTH_URL: baseURL,

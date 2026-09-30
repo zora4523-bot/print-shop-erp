@@ -272,4 +272,8 @@ OrderLog 与 BusinessAuditLog 的 before。生产执行步骤（dry-run → 业�
 
 PDF 恢复验收：满足本文件 E2E 隔离前置后运行 `pnpm exec playwright test --config=playwright.pdf.config.ts`。测试使用真实 Next 开发服务及独立 HEAVY worker，覆盖服务离线、六视口双主题、触控、axe、就地状态查询、生成和重复下载；不代表生产构建、真实 OSS 图稿或通知验收。
 
-单张下载现默认 `PDF_ORDER_MODE=direct`，不依赖后台 worker；`pnpm dev` 仍管理其他业务需要的 LIGHT/HEAVY。直接路径验收使用 `E2E_PDF_ORDER_MODE=direct pnpm exec playwright test --config=playwright.pdf.config.ts`：仅启动 Web，覆盖多页下载、缓存、匿名拒绝、不入队及 HTML 打印准备。未指定该测试变量时验证 queued 恢复路径，`playwright.durable.config.ts` 也显式固定 queued 以保留原任务链验收。两种模式都保留下载协议与授权检查。
+开发单张下载默认 `PDF_ORDER_MODE=direct`；生产必须显式配置，queued 必须使用 durable。direct 模式，不依赖后台 worker；`pnpm dev` 仍管理其他业务需要的 LIGHT/HEAVY。直接路径验收使用 `E2E_PDF_ORDER_MODE=direct pnpm exec playwright test --config=playwright.pdf.config.ts`：仅启动 Web，覆盖多页下载、缓存、匿名拒绝、不入队及 HTML 打印准备。未指定该测试变量时验证 queued 恢复路径，`playwright.durable.config.ts` 也显式固定 queued 以保留原任务链验收。两种模式都保留下载协议与授权检查。
+
+PDF 补强验证：`node --import tsx scripts/pdf-lifecycle-check.ts` 在本机启动独立 Chromium，验证冻结/强杀后的恢复并断言本次进程组清空（POSIX）。真实 Next + PM2 信号验证：先在临时工具目录安装 PM2，再指定 `PDF_TEST_PM2_CLI=/绝对路径/pm2/bin/pm2 node scripts/pdf-shutdown-check.mjs`。它创建临时 Next 夹具、独立 PM2_HOME 和随机本机端口，不连接业务库、不操作已有 PM2 应用，验证在途 PDF、普通请求、reload 和子进程退出；不能代替生产资源容量验收。
+
+两条 PDF 浏览器用例均支持 `E2E_PDF_RELEASE=1`，此时执行真实 production build/start；direct 再加 `E2E_PDF_ORDER_MODE=direct`。必须先按现有隔离约束设置 E2E_DATABASE_URL/确认库名、SEED_ADMIN_USERNAME、测试管理员密码，完成 migrate/seed 和 `pnpm test:e2e:prepare`；缺前置的失败不得计为用例通过。

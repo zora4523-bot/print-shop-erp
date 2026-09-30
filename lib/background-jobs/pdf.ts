@@ -230,6 +230,8 @@ export async function waitForOrderPdfJob(
     const worker = await db.backgroundWorkerHeartbeat.findFirst({
       where: {
         queue: BackgroundJobQueue.HEAVY,
+        pdfReady: true,
+        version: process.env.APP_VERSION || 'dev',
         lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) },
       },
       select: { workerId: true },

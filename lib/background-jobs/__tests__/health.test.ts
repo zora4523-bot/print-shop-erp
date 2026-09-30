@@ -68,7 +68,7 @@ describe('smart-bot heartbeat recovery observation', () => {
         if (elapsedMs <= crashedAt + WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) {
           expect(operational.operational).toBe(false);
         }
-        return { smartBot: {
+        return { pdf: { ready: true }, smartBot: {
           status: summarizeSmartBotConnection(health, { expectedVersion: 'v1' }).status,
           ...operational, recoveryWaitMs: smartBotRecoveryWaitMs(health),
         } };
@@ -96,6 +96,7 @@ function fixture(): BackgroundJobHealth {
       },
       {
         queue: BackgroundJobQueue.HEAVY,
+        pdfReady: true,
         version: 'v1',
         smartBotStatus: null,
         smartBotBotDigest: null,
@@ -129,7 +130,7 @@ describe('assessBackgroundJobHealth', () => {
     expect(assessBackgroundJobHealth(health, { requireWorkers: true })).toMatchObject({
       available: false,
       status: 'error',
-      warnings: ['heavy-worker-missing'],
+      warnings: ['heavy-worker-missing', 'pdf-worker-unavailable'],
     });
   });
 

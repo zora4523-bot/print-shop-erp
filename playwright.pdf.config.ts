@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { createE2eConfig } from './scripts/lib/playwright-config';
 
 // Real Next routes + manually controlled durable worker, on a disposable DB.
-const base = createE2eConfig('development');
+const base = createE2eConfig(process.env.E2E_PDF_RELEASE === '1' ? 'release' : 'development');
 if (!base.webServer || Array.isArray(base.webServer)) throw new Error('PDF E2E requires one web server');
 const direct = process.env.E2E_PDF_ORDER_MODE === 'direct';
 const runId = process.env.E2E_PDF_RUN_ID || randomUUID();

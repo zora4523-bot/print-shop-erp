@@ -6,11 +6,21 @@ import { E2E_USERS, E2E_PASSWORD, login, getUserIdByUsername, seedPrintableOrder
 import { withSupplyChainDb } from '../e2e/_supply-chain-fixtures';
 import { assertDurableEnvironment, startHeavyWorker, expectJobSucceeded } from './_helpers';
 
+// Failed runs can leave a delayed job for this deterministic print fixture.
+// Retain its attempts/history; cancel only pending fixture PDFs in the isolated DB.
+async function cancelPendingFixturePdfs(orderId: string) {
+  if (!/^e2e-vr-/.test(orderId)) throw new Error('Expected an isolated print fixture');
+  await withSupplyChainDb((db) => db.query(`UPDATE "BackgroundJob"
+    SET status='CANCELLED', "finishedAt"=NOW(), "updatedAt"=NOW(), "lastErrorCode"='E2eFixtureReset'
+    WHERE type='ORDER_PDF' AND status='PENDING' AND "lockedBy" IS NULL AND payload->>'orderId'=$1`, [orderId]));
+}
+
 test('offline recovery, in-place progress, isolated worker rendering and authorized repeated downloads', async ({ page, request }, testInfo) => {
   test.setTimeout(150_000);
   assertDurableEnvironment();
   await cleanupPrintableOrderStressFixture();
   const fixture = await seedPrintableOrder({ submitterId: await getUserIdByUsername(E2E_USERS.sales.username), designCount: 5, variant: 'rich-context' });
+  await cancelPendingFixturePdfs(fixture.orderId);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   let worker: Awaited<ReturnType<typeof startHeavyWorker>> | undefined;
@@ -76,9 +86,31 @@ test('offline recovery, in-place progress, isolated worker rendering and authori
     const annexPdf = await annexResponse.body();
     expect((await PDFDocument.load(annexPdf)).getPageCount()).toBeGreaterThan(1);
     await testInfo.attach('colored-annex.pdf', { body: annexPdf, contentType: 'application/pdf' });
+    const ops = await page.context().newPage();
+    try {
+      await ops.goto('/owner/background-jobs');
+      await expect(ops.getByText(/PDF 可用/)).toBeVisible();
+      for (const width of [375, 393, 768, 1024, 1280, 1920]) {
+        await ops.setViewportSize({ width, height: 900 });
+        for (const colorScheme of ['light', 'dark'] as const) {
+          await ops.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+          await ops.getByRole('button', { name: '切换界面主题' }).click();
+          await ops.getByRole('menuitemradio', { name: colorScheme === 'dark' ? '暗色' : '浅色', exact: true }).click();
+          await expect(ops.locator('html')).toHaveAttribute('data-theme', colorScheme);
+          await ops.keyboard.press('Escape');
+          await expect(ops.getByRole('menu')).toBeHidden();
+          await expect(ops.getByRole('button', { name: '切换界面主题' })).toBeFocused();
+          await expect.poll(() => ops.evaluate(() => document.getAnimations()
+            .filter((animation) => animation.playState === 'running' || animation.pending).length)).toBe(0);
+          expect(await ops.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+          expect((await new AxeBuilder({ page: ops }).analyze()).violations).toEqual([]);
+        }
+      }
+    } finally { await ops.close(); }
     expect(errors).toEqual([]);
   } finally {
     await worker?.stop();
+    await cancelPendingFixturePdfs(fixture.orderId);
     await cleanupPrintableOrderStressFixture();
   }
 });

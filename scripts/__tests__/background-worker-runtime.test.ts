@@ -77,6 +77,8 @@ let signalHandlers: Map<string, SignalHandler>;
 let initialExitCode: typeof process.exitCode;
 
 beforeEach(() => {
+  pdfMocks.enable.mockClear();
+  pdfMocks.close.mockClear();
   initialExitCode = process.exitCode;
   process.exitCode = undefined;
   vi.stubEnv('BACKGROUND_JOB_QUEUE', 'LIGHT');
@@ -213,19 +215,22 @@ describe('worker Sentry scrubbing', () => {
   });
 });
 
-it('does not advertise a HEAVY heartbeat or consume jobs if PDF preflight fails', async () => {
+it('keeps HEAVY online but excludes PDF before a failed capability probe', async () => {
   vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
   pdfMocks.check.mockRejectedValueOnce(new Error('preflight'));
+  runBackgroundWorkerMock.mockImplementationOnce(async (input) => {
+    const options = input as { excludedTypes: () => string[] };
+    expect(options.excludedTypes()).toEqual(['ORDER_PDF', 'ORDER_BATCH_PDF']);
+  });
   await runBackgroundWorkerProcess();
-  expect(process.exitCode).toBe(1);
-  expect(startWorkerHeartbeatMock).not.toHaveBeenCalled();
-  expect(runBackgroundWorkerMock).not.toHaveBeenCalled();
+  expect(process.exitCode).not.toBe(1);
+  expect(startWorkerHeartbeatMock).toHaveBeenCalledOnce();
+  expect(runBackgroundWorkerMock).toHaveBeenCalledOnce();
 });
-it('checks PDF before heartbeat and closes the reused browser after draining', async () => {
+it('closes the reused browser after draining without blocking startup on the probe', async () => {
   vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
   pdfMocks.check.mockResolvedValueOnce({ bytes: 1234 });
   await runBackgroundWorkerProcess();
-  expect(pdfMocks.check).toHaveBeenCalledBefore(startWorkerHeartbeatMock);
   expect(pdfMocks.enable).toHaveBeenCalledOnce();
   expect(pdfMocks.close).toHaveBeenCalledAfter(runBackgroundWorkerMock);
 });

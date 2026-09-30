@@ -15,6 +15,7 @@ export async function startWorkerHeartbeat(input: {
   queue: BackgroundJobQueue;
   version: string;
   intervalMs?: number;
+  pdfReady?: () => boolean;
   smartBotStatus?: () => WorkerSmartBotConnectionStatus | null;
   smartBotBotDigest?: () => string | null;
   onError?: (error: unknown) => void;
@@ -27,17 +28,19 @@ export async function startWorkerHeartbeat(input: {
     // Read immediately before every statement: the connector can transition
     // independently between beats. Workers without a connector (including
     // the HEAVY worker) deliberately publish NULL.
+    const pdfReady = input.pdfReady?.() ?? null;
     const smartBotStatus = input.smartBotStatus?.() ?? null;
     const smartBotBotDigest = input.smartBotBotDigest?.() ?? null;
     await db.$executeRaw`
       INSERT INTO "BackgroundWorkerHeartbeat"
-             ("workerId", "queue", "version", "smartBotStatus", "smartBotBotDigest", "startedAt", "lastSeenAt")
+             ("workerId", "queue", "version", "smartBotStatus", "smartBotBotDigest", "pdfReady", "startedAt", "lastSeenAt")
       VALUES (
         ${input.workerId},
         ${input.queue}::"BackgroundJobQueue",
         ${input.version},
         ${smartBotStatus}::"SmartBotConnectionStatus",
         ${smartBotBotDigest},
+        ${pdfReady},
         clock_timestamp(),
         clock_timestamp()
       )
@@ -46,6 +49,7 @@ export async function startWorkerHeartbeat(input: {
              "version" = EXCLUDED."version",
              "smartBotStatus" = EXCLUDED."smartBotStatus",
              "smartBotBotDigest" = EXCLUDED."smartBotBotDigest",
+             "pdfReady" = EXCLUDED."pdfReady",
              "lastSeenAt" = EXCLUDED."lastSeenAt"
     `;
   };

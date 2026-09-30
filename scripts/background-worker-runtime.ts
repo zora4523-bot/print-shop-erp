@@ -1,3 +1,6 @@
+import { startPdfCapabilityMonitor, PDF_JOB_TYPES, isPdfInfrastructureFailure } from '../lib/pdf/capability';
+import { pdfFailure } from '../lib/pdf/status-response';
+import { logPdfFailure } from '../lib/pdf/diagnostics';
 import { hostname } from 'node:os';
 import * as Sentry from '@sentry/nextjs';
 import { BackgroundJobQueue } from '../generated/prisma/client';
@@ -41,8 +44,6 @@ async function main(): Promise<void> {
   const concurrency = intEnv(queue === BackgroundJobQueue.HEAVY ? 'HEAVY_WORKER_CONCURRENCY' : 'LIGHT_WORKER_CONCURRENCY', queue === BackgroundJobQueue.HEAVY ? 1 : 2, 1, 8);
   assertWorkerPoolCapacity(databasePoolConfig(process.env.DATABASE_URL!, { role: 'worker' }).max!, concurrency);
   if (queue === BackgroundJobQueue.HEAVY) {
-    const { checkPdfRuntime } = await import('../lib/pdf/preflight');
-    console.info('[worker] PDF preflight', await checkPdfRuntime());
     if (process.env.PDF_BROWSER_REUSE !== '0') {
       const { enableWorkerPdfBrowserReuse } = await import('../lib/pdf/render');
       enableWorkerPdfBrowserReuse();
@@ -93,12 +94,18 @@ async function main(): Promise<void> {
   let stopHeartbeat: () => Promise<void> = async () => undefined;
   let stopSmartBotConnector: () => Promise<void> = async () => undefined;
   let smartBotOwnershipLost = false;
+  const pdfCapability = queue === BackgroundJobQueue.HEAVY
+    ? startPdfCapabilityMonitor(async () => {
+        const { checkPdfRuntime } = await import('../lib/pdf/preflight');
+        await checkPdfRuntime({ reuseWorker: process.env.PDF_BROWSER_REUSE !== '0' });
+      }) : null;
 
   try {
     stopHeartbeat = await startWorkerHeartbeat({
       workerId,
       queue,
       version: process.env.APP_VERSION || 'dev',
+      ...(pdfCapability ? { pdfReady: pdfCapability.ready } : {}),
       intervalMs: intEnv(
         'WORKER_HEARTBEAT_MS',
         WORKER_HEARTBEAT_DEFAULT_INTERVAL_MS,
@@ -153,6 +160,7 @@ async function main(): Promise<void> {
       queue,
       workerId,
       handlers,
+      ...(pdfCapability ? { excludedTypes: () => pdfCapability.ready() ? [] : PDF_JOB_TYPES } : {}),
       concurrency,
       pollIntervalMs: intEnv('BACKGROUND_JOB_POLL_MS', 1_000, 100, 60_000),
       leaseMs: intEnv(
@@ -163,7 +171,12 @@ async function main(): Promise<void> {
       ),
       signal: controller.signal,
       onError(error, job) {
-        const code = backgroundJobErrorCode(error);
+        if (job && PDF_JOB_TYPES.some((type) => type === job.type)) {
+          logPdfFailure(error, { mode: 'queued', stage: 'render', started: performance.now() - Math.max(0, Date.now() - job.claimedAt.getTime()) });
+          if (isPdfInfrastructureFailure(error)) pdfCapability?.invalidate();
+        }
+        const code = job && PDF_JOB_TYPES.some((type) => type === job.type)
+          ? pdfFailure(error instanceof Error ? error.name : null).code : backgroundJobErrorCode(error);
         console.error(
           `[worker] ${queue} ${job?.type ?? 'poll'} failed: ${code}`,
         );
@@ -207,6 +220,7 @@ async function main(): Promise<void> {
       }
     }
   } finally {
+    await pdfCapability?.stop();
     await stopHeartbeat();
     await stopSmartBotConnector();
     if (queue === BackgroundJobQueue.HEAVY) {

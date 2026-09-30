@@ -12,6 +12,7 @@
  */
 // @next/env 是 CommonJS，纯 .mjs 里用默认导入解构（具名导入 Node 会报错）。
 import nextEnv from '@next/env';
+import { orderPdfMode } from '../lib/pdf/mode.mjs';
 import { resolve, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -88,7 +89,7 @@ if (wecomSmartBotSet.length === 1) {
 if (isProd && !/^\d+\.\d+\.\d+\.\d+$/.test(env.PDF_CHROMIUM_VERSION || '')) {
   errors.push('生产 PDF_CHROMIUM_VERSION 必须固定为已验收 Chromium 的完整版本。');
 }
-if (!['direct', 'queued'].includes(env.PDF_ORDER_MODE || 'direct')) errors.push('PDF_ORDER_MODE 必须为 direct 或 queued。');
+if (!orderPdfMode(env)) errors.push('PDF_ORDER_MODE 必须显式配置为 direct 或 queued；queued 要求 durable 后台任务模式。');
 const pdfStorage = env.PDF_ARTIFACT_STORAGE || 'filesystem';
 if (!['filesystem', 'oss'].includes(pdfStorage)) errors.push('PDF_ARTIFACT_STORAGE 必须为 filesystem 或 oss。');
 if (isProd && pdfStorage === 'filesystem' && !env.PDF_ARTIFACT_DIR?.trim()) {

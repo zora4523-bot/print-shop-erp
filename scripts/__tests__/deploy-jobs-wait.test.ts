@@ -3,7 +3,7 @@ import * as gate from '../deploy-jobs-gate.mjs';
 
 function health(status = 'CONNECTED', overrides: Record<string, unknown> = {}) {
   return {
-    smartBot: {
+    pdf: { ready: true }, smartBot: {
       status,
       required: true,
       configurationValid: true,

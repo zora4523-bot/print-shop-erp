@@ -96,6 +96,7 @@ describe('getBackgroundJobHealth', () => {
         select: {
           queue: true,
           version: true,
+          pdfReady: true,
           smartBotStatus: true,
           smartBotBotDigest: true,
           lastSeenAt: true,

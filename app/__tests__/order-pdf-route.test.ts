@@ -32,6 +32,7 @@ const request = (query = '') => handleOrderPdfGet(Object.assign(new NextRequest(
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv('PDF_ORDER_MODE', 'queued');
+  vi.stubEnv('BACKGROUND_JOBS_MODE', 'durable');
   mocks.direct.mockImplementation(async (input) => mocks.render({ html: await input.html(), signal: input.signal }));
   mocks.session.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
   mocks.order.mockResolvedValue({ id: 'order-1', orderNo: 'GD-001', externalSalesName: '外销甲', workOrderVersion: 3, items: [] });
@@ -286,4 +287,13 @@ it('refuses an invalid mode rather than silently switching execution paths', asy
   expect((await request()).status).toBe(503);
   expect(mocks.direct).not.toHaveBeenCalled();
   expect(mocks.enqueue).not.toHaveBeenCalled();
+});
+
+it('fails closed when production PDF mode is missing', async () => {
+  vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('PDF_ORDER_MODE', '');
+  const response = await request();
+  expect(response.status).toBe(503);
+  expect(await response.text()).toContain('PDF_CONFIGURATION_INVALID');
+  expect(mocks.direct).not.toHaveBeenCalled();
 });

@@ -525,12 +525,18 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 ### PDF 单张下载、状态查询与恢复（2026-09-30）
 
-单张下载默认 `PDF_ORDER_MODE=direct`：在 Web Node 进程生成，不入队、不要求 HEAVY 心跳或产物存储。相同账号/角色/工单/完整打印内容/base URL 合并并发请求，最多缓存五分钟（每进程 32 MiB、16 份；超大文件只返回不缓存）。每进程最多四个不同请求在途，Chromium 串行执行，每次独立上下文；包含等待在内上限 45 秒。超过容量返回恢复页 503 `PDF_BUSY`；客户端断开只结束自己的等待（499 空响应），不取消其他订阅者。每次下载仍复核当前身份、资源所有权和完整内容（包括未升版修改），内容改变返回 409。`regenerate=1` 绕过完成缓存，但仍合并同内容的在途请求。HTTP 始终 `private, no-store`，与服务内部短时复用不同。
+开发单张下载默认 `PDF_ORDER_MODE=direct`；生产必须显式配置 direct 或 queued，缺少/非法配置返回 503 `PDF_CONFIGURATION_INVALID`。direct 模式：在 Web Node 进程生成，不入队、不要求 HEAVY 心跳或产物存储。相同账号/角色/工单/完整打印内容/base URL 合并并发请求，最多缓存五分钟（每进程 32 MiB、16 份；超大文件只返回不缓存）。每进程最多四个不同请求在途，Chromium 串行执行，每次独立上下文；包含等待在内上限 45 秒。超过容量返回恢复页 503 `PDF_BUSY`；客户端断开只结束自己的等待（499 空响应），不取消其他订阅者。每次下载仍复核当前身份、资源所有权和完整内容（包括未升版修改），内容改变返回 409。`regenerate=1` 绕过完成缓存，但仍合并同内容的在途请求。HTTP 始终 `private, no-store`，与服务内部短时复用不同。
 
-`PDF_ORDER_MODE=queued` 可回退到原 durable 队列路径；后台模式为 inline 时仍直接生成。已有 `jobId` 在 durable 模式下继续走原授权任务，不会误生成新任务；重复、空或非法 jobId 返回 400。旧任务内容标识与当前内容不同或缺失时拒绝返回产物，提示重新生成。批量打印接口始终沿用原队列。单张 PDF 的 `view=inline` 协议保留，页面“打印”入口使用 `/print/orders/:id?autoprint=1`，减少对浏览器 PDF 插件的依赖。
+`PDF_ORDER_MODE=queued` 使用原 durable 队列路径；后台模式为 inline 时返回 503 `PDF_CONFIGURATION_INVALID`，不静默改用 direct。已有 `jobId` 在 durable 模式下继续走原授权任务，不会误生成新任务；重复、空或非法 jobId 返回 400。旧任务内容标识与当前内容不同或缺失时拒绝返回产物，提示重新生成。批量打印接口始终沿用原队列。单张 PDF 的 `view=inline` 协议保留，页面“打印”入口使用 `/print/orders/:id?autoprint=1`，减少对浏览器 PDF 插件的依赖。
 
 `GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
 
 202 HTML 每次查询结束后等待 3 秒再查询，单次网络查询上限 15 秒、页面自动查询上限两分钟；不刷新整页、不自动抢焦点。就绪后再次通过授权下载路由打开 PDF；离线、超时或错误停止自动查询。禁用 JS 时仍可手动查询。HTML 提供网页打印、返回工单，以及仅对 `ops:jobs:manage` 角色显示的后台任务入口；跳转目标仍独立授权。
 
 已知错误包括 PDF_WORKER_UNAVAILABLE、PDF_QUEUE_DELAYED、PDF_FONT_UNAVAILABLE、PDF_BROWSER_VERSION_MISMATCH、PDF_LAYOUT_OVERFLOW、PDF_ARTWORK_UNAVAILABLE、PDF_STORAGE_UNAVAILABLE、PDF_VERSION_CHANGED、PDF_RENDER_TIMEOUT；未知错误只显示 PDF_GENERATION_FAILED。inline 渲染失败现在与 durable 一致返回可恢复 HTML，而非只有 JSON 错误。
+
+### PDF 能力与诊断补强（2026-09-30）
+
+`/api/health/jobs` 新增 `pdf: {ready: boolean | null}`：durable 仅在当前发布版本的活跃 HEAVY 心跳明确上报 PDF 可用时为 true；inline 为 null（不代表 Web 渲染已检查）。失能产生 `pdf-worker-unavailable` 告警，jobs 返回 503，但不单独使 Web ready 失败。发布 jobs gate 在能力未知/失能时拒绝放行。PDF 等待端点要求相同版本和有效能力；已生成产物仍先按原授权规则读取。
+
+direct 生成失败返回 `X-Request-Id`，与只包含随机关联号、白名单错误码、模式、阶段和耗时的日志对应。容量、浏览器、字体、版本、产物存储不可用返回 503；其他渲染失败保留 500。图稿不完整时继续提供含原有警告的 PDF，但不保存到 direct 完成缓存；批量打印原有严格图稿校验不变。

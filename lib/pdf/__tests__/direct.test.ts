@@ -64,3 +64,13 @@ it('aborts one caller promptly without cancelling a shared request or another ca
   finish(Buffer.from('done'));
   expect(await other).toEqual(Buffer.from('done'));
 });
+
+it('shares an incomplete result only while pending, never caching the warning PDF', async () => {
+  const cache = new PdfRequestCache();
+  const generate = vi.fn(async () => Buffer.from('warning PDF'));
+  const first = cache.get('artwork', generate, false, () => false);
+  expect(cache.get('artwork', generate)).toBe(first);
+  await first;
+  await cache.get('artwork', generate);
+  expect(generate).toHaveBeenCalledTimes(2);
+});
