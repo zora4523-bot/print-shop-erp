@@ -499,6 +499,8 @@ model Order {
   exportSelections            OrderExportSelection[]
 
   @@index([submitterId])
+  // 代理商账单的代理人筛选逐用户探测「是否有外部销售工单」（lib/agent-monthly-billing/query.ts）。
+  @@index([submitterId, settlementType])
   @@index([customerPartyId])
   @@index([sourceOrderId])
   @@index([kind])
@@ -613,6 +615,8 @@ model OrderItem {
   @@index([orderId])
   @@index([craft])
   @@index([quoteDisposition])
+  // 产品目录的「被多少工单引用」逐行计数按 productId 探测（lib/product.ts）。
+  @@index([productId, orderId])
 }
 
 // 每款可有多行制版明细。plateGroupId/specification 是生产与复核事实，
