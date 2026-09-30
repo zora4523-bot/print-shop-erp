@@ -21,6 +21,7 @@ const bill = {
     id: `item-${index}`, orderId: `order-${index}`, orderNoSnapshot: `WO-${index}`,
     orderStatusSnapshot: status, workOrderVersionSnapshot: 2,
     settledFeeSnapshot: new Decimal('60.15'), settledAtSnapshot: new Date('2026-08-20T00:00:00Z'),
+    credits: [],
     order: { customName: index === 0 ? null : '中秋礼盒' },
   })),
 };

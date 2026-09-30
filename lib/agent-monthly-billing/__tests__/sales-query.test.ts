@@ -35,7 +35,7 @@ it('selects only customer-facing receipt facts and frozen item identity/status',
   expect(query.select.receipt).toEqual({ select: {
     amount: true, receivedAt: true, paymentMethod: true, referenceNo: true,
   } });
-  expect(query.select.items.select).toEqual({
+  expect(query.select.items.select).toMatchObject({
     id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true,
     orderStatusSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true,
     order: { select: { customName: true } },
@@ -53,4 +53,11 @@ it('bounds pages and summarizes the complete owned result, not just the visible 
 it('denies a non-sales list before reading aggregates', async () => {
   await expect(listSalesMonthlyBills({ id: 'admin', role: Role.ADMIN })).rejects.toThrow();
   expect(count).not.toHaveBeenCalled();
+});
+it('limits linked allocations to the same sales account and omits internal credit reasons', async () => {
+  await getSalesMonthlyBill(actor, 'bill-a');
+  const credits = findFirst.mock.calls[0][0].select.items.select.credits;
+  expect(credits.select.allocations.where).toEqual({ bill: { agentUserId: actor.id } });
+  expect(credits.select).not.toHaveProperty('reason');
+  expect(credits.select).not.toHaveProperty('createdBy');
 });

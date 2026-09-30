@@ -1,3 +1,5 @@
+import { BillItemEvidence } from '@/components/business/agent-monthly-billing/BillItemEvidence';
+import { BillDetailDisclosure } from '@/components/business/agent-monthly-billing/BillDetailDisclosure';
 import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -117,6 +119,7 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
                     >
                       {item.orderNoSnapshot}
                     </Link>
+                    <div className="mt-2"><BillItemEvidence item={item} period={bill.period} /></div>
                     {bill.status !== AgentMonthlyBillStatus.DRAFT && new Decimal(remainingCreditAmount(item.settledFeeSnapshot, item.credits)).gt(0) ? (
                       <Link href={`/owner/agent-bills/${bill.id}/credits/${item.id}/new`} className={buttonVariants({ size: 'sm', variant: 'outline' })}>
                         录入抵扣
@@ -151,6 +154,11 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
                 <span>
                   来源 {row.credit.sourceItem.bill.period} ·{' '}
                   {row.credit.sourceItem.orderNoSnapshot}
+                  <BillDetailDisclosure label="查看抵扣来源" title="抵扣来源" description={`${bill.period} 月账单抵扣`}>
+                    <p>本账单抵扣 {formatMoneyDelta(row.amount)}</p>
+                    <p>来源工单 {row.credit.sourceItem.orderNoSnapshot}</p>
+                    <Link href={`/owner/agent-bills/${row.credit.sourceItem.bill.id}`} className={buttonVariants({ variant: 'outline' })}>{row.credit.sourceItem.bill.period} 月账单</Link>
+                  </BillDetailDisclosure>
                 </span>
                 <strong className="font-sans tabular-nums">
                   {formatMoneyDelta(row.amount)}
