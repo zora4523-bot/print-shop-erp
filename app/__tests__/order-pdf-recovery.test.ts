@@ -56,7 +56,7 @@ it('recovers a ready job whose PDF file was removed without exposing its diagnos
   expect(body).toContain('PDF 产物不可用');
   expect(body).toContain('生成结果已过期或被清理，请点击下方按钮重新生成。');
   const retryLinks = [...body.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
-  expect(retryLinks).toEqual(['/api/orders/order-recovery/pdf?regenerate=1']);
+  expect(retryLinks).toEqual(['/api/orders/order-recovery/pdf?regenerate=1', '/print/orders/order-recovery', '/orders/order-recovery', '/owner/background-jobs']);
   const publicPayload = JSON.stringify({ headers: Object.fromEntries(response.headers), body });
   for (const diagnostic of [artifactName, artifactPath, 'ENOENT', 'private-stack-frame', '%PDF', 'job-consumed', 'jobId']) {
     expect(publicPayload).not.toContain(diagnostic);

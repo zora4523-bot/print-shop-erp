@@ -260,3 +260,7 @@ BOM 在原版本机制内支持纸张＋规格目标；历史产品目标保留�
 ### 无计薪进度授权补充（2026-09-21）
 
 无计薪进度的列表、详情及提交在领域层共享 `lib/production/progress-reporter-lane.ts` 的工艺岗位/机型匹配。步骤 craftId 必须属于当前在职 WORKER 对应的有效自产工艺集合；写入在事务内复核。无配置不放行，不依赖前端隐藏或个人推荐熟练项。生产打印仍由独立 print-access 规则控制（用途权限待业务决策，不以进度页授权替代）。
+
+### PDF worker 运行保障（2026-09-30）
+
+HEAVY 在登记心跳前执行 `lib/pdf/preflight.ts`：真实 Chromium 中文 PDF、嵌入字体与私有产物存储往返，失败不消费任务。`lib/pdf/browser-pool.ts` 仅在 HEAVY 内启用；一个浏览器串行执行，每任务独立 BrowserContext，无共享 cookie/页面。50 次、5 分钟寿命、60 秒空闲、断连或任务失败会回收；排队受 worker 并发及池上限限制，单次复用请求信号上限 60 秒；停机先排空任务再关闭浏览器。`PDF_BROWSER_REUSE=0` 可回退逐次启动，Web inline 和调用方注入浏览器不启用池。worker 结构化日志只含内部等待/浏览器准备/渲染耗时、是否复用和 Node RSS，不含订单正文、图片地址或凭证；Node RSS 不代表 Chromium 子进程峰值。模板、金额、权限、版本及任务幂等规则不变。

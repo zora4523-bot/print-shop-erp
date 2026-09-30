@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "predev": "prisma generate",
-    "dev": "next dev",
+    "dev": "node scripts/dev-stack.mjs",
+    "dev:web": "next dev",
+    "check:pdf": "node --import tsx scripts/pdf-check.ts",
     "build": "next build",
     "start": "next start",
     "worker:light": "node --conditions=react-server --import tsx scripts/background-worker.ts --queue=LIGHT",

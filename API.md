@@ -152,12 +152,12 @@ v2 月账单入账前使用 Decimal 核对加工费＋对客收费明细＝工�
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
 | `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
 | `GET /api/cdr/bundles/:accessToken` | 256-bit capability URL | 服务端生成的 43 位 base64url token；不接受数据库 id | 就绪后校验 token 并 `302` 到 60 秒 OSS GET 签名；生成中 `409` + `Retry-After`；失效、撤销或不存在统一 `404`；频率超限 `429`；OSS 不可用 `503` |
-| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
+| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为就地查询进度的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 
-Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到登录 HTML；页面请求仍跳转登录。路由继续校验数据库账号状态、角色及资源所有权，不依赖 Proxy 作为最终授权。PDF 的内联渲染失败与后台任务失败只返回固定错误码 `PDF_GENERATION_FAILED` 和重试建议，不返回底层异常正文或部署路径。
+Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到登录 HTML；页面请求仍跳转登录。路由继续校验数据库账号状态、角色及资源所有权，不依赖 Proxy 作为最终授权。PDF 的内联渲染失败与后台任务失败只返回白名单错误码和恢复建议，不返回底层异常正文或部署路径；未知异常统一为 `PDF_GENERATION_FAILED`。
 
 下载响应使用 `private, no-store`；文件名同时提供安全的 ASCII fallback 和 UTF-8 名称（适用的端点）。新增下载接口时保持内容类型、长度、缓存和 `nosniff` 语义。
 
@@ -522,3 +522,11 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 - `retryDeadBackgroundJob` 以 `isRegisteredBackgroundJobType`（`BACKGROUND_JOB_TYPES`，与处理器表一一对应）判定；已删除类型 `CRON_HOURLY_PAYROLL`、`CRON_CS_SETTLE`、`CRON_CS_PERIOD_ENDING`，以及事件已不在 `NOTIFICATION_EVENTS` 的通知死信，抛 `RetiredBackgroundJobTypeError`，action 返回 `{ status: 'error', message: '该任务类型对应的功能已停用，无法重试；记录保留为运行历史' }`，历史行不改。运维页对这些行不渲染“重试”，列表只提取事件名，不把 payload 交给页面。
 - `resolveUnknownNotification` 对已删除事件（`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED`）的 `NOT_DELIVERED_RETRY` 在写入前拒绝（`RETIRED_EVENT`），action 返回“该通知事件已停用，无法重发；请核对后确认已送达或忽略”；`DELIVERED` / `IGNORED` 照常可用。同组仍有 `RETRYING` 日志（升级前已确认未送达）时，已删除事件在最后一条 UNKNOWN 收尾后**不**重新入队（2026-09-26 修复：此前会把任务改回 PENDING，处理器拒绝后这些日志永远停在 RETRYING）：同一事务内以 CAS（`id` + `deliveryKey` + `RETRYING` + `deliveryStateVersion`）把它们关闭为 `FAILED`（`IGNORED` 沿用“人工忽略：理由”，`DELIVERED` 记“人工核对：未送达；事件已停用，不再重发”），任务保持 `DEAD`、`lastErrorCode` 改为 `NotificationReplayTerminalError`（运维页不再给“去通知页处置”），审计行 `after.retiredEventClosedLogs` 逐条记录；返回值 `retiredClosedCount` 供 action 提示。通知页由服务端纯函数 `lib/notification/unknown-retry-availability.ts` 给出不可重发原因，组件据此禁用按钮。
 - 升级前已处于 `RETRYING` 的同组日志：对最后一条 `UNKNOWN` 选择“确认已送达”或“忽略”时，事件已删除则不再重新入队，这些日志在同一事务内按 CAS 关闭为 `FAILED`（确认已送达时记“人工核对：未送达；事件已停用，不再重发”，忽略时沿用忽略理由），任务保持 `DEAD`（`ec43cf66`）。
+
+### PDF 状态查询与恢复（2026-09-30）
+
+`GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
+
+202 HTML 每次查询结束后等待 3 秒再查询，单次网络查询上限 15 秒、页面自动查询上限两分钟；不刷新整页、不自动抢焦点。就绪后再次通过授权下载路由打开 PDF；离线、超时或错误停止自动查询。禁用 JS 时仍可手动查询。HTML 提供网页打印、返回工单，以及仅对 `ops:jobs:manage` 角色显示的后台任务入口；跳转目标仍独立授权。
+
+已知错误包括 PDF_WORKER_UNAVAILABLE、PDF_QUEUE_DELAYED、PDF_FONT_UNAVAILABLE、PDF_BROWSER_VERSION_MISMATCH、PDF_LAYOUT_OVERFLOW、PDF_ARTWORK_UNAVAILABLE、PDF_STORAGE_UNAVAILABLE、PDF_VERSION_CHANGED、PDF_RENDER_TIMEOUT；未知错误只显示 PDF_GENERATION_FAILED。inline 渲染失败现在与 durable 一致返回可恢复 HTML，而非只有 JSON 错误。

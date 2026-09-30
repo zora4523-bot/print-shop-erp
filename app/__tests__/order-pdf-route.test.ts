@@ -99,7 +99,8 @@ describe('order PDF route', () => {
     expect(mocks.wait).toHaveBeenCalledWith('job-1', expect.objectContaining({
       expected: { orderId: 'order-1', actorId: 'admin-1', actorRole: Role.ADMIN, workOrderVersion: 3 },
     }));
-    expect(response.headers.get('refresh')).toBe('5;url=/api/orders/order-1/pdf?jobId=job-1');
+    expect(response.headers.get('refresh')).toBeNull();
+    expect(await response.text()).toContain("url.searchParams.set('status', '1')");
   });
 
   it('retries a failed PDF without reusing its failed job', async () => {
@@ -139,7 +140,10 @@ it('does not return renderer diagnostics or durable error payloads', async () =>
   mocks.render.mockRejectedValue(new Error(diagnostic));
   const response = await request();
   expect(response.status).toBe(500);
-  expect(await response.json()).toEqual({ error: 'PDF 生成失败', code: 'PDF_GENERATION_FAILED', message: '请重新生成；如仍失败，请联系管理员' });
+  const inlineBody = await response.text();
+  expect(inlineBody).toContain('PDF_GENERATION_FAILED');
+  expect(inlineBody).not.toContain(diagnostic);
+  expect(inlineBody).toContain('/print/orders/order-1');
   mocks.mode.mockReturnValue('durable');
   mocks.wait.mockResolvedValue({ status: 'failed', errorCode: diagnostic });
   const queued = await request('?jobId=job-1');
@@ -173,4 +177,50 @@ it.each(['unavailable', 'delayed'])('stops automatic refresh for %s but preserve
   expect(body).toContain('view=inline');
   expect(body).not.toContain('regenerate=1');
   expect(mocks.enqueue).not.toHaveBeenCalled();
+});
+
+it('offers an authorized web-print fallback and an operator entry when the worker is offline', async () => {
+  mocks.mode.mockReturnValue('durable');
+  mocks.wait.mockResolvedValue({ status: 'unavailable' });
+  const response = await request();
+  const body = await response.text();
+  expect(body).toContain('href="/print/orders/order-1"');
+  expect(body).toContain('href="/orders/order-1"');
+  expect(body).toContain('/owner/background-jobs');
+  expect(body).toContain('PDF_WORKER_UNAVAILABLE');
+});
+
+it('polls the same authorized task as private JSON without enqueueing a new task', async () => {
+  mocks.mode.mockReturnValue('durable');
+  mocks.wait.mockResolvedValue({ status: 'timeout', phase: 'running' });
+  const response = await request('?jobId=job-1&status=1&view=inline');
+  expect(response.status).toBe(202);
+  expect(response.headers.get('cache-control')).toBe('private, no-store');
+  expect(await response.json()).toMatchObject({ state: 'pending', title: 'PDF 正在生成' });
+  expect(mocks.enqueue).not.toHaveBeenCalled();
+});
+
+it.each(['?status=bad', '?status=1', '?status=1&status=1&jobId=job-1'])('rejects an invalid polling request %s', async (query) => {
+  mocks.mode.mockReturnValue('durable');
+  expect((await request(query)).status).toBe(400);
+  expect(mocks.enqueue).not.toHaveBeenCalled();
+});
+it('does not expose operator actions to a worker and still rechecks access before reporting ready', async () => {
+  mocks.mode.mockReturnValue('durable');
+  mocks.session.mockResolvedValue({ user: { id: 'worker-1', role: Role.WORKER } });
+  mocks.wait.mockResolvedValue({ status: 'unavailable' });
+  expect(await (await request()).text()).not.toContain('/owner/background-jobs');
+  mocks.wait.mockResolvedValue({ status: 'ready', artifactName: 'job.pdf' });
+  mocks.read.mockResolvedValue(Buffer.from('pdf'));
+  mocks.order.mockResolvedValueOnce({ id: 'order-1', workOrderVersion: 3, items: [] }).mockResolvedValueOnce(null);
+  expect((await request('?status=1&jobId=job-1')).status).toBe(404);
+});
+it('returns ready JSON only after download checks, without exposing artifact names or bytes', async () => {
+  mocks.mode.mockReturnValue('durable');
+  mocks.wait.mockResolvedValue({ status: 'ready', artifactName: 'private.pdf' });
+  mocks.read.mockResolvedValue(Buffer.from('private-pdf-bytes'));
+  const response = await request('?status=1&jobId=job-1');
+  expect(await response.json()).toEqual({ state: 'ready' });
+  expect(mocks.session).toHaveBeenCalledTimes(2);
+  expect(mocks.order).toHaveBeenCalledTimes(2);
 });

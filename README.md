@@ -346,7 +346,7 @@ PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium /usr/bin/chromium --version
 fc-list :lang=zh | head
 ```
 
-生产 smoke 必须显式传 `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` 和 `CI=true`，使浏览器以与真实渲染相同的 no-sandbox 参数启动。当前 `deploy-smoke` 只验证启动，不调用 `page.pdf()`；还要另跑部署指南 §13 的内存 PDF 命令。2026-08-02 已用该运行时生成 37,646 字节中文 PDF；只检查 HTTP 200 或 Puppeteer 缓存不算 PDF 验收。
+生产 smoke 必须显式传 `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium` 和 `CI=true`，使浏览器以与真实渲染相同的 no-sandbox 参数启动。当前 `deploy-smoke` 会执行真实中文 PDF 和产物存储往返检查；仍需按部署指南检查真实工单、图稿及分页。2026-08-02 已用该运行时生成 37,646 字节中文 PDF；只检查 HTTP 200 或 Puppeteer 缓存不算 PDF 验收。
 
 本地/CI 若没有系统 Chromium，可运行 `npx puppeteer browsers install chrome` 安装 Puppeteer-managed Chrome。完整生产命令见 `docs/部署指南.md` §7 / §13。
 

@@ -1,3 +1,5 @@
+import { PERMISSIONS } from '@/lib/auth/permissions-dict';
+import { pdfFailure, pdfRetryUrl, pdfStatusResponse, type PdfStatus } from '@/lib/pdf/status-response';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { NextAuthRequest } from 'next-auth';
@@ -40,6 +42,10 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   }
   const requestUrl = new URL(_req.url);
   const view = requestUrl.searchParams.get('view');
+  const statuses = requestUrl.searchParams.getAll('status');
+  if (statuses.length > 1 || (statuses.length === 1 && (statuses[0] !== '1' || !requestUrl.searchParams.get('jobId') || backgroundJobsMode() !== 'durable'))) {
+    return NextResponse.json({ error: 'Invalid PDF status query' }, { status: 400 });
+  }
   if ((view !== null && view !== 'inline') || requestUrl.searchParams.getAll('view').length > 1) {
     return NextResponse.json({ error: 'Invalid PDF view' }, { status: 400 });
   }
@@ -49,6 +55,8 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     return NextResponse.json({ error: 'Invalid print mode' }, { status: 400 });
   }
   const { id } = await ctx.params;
+  const statusOnly = statuses.length === 1;
+  const pdfStatusPage = (input: PdfStatus) => pdfStatusResponse(input, { orderId: id, json: statusOnly, operator: PERMISSIONS['ops:jobs:manage'].some((role) => role === session.user.role) });
   const baseUrl = await derivePublicBaseUrl();
   const order = await getOrderForPrint(
     id,
@@ -77,7 +85,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
         snapshotKey: orderPdfSnapshotKey(order, factoryName),
       }));
     const result = await waitForOrderPdfJob(jobId, {
-      timeoutMs: Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
+      timeoutMs: statusOnly ? 1_000 : Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
       signal: _req.signal,
       expected: {
         orderId: id,
@@ -90,16 +98,17 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       return pdfStatusPage({
         title: result.status === 'unavailable' ? 'PDF 生成服务暂不可用' : 'PDF 等待时间较长',
         message: result.status === 'unavailable'
-          ? '暂时无法生成 PDF，请稍后重试；如仍不可用，请联系管理员。'
+          ? 'PDF 生成服务未就绪。可以使用网页打印，或联系管理员恢复服务后重试。'
           : '已暂停自动刷新，请稍后重试以查看生成结果。',
+        code: result.status === 'unavailable' ? 'PDF_WORKER_UNAVAILABLE' : 'PDF_QUEUE_DELAYED',
         status: 503,
         retryUrl: pdfRetryUrl(_req.url, jobId),
       });
     }
     if (result.status === 'timeout') {
       return pdfStatusPage({
-        title: 'PDF 正在生成',
-        message: '任务仍在排队，本页将在 5 秒后自动重试。',
+        title: result.phase === 'running' ? 'PDF 正在生成' : 'PDF 正在排队',
+        message: result.phase === 'running' ? '正在生成当前工单，本页会自动查询结果。' : '任务已进入队列，本页会自动查询结果。',
         status: 202,
         retryUrl: pdfRetryUrl(_req.url, jobId),
       });
@@ -107,7 +116,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     if (result.status === 'failed') {
       return pdfStatusPage({
         title: 'PDF 生成失败',
-        message: '生成失败，请重新生成；如仍失败，请联系管理员。错误码：PDF_GENERATION_FAILED。',
+        ...pdfFailure(result.errorCode),
         status: 500,
         retryUrl: pdfRetryUrl(_req.url),
       });
@@ -126,17 +135,15 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     try {
       const html = await buildPrintHtml(order, { factoryName });
       pdf = await renderHtmlToPdf({ html, signal: _req.signal });
-    } catch {
+    } catch (error) {
       // Log a fixed event only: renderer exceptions can contain paths, URLs and secrets.
       console.error('[order-pdf] PDF_GENERATION_FAILED');
-      return NextResponse.json(
-        {
-          error: 'PDF 生成失败',
-          code: 'PDF_GENERATION_FAILED',
-          message: '请重新生成；如仍失败，请联系管理员',
-        },
-        { status: 500, headers: { 'Cache-Control': 'private, no-store' } },
-      );
+      return pdfStatusPage({
+        title: 'PDF 生成失败',
+        ...pdfFailure(error instanceof Error ? error.name : null),
+        status: 500,
+        retryUrl: pdfRetryUrl(_req.url),
+      });
     }
   }
 
@@ -168,6 +175,10 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     });
   }
 
+  if (statusOnly) {
+    return NextResponse.json({ state: 'ready' }, { headers: { 'Cache-Control': 'private, no-store' } });
+  }
+
   return new Response(new Uint8Array(pdf), {
     status: 200,
     headers: {
@@ -179,56 +190,6 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   });
 }
 
-
-function pdfRetryUrl(requestUrl: string, jobId?: string): string {
-  const url = new URL(requestUrl);
-  const inline = url.searchParams.get('view') === 'inline';
-  url.search = '';
-  if (inline) url.searchParams.set('view', 'inline');
-  if (jobId) url.searchParams.set('jobId', jobId);
-  else url.searchParams.set('regenerate', '1');
-  return `${url.pathname}${url.search}`;
-}
-
-function pdfStatusPage(input: {
-  title: string;
-  message: string;
-  status: number;
-  retryUrl: string;
-}): Response {
-  const retryUrl = escapeHtml(input.retryUrl);
-  const autoRefresh = input.status === 202;
-  const refreshMeta = autoRefresh
-    ? `<meta http-equiv="refresh" content="5;url=${retryUrl}">`
-    : '';
-  return new Response(
-    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">${refreshMeta}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36rem;margin:12vh auto;padding:0 1.5rem;line-height:1.6"><h1>${escapeHtml(input.title)}</h1><p>${escapeHtml(input.message)}</p><p><a href="${retryUrl}" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:0 12px">立即重试</a></p></body></html>`,
-    {
-      status: input.status,
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'private, no-store',
-        ...(autoRefresh
-          ? { 'Retry-After': '5', Refresh: `5;url=${input.retryUrl}` }
-          : {}),
-      },
-    },
-  );
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      })[character]!,
-  );
-}
 
 // RFC 5987 / 6266: ship an ASCII fallback for legacy clients and the
 // UTF-8 spelling via filename*= for anything modern. orderNo is ASCII

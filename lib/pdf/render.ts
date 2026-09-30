@@ -1,4 +1,4 @@
-import type { Browser, LaunchOptions, Page, PDFOptions } from 'puppeteer';
+import type { Browser, BrowserContext, LaunchOptions, Page, PDFOptions } from 'puppeteer';
 
 export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
 
@@ -7,10 +7,20 @@ export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
 // salary slips / bills / CDR cover sheets without duplicating the
 // launch boilerplate.
 //
-// Puppeteer launches a new browser per call for simplicity. That's
-// fine for MVP volume (a handful of PDFs per day). If we start seeing
-// >1 concurrent render we can memoize the browser across requests —
-// for now a fresh browser keeps tests / dev reloads clean.
+// Reuse is opt-in during HEAVY worker bootstrap; Web/inline rendering stays isolated.
+import { PdfBrowserPool } from './browser-pool';
+let workerPool: PdfBrowserPool | undefined;
+export function enableWorkerPdfBrowserReuse() {
+  workerPool ??= new PdfBrowserPool(async () => {
+    const { default: puppeteer } = await import('puppeteer');
+    return puppeteer.launch({ headless: true, timeout: 20_000, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+  });
+}
+export async function closeWorkerPdfBrowser() {
+  const pool = workerPool;
+  workerPool = undefined;
+  await pool?.close();
+}
 
 export type RenderPdfOptions = {
   html: string;
@@ -25,11 +35,16 @@ export type RenderPdfOptions = {
   // Inject an already-launched browser (tests). When present, launch
   // is skipped and the caller retains responsibility for teardown.
   browser?: Browser;
+  context?: BrowserContext;
   // Durable workers abort this when they can no longer prove lease ownership.
   signal?: AbortSignal;
 };
 
 export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
+  if (workerPool && !opts.browser && !opts.launch) {
+    const signal = AbortSignal.any([...(opts.signal ? [opts.signal] : []), AbortSignal.timeout(60_000)]);
+    return workerPool.run((browser, context) => renderHtmlToPdf({ ...opts, browser, context, signal }), signal);
+  }
   const puppeteer = await import('puppeteer');
   const browser =
     opts.browser ??
@@ -45,7 +60,7 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     if (expectedVersion && (await browser.version()).split('/').pop() !== expectedVersion) {
       throw new PdfBrowserVersionMismatchError();
     }
-    page = await browser.newPage();
+    page = await (opts.context ?? browser).newPage();
   } catch (error) {
     if (!opts.browser) await browser.close();
     throw error;

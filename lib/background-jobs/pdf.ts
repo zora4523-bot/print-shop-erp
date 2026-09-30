@@ -1,4 +1,4 @@
-import { writePdfArtifact, cleanupOldPdfArtifacts } from '../pdf/artifacts';
+import { writePdfArtifact, cleanupOldPdfArtifacts, PdfArtifactStorageError } from '../pdf/artifacts';
 import {
   BackgroundJobQueue,
   BackgroundJobStatus,
@@ -157,7 +157,8 @@ export async function handleOrderPdfJob(
     throw new OrderPdfVersionStaleError();
   }
   const artifactName = `${job.id}-${job.attempts}.pdf`;
-  await writePdfArtifact(artifactName, pdf);
+  try { await writePdfArtifact(artifactName, pdf); }
+  catch { throw new PdfArtifactStorageError(); }
   await job.assertLease?.();
   await cleanupOldPdfArtifacts();
   return {
@@ -171,7 +172,7 @@ export async function handleOrderPdfJob(
 export type OrderPdfJobWaitResult =
   | { status: 'ready'; artifactName: string }
   | { status: 'failed'; errorCode: string | null }
-  | { status: 'timeout' }
+  | { status: 'timeout'; phase?: 'queued' | 'running' }
   | { status: 'unavailable' }
   | { status: 'delayed' };
 
@@ -189,6 +190,7 @@ export async function waitForOrderPdfJob(
   } = {},
 ): Promise<OrderPdfJobWaitResult> {
   const deadline = Date.now() + Math.max(1_000, options.timeoutMs ?? 120_000);
+  let phase: 'queued' | 'running' = 'queued';
   while (Date.now() < deadline && !options.signal?.aborted) {
     const job = await db.backgroundJob.findUnique({
       where: { id: jobId },
@@ -201,6 +203,7 @@ export async function waitForOrderPdfJob(
         createdAt: true,
       },
     });
+    phase = job?.status === BackgroundJobStatus.RUNNING ? 'running' : 'queued';
     if (!job) return { status: 'failed', errorCode: 'JobNotFound' };
     if (options.expected && !matchesExpectedPdfJob(job, options.expected)) {
       // Do not reveal whether a caller-supplied job id exists or belongs to a
@@ -233,7 +236,7 @@ export async function waitForOrderPdfJob(
     }
     await delay(300, options.signal);
   }
-  return { status: 'timeout' };
+  return { status: 'timeout', phase };
 }
 
 function matchesExpectedPdfJob(

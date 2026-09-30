@@ -93,7 +93,9 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 | 目的 | 命令 |
 |---|---|
-| 开发服务器 | `pnpm dev` |
+| 开发服务器（含后台依赖检查） | `pnpm dev` |
+| 仅 Web（worker 由外部管理时） | `pnpm dev:web` |
+| PDF 字体、渲染及产物存储检查 | `pnpm check:pdf` |
 | 生产构建 | `pnpm build` |
 | 启动构建产物 | `pnpm start` |
 | 类型检查 | `pnpm typecheck` |
@@ -261,3 +263,11 @@ OrderLog 与 BusinessAuditLog 的 before。生产执行步骤（dry-run → 业�
 ## 生产事实核对与恢复（2026-09-28）
 
 重做未下发、数量申请被旧版取消、工资日期已结算或历史生产不明时，按 [生产事实恢复手册](docs/生产事实恢复手册.md) 先只读扫描，再逐单据证处理。不要通过换日期、改负责人、删除申请或解锁原账绕过守卫。
+
+### PDF 开发与回归（2026-09-30）
+
+`pnpm dev` 使用 `scripts/dev-stack.mjs`。未设置后台模式时默认 durable，先启动 LIGHT/HEAVY；HEAVY 必须完成真实中文 PDF 与私有产物读写检查，两类 worker 的本次启动心跳均就绪后才启动 Web。默认监听 127.0.0.1:3000，支持 `--port`、`--hostname`。端口冲突在 worker 启动前拒绝；任一子进程异常退出会停止整组，Ctrl-C 统一收尾。此开发入口固定模拟通知，不用于生产。显式 `BACKGROUND_JOBS_MODE=inline` 只启动 Web，但仍先检查 PDF 运行时。
+
+`pnpm dev:web` 保留仅 Web 入口，适用于外部进程管理或手动控制 worker 的测试；它本身不保证 durable PDF 可用。`pnpm check:pdf` 使用当前环境、当前 Chromium 与内嵌字体，实际生成一页中文 PDF，并验证存储往返；只操作自己的随机探针产物。
+
+PDF 恢复验收：满足本文件 E2E 隔离前置后运行 `pnpm exec playwright test --config=playwright.pdf.config.ts`。测试使用真实 Next 开发服务及独立 HEAVY worker，覆盖服务离线、六视口双主题、触控、axe、就地状态查询、生成和重复下载；不代表生产构建、真实 OSS 图稿或通知验收。

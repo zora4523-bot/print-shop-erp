@@ -54,15 +54,10 @@ function run(label, command, commandArgs, options = {}) {
 async function checkPdfBrowser() {
   info('checking Puppeteer PDF browser');
   if (dryRun) {
-    console.log('  import puppeteer and launch headless browser');
+    console.log('  render a Chinese PDF and verify private artifact storage');
     return;
   }
-  const { default: puppeteer } = await import('puppeteer');
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: process.env.CI ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
-  });
-  await browser.close();
+  run('PDF render, fonts and artifact storage', process.execPath, ['--import', 'tsx', 'scripts/pdf-check.ts']);
 }
 
 function checkNotificationMode() {

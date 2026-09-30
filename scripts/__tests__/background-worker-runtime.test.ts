@@ -20,6 +20,10 @@ const {
   stopSmartBotMock: vi.fn(async () => undefined),
 }));
 
+const pdfMocks = vi.hoisted(() => ({ check: vi.fn(), enable: vi.fn(), close: vi.fn() }));
+vi.mock('@/lib/pdf/preflight', () => ({ checkPdfRuntime: pdfMocks.check }));
+vi.mock('@/lib/pdf/render', () => ({ enableWorkerPdfBrowserReuse: pdfMocks.enable, closeWorkerPdfBrowser: pdfMocks.close }));
+vi.mock('@/lib/background-jobs/handlers-heavy', () => ({ heavyBackgroundJobHandlers: {} }));
 vi.mock('@/lib/db', () => ({
   db: { $disconnect: dbDisconnectMock },
 }));
@@ -207,4 +211,21 @@ describe('worker Sentry scrubbing', () => {
       }),
     );
   });
+});
+
+it('does not advertise a HEAVY heartbeat or consume jobs if PDF preflight fails', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  pdfMocks.check.mockRejectedValueOnce(new Error('preflight'));
+  await runBackgroundWorkerProcess();
+  expect(process.exitCode).toBe(1);
+  expect(startWorkerHeartbeatMock).not.toHaveBeenCalled();
+  expect(runBackgroundWorkerMock).not.toHaveBeenCalled();
+});
+it('checks PDF before heartbeat and closes the reused browser after draining', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  pdfMocks.check.mockResolvedValueOnce({ bytes: 1234 });
+  await runBackgroundWorkerProcess();
+  expect(pdfMocks.check).toHaveBeenCalledBefore(startWorkerHeartbeatMock);
+  expect(pdfMocks.enable).toHaveBeenCalledOnce();
+  expect(pdfMocks.close).toHaveBeenCalledAfter(runBackgroundWorkerMock);
 });

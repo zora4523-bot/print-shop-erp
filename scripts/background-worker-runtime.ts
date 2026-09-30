@@ -40,6 +40,14 @@ async function main(): Promise<void> {
   );
   const concurrency = intEnv(queue === BackgroundJobQueue.HEAVY ? 'HEAVY_WORKER_CONCURRENCY' : 'LIGHT_WORKER_CONCURRENCY', queue === BackgroundJobQueue.HEAVY ? 1 : 2, 1, 8);
   assertWorkerPoolCapacity(databasePoolConfig(process.env.DATABASE_URL!, { role: 'worker' }).max!, concurrency);
+  if (queue === BackgroundJobQueue.HEAVY) {
+    const { checkPdfRuntime } = await import('../lib/pdf/preflight');
+    console.info('[worker] PDF preflight', await checkPdfRuntime());
+    if (process.env.PDF_BROWSER_REUSE !== '0') {
+      const { enableWorkerPdfBrowserReuse } = await import('../lib/pdf/render');
+      enableWorkerPdfBrowserReuse();
+    }
+  }
   const handlers = await loadBackgroundJobHandlers(queue);
   const smartBotConnector =
     queue === BackgroundJobQueue.LIGHT
@@ -201,6 +209,10 @@ async function main(): Promise<void> {
   } finally {
     await stopHeartbeat();
     await stopSmartBotConnector();
+    if (queue === BackgroundJobQueue.HEAVY) {
+      const { closeWorkerPdfBrowser } = await import('../lib/pdf/render');
+      await closeWorkerPdfBrowser();
+    }
     await db.$disconnect();
     if (process.env.SENTRY_DSN) await Sentry.flush(2_000);
     console.info(`[worker] stopped ${workerId}`);
