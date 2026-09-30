@@ -60,6 +60,7 @@ import OwnerBillDetailPage from '@/app/(billing)/owner/bills/[id]/page';
 import LegacyBillArchiveDetailPage from '@/app/(billing)/owner/bills/archive/[id]/page';
 import AgentMonthlyBillDetailPage from '@/app/(billing)/owner/agent-bills/[id]/page';
 import SalesBillDetailPage from '@/app/(admin)/sales/bills/[id]/page';
+import { BillItemsList } from '@/components/business/agent-monthly-billing/BillItemsList';
 
 const finishedAt = new Date('2026-08-01T02:00:00.000Z');
 const paidAt = new Date('2026-08-02T03:00:00.000Z');
@@ -121,7 +122,11 @@ describe('bill detail visibility boundary', () => {
     const html = renderToStaticMarkup(await AgentMonthlyBillDetailPage({ params: Promise.resolve({ id: 'agent-bill-1' }) }));
     expect(requirePermissionMock).toHaveBeenCalledWith('bill:view:all');
     const headers = [...html.matchAll(/<th class="p-3 text-left">([^<]*)<\/th>/g)].map((match) => match[1]);
-    expect(headers).toEqual(['工单', '工单名称', '结算状态', '版本', '结算时间']);
+    expect(headers).toEqual(['工单号', '工单名称', '结算日期', '状态']);
+    expect(html).toContain('<th class="p-3 text-right">结算金额</th>');
+    expect(html.match(/>录入抵扣<\/a>/g)).toHaveLength(2);
+    expect(html).toContain('href="/owner/agent-bills/agent-bill-1/credits/item-1/new"');
+    expect(html).toContain('href="/owner/agent-bills/agent-bill-1/credits/item-2/new"');
     const nameCells = [...html.matchAll(/<td[^>]*>([^<]*<span class="block text-xs text-muted-foreground">当前名称<\/span>)<\/td>/g)].map((match) => match[1].replace(/<[^>]+>/g, ""));
     expect(nameCells).toEqual(['中秋礼盒当前名称', '未命名工单当前名称']);
     for (const customer of ['外部客户甲', '外部客户乙', '客户']) expect(html).not.toContain(customer);
@@ -271,6 +276,29 @@ describe('bill detail visibility boundary', () => {
     expect(requirePermissionMock).not.toHaveBeenCalled();
     expect(getAdminBillDetailMock).not.toHaveBeenCalled();
   });
+});
+
+it.each([
+  ['CONFIRMED', false, '0.00', true],
+  ['PAID', false, '-100.00', true],
+  ['CONFIRMED', false, '-500.00', false],
+  ['DRAFT', false, '0.00', false],
+  ['CONFIRMED', true, '0.00', false],
+] as const)('preserves credit eligibility on %s bills, sales=%s, requested credit=%s', (billStatus, sales, requestedAmount, eligible) => {
+  const html = renderToStaticMarkup(<BillItemsList
+    period="2026-08" billId="bill-1" billStatus={billStatus} sales={sales}
+    items={[{
+      id: 'item-1', orderId: 'order-1', orderNoSnapshot: '20260801-0001', orderStatusSnapshot: 'SETTLED',
+      workOrderVersionSnapshot: 7, settledFeeSnapshot: '500.00', settledAtSnapshot: finishedAt,
+      credits: requestedAmount === '0.00' ? [] : [{ id: 'credit-1', requestedAmount, createdAt: paidAt, allocations: [] }],
+      order: { customName: '中秋礼盒' },
+    }]}
+  />);
+  expect(html.includes('href="/owner/agent-bills/bill-1/credits/item-1/new"')).toBe(eligible);
+  expect(html.includes('录入抵扣')).toBe(eligible);
+  expect(html.match(/aria-label="查看 20260801-0001 明细"/g)).toHaveLength(1);
+  expect(html).not.toContain('href="/orders/order-1"');
+  expect(html).not.toContain('v7');
 });
 
 it('paginates and searches administrator bill items without changing whole-bill amounts', async () => {

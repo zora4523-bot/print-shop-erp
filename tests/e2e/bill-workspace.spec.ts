@@ -79,7 +79,15 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   sales.on('pageerror', (error) => pageErrors.push(error.message));
   await login(sales, { username: source.agentUsername, password: E2E_PASSWORD, from: `/sales/bills?period=${source.period}` });
   await sales.getByRole('link', { name: `查看 ${source.period} 账单详情`, exact: true }).click();
-  await expect(sales.getByRole('link', { name: '返回我的对客应付账单' })).toHaveAttribute('href', `/sales/bills?period=${source.period}`);
+  await expect(sales.getByRole('link', { name: '返回我的货款账单' })).toHaveAttribute('href', `/sales/bills?period=${source.period}`);
+  const receiptToggle = sales.locator('summary').filter({ hasText: '工厂收款记录' });
+  await expect(receiptToggle).toContainText('已收');
+  await expect(sales.getByText('测试转账', { exact: true })).toBeHidden();
+  await receiptToggle.focus();
+  await sales.keyboard.press('Enter');
+  await expect(sales.getByText('测试转账', { exact: true })).toBeVisible();
+  await sales.keyboard.press('Enter');
+  await expect(sales.getByText('测试转账', { exact: true })).toBeHidden();
   for (const width of [375, 393, 768, 1024, 1280, 1920]) {
     await sales.setViewportSize({ width, height: 900 });
     await page.setViewportSize({ width, height: 900 });
@@ -104,6 +112,12 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
       await sales.goto(`/sales/bills?period=${source.period}`);
       await selectBillTheme(sales, theme);
       await expect(sales.getByRole('region', { name: '我的月账单', exact: true })).toContainText('1 单');
+      await expect(sales.getByRole('heading', { name: '账期概览', exact: true })).toBeHidden();
+      const billResults = await sales.locator('#sales-bill-results:visible').boundingBox();
+      const trendToggle = sales.locator('summary:visible').filter({ hasText: '查看账期金额分布' });
+      const toggleBox = await trendToggle.boundingBox();
+      expect(billResults!.y + billResults!.height).toBeLessThanOrEqual(toggleBox!.y);
+      await trendToggle.click();
       await expect(sales.getByRole('heading', { name: '账期概览', exact: true })).toBeVisible();
       const overview = sales.getByRole('list', { name: '我的账期概览' });
       await expect(overview.getByRole('link')).toHaveCount(2);
@@ -112,10 +126,14 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
       expect((await new AxeBuilder({ page: sales }).include('#admin-main').analyze()).violations).toEqual([]);
       await sales.screenshot({ path: test.info().outputPath(`bill-sales-list-${width}-${theme}.png`), fullPage: true });
       await overview.getByRole('link', { name: new RegExp(`^${target.period}`) }).tap();
-      await expect(sales.getByLabel('周期', { exact: true })).toHaveValue(target.period);
+      await expect(sales.getByLabel('账期', { exact: true })).toHaveValue(target.period);
       await sales.goto(`/sales/bills?period=${source.period}`);
       await sales.getByRole('link', { name: `查看 ${source.period} 账单详情`, exact: true }).tap();
-      await sales.getByRole('button', { name: `查看 ${source.orderNo} 明细`, exact: true }).tap();
+      const evidenceTrigger = sales.getByRole('button', { name: `查看 ${source.orderNo} 明细`, exact: true });
+      await expect(evidenceTrigger).toHaveText(source.orderNo);
+      const triggerBox = await evidenceTrigger.boundingBox();
+      expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+      await evidenceTrigger.tap();
       const detail = sales.getByRole('dialog');
       await expect(detail).toBeVisible();
       await expect(detail).toContainText('已抵扣 ¥ 20.00 · 待抵扣 ¥ 10.00');

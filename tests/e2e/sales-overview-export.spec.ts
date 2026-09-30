@@ -46,14 +46,14 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   await login(page, { from: '/sales/overview', username: source.agentUsername, password: E2E_PASSWORD });
   await expect(page.getByRole('heading', { name: '我的总览', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: /全部工单 33 张/ })).toBeVisible();
-  await expect(page.getByRole('link', { name: /^待支付.*163\.45/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /^待付款.*163\.45/ })).toBeVisible();
   await expect(page.getByRole('list', { name: '我的账期概览' })).toBeVisible();
   await page.getByRole('link', { name: /全部工单 33 张/ }).click();
   await page.getByLabel('下单月份', { exact: true }).fill('2026-07');
   await page.getByRole('button', { name: '应用筛选', exact: true }).click();
   await expect(page).toHaveURL(/createdMonth=2026-07/);
   await expect(page.getByText('共 32 条', { exact: false }).first()).toBeVisible();
-  await expect(page.locator('[data-order-id]').filter({ visible: true }).filter({ hasText: `${source.orderNo}-extra-32` })).toHaveCount(0);
+  await expect(page.locator(`[data-order-id="${source.orderId}-extra-32"]:visible`)).toHaveCount(0);
   await page.goto(`/sales/bills?period=${source.period}&status=CONFIRMED`);
   const summary = await downloadCsv(page, '导出当前筛选 CSV');
   expect(summary).toContain(source.period);
@@ -62,6 +62,12 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   expect(summary.trim().split('\r\n')).toHaveLength(2);
   await page.getByRole('link', { name: `查看 ${source.period} 账单详情`, exact: true }).click();
   await expect(page.getByText('整张账单共 33 单', { exact: false })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const memberTable = page.getByRole('table');
+  await expect(memberTable.getByRole('row')).toHaveCount(31);
+  await expect(memberTable.getByRole('columnheader', { name: '工单金额', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath('sales-bill-records-1280.png'), fullPage: false });
   const csv = await downloadCsv(page, '导出账单明细 CSV');
   expect(csv).toContain('导出时的工单名称');
   expect(csv).not.toContain('后来改过的名称');
@@ -79,7 +85,7 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   await page.route('**/api/sales/bills/*/export?*', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '导出暂时不可用，请重试' }) }));
   await page.getByText('导出匹配明细 CSV', { exact: true }).click();
   await expect(page.locator('#admin-main').getByRole('alert')).toBeVisible();
-  await expect(page.getByRole('heading', { name: `${source.period} 月账单`, exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: `${source.period} 货款账单`, exact: true })).toBeVisible();
   await page.unroute('**/api/sales/bills/*/export?*');
   expect(await downloadCsv(page, '导出匹配明细 CSV')).toContain('导出时的工单名称');
   await expect(page.locator('#admin-main').getByRole('alert')).toHaveCount(0);

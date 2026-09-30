@@ -21,13 +21,14 @@ export function BillItemEvidence({ item, period, sales = false }: {
 }) {
   const detail = readBillSettlementDetail(item.settlementDetailSnapshot, item.settledFeeSnapshot);
   const base = sales ? '/sales/bills' : '/owner/agent-bills';
-  return <BillDetailDisclosure label={`查看 ${item.orderNoSnapshot} 明细`} title={item.orderNoSnapshot} description={`${period} 账单中的结算记录`}>
+  return <BillDetailDisclosure label={`查看 ${item.orderNoSnapshot} 明细`} triggerText={item.orderNoSnapshot} title={item.orderNoSnapshot} description={`${period} 账单中的结算记录`}>
     <dl className="grid grid-cols-2 gap-4">
-      <div><dt className="text-muted-foreground">结算金额</dt><dd className="font-semibold tabular-nums">{formatMoney(item.settledFeeSnapshot)}</dd></div>
+      <div><dt className="text-muted-foreground">{sales ? '工单金额' : '结算金额'}</dt><dd className="font-semibold tabular-nums">{formatMoney(item.settledFeeSnapshot)}</dd></div>
       <div><dt className="text-muted-foreground">结算时间</dt><dd>{formatDateTimeShanghai(item.settledAtSnapshot)}</dd></div>
       <div><dt className="text-muted-foreground">结算时状态</dt><dd><OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /></dd></div>
       <div><dt className="text-muted-foreground">结算时纸单版本</dt><dd>v{item.workOrderVersionSnapshot}</dd></div>
     </dl>
+    {sales ? <p className="text-muted-foreground">工单金额为结算时金额；账单抵扣单独列示。</p> : null}
     <section className="space-y-3">
       <h3 className="font-semibold">结算费用明细</h3>
       {detail ? <dl className="space-y-2">
@@ -44,7 +45,7 @@ export function BillItemEvidence({ item, period, sales = false }: {
           <p>录入 {formatMoney(new Decimal(credit.requestedAmount).abs())} · {formatDateTimeShanghai(credit.createdAt)}</p>
           <p className="text-muted-foreground">已抵扣 {formatMoney(allocated)} · 待抵扣 {formatMoney(remaining)}</p>
           <ul className="space-y-1">{credit.allocations.map((row) => <li key={row.id}>
-            <Link href={`${base}/${row.bill.id}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{row.bill.period} 月账单 · {formatMoney(row.amount)}</Link>
+            <Link href={`${base}/${row.bill.id}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{row.bill.period} {sales ? '货款账单' : '月账单'} · {formatMoney(row.amount)}</Link>
           </li>)}</ul>
         </li>;
       })}</ul>

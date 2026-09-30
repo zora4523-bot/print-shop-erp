@@ -1078,7 +1078,7 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'sales-bills',
       path: '/sales/bills',
-      readyHeading: '我的对客应付账单',
+      readyHeading: '我的货款账单',
     },
   ];
 }

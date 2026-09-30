@@ -1,6 +1,7 @@
 import { Role } from '../../generated/prisma/enums';
 import type { Permission } from '../auth/permissions-dict';
 import { RULE_CENTER_SIDEBAR_ITEMS } from './rule-center';
+import { SALES_BILL_PAGE_TITLE } from '../agent-monthly-billing/labels';
 
 // 受控的图标名集合。新增图标时同时更新 AppSidebar 的 ICONS map。
 export type IconName =
@@ -430,10 +431,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'sales.bills',
-    label: '我的账单',
+    label: SALES_BILL_PAGE_TITLE,
     routeBase: '/sales/bills',
     iconName: 'Wallet',
-    breadcrumbLabel: '我的账单',
+    breadcrumbLabel: SALES_BILL_PAGE_TITLE,
     menuSection: 'finance',
     status: 'implemented',
     menuOrder: 40,

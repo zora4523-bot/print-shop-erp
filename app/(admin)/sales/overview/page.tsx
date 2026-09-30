@@ -5,6 +5,7 @@ import { listSalesMonthlyBills } from '@/lib/agent-monthly-billing/sales-query';
 import { getSalesOrderListSummary, listSalesOrdersPage } from '@/lib/order/sales-list-query';
 import { parseOrderListQuery } from '@/lib/order/list-query';
 import { formatMoney } from '@/lib/dashboard/format';
+import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY as statusRegistry } from '@/lib/ui/status-registry';
 import { salesOrderAmountPresentation } from '@/lib/order/sales-list-presentation';
 import { SalesOrderStatusBadge } from '@/components/business/order/SalesOrderStatusBadge';
 import { SalesBillOverview } from '@/components/business/agent-monthly-billing/SalesBillOverview';
@@ -45,19 +46,19 @@ export default async function SalesOverviewPage() {
       </section>
       <section aria-labelledby="sales-payment-heading" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="sales-payment-heading" className="text-lg font-semibold">对客应付账单</h2>
+          <h2 id="sales-payment-heading" className="text-lg font-semibold">应付工厂货款</h2>
           <Link href="/sales/bills" className={buttonVariants({ variant: 'ghost' })}>查看全部账单<ArrowRight aria-hidden className="size-4" /></Link>
         </div>
-        <p className="text-sm text-muted-foreground">全部账期。已确认应收的工单按结算月份归集，月末后出账。</p>
+        <p className="text-sm text-muted-foreground">全部账期。您应付给工厂的货款，按结算月份生成月账单。</p>
         <div className="grid gap-3 sm:grid-cols-3">
           <Link href="/sales/bills?status=CONFIRMED" className="min-w-0 rounded-xl focus-visible:outline-2 focus-visible:outline-ring">
-            <StatCard label="待支付" value={formatMoney(bills.summary.CONFIRMED.amount)} hint={`${bills.summary.CONFIRMED.count} 张账单`} icon={Wallet} tone="warning" className="h-full w-full hover:bg-muted" />
+            <StatCard label={statusRegistry.CONFIRMED.label} value={formatMoney(bills.summary.CONFIRMED.amount)} hint={`${bills.summary.CONFIRMED.count} 张账单`} icon={Wallet} tone="warning" className="h-full w-full hover:bg-muted" />
           </Link>
           <Link href="/sales/bills?status=DRAFT" className="min-w-0 rounded-xl focus-visible:outline-2 focus-visible:outline-ring">
-            <StatCard label="整理中" value={formatMoney(bills.summary.DRAFT.amount)} hint={`${bills.summary.DRAFT.count} 张账单 · 金额未定稿`} icon={ClipboardList} tone="neutral" className="h-full w-full hover:bg-muted" />
+            <StatCard label={statusRegistry.DRAFT.label} value={formatMoney(bills.summary.DRAFT.amount)} hint={`${bills.summary.DRAFT.count} 张账单 · 金额未定稿`} icon={ClipboardList} tone="neutral" className="h-full w-full hover:bg-muted" />
           </Link>
           <Link href="/sales/bills?status=PAID" className="min-w-0 rounded-xl focus-visible:outline-2 focus-visible:outline-ring">
-            <StatCard label="已结清" value={formatMoney(bills.summary.PAID.amount)} hint={`${bills.summary.PAID.count} 张账单`} tone="success" className="h-full w-full hover:bg-muted" />
+            <StatCard label={statusRegistry.PAID.label} value={formatMoney(bills.summary.PAID.amount)} hint={`${bills.summary.PAID.count} 张账单`} tone="success" className="h-full w-full hover:bg-muted" />
           </Link>
         </div>
         <SalesBillOverview months={bills.trend} />
