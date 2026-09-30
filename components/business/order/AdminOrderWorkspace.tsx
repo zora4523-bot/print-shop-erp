@@ -1,7 +1,7 @@
 import Form from 'next/form';
 import Link from 'next/link';
 import { formatMoney } from '@/lib/dashboard/format';
-import { Search, Star } from 'lucide-react';
+import { Search, Star, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderWorkspacePage } from '@/lib/order/admin-workspace';
@@ -36,7 +36,8 @@ const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
 ];
 
 const SIGNALS: Array<{ key: AdminOrderSignal; label: string }> = [
-  { key: 'pending-quantity', label: '生产数量待核对' },
+  // 看板卡 9 列时内容宽约 70px，标签超过 5 个字会在词中折行。
+  { key: 'pending-quantity', label: '产量待核对' },
   { key: 'pending-confirmation', label: '待处理' },
   { key: 'pending-pricing', label: '待核价' },
   { key: 'pending-change', label: '变更申请' },
@@ -87,6 +88,7 @@ export function AdminOrderWorkspace({
   const clearFiltersHref = buildTableHref('/orders', {}, {
     queue: query.queue === 'todo' ? undefined : query.queue,
   });
+  const excludedFees = excludedFeeSummary(data.summary);
 
   return (
     <div data-slot="admin-order-workspace" style={{ backgroundColor: 'transparent' }} className={cn(styles.surface, "w-full min-w-0 max-w-none space-y-3.5")}>
@@ -155,83 +157,55 @@ export function AdminOrderWorkspace({
             />
           </div>
           <Button type="submit">应用筛选</Button>
-          <Link
-            href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
-            prefetch={false}
-            scroll={false}
-            aria-current={rejectedFilterActive ? 'true' : undefined}
-            className={cn(buttonVariants({ variant: rejectedFilterActive ? 'selected' : 'outline' }), 'relative')}
-          >
-            {rejectedFilterActive ? '取消已驳回筛选' : '已驳回 / 待补正'}
-            <LinkPendingHint />
-          </Link>
-          <Link
-            href={buildTableHref(
-              '/orders',
-              {},
-              serializeAdminOrderWorkspaceQuery(
-                updateAdminOrderWorkspaceQuery(query, {
-                  starred: !query.starred,
-                }),
-              ),
-            )}
-            prefetch={false}
-            scroll={false}
-            aria-current={query.starred ? 'true' : undefined}
-            className={cn(
-              buttonVariants({
-                variant: query.starred ? 'selected' : 'outline',
-              }),
-              'relative shrink-0',
-            )}
-          >
-            <Star
-              aria-hidden="true"
-              className={cn(query.starred && 'fill-warning text-warning')}
+          {/* 快捷筛选整组换行：1280 宽下不再把最后一个开关单独挤到第二行。
+              开关文字不随状态改变（原「取消仅星标」等会改变按钮宽度、引起换行跳动），
+              选中态由 selected 变体 + ✕ 表达，读屏由 aria-current 与「再次点击取消」表达。 */}
+          <div role="group" aria-label="快捷筛选" className="flex min-w-0 flex-wrap items-center gap-2">
+            <QuickFilterLink
+              href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
+              active={rejectedFilterActive}
+              label="已驳回 / 待补正"
             />
-            {query.starred ? '取消仅星标' : '仅星标'}
-            <LinkPendingHint />
-          </Link>
-          <Link
-            href={buildTableHref('/orders', {}, adminPendingWagesFilterParams(query))}
-            prefetch={false}
-            scroll={false}
-            aria-current={query.pendingWages ? 'true' : undefined}
-            className={cn(
-              buttonVariants({
-                variant: query.pendingWages ? 'selected' : 'outline',
-              }),
-              'relative',
-            )}
-          >
-            {query.pendingWages ? '取消待补录提成筛选' : '待补录提成'}
-            <LinkPendingHint />
-          </Link>
-          <Link
-            href={buildTableHref(
-              '/orders',
-              {},
-              serializeAdminOrderWorkspaceQuery(
-                updateAdminOrderWorkspaceQuery(query, {
-                  queue: 'done',
-                  signal: undefined,
-                  unbilled: !query.unbilled,
-                }),
-              ),
-            )}
-            prefetch={false}
-            scroll={false}
-            aria-current={query.unbilled ? 'true' : undefined}
-            className={cn(
-              buttonVariants({
-                variant: query.unbilled ? 'selected' : 'outline',
-              }),
-              'relative',
-            )}
-          >
-            {query.unbilled ? '取消仅未出账' : '仅未出账'}
-            <LinkPendingHint />
-          </Link>
+            <QuickFilterLink
+              href={buildTableHref(
+                '/orders',
+                {},
+                serializeAdminOrderWorkspaceQuery(
+                  updateAdminOrderWorkspaceQuery(query, {
+                    starred: !query.starred,
+                  }),
+                ),
+              )}
+              active={query.starred}
+              label="仅星标"
+              icon={
+                <Star
+                  aria-hidden="true"
+                  className={cn(query.starred && 'fill-warning text-warning')}
+                />
+              }
+            />
+            <QuickFilterLink
+              href={buildTableHref('/orders', {}, adminPendingWagesFilterParams(query))}
+              active={query.pendingWages}
+              label="待补录提成"
+            />
+            <QuickFilterLink
+              href={buildTableHref(
+                '/orders',
+                {},
+                serializeAdminOrderWorkspaceQuery(
+                  updateAdminOrderWorkspaceQuery(query, {
+                    queue: 'done',
+                    signal: undefined,
+                    unbilled: !query.unbilled,
+                  }),
+                ),
+              )}
+              active={query.unbilled}
+              label="仅未出账"
+            />
+          </div>
           {hasUserFilters ? (
             <OrderFilterClearLink href={clearFiltersHref} className={buttonVariants({ variant: 'ghost' })} />
           ) : null}
@@ -269,23 +243,7 @@ export function AdminOrderWorkspace({
           <b className="font-sans text-foreground tabular-nums">
             {formatMoney(data.summary.effectiveFee)}
           </b>
-          {data.summary.manualPricingCount > 0 ? (
-            <span>
-              （另 {data.summary.manualPricingCount.toLocaleString('zh-CN')} 单待核价未计入）
-            </span>
-          ) : null}
-          {data.summary.incompleteFeeExcludedCount > 0 ? (
-            <span>
-              （另{' '}
-              {data.summary.incompleteFeeExcludedCount.toLocaleString('zh-CN')}{' '}
-              单金额不完整未计入）
-            </span>
-          ) : null}
-          {data.summary.legacyFeeExcludedCount > 0 ? (
-            <span>
-              （另 {data.summary.legacyFeeExcludedCount.toLocaleString('zh-CN')} 单历史金额未计入）
-            </span>
-          ) : null}
+          {excludedFees ? <span>{excludedFees}</span> : null}
         </span>
       </section>
 
@@ -318,6 +276,59 @@ export function AdminOrderWorkspace({
       </OrderQueueResults>
     </div>
   );
+}
+
+function QuickFilterLink({
+  href,
+  active,
+  label,
+  icon,
+}: {
+  href: string;
+  active: boolean | undefined;
+  label: string;
+  icon?: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      scroll={false}
+      aria-current={active ? 'true' : undefined}
+      className={cn(
+        buttonVariants({ variant: active ? 'selected' : 'outline' }),
+        'relative shrink-0',
+      )}
+    >
+      {icon}
+      {label}
+      {active ? (
+        <>
+          <X aria-hidden="true" />
+          <span className="sr-only">（再次点击取消）</span>
+        </>
+      ) : null}
+      <LinkPendingHint />
+    </Link>
+  );
+}
+
+/** 「金额合计」未计入的工单合成一句，不再逐类重复「（另 N 单…未计入）」。 */
+export function excludedFeeSummary(
+  summary: Pick<
+    AdminOrderWorkspacePage['summary'],
+    'manualPricingCount' | 'incompleteFeeExcludedCount' | 'legacyFeeExcludedCount'
+  >,
+): string | null {
+  const parts = [
+    [summary.manualPricingCount, '待核价'],
+    [summary.incompleteFeeExcludedCount, '金额不完整'],
+    [summary.legacyFeeExcludedCount, '历史金额'],
+  ] as const;
+  const listed = parts
+    .filter(([count]) => count > 0)
+    .map(([count, label]) => `${label} ${count.toLocaleString('zh-CN')} 单`);
+  return listed.length > 0 ? `（未计入：${listed.join('、')}）` : null;
 }
 
 function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; data: AdminOrderWorkspacePage; }) {
@@ -367,12 +378,13 @@ function AdminOrderDecisionDashboard({
   billingStats: BillingStats;
 }) {
   // 9 张卡（8 个信号 + 待收款）按容器宽度取 3 列或 9 列：两档都整除，任何视口都不会出现孤行（§8）。
+  // 9 列时待收款卡占 1.5 份：金额比计数长，等宽列会把「¥ 15,395.29」从数字中间折开。
   return (
     <section
       aria-label="工单决定看板"
       className="@container"
     >
-      <div className="grid grid-cols-3 gap-2.5 @min-[56rem]:grid-cols-9">
+      <div className="grid grid-cols-3 gap-2.5 @min-[56rem]:grid-cols-[repeat(8,minmax(0,1fr))_minmax(0,1.5fr)]">
       {SIGNALS.map((signal) => {
         const active = query.signal === signal.key;
         const count = counts[signal.key];
@@ -422,7 +434,8 @@ function AdminOrderDecisionDashboard({
           DECISION_CARD_LAYOUT,
         )}
       >
-        <span className="block max-w-full font-sans text-base font-semibold tabular-nums admin-wrap-anywhere">
+        {/* 不用 admin-wrap-anywhere：金额只允许在「¥」后的空格处换行，数字本身不拆开。 */}
+        <span className="block max-w-full font-sans text-sm font-semibold tabular-nums @min-[56rem]:text-base">
           {formatMoney(billingStats.receivableAmount)}
         </span>
         <span className="mt-0.5 block text-xs font-semibold text-muted-foreground">

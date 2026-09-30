@@ -432,28 +432,33 @@ function rowActionVariant(order: AdminOrderWorkspaceRow): 'default' | 'outline' 
   return actionable ? 'default' : 'outline';
 }
 
-function rowActionLabel(order: AdminOrderWorkspaceRow): string {
+/**
+ * 行尾动作按真实待办命名（UI-SYSTEM「管理端工单列表」），与详情「当前待办」标题同词：
+ * 不再用「查看处理」「处理」这类不说明要做什么的词。
+ */
+export function rowActionLabel(order: AdminOrderWorkspaceRow): string {
   if (order.pendingChangeRequest) return '裁决变更';
   if (order.fee.source === 'PENDING') return '录价';
   if (order.printPending) return '处理打印';
   if (order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED') {
-    return '查看处理';
+    return '下发前检查';
   }
-  if (order.status === 'ON_HOLD') return '处理';
-  if (order.capabilities.release) return '查看处理';
+  if (order.status === 'ON_HOLD') return '处理暂停';
+  if (order.capabilities.release) return '下发生产';
   if (order.capabilities.settle) return '结算';
   if (order.capabilities.ship) return '录运单发货';
   return '详情';
 }
 
+/** 金额下方的口径与详情「费用记录」三个阶段同名，避免「¥ 130.00 估 / 确认」读成已确认。 */
 function feeSourceLabel(source: AdminOrderWorkspaceRow['fee']['source']) {
   switch (source) {
     case 'SETTLED':
-      return '结算';
+      return '结算金额';
     case 'CONFIRMED':
-      return '确认';
+      return '确认金额';
     case 'QUOTED':
-      return '报价';
+      return '提交报价';
     case 'LEGACY':
       return '历史金额';
     case 'PENDING':

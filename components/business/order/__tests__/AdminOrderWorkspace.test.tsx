@@ -62,9 +62,7 @@ describe('AdminOrderWorkspace', () => {
     expect(html).not.toContain('name="customerRef"');
     expect(html).toContain('12,345');
     expect(html).toContain('¥ 4,567.80');
-    expect(html).toContain('另 1 单待核价未计入');
-    expect(html).toContain('另 3 单金额不完整未计入');
-    expect(html).toContain('另 2 单历史金额未计入');
+    expect(html).toContain('（未计入：待核价 1 单、金额不完整 3 单、历史金额 2 单）');
     expect(html).toContain('待收款 · 2 张');
     expect(html).toContain('¥ 998.50');
     expect(html).toContain('仅未出账');

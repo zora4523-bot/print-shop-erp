@@ -133,7 +133,7 @@ test('列表队列、信号与搜索连续切换保持真实数据库统计一�
   await expectWorkspace(page, { queue: 'shipped' }, ['shipped'], '75.00');
   await expectWorkspace(page, { queue: 'done' }, ['settled', 'cancelled'], '80.00');
   await expectWorkspace(page, { queue: 'all', signal: 'pending-pricing' }, ['manual'], '0.00');
-  await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('1 单待核价未计入');
+  await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('未计入：待核价 1 单');
   await expectWorkspace(page, { queue: 'all', signal: 'pending-release' }, ['confirmed'], '45.00');
   await expectWorkspace(page, { queue: 'all', signal: 'on-hold' }, ['hold'], '35.00');
   await expectWorkspace(page, { queue: 'all', q: `${prefix}-quote` }, ['quote'], '28.00');
