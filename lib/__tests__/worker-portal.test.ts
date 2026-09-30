@@ -402,6 +402,46 @@ describe('worker order external salesperson', () => {
 });
 
 describe('worker order list pagination', () => {
+  it('单负责人工单汇总本人 ProductionWage，旧工单仍汇总 ProductionReport', async () => {
+    dbMock.$queryRaw
+      .mockReset()
+      .mockResolvedValueOnce([{ total: BigInt(2) }])
+      .mockResolvedValueOnce([{ id: 'simple' }, { id: 'legacy' }]);
+    const base = {
+      orderNo: 'X', customName: null, status: OrderStatus.IN_PRODUCTION, isUrgent: false,
+      promisedDate: null, createdAt: new Date('2026-09-28T01:00:00.000Z'), workOrderVersion: 2,
+      settlementType: OrderSettlementType.EXTERNAL_SALES, submitter: null, sourceOrder: null,
+      productionProgressSteps: [],
+    };
+    dbMock.order.findMany.mockResolvedValue([
+      {
+        ...base, id: 'simple', simpleProduction: true, productionOperations: [],
+        productionJobs: [
+          { workOrderVersion: 2, status: 'COMPLETED', wages: [{ amount: '12.30' }, { amount: null }] },
+          // 改版淘汰的真实生产保留提成（DECISIONS 2026-09-28），但不计入当前代次步骤数。
+          { workOrderVersion: 1, status: 'COMPLETED', wages: [{ amount: '5.00' }] },
+          { workOrderVersion: 2, status: 'PENDING', wages: [] },
+        ],
+      },
+      {
+        ...base, id: 'legacy', simpleProduction: false, productionJobs: [],
+        productionOperations: [
+          { id: 'op', workOrderVersion: 2, status: ProductionOperationStatus.COMPLETED, reports: [{ amount: '7.10' }] },
+        ],
+      },
+    ]);
+
+    const result = await listWorkerOrders(worker);
+    const query = dbMock.order.findMany.mock.calls[0][0];
+
+    expect(query.select.productionJobs.where).toEqual({ workerId: worker.id });
+    expect(query.select.productionJobs.select.wages.where).toEqual({ workerId: worker.id });
+    expect(result.rows.map((row) => [row.id, row.pieceworkAmount, row.completedOperationCount, row.operationCount])).toEqual([
+      ['simple', '17.30', 1, 2],
+      ['legacy', '7.10', 1, 1],
+    ]);
+  });
+
   it('bounds the first page instead of streaming the whole history', async () => {
     dbMock.$queryRaw
       .mockReset()
