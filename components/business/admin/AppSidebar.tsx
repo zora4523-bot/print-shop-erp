@@ -213,7 +213,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
+      <SidebarHeader role="complementary" aria-label="企业信息">
         <div className="flex flex-col gap-1 px-2 py-2 group-data-[collapsible=icon]:hidden">
           <span className="text-sm font-semibold leading-tight tracking-normal">
             {COMPANY_NAME}
