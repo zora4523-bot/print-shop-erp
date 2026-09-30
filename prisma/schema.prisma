@@ -2633,6 +2633,8 @@ model AgentMonthlyBillItem {
   orderStatusSnapshot      String   @db.VarChar(32)
   customerRefSnapshot      String?
   settledFeeSnapshot       Decimal  @db.Decimal(12, 2)
+  // Forward-only public settlement evidence; null on historical frozen bills.
+  settlementDetailSnapshot Json?
   settledAtSnapshot        DateTime @db.Timestamptz(3)
   createdAt                DateTime @default(now()) @db.Timestamptz(3)
   updatedAt                DateTime @updatedAt @db.Timestamptz(3)

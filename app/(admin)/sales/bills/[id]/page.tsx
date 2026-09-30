@@ -1,3 +1,4 @@
+import { BillItemName } from '@/components/business/agent-monthly-billing/BillItemName';
 import { BillItemEvidence } from '@/components/business/agent-monthly-billing/BillItemEvidence';
 import { BillDetailDisclosure } from '@/components/business/agent-monthly-billing/BillDetailDisclosure';
 import Link from 'next/link';
@@ -48,7 +49,7 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
       </dl> : <p className="text-sm text-muted-foreground">暂无收款记录</p>}
     </section>
     <TableScrollArea label="月账单工单明细"><table className="w-full text-sm"><thead><tr><th className="p-3 text-left">工单</th><th className="p-3">工单名称</th><th className="p-3">结算状态</th><th className="p-3">版本</th><th className="p-3">结算时间</th><th className="p-3 text-right">金额</th></tr></thead><tbody>
-      {bill.items.map((item) => <tr key={item.id} className="border-t"><td className="p-3"><Link href={`/orders/${item.orderId}`} className="text-primary underline underline-offset-4">{item.orderNoSnapshot}</Link><div className="mt-2"><BillItemEvidence item={item} period={bill.period} sales /></div></td><td className="p-3">{item.order.customName?.trim() || '未命名工单'}</td><td className="p-3"><OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /></td><td className="p-3">{item.workOrderVersionSnapshot}</td><td className="p-3">{formatDateTimeShanghai(item.settledAtSnapshot)}</td><td className="p-3 text-right">{formatMoney(item.settledFeeSnapshot)}</td></tr>)}
+      {bill.items.map((item) => <tr key={item.id} className="border-t"><td className="p-3"><Link href={`/orders/${item.orderId}`} className="text-primary underline underline-offset-4">{item.orderNoSnapshot}</Link><div className="mt-2"><BillItemEvidence item={item} period={bill.period} sales /></div></td><td className="p-3"><BillItemName item={item} /></td><td className="p-3"><OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /></td><td className="p-3">{item.workOrderVersionSnapshot}</td><td className="p-3">{formatDateTimeShanghai(item.settledAtSnapshot)}</td><td className="p-3 text-right">{formatMoney(item.settledFeeSnapshot)}</td></tr>)}
     </tbody></table></TableScrollArea>
     {bill.adjustments.length ? <section className="space-y-3"><h2 className="font-semibold">抵扣明细</h2>{bill.adjustments.map((item) => <p key={item.id} className="flex flex-wrap justify-between gap-3"><span>{item.credit.sourceItem.orderNoSnapshot}<BillDetailDisclosure label="查看抵扣来源" title="抵扣来源" description={`${bill.period} 月账单抵扣`}>
         <p>本账单抵扣 {formatMoney(item.amount)}</p>

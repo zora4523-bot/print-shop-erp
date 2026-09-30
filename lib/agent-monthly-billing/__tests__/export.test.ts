@@ -483,6 +483,7 @@ describe('结算成员表：客户名称/简称停用后的工单名称列', () 
       {
         orderNoSnapshot: 'GD-260815-001',
         orderNameSnapshot: '中秋礼盒',
+        orderNameAtSettlement: false,
         orderStatusSnapshot: 'SETTLED',
         workOrderVersionSnapshot: 2,
         settledFeeSnapshot: '100.00',
@@ -492,10 +493,10 @@ describe('结算成员表：客户名称/简称停用后的工单名称列', () 
 
     const sheets = await processStoredPayload(persisted);
     expect(sheets.get('结算成员')).toEqual([
-      ['账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间'],
+      ['账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间', '名称依据'],
       [
         '2026-08', '代理商 A', 'GD-260815-001', '中秋礼盒', 'SETTLED', 2,
-        { kind: 'xlsx-decimal', value: '100.00' }, '2026/09/02 11:00',
+        { kind: 'xlsx-decimal', value: '100.00' }, '2026/09/02 11:00', '导出时名称',
       ],
     ]);
   });

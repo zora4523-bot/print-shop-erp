@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { readBillSettlementDetail } from '@/lib/agent-monthly-billing/settlement-detail';
 import Decimal from 'decimal.js';
 import { BillDetailDisclosure } from './BillDetailDisclosure';
 import { OrderStatusSnapshotBadge } from './OrderStatusSnapshotBadge';
@@ -14,10 +15,11 @@ export function BillItemEvidence({ item, period, sales = false }: {
   item: {
     orderId: string; orderNoSnapshot: string; workOrderVersionSnapshot: number;
     orderStatusSnapshot: string; settledFeeSnapshot: Decimal.Value; settledAtSnapshot: Date;
-    credits: Credit[];
+    credits: Credit[]; settlementDetailSnapshot?: unknown;
   };
   period: string; sales?: boolean;
 }) {
+  const detail = readBillSettlementDetail(item.settlementDetailSnapshot, item.settledFeeSnapshot);
   const base = sales ? '/sales/bills' : '/owner/agent-bills';
   return <BillDetailDisclosure label={`查看 ${item.orderNoSnapshot} 明细`} title={item.orderNoSnapshot} description={`${period} 账单中的结算记录`}>
     <dl className="grid grid-cols-2 gap-4">
@@ -26,6 +28,13 @@ export function BillItemEvidence({ item, period, sales = false }: {
       <div><dt className="text-muted-foreground">结算时状态</dt><dd><OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /></dd></div>
       <div><dt className="text-muted-foreground">结算时纸单版本</dt><dd>v{item.workOrderVersionSnapshot}</dd></div>
     </dl>
+    <section className="space-y-3">
+      <h3 className="font-semibold">结算费用明细</h3>
+      {detail ? <dl className="space-y-2">
+        <div className="flex justify-between gap-4"><dt>加工费</dt><dd className="tabular-nums">{formatMoney(detail.processingAmount)}</dd></div>
+        {detail.charges.map((charge, index) => <div key={index} className="flex justify-between gap-4"><dt>{charge.description}</dt><dd className="shrink-0 tabular-nums">{formatMoney(charge.amount)}</dd></div>)}
+      </dl> : <p className="text-muted-foreground">该账单未保留完整费用分项，请按结算总额核对。</p>}
+    </section>
     {item.credits.length > 0 ? <section className="space-y-3">
       <h3 className="font-semibold">该工单的抵扣记录</h3>
       <ul className="divide-y">{item.credits.map((credit) => {
@@ -40,6 +49,7 @@ export function BillItemEvidence({ item, period, sales = false }: {
         </li>;
       })}</ul>
     </section> : null}
+    <p className="text-muted-foreground">当前工单资料可能已变更；本账单按结算记录核对。</p>
     <Link href={`/orders/${item.orderId}`} className={buttonVariants({ variant: 'outline' })}>查看当前工单</Link>
   </BillDetailDisclosure>;
 }

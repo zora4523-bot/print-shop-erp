@@ -82,8 +82,8 @@ it('lists members by order name and marks unnamed orders instead of repeating th
   const rows = html.match(/<tr class="border-t">[\s\S]*?<\/tr>/g) ?? [];
   const nameCell = (row: string | undefined) =>
     (row?.match(/<td class="p-3">[\s\S]*?<\/td>/g) ?? [])[1]?.replace(/<[^>]+>/g, '');
-  expect(nameCell(rows.find((row) => row.includes('/orders/order-0')))).toBe('未命名工单');
-  expect(nameCell(rows.find((row) => row.includes('/orders/order-1')))).toBe('中秋礼盒');
+  expect(nameCell(rows.find((row) => row.includes('/orders/order-0')))).toBe('未命名工单当前名称');
+  expect(nameCell(rows.find((row) => row.includes('/orders/order-1')))).toBe('中秋礼盒当前名称');
   expect(html).not.toContain('客户');
 });
 it('marks a DRAFT bill detail as provisional and labels item status through the order status registry', async () => {

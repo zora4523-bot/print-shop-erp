@@ -211,15 +211,6 @@
     },
     {
       "rule": "money",
-      "file": "app/(billing)/owner/agent-bills/[id]/page.tsx",
-      "text": "sourceAmount={new Decimal(item.settledFeeSnapshot).toFixed(2)}",
-      "clause": "§4.1",
-      "migration": "P0-1",
-      "count": 1,
-      "reason": "Decimal→两位小数字符串序列化，传给子组件做 Number() 校验 / 隐藏输入上限，展示端已走 formatMoney"
-    },
-    {
-      "rule": "money",
       "file": "app/(admin)/owner/purchases/[id]/page.tsx",
       "text": ".toFixed(2);",
       "clause": "§4.1",

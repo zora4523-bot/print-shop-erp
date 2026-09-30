@@ -1,3 +1,4 @@
+import { BillItemName } from '@/components/business/agent-monthly-billing/BillItemName';
 import { BillItemEvidence } from '@/components/business/agent-monthly-billing/BillItemEvidence';
 import { BillDetailDisclosure } from '@/components/business/agent-monthly-billing/BillDetailDisclosure';
 import { randomUUID } from 'node:crypto';
@@ -127,7 +128,7 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
                     ) : null}
                   </td>
                   <td className="px-4 py-3 align-top">
-                    {item.order.customName?.trim() || '未命名工单'}
+                    <BillItemName item={item} />
                   </td>
                   <td className="px-4 py-3 align-top text-xs text-muted-foreground">
                     <OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /> · v{item.workOrderVersionSnapshot}

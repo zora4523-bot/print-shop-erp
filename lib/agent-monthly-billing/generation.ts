@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { createBillSettlementDetail } from './settlement-detail';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   AgentMonthlyBillStatus,
@@ -34,6 +35,7 @@ type Tx = Prisma.TransactionClient;
 const ELIGIBLE_ORDER_SELECT = {
   id: true,
   orderNo: true,
+  customName: true,
   submitterId: true,
   status: true,
   // 客户名称/简称已停用、不再展示（业主 2026-09-27），但确认触发器要求成员
@@ -43,9 +45,9 @@ const ELIGIBLE_ORDER_SELECT = {
   settledFee: true,
   processingAmount: true,
   totalAmount: true,
-  customerCharges: { select: { amount: true } },
+  customerCharges: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { amount: true, description: true } },
   settledAt: true,
-} as const;
+} satisfies Prisma.OrderSelect;
 
 type EligibleOrder = Prisma.OrderGetPayload<{
   select: typeof ELIGIBLE_ORDER_SELECT;
@@ -324,6 +326,7 @@ export async function synchronizeDraftBillInTx(
         orderStatusSnapshot: order.status,
         customerRefSnapshot: order.customerRef,
         settledFeeSnapshot: money(order.settledFee),
+        settlementDetailSnapshot: createBillSettlementDetail(order),
         settledAtSnapshot: order.settledAt,
       },
       update: {
@@ -332,6 +335,7 @@ export async function synchronizeDraftBillInTx(
         orderStatusSnapshot: order.status,
         customerRefSnapshot: order.customerRef,
         settledFeeSnapshot: money(order.settledFee),
+        settlementDetailSnapshot: createBillSettlementDetail(order),
         settledAtSnapshot: order.settledAt,
       },
       select: { id: true },

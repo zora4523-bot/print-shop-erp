@@ -29,6 +29,7 @@ import {
 } from './export-artifact';
 import { isAgentBillPeriod } from './period';
 import { agentBillWhere } from './list-filter';
+import { readBillSettlementDetail } from './settlement-detail';
 
 const EXPORT_SCHEMA_VERSION = 1;
 const EXPORT_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -85,6 +86,7 @@ type ExportSnapshotPayload = {
     orderNoSnapshot: string;
     // 请求时的工单名称，2026-09-27 起写入；更早入队的快照没有此键，表格留空。
     orderNameSnapshot?: string | null;
+    orderNameAtSettlement?: boolean;
     // 已停用的客户名称/简称，只存在于 2026-09-27 前写入的快照。不再写入、不再输出，
     // 但键仍留在 strict schema 里，停用前入队、尚未生成的导出才能照常解析。
     customerRefSnapshot?: string | null;
@@ -140,6 +142,7 @@ const EXPORT_SNAPSHOT_PAYLOAD_SCHEMA = z
         .object({
           orderNoSnapshot: z.string(),
           orderNameSnapshot: z.string().nullable().optional(),
+        orderNameAtSettlement: z.boolean().optional(),
           customerRefSnapshot: z.string().nullable().optional(),
           orderStatusSnapshot: z.string(),
           workOrderVersionSnapshot: z.number().int().positive(),
@@ -196,6 +199,7 @@ const EXPORT_SNAPSHOT_SELECT = {
       orderStatusSnapshot: true,
       workOrderVersionSnapshot: true,
       settledFeeSnapshot: true,
+      settlementDetailSnapshot: true,
       settledAtSnapshot: true,
       order: { select: { customName: true } },
     },
@@ -250,14 +254,18 @@ function exportSnapshotPayload(source: ExportSnapshotSource): ExportSnapshotPayl
       createdAt: source.createdAt.toISOString(),
       orderCount: source.items.length,
     },
-    items: source.items.map((item) => ({
-      orderNoSnapshot: item.orderNoSnapshot,
-      orderNameSnapshot: item.order.customName,
-      orderStatusSnapshot: item.orderStatusSnapshot,
-      workOrderVersionSnapshot: item.workOrderVersionSnapshot,
-      settledFeeSnapshot: item.settledFeeSnapshot.toFixed(2),
-      settledAtSnapshot: item.settledAtSnapshot.toISOString(),
-    })),
+    items: source.items.map((item) => {
+      const detail = readBillSettlementDetail(item.settlementDetailSnapshot, item.settledFeeSnapshot);
+      return {
+        orderNoSnapshot: item.orderNoSnapshot,
+        orderNameSnapshot: detail ? detail.orderName : item.order.customName,
+        orderNameAtSettlement: Boolean(detail),
+        orderStatusSnapshot: item.orderStatusSnapshot,
+        workOrderVersionSnapshot: item.workOrderVersionSnapshot,
+        settledFeeSnapshot: item.settledFeeSnapshot.toFixed(2),
+        settledAtSnapshot: item.settledAtSnapshot.toISOString(),
+      };
+    }),
     adjustments: source.adjustments.map((adjustment) => ({
       targetPeriod: source.period,
       targetAgentDisplayNameSnapshot: source.agentDisplayNameSnapshot,
@@ -763,7 +771,7 @@ async function* itemRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间',
+    '账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间', '名称依据',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
@@ -784,6 +792,7 @@ async function* itemRows(
           item.workOrderVersionSnapshot,
           moneyText(item.settledFeeSnapshot),
           dateTime(item.settledAtSnapshot),
+          item.orderNameAtSettlement ? '结算时名称' : '导出时名称',
         ];
       }
     }

@@ -392,3 +392,9 @@ pnpm db:studio
 ### PDF 能力迁移（2026-09-30）
 
 `20260930160000_pdf_worker_capability` 仅向 BackgroundWorkerHeartbeat 添加 nullable Boolean `pdfReady`，无默认 true、无业务表回填。新 HEAVY 上报动态能力，旧代码的 INSERT/UPDATE 不受可空列影响；旧进程的 NULL 心跳不可满足新 jobs gate。先执行新增前向迁移，再切换 Web/worker；不修改既有 migration，不改历史工单/产物/尝试记录。回退代码可忽略新增列，不需删除列。
+
+### 外部销售账单结算依据（2026-09-30）
+
+`20260930100000_agent_bill_settlement_detail` 添加可空 JSONB `AgentMonthlyBillItem.settlementDetailSnapshot`。只在生成/更新草稿及最终确认时写入 schemaVersion、结算时工单名称、加工费与对客收费名称/金额，分项以 Decimal 核对结算总额。既有 `AgentMonthlyBillItem_parent_draft_guard` 覆盖整行，已确认账单仍禁止修改。历史确认账单保留 NULL，不以当前工单反填。
+
+先迁移数据库，再启动新 Web/worker；旧代码可忽略新列，回退不删除字段。导出任务 schemaVersion 保持兼容，只添加可选名称依据标记；已排队旧导出继续使用请求时保存的内容。新增字段不包含内部成本、工资、调价审批原因。2026-09-30 已在隔离本地 PostgreSQL 应用此迁移，未部署生产。

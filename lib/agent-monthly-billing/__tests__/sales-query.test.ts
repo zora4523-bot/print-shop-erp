@@ -37,7 +37,7 @@ it('selects only customer-facing receipt facts and frozen item identity/status',
   } });
   expect(query.select.items.select).toMatchObject({
     id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true,
-    orderStatusSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true,
+    orderStatusSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true, settlementDetailSnapshot: true,
     order: { select: { customName: true } },
   });
 });
