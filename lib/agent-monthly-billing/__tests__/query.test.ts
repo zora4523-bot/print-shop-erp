@@ -97,6 +97,25 @@ describe('agent monthly billing owner queries', () => {
     );
   });
 
+  it('summarizes the whole filtered population with the same filter as the page', async () => {
+    dbMock.agentMonthlyBill.count.mockResolvedValue(61);
+    dbMock.agentMonthlyBill.groupBy.mockResolvedValue([
+      { status: AgentMonthlyBillStatus.CONFIRMED, _sum: { totalAmount: { toFixed: () => '6100.00' } }, _count: { _all: 61 } },
+    ]);
+    const result = await listAgentMonthlyBills({ period: '2026-08', status: AgentMonthlyBillStatus.CONFIRMED, agentUserId: 'agent-1', page: 3 });
+    const listWhere = dbMock.agentMonthlyBill.findMany.mock.calls[0][0].where;
+    expect(listWhere).toEqual({ period: '2026-08', status: AgentMonthlyBillStatus.CONFIRMED, agentUserId: 'agent-1' });
+    expect(dbMock.agentMonthlyBill.count).toHaveBeenCalledWith({ where: listWhere });
+    expect(dbMock.agentMonthlyBill.groupBy).toHaveBeenCalledWith({
+      by: ['status'], where: listWhere, _sum: { totalAmount: true }, _count: { _all: true },
+    });
+    expect(result.summary).toEqual({
+      DRAFT: { amount: '0.00', count: 0 },
+      CONFIRMED: { amount: '6100.00', count: 61 },
+      PAID: { amount: '0.00', count: 0 },
+    });
+  });
+
   it('joins each frozen member to its order name only for the detail label', async () => {
     dbMock.agentMonthlyBill.findUnique.mockResolvedValue(null);
     await expect(getAgentMonthlyBillDetail('bill-1')).resolves.toBeNull();

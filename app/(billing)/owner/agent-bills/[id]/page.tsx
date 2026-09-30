@@ -25,7 +25,7 @@ import {
 import { PageHeader, StatusBadge, EmptyState, FilterClearLink } from '@/components/ui-business';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { billListReturnHref } from '@/lib/agent-monthly-billing/presentation';
+import { billListReturnHref, billScopedHref } from '@/lib/agent-monthly-billing/presentation';
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ returnTo?: string | string[]; q?: string | string[]; page?: string | string[] }> };
 
@@ -112,7 +112,7 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
           <Button type="submit" variant="outline">搜索</Button>
           {members.q ? <FilterClearLink formId="agent-bill-item-search" href={buildTableHref(basePath, {}, { returnTo: returnHref })} className={buttonVariants({ variant: 'ghost' })}>清除筛选</FilterClearLink> : null}
         </Form>
-        {members.rows.length ? <BillItemsList items={members.rows} period={bill.period} billId={bill.id} billStatus={bill.status} /> : <EmptyState title="未找到匹配的工单" />}
+        {members.rows.length ? <BillItemsList items={members.rows} period={bill.period} billId={bill.id} billStatus={bill.status} returnTo={returnHref} /> : <EmptyState title="未找到匹配的工单" />}
         <AdminPagination basePath={basePath} page={members.page} pageCount={members.pageCount} total={members.total} pageSize={members.pageSize} queryParams={{ q: members.q || undefined, returnTo: returnHref }} />
       </section>
 
@@ -128,7 +128,7 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
                   <BillDetailDisclosure label="查看抵扣来源" title="抵扣来源" description={`${bill.period} 月账单抵扣`}>
                     <p>本账单抵扣 {formatMoneyDelta(row.amount)}</p>
                     <p>来源工单 {row.credit.sourceItem.orderNoSnapshot}</p>
-                    <Link href={`/owner/agent-bills/${row.credit.sourceItem.bill.id}`} className={buttonVariants({ variant: 'outline' })}>{row.credit.sourceItem.bill.period} 月账单</Link>
+                    <Link href={billScopedHref(`/owner/agent-bills/${row.credit.sourceItem.bill.id}`, returnHref)} className={buttonVariants({ variant: 'outline' })}>{row.credit.sourceItem.bill.period} 月账单</Link>
                   </BillDetailDisclosure>
                 </span>
                 <strong className="font-sans tabular-nums">

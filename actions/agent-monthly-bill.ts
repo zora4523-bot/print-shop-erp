@@ -76,6 +76,7 @@ function invalid(error: z.ZodError): AgentMonthlyBillActionResult {
 
 function refreshBillPages(billId?: string): void {
   revalidatePath('/owner/agent-bills');
+  revalidatePath('/owner/agent-bills/unbilled');
   revalidatePath('/sales/bills');
   revalidatePath('/owner/agent-bills/[id]', 'page');
   revalidatePath('/sales/bills/[id]', 'page');

@@ -10,7 +10,7 @@ import { ChevronDown } from 'lucide-react';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { billItemPage } from '@/lib/agent-monthly-billing/item-list';
 import { buildTableHref } from '@/lib/admin/table';
-import { billListReturnHref } from '@/lib/agent-monthly-billing/presentation';
+import { billListReturnHref, billScopedHref } from '@/lib/agent-monthly-billing/presentation';
 import { notFound } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getSalesBillTitleRef } from '@/lib/page-title/refs';
@@ -79,13 +79,13 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
     </Form>
       {members.total > 0 ? <SalesBillExportButton href={buildTableHref(`/api/sales/bills/${bill.id}/export`, {}, { q: members.q || undefined })} label={members.q ? '导出匹配明细 CSV' : '导出账单明细 CSV'} /> : null}
     </div>
-    {members.rows.length === 0 ? <EmptyState title="未找到匹配的工单" /> : <BillItemsList items={members.rows} period={bill.period} billId={bill.id} billStatus={bill.status} sales />}
+    {members.rows.length === 0 ? <EmptyState title="未找到匹配的工单" /> : <BillItemsList items={members.rows} period={bill.period} billId={bill.id} billStatus={bill.status} returnTo={returnTo} sales />}
     <AdminPagination basePath={basePath} page={members.page} pageCount={members.pageCount} total={members.total} pageSize={members.pageSize} queryParams={{ q: members.q || undefined, returnTo }} />
     </section>
     {bill.adjustments.length ? <section className="space-y-3"><h2 className="font-semibold">抵扣明细</h2>{bill.adjustments.map((item) => <p key={item.id} className="flex flex-wrap justify-between gap-3"><span>{item.credit.sourceItem.orderNoSnapshot}<BillDetailDisclosure label="查看抵扣来源" title="抵扣来源" description={`${bill.period} 货款账单抵扣`}>
         <p>本账单抵扣 {formatMoney(item.amount)}</p>
         <p>来源工单 {item.credit.sourceItem.orderNoSnapshot}</p>
-        <Link href={`/sales/bills/${item.credit.sourceItem.bill.id}`} className={buttonVariants({ variant: 'outline' })}>{item.credit.sourceItem.bill.period} 货款账单</Link>
+        <Link href={billScopedHref(`/sales/bills/${item.credit.sourceItem.bill.id}`, returnTo, true)} className={buttonVariants({ variant: 'outline' })}>{item.credit.sourceItem.bill.period} 货款账单</Link>
       </BillDetailDisclosure></span><span>{formatMoney(item.amount)}</span></p>)}</section> : null}
   </div>;
 }

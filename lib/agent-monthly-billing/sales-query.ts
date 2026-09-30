@@ -58,7 +58,8 @@ export async function getSalesMonthlyBill(actor: Actor, id: string) {
         credits: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
           id: true, requestedAmount: true, createdAt: true,
           allocations: { where: { bill: scope(actor) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
-            id: true, amount: true, bill: { select: { id: true, period: true } },
+            // 目标账单状态：草稿上的分摊只算“暂计抵扣”，不能与已确认抵扣合并展示。
+            id: true, amount: true, bill: { select: { id: true, period: true, status: true } },
           } },
         } },
       } },

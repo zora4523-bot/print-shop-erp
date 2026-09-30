@@ -6,18 +6,21 @@ import { OrderStatusSnapshotBadge } from './OrderStatusSnapshotBadge';
 import { formatMoney } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { buttonVariants } from '@/components/ui/button';
+import { billScopedHref, creditAllocationSummary } from '@/lib/agent-monthly-billing/presentation';
 
 type Credit = {
   id: string; requestedAmount: Decimal.Value; createdAt: Date;
-  allocations: Array<{ id: string; amount: Decimal.Value; bill: { id: string; period: string } }>;
+  allocations: Array<{ id: string; amount: Decimal.Value; bill: { id: string; period: string; status: string } }>;
 };
-export function BillItemEvidence({ item, period, sales = false }: {
+export function BillItemEvidence({ item, period, sales = false, returnTo }: {
   item: {
     orderId: string; orderNoSnapshot: string; workOrderVersionSnapshot: number;
     orderStatusSnapshot: string; settledFeeSnapshot: Decimal.Value; settledAtSnapshot: Date;
     credits: Credit[]; settlementDetailSnapshot?: unknown;
   };
   period: string; sales?: boolean;
+  /** List scope to carry onto linked bills; re-sanitized by billScopedHref. */
+  returnTo?: string;
 }) {
   const detail = readBillSettlementDetail(item.settlementDetailSnapshot, item.settledFeeSnapshot);
   const base = sales ? '/sales/bills' : '/owner/agent-bills';
@@ -39,13 +42,12 @@ export function BillItemEvidence({ item, period, sales = false }: {
     {item.credits.length > 0 ? <section className="space-y-3">
       <h3 className="font-semibold">该工单的抵扣记录</h3>
       <ul className="divide-y">{item.credits.map((credit) => {
-        const allocated = credit.allocations.reduce((sum, row) => sum.plus(row.amount), new Decimal(0)).abs();
-        const remaining = new Decimal(credit.requestedAmount).abs().minus(allocated);
+        const summary = creditAllocationSummary(credit);
         return <li key={credit.id} className="space-y-2 py-3">
-          <p>录入 {formatMoney(new Decimal(credit.requestedAmount).abs())} · {formatDateTimeShanghai(credit.createdAt)}</p>
-          <p className="text-muted-foreground">已抵扣 {formatMoney(allocated)} · 待抵扣 {formatMoney(remaining)}</p>
+          <p>录入 {formatMoney(summary.requested)} · {formatDateTimeShanghai(credit.createdAt)}</p>
+          <p className="text-muted-foreground">已抵扣 {formatMoney(summary.confirmed)}{new Decimal(summary.pending).gt(0) ? <> · 暂计抵扣（账单整理中） {formatMoney(summary.pending)}</> : null} · 待抵扣 {formatMoney(summary.remaining)}</p>
           <ul className="space-y-1">{credit.allocations.map((row) => <li key={row.id}>
-            <Link href={`${base}/${row.bill.id}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{row.bill.period} {sales ? '货款账单' : '月账单'} · {formatMoney(row.amount)}</Link>
+            <Link href={billScopedHref(`${base}/${row.bill.id}`, returnTo, sales)} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{row.bill.period} {sales ? '货款账单' : '月账单'}{row.bill.status === 'DRAFT' ? '（整理中）' : ''} · {formatMoney(row.amount)}</Link>
           </li>)}</ul>
         </li>;
       })}</ul>

@@ -17,6 +17,35 @@ export function billListReturnHref(value: string | string[] | undefined, sales =
   return buildTableHref(base, {}, { ...filter, agentUserId: sales ? undefined : filter.agentUserId, page: filter.page > 1 ? filter.page : undefined });
 }
 
+/**
+ * Link to a bill detail (or a page beneath it) that keeps the list scope. The list destination is
+ * re-sanitized here, so callers may pass the raw query value; the unfiltered list adds no parameter.
+ */
+export function billScopedHref(path: string, returnTo: string | string[] | undefined, sales = false) {
+  const base = sales ? '/sales/bills' : '/owner/agent-bills';
+  const back = billListReturnHref(returnTo, sales);
+  return buildTableHref(path, {}, { returnTo: back === base ? undefined : back });
+}
+
+type CreditAllocationRow = { amount: Decimal.Value; bill: { status: string } };
+
+/**
+ * Split a credit's allocations by target bill state: only frozen (non-DRAFT) bills count as
+ * deducted; DRAFT allocations are provisional because regeneration may still move them.
+ */
+export function creditAllocationSummary(credit: { requestedAmount: Decimal.Value; allocations: ReadonlyArray<CreditAllocationRow> }) {
+  const zero = new Decimal(0);
+  const confirmed = credit.allocations.filter((row) => row.bill.status !== 'DRAFT').reduce((sum, row) => sum.plus(new Decimal(row.amount).abs()), zero);
+  const pending = credit.allocations.filter((row) => row.bill.status === 'DRAFT').reduce((sum, row) => sum.plus(new Decimal(row.amount).abs()), zero);
+  const requested = new Decimal(credit.requestedAmount).abs();
+  return {
+    requested: requested.toFixed(2),
+    confirmed: confirmed.toFixed(2),
+    pending: pending.toFixed(2),
+    remaining: requested.minus(confirmed).minus(pending).toFixed(2),
+  };
+}
+
 /** Billing screens and downloads must distinguish cancellation fees from completion. */
 export function billOrderStatus(snapshot: string): StatusDefinition {
   const definition = Object.hasOwn(ORDER_STATUS_REGISTRY, snapshot)

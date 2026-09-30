@@ -58,6 +58,8 @@ it('limits linked allocations to the same sales account and omits internal credi
   await getSalesMonthlyBill(actor, 'bill-a');
   const credits = findFirst.mock.calls[0][0].select.items.select.credits;
   expect(credits.select.allocations.where).toEqual({ bill: { agentUserId: actor.id } });
+  // 目标账单状态用于区分已确认抵扣与草稿上的暂计抵扣。
+  expect(credits.select.allocations.select.bill).toEqual({ select: { id: true, period: true, status: true } });
   expect(credits.select).not.toHaveProperty('reason');
   expect(credits.select).not.toHaveProperty('createdBy');
 });
@@ -75,4 +77,13 @@ it('scopes the twelve-period overview to the actor even when filters request ano
     { period: '2025-01', draft: '0.10', confirmed: '0.00', paid: '0.00' },
     { period: '2026-08', draft: '0.00', confirmed: '123.45', paid: '0.00' },
   ]);
+});
+
+it('summarizes with exactly the actor-scoped filter used for the visible page', async () => {
+  count.mockResolvedValue(3);
+  await listSalesMonthlyBills(actor, { period: '2026-08', status: 'CONFIRMED', agentUserId: 'foreign', page: '2' });
+  const listWhere = findMany.mock.calls[0][0].where;
+  expect(listWhere).toEqual({ period: '2026-08', status: 'CONFIRMED', agentUserId: actor.id });
+  expect(groupBy.mock.calls[0][0]).toEqual({ by: ['status'], where: listWhere, _sum: { totalAmount: true }, _count: { _all: true } });
+  expect(count.mock.calls[0][0].where).toEqual(listWhere);
 });
