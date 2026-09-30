@@ -156,6 +156,10 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   // The sidebar can contain dozens of dynamic routes. Letting every visible
   // Link auto-prefetch floods the server with authenticated RSC requests.
   // Enable prefetch only for the latest link that shows real user intent.
+  // Intent uses the default (null) mode, not `true`: for these dynamic routes it
+  // prefetches only down to the nearest loading.tsx, so the click paints the
+  // skeleton instantly and still fetches fresh data. `true` ran the whole page
+  // (every query) on hover and served that snapshot for up to 5 minutes.
   const [intent, setIntent] = useState<IntentPrefetchTarget | null>(null);
   const collapsedGroups = useSyncExternalStore(
     subscribeSidebarCollapse,
@@ -412,7 +416,7 @@ function SidebarItem({
               href={item.href}
               aria-label={item.label}
               aria-current={active ? 'page' : undefined}
-              prefetch={intentHref === item.href ? true : false}
+              prefetch={intentHref === item.href ? null : false}
               onMouseEnter={() => onEnter(item.href)}
               onMouseLeave={() => onLeave(item.href)}
               onClick={() => onNavigate(item.href)}
@@ -514,7 +518,7 @@ function SidebarSubItem({
           <Link
             href={item.href}
             aria-current={active ? 'page' : undefined}
-            prefetch={intentHref === item.href ? true : false}
+            prefetch={intentHref === item.href ? null : false}
             onMouseEnter={() => onEnter(item.href)}
             onMouseLeave={() => onLeave(item.href)}
             onClick={() => onNavigate(item.href)}
