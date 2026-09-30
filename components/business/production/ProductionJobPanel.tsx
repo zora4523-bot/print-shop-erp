@@ -24,9 +24,7 @@ export async function ProductionJobPanel({ orderId }: { orderId: string }) {
       const needsReview = !!job.factReview && ['OPEN', 'CONFLICT'].includes(job.factReview.status);
       const resolution = (job.factReview?.evidence as { resolution?: string } | undefined)?.resolution;
       const laterJobs = jobs.filter(next => next.workOrderVersion > job.workOrderVersion && next.status === 'COMPLETED');
-      const snapshot = job.snapshot as { items?: Array<{ id: string; name: string; quantity: number }>; productionQuantities?: Record<string, string>; requestedItemQuantities?: Record<string, string> | null };
-      // A pending request prefills the worker's requested per-item split, not the plan.
-      const requestedItems = job.status === 'REQUESTED' ? snapshot.requestedItemQuantities ?? null : null;
+      const snapshot = job.snapshot as { items?: Array<{ id: string; name: string; quantity: number }>; productionQuantities?: Record<string, string> };
       return <Disclosure key={job.id} id={`production-job-${job.id}`} tabIndex={-1} className="min-w-0 rounded-lg border p-3" open={job.status === 'REQUESTED' || needsReview || job.workOrderVersion === jobs[0]?.workOrderVersion || job.wages.some(wage => wage.amount === null)}>
       <DisclosureSummary className="min-h-11 cursor-pointer gap-2 py-2"><span className="min-w-0 flex-1 break-words">v{job.workOrderVersion} · {job.label} · {job.workerName} · {job.completedQty?.toString() ?? job.plannedQty.toString()} 个 <StatusBadge tone={job.status === 'COMPLETED' || job.status === 'CARRIED' ? 'success' : 'neutral'}>{job.status === 'COMPLETED' ? '已登记完成' : job.status === 'CARRIED' ? '沿用已产数量' : job.status === 'REQUESTED' ? '数量待审批' : job.status === 'CANCELLED' ? '已取消' : '生产中'}</StatusBadge>{job.manualPricing && ' · 改版生产'}{job.wages.some(wage => wage.amount === null) && ' · 待补录提成'}</span><ChevronDown aria-hidden className="size-4 shrink-0 transition-transform group-open:rotate-180" /></DisclosureSummary>
       <div className="space-y-4 pt-3">
@@ -35,7 +33,7 @@ export async function ProductionJobPanel({ orderId }: { orderId: string }) {
         {((['PENDING', 'REQUESTED'].includes(job.status) && !job.historical) || (job.historical && needsReview)) && <CompletionRegistrationForm key={`${job.id}:${job.revision}:${job.factReview?.revision}`} job={{ id: job.id, revision: job.revision, workerName: job.workerName,
           quantity: job.plannedQty.toString(), requestedQty: job.requestedQty?.toString() ?? null, requestReason: job.requestReason, status: job.status,
           workDate: job.workDate?.toISOString().slice(0, 10), historical: job.historical, reviewRevision: job.factReview?.revision, settledWorkDates: job.settledWorkDates, hasLaterProduction: laterJobs.length > 0,
-          items: snapshot.items?.map(item => ({ id: item.id, name: item.name, quantity: requestedItems?.[item.id] ?? snapshot.productionQuantities?.[item.id] ?? String(item.quantity) })),
+          items: snapshot.items?.map(item => ({ id: item.id, name: item.name, quantity: snapshot.productionQuantities?.[item.id] ?? String(item.quantity) })),
         }} admin today={todayShanghai()} />}
         {resolution === 'CONTINUED' && <p className="text-sm">资料改版前的生产已由新版原师傅继续承接，实际完成后登记一次。</p>}
         {resolution === 'INCLUDED_LATER' && <p className="text-sm">已核实计入后续登记，未新增产量或工资。</p>}

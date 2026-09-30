@@ -49,25 +49,14 @@ export async function lockProductionWageDay(tx: Prisma.TransactionClient, worker
   return workDate;
 }
 
-function plannedItemQuantities(snapshot: Prisma.JsonObject) {
-  const items = z.array(z.object({ id: z.string(), quantity: z.number().int().positive() })).nonempty().parse(snapshot.items);
-  const plannedByItem = (snapshot.productionQuantities as Record<string, string> | undefined) ?? Object.fromEntries(items.map(item => [item.id, String(item.quantity)]));
-  return { items, plannedByItem };
-}
-
-/** SPEC「2026-09-28 排单与完工登记规则」：师傅只确认下发数量、修改需审批；多款逐款核对：逐款改分配与改总量同样需要审批。 */
-export function itemQuantitiesDeviateFromPlan(submitted: Record<string, string> | undefined, planned: Record<string, string>) {
-  if (!submitted) return false;
-  return [...new Set([...Object.keys(submitted), ...Object.keys(planned)])]
-    .some(id => submitted[id] === undefined || planned[id] === undefined || !new Decimal(submitted[id]).eq(planned[id]));
-}
-
 export async function registerProductionCompletion(raw: CompletionInput, actor: ProductionActor) {
   const input = completionSchema.parse(raw);
   const requestHash = createHash('sha256').update(JSON.stringify([actor.id, input])).digest('hex');
   const result = await db.$transaction(async tx => {
     if (input.mode !== 'COMPLETE') await assertProductionAdmin(tx, actor);
     else if (actor.role !== 'WORKER') throw new Error('请使用生产师傅账号登记完成');
+    // 业主 2026-10-01：师傅只按总数登记，各款实际数量按工单确定，由管理员核定/补登记。
+    else if (input.itemQuantities) throw new Error('师傅按总数登记完成，逐款数量由管理员核定');
     const locator = await tx.productionJob.findUnique({ where: { id: input.jobId }, select: { orderId: true } });
     if (!locator) throw new Error('生产任务不存在，请刷新任务列表');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(locator.orderId)}))`;
@@ -114,7 +103,7 @@ export async function registerProductionCompletion(raw: CompletionInput, actor: 
       await tx.orderLog.create({ data: { orderId: job.orderId, operatorId: actor.id, action: 'PRODUCTION_QUANTITY_REJECTED', remark: input.reason,
         changedFields: { jobId: job.id, rejectedRevision: job.revision, workerId: job.workerId, requestedQty: job.requestedQty?.toString() ?? null, workDate: day, requestReason: job.requestReason, notActuallyProduced: true } } });
       await tx.productionJob.update({ where: { id: job.id }, data: { status: historical ? 'CANCELLED' : 'PENDING', requestedQty: null, requestReason: null, requestedAt: null, workDate: null,
-        snapshot: { ...snapshot, registrationPricing: null, registrationRequestHash: null, requestedItemQuantities: null }, revision: { increment: 1 } } });
+        snapshot: { ...snapshot, registrationPricing: null, registrationRequestHash: null }, revision: { increment: 1 } } });
       await tx.productionFactReview.upsert({ where: { jobId: job.id }, create: { jobId: job.id, jobRevision: job.revision + 1, status: 'UNPRODUCED', periodStart: job.workDate, periodEnd: job.workDate, reason: input.reason, evidence: { notActuallyProduced: true }, createdById: actor.id, resolvedById: actor.id, resolvedAt: new Date() },
         update: { status: 'UNPRODUCED', jobRevision: job.revision + 1, reason: input.reason, resolvedById: actor.id, resolvedAt: new Date(), revision: { increment: 1 } } });
       if (historical) await reconcileResolvedHistoryInTx(tx, job.orderId, actor.id);
@@ -135,16 +124,15 @@ export async function registerProductionCompletion(raw: CompletionInput, actor: 
     if (!employmentCoversDate(workDate, worker)) throw new Error('生产日期不在师傅的雇佣期间，请核对日期');
     const quantity = new Decimal(input.quantity);
     const basis = await completionPricingBasis(tx, job, job.requestedAt ?? (day === todayShanghai(now) ? now : new Date(`${day}T12:00:00+08:00`)));
-    const itemDeviation = input.mode === 'COMPLETE' && !!input.itemQuantities && itemQuantitiesDeviateFromPlan(input.itemQuantities, plannedItemQuantities(snapshot).plannedByItem);
-    if (input.mode === 'COMPLETE' && (!quantity.eq(job.plannedQty.toString()) || itemDeviation)) {
+    if (input.mode === 'COMPLETE' && !quantity.eq(job.plannedQty.toString())) {
       if (!input.reason) throw new Error('请填写数量修改原因');
       await tx.productionJob.update({ where: { id: job.id }, data: { status: 'REQUESTED', requestedQty: input.quantity, requestReason: input.reason, requestedAt: now, workDate,
-        // The per-item split is kept for the approval form to prefill; approval still re-validates it.
-        snapshot: { ...snapshot, registrationPricing: basis, registrationRequestHash: requestHash, requestedItemQuantities: itemDeviation ? input.itemQuantities! : null }, revision: { increment: 1 } } });
-      await tx.orderLog.create({ data: { orderId: job.orderId, operatorId: actor.id, action: 'PRODUCTION_QUANTITY_REQUESTED', remark: input.reason, changedFields: { jobId: job.id, plannedQty: job.plannedQty.toString(), requestedQty: input.quantity, ...(itemDeviation ? { requestedItemQuantities: input.itemQuantities } : {}), workDate: day, pricing: basis } } });
+        snapshot: { ...snapshot, registrationPricing: basis, registrationRequestHash: requestHash }, revision: { increment: 1 } } });
+      await tx.orderLog.create({ data: { orderId: job.orderId, operatorId: actor.id, action: 'PRODUCTION_QUANTITY_REQUESTED', remark: input.reason, changedFields: { jobId: job.id, plannedQty: job.plannedQty.toString(), requestedQty: input.quantity, workDate: day, pricing: basis } } });
       return { orderId: job.orderId, status: 'REQUESTED' };
     }
-    const { items, plannedByItem } = plannedItemQuantities(snapshot);
+    const items = z.array(z.object({ id: z.string(), quantity: z.number().int().positive() })).nonempty().parse(snapshot.items);
+    const plannedByItem = (snapshot.productionQuantities as Record<string, string> | undefined) ?? Object.fromEntries(items.map(item => [item.id, String(item.quantity)]));
     const actualByItem = input.itemQuantities ?? (items.length === 1 ? { [items[0].id]: quantity.toString() } : quantity.eq(job.plannedQty.toString()) ? plannedByItem : null);
     if (!actualByItem || Object.keys(actualByItem).length !== items.length || items.some(item => actualByItem[item.id] === undefined)
       || !Object.values(actualByItem).reduce((sum, qty) => sum.plus(qty), new Decimal(0)).eq(quantity)) throw new Error('请逐款核对实际生产数量，各款合计须与核定数量一致');
