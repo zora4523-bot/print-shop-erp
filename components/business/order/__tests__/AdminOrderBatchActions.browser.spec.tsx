@@ -186,7 +186,7 @@ describe('admin order batch review', () => {
     expect(batchAction.mock.calls[0][0]).not.toHaveProperty('reason');
     resolve(partialResult());
     await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
-    await assertConsistentSummary('成功 1 张，业务跳过 1 张，结果未知 1 张，未执行 1 张，未纳入处理 1 张');
+    await assertConsistentSummary('成功 1 张，跳过 1 张，结果未知 1 张，未执行 1 张，未纳入处理 1 张');
     expect(document.querySelectorAll('[data-slot="batch-action-result-items"] > li')).toHaveLength(5);
     expect(document.querySelector('[data-slot="batch-action-result"]')?.textContent).not.toMatch(/INTERNAL_MESSAGE|INVALID_STATUS|PENDING_FACTORY|DB_DETAIL|ABORTED/);
     expect(refresh).toHaveBeenCalledOnce();
@@ -211,10 +211,10 @@ describe('admin order batch review', () => {
     await review();
     await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
     await expect.element(page.getByRole('heading', { name: '请处理未完成的工单', exact: true })).toBeVisible();
-    await assertConsistentSummary('成功 4 张，业务跳过 0 张，结果未知 0 张，未执行 0 张，未纳入处理 1 张');
+    await assertConsistentSummary('成功 4 张，跳过 0 张，结果未知 0 张，未执行 0 张，未纳入处理 1 张');
     expect(document.querySelectorAll('[data-slot="batch-action-result-items"] > li')).toHaveLength(5);
     await page.getByRole('button', { name: '关闭结果', exact: true }).click();
-    await expect.element(page.getByRole('region', { name: '工单批量操作' }).getByText(/成功 4 张，业务跳过 0 张.*未纳入处理 1 张/)).toBeVisible();
+    await expect.element(page.getByRole('region', { name: '工单批量操作' }).getByText(/成功 4 张，跳过 0 张.*未纳入处理 1 张/)).toBeVisible();
   });
 
   it('shows settlement amounts before confirmation and preserves unknown outcomes on transport failure', async () => {

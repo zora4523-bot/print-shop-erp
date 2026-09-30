@@ -34,3 +34,15 @@ PR #32 首轮 `Quality` 运行 `36766861290` 的生产依赖审计报告 5 条�
 - 对实际依赖树中的 `fast-uri` 3.x 和 `brace-expansion` 5.x 使用有上限范围的 override，分别锁到 `3.1.8`、`5.0.12`。依据 [fast-uri 公告](https://github.com/fastify/fast-uri/security/advisories/GHSA-hrr3-gc8f-f4qj) 及 brace-expansion 的 [解析递归](https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-6j4f-fj2g-mc7p)、[嵌套递归](https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-qhr7-859c-m2p7)、[二次复杂度](https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-q2hr-2g5m-vwhr) 公告；未全量升级无关依赖。
 
 已先阅读安装版 Next 16 升级文档，保留现有路由和构建配置。用 Git 归档及候选清单/锁文件创建无 `node_modules` 的干净目录，`pnpm install --frozen-lockfile` 通过；`pnpm audit --prod --json` 为 0 条公告，完整 typecheck、lint 和 `pnpm check:dead-code --check` 通过。Next 补丁后的全量浏览器组件测试 75 文件、1,047 项通过；后续离开确认缺陷的新增测试及生产构建、远端同 SHA 检查单独记录。
+
+## 首轮 CI：交互与测试契约修复
+
+- 四项浏览器组件失败来自已批准文案精简后残留的旧断言：物流确认、批量结果两项和共享报工不计薪标识。断言改为当前动作及作用域内的“不计薪”，仍校验金额快照、幂等、全部结果分类和可报工链接。完整浏览器组件集 1,047 项通过。
+- 报价草稿恢复的真实框架测试暴露出离开确认竞态：弹框后自动保存完成，原有后果列表变空，通用确认组件因此禁用操作。新增组件回归先确认失败，再由协调器展示“当前没有未保存的内容”及“离开页面”；通用空确认保护不修改。新增测试同时检查自动保存后启动请求仍锁定。两个离开保护文件共 26 项通过。
+- 报价恢复 E2E 显式处理当前离开确认；原单未重新打开前仍要求存储字节不变。重新打开并保存后对比全部草稿字段、范围和版本，仅允许保存时间前进，保留报价草稿恢复及原单不被覆盖的验证。
+- 管理员代销售建单用例用可见语义行定位桌面列表，并核对精确工单 ID；另一账号的桌面行和移动卡片都必须为零。停用会话测试按现行“外部销售月账单”标题进入，权限拒绝断言全部保留。
+- durable PDF 用例启用真实触控，并在点击重试后等待路由实际返回 202，再验证排队页。原实现的路由会等待约 10 秒，不能用默认 5 秒 DOM 断言替代响应等待。下载事件在释放测试任务前注册；继续检查原页轮询、焦点、多页 PDF、重复下载、匿名拒绝、六视口双主题和 axe。
+
+隔离库 `erp_e2e_pr_ci_1001` 完整 181 条迁移、seed 和测试价簿准备通过。build/start 模式下三项真实 worker 文件用例通过，PDF 恢复独立复跑 1/1 通过；direct PDF 在 queued 套件中按设计跳过，仍由独立 direct 配置覆盖。业务 E2E 使用同一隔离库顺序执行，临时干净副本在 3337 启动，不覆盖用户 3336 的预览构建。最新业务回归和远端完整结果记录到 PR 验证表。
+
+修复后业务验证：建单人工定价及账号隔离 2 项、会话拒绝 2 项通过；报价工作台首轮因保存时间更新的旧字节断言失败，保留全部字段等值并验证时间前进后，整个工作台 10/10 通过。最新完整类型检查与 lint 通过；临时干净副本完成 Next 16.3.6 production build/start。远端 CI 仍须验证最新提交。

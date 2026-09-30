@@ -388,7 +388,7 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
 
       completion.resolve({ status: 'success', result: {}, orderId: 'order-1' });
       await vi.waitFor(() => {
-        expect(host.textContent).toContain('物流费用已确认，工单已刷新。');
+        expect(host.textContent).toContain('物流费用已确认。');
         expect(refreshMock).toHaveBeenCalledTimes(1);
       });
     } finally {

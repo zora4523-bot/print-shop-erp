@@ -99,7 +99,7 @@ test('月账单导出由真实worker读取请求时数据并生成可下载XLSX'
   await expect(page.getByText(new RegExp(`^已生成或更新 \\d+ 张 ${fixture.period} 账单$`))).toBeVisible();
   await page.goto(`/owner/agent-bills?period=${fixture.period}&agentUserId=${fixture.agentUserId}`);
   await page.getByRole('button', { name: '导出当前结果（1 张）', exact: true }).click();
-  await expect(page.getByText('已进入大文件队列，生成后会显示下载按钮。', { exact: true })).toBeVisible();
+  await expect(page.getByText('正在生成导出文件，完成后会显示下载按钮。', { exact: true })).toBeVisible();
   const exported = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string }>('SELECT id,status::text,"backgroundJobId" FROM "AgentMonthlyBillExport" WHERE filters::text LIKE $1 ORDER BY "createdAt" DESC LIMIT 1', [`%${fixture.agentUserId}%`]));
   expect(exported.rows).toHaveLength(1);
   const row = exported.rows[0]!;

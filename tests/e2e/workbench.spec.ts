@@ -187,14 +187,27 @@ test.describe('shared workbench calculator', () => {
     );
     await page.getByText('报价工单草稿（1）', { exact: true }).click();
     await page.getByRole('link', { name: '恢复草稿' }).click();
+    const leave = page.getByRole('alertdialog', { name: /^(保存草稿并离开|离开页面)$/ });
+    // Autosave can finish before the click, or while the leave confirmation is open.
+    await expect.poll(async () => page.url() === transferUrl || await leave.isVisible()).toBe(true);
+    if (await leave.isVisible()) {
+      await expect(page).toHaveURL(/\/orders\/new$/);
+      await expect(leave.getByRole('alert')).toHaveCount(0);
+      await leave.getByRole('button', { name: /^(保存草稿并离开|离开页面)$/ }).click();
+    }
     await expect(page).toHaveURL(transferUrl);
     await expect(page.getByRole('textbox', { name: /工单名称/ })).toHaveValue(
       '报价转单继续填写',
     );
-    for (const [key, value] of Object.entries(original))
-      expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBe(
-        value,
-      );
+    for (const [key, value] of Object.entries(original)) {
+      if (!value) throw new Error('原工单草稿缺失');
+      const before = JSON.parse(value);
+      const saved = JSON.parse(await page.evaluate((key) => localStorage.getItem(key), key) ?? 'null');
+      // Reopening the original draft may autosave it. Every stored fact and
+      // its scope must survive; only the successful save timestamp may advance.
+      expect(saved).toEqual({ ...before, savedAt: expect.any(String) });
+      expect(Date.parse(saved.savedAt)).toBeGreaterThanOrEqual(Date.parse(before.savedAt));
+    }
   });
   test('preserves finishing after reload and recovery without a session payload', async ({
     page,

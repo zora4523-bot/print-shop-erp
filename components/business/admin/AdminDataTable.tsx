@@ -81,7 +81,7 @@ export function AdminListToolbar({
   );
 }
 
-/** 规范化已应用查询：空值与 undefined 等价，参数顺序无关。导出供测试。 */
+/** 规范化已应用查询：空值与 undefined 等价，参数顺序无关。 */
 function adminListToolbarKey(
   query: string,
   hiddenParams: TableHrefParams,

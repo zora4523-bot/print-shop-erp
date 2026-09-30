@@ -76,7 +76,7 @@ describe('工单统一扫码任务选择', () => {
   it('共享进度与计件分组，清楚标注不计薪', async () => {
     mount([], [{ id: 'glue-1', title: '粘封', sources: ['#1 · 花好月圆'], status: ProductionOperationStatus.PENDING, planned: '2000', completed: '1500', remaining: '500', unit: '个' }]);
     await expect.element(page.getByText('当前工单没有本岗位计件工序。')).toBeVisible();
-    await expect.element(page.getByText('仅推进生产进度，不计入工资。')).toBeVisible();
+    await expect.element(page.getByRole('link', { name: /粘封/ }).getByText('不计薪', { exact: true })).toBeVisible();
     await expect.element(page.getByRole('link', { name: /粘封/ })).toHaveAttribute('href', '/worker/tasks/glue-1');
   });
 });

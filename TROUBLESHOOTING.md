@@ -28,7 +28,7 @@ Next 16.3.4 为每次浏览器 Server Action 建立独立调试请求标识。�
 
 当日志出现 `unstable_catchError is not a function`，先比较
 `package.json` 的 Next.js 版本和 `node -p "require('next/package.json').version"`。
-当前主线锁定 16.3.4，错误边界使用 `catchError` 和 `retry`。
+当前仓库锁定 16.3.6，错误边界使用 `catchError` 和 `retry`。
 旧版 16.2.4 分支使用 `unstable_catchError` 和 `unstable_retry`；
 切换分支后应按目标分支锁文件安装依赖，不能只替换 API 或本地安装版本。
 
