@@ -188,8 +188,12 @@ export async function batchPrintStatus(actorId: string, jobId: string): Promise<
   if (result.issues.length || job.status === 'DEAD' || job.status === 'CANCELLED') return { ...base, status: 'failed' };
   if (job.status === 'SUCCEEDED') return { ...base, status: result.artifactName ? 'ready' : 'failed' };
   const at = await databaseNow();
-  const worker = await db.backgroundWorkerHeartbeat.findFirst({
-    where: { queue: BackgroundJobQueue.HEAVY, lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
+  // Same capability rule as single-order PDFs: a live HEAVY worker that cannot
+  // render (pdfReady=false) or runs another version will not claim this job.
+  // A RUNNING job is already owned by a worker.
+  const worker = job.status === 'RUNNING' ? true : await db.backgroundWorkerHeartbeat.findFirst({
+    where: { queue: BackgroundJobQueue.HEAVY, pdfReady: true, version: process.env.APP_VERSION || 'dev',
+      lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
     select: { workerId: true },
   });
   return { ...base, status: worker ? 'pending' : 'unavailable',

@@ -94,6 +94,13 @@ describe('batch PDF invariants', () => {
     m.worker.mockResolvedValue({ workerId: 'w' });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending' });
   });
+  it('only counts HEAVY workers that can currently render PDFs, unless the job is already running', async () => {
+    await batchPrintStatus('admin', 'j');
+    expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', pdfReady: true, version: process.env.APP_VERSION || 'dev' });
+    m.worker.mockResolvedValue(null);
+    m.find.mockResolvedValue({ ...job, status: 'RUNNING', result: { completed: 1, issues: [] } });
+    expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending', phase: 'rendering' });
+  });
   it('rechecks contents even after reading the finished artifact', async () => {
     m.find.mockResolvedValue({ ...job, status: 'SUCCEEDED', result: { completed: 2, issues: [], artifactName: 'j.pdf' } });
     m.order.mockResolvedValueOnce({ id: 'a', version: 1 }).mockResolvedValueOnce({ id: 'b', version: 1 }).mockResolvedValue({ id: 'a', version: 2 });
