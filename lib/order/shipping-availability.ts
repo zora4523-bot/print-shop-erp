@@ -7,12 +7,14 @@ export type OrderShippingAvailabilityInput = {
   status: OrderStatus;
   incompleteProductionCount: number;
   hasLiveOutsource: boolean;
+  /** Required outsourcing has no live order or does not cover every item (same facts as the ship gate). */
+  hasOutsourceGap?: boolean;
   isPricingPending: boolean;
   hasShipment: boolean;
   hasPendingChange: boolean;
 };
 
-type OrderShippingBlocker = 'STATUS' | 'CHANGE' | 'PRICING' | 'OUTSOURCE' | 'PRODUCTION' | 'ADDRESS';
+type OrderShippingBlocker = 'STATUS' | 'CHANGE' | 'PRICING' | 'OUTSOURCE' | 'OUTSOURCE_GAP' | 'PRODUCTION' | 'ADDRESS';
 
 /** Shared presentation facts. Actual writes still enforce their transactional guards. */
 export function orderShippingBlocker(input: OrderShippingAvailabilityInput): OrderShippingBlocker | null {
@@ -20,6 +22,7 @@ export function orderShippingBlocker(input: OrderShippingAvailabilityInput): Ord
   if (input.hasPendingChange) return 'CHANGE';
   if (input.isPricingPending) return 'PRICING';
   if (input.hasLiveOutsource) return 'OUTSOURCE';
+  if (input.hasOutsourceGap) return 'OUTSOURCE_GAP';
   if (input.incompleteProductionCount > 0) return 'PRODUCTION';
   if (!input.hasShipment) return 'ADDRESS';
   return null;
@@ -29,6 +32,7 @@ const SHIPPING_BLOCKER_LABELS: Record<Exclude<OrderShippingBlocker, 'STATUS'>, s
   CHANGE: '存在待审的工单变更',
   PRICING: '价格待管理员确认',
   OUTSOURCE: '外协尚未收回，请先核对外协进度',
+  OUTSOURCE_GAP: '外协单缺失或数量未覆盖工单，请先补齐外协',
   PRODUCTION: '生产工序尚未完成，请先核对报工',
   ADDRESS: '缺少发货地址，无法发货',
 };
@@ -68,7 +72,7 @@ export function orderShippingRecoveryHref(input: OrderShippingAvailabilityInput)
   switch (blocker) {
     case 'CHANGE': case 'STATUS': return '#order-detail-actions';
     case 'PRICING': return '#pricing-review';
-    case 'OUTSOURCE': return '/foreman/outsource';
+    case 'OUTSOURCE': case 'OUTSOURCE_GAP': return '/foreman/outsource';
     case 'PRODUCTION': return '#detail-business-records';
     case 'ADDRESS': return isOrderEditable(input.status) ? '#shipment-registration' : null;
     case null: return '#shipment-registration';

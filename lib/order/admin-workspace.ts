@@ -29,6 +29,7 @@ import {
 } from '../production/work-order-progress-query';
 import { selectOrderCustomerFee } from './customer-fee';
 import { buildOrderWhere } from './list-query';
+import { outsourceCoverageApplies } from '../outsource/coverage';
 import { promisedDaysLeft } from './promised-date';
 import { shippedShipmentViolation } from './change-request-shipment-guard';
 import { canConfirmOrderPrinted } from './print-eligibility';
@@ -396,6 +397,7 @@ const adminOrderSelect = {
     select: { reasonCode: true, reasonNote: true, toStatus: true },
   },
   simpleProduction: true,
+  requiresOutsource: true,
   productionJobs: { select: { id: true, label: true, status: true, factReview: { select: { status: true } }, workerName: true, workOrderVersion: true, wages: { select: { amount: true } } } },
   productionOperations: {
     select: { workOrderVersion: true, status: true, operationType: true },
@@ -435,12 +437,13 @@ type AdminOrderCapabilityFacts = {
   pricingPending: boolean;
   hasShipment: boolean;
   hasLiveOutsource: boolean;
+  hasOutsourceGap?: boolean;
   hasIncompleteProduction: boolean;
   printFacts: AdminPrintFacts;
 };
 
 export function resolveAdminOrderShipDisabledReason(
-  input: Pick<AdminOrderCapabilityFacts, 'status' | 'pricingPending' | 'hasShipment' | 'hasLiveOutsource' | 'hasIncompleteProduction' | 'hasPendingChange'>,
+  input: Pick<AdminOrderCapabilityFacts, 'status' | 'pricingPending' | 'hasShipment' | 'hasLiveOutsource' | 'hasOutsourceGap' | 'hasIncompleteProduction' | 'hasPendingChange'>,
 ): string | null {
   return orderShippingAvailability({
     ...input,
@@ -855,6 +858,10 @@ function mapAdminOrderRow(
     pricingPending: row.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
     hasShipment: row._count.shipments > 0,
     hasLiveOutsource,
+    // List rows only load outsource statuses: surface the missing-order case here;
+    // per-item quantity coverage is shown on the detail page and enforced by the ship gate.
+    hasOutsourceGap: outsourceCoverageApplies(row) &&
+      !row.outsourceOrders.some((outsource) => outsource.status !== OutsourceStatus.CANCELLED),
     hasIncompleteProduction,
     printFacts,
   };

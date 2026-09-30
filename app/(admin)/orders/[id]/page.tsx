@@ -133,6 +133,7 @@ import {
   orderShippingBlocker,
   orderShippingRecoveryHref,
 } from '@/lib/order/shipping-availability';
+import { outsourceCoverageApplies } from '@/lib/outsource/coverage';
 import { canShowAdminDirectCancel } from '@/lib/order/direct-cancel';
 
 type PageProps = {
@@ -346,11 +347,18 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   ).length;
   const incompleteProductionCount =
     pendingProductionCount + inProgressProductionCount;
+  // Mirrors the ship gate's outsource check (findRequiredOutsourceBlocker):
+  // uncoveredOutsourceItems is computed with the same predicate and coverage function.
+  const hasOutsourceGap = outsourceCoverageApplies(order) && (
+    order.uncoveredOutsourceItems.length > 0 ||
+    !order.outsourceOrders.some((row) => row.status !== OutsourceStatus.CANCELLED)
+  );
   const shippingFacts = {
       isAdministrator: canShipOrSettle,
       status: order.status,
       incompleteProductionCount,
       hasLiveOutsource,
+      hasOutsourceGap,
       isPricingPending,
       hasShipment: order.shipments.length > 0,
       hasPendingChange: Boolean(pendingChangeRequest),

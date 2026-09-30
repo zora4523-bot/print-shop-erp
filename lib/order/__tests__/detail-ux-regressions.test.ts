@@ -79,3 +79,11 @@ it('does not offer address recovery when the order cannot be edited', () => {
   expect(orderShippingRecoveryHref(input)).toBeNull();
   expect(orderShippingRecoveryHref({ ...input, status: OrderStatus.PACKING })).toBe('#shipment-registration');
 });
+
+it('blocks shipping when required outsourcing is missing or does not cover the order', () => {
+  const input = { status: OrderStatus.PACKING, isAdministrator: true, hasPendingChange: false,
+    isPricingPending: false, hasLiveOutsource: false, hasOutsourceGap: true, incompleteProductionCount: 0, hasShipment: true };
+  expect(orderShippingAvailability(input)).toEqual({ canShip: false, disabledReason: '外协单缺失或数量未覆盖工单，请先补齐外协' });
+  expect(orderShippingRecoveryHref(input)).toBe('/foreman/outsource');
+  expect(orderShippingAvailability({ ...input, hasOutsourceGap: false }).canShip).toBe(true);
+});
