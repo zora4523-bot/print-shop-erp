@@ -102,6 +102,8 @@ export class PdfBrowserPool {
     if (stale && (!stale.browser.connected || stale.uses >= maxUses || Date.now() - stale.born >= maxLifetimeMs)) {
       await this.retire(stale);
       if (this.unavailable) throw new PdfBrowserUnavailableError();
+      // Retirement can take seconds; a task cancelled meanwhile must not launch Chromium.
+      taskSignal.throwIfAborted();
     }
     const start = performance.now();
     if (!this.current) {

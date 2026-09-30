@@ -227,7 +227,10 @@ export async function waitForOrderPdfJob(
     // Check only after the actor/order binding and completed-state checks.
     // Database time keeps queue age and remote worker heartbeats comparable.
     const at = await databaseNow();
-    const worker = await db.backgroundWorkerHeartbeat.findFirst({
+    // A RUNNING job is demonstrably owned by a worker; a stale capability
+    // heartbeat (e.g. a probe queued behind this very render) must not
+    // report it unavailable.
+    const worker = job.status === BackgroundJobStatus.RUNNING ? true : await db.backgroundWorkerHeartbeat.findFirst({
       where: {
         queue: BackgroundJobQueue.HEAVY,
         pdfReady: true,

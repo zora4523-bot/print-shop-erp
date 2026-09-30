@@ -2,7 +2,11 @@ import { BACKGROUND_JOB_TYPES } from '@/lib/background-jobs/types';
 import { logPdfFailure } from './diagnostics';
 
 export const PDF_JOB_TYPES = [BACKGROUND_JOB_TYPES.ORDER_PDF, BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF] as const;
-const READY_TTL_MS = 120_000;
+/** Healthy probes render in Chromium and round-trip OSS; keep them well above the pool idle window. */
+export const PDF_PROBE_HEALTHY_INTERVAL_MS = 300_000;
+export const PDF_PROBE_RETRY_MS = 10_000;
+/** Longer than the healthy interval so readiness never lapses between successful probes. */
+export const PDF_READY_TTL_MS = PDF_PROBE_HEALTHY_INTERVAL_MS + 60_000;
 
 /** One non-overlapping probe. Failure disables PDF claims without stopping other HEAVY work. */
 export function startPdfCapabilityMonitor(probe: () => Promise<unknown>) {
@@ -18,7 +22,7 @@ export function startPdfCapabilityMonitor(probe: () => Promise<unknown>) {
     inFlight = Promise.resolve().then(probe).then(() => {
       // A real job can fail while a probe is finishing. Its newer failure wins.
       if (generation === expectedGeneration && !stopped) {
-        readyUntil = Date.now() + READY_TTL_MS;
+        readyUntil = Date.now() + PDF_READY_TTL_MS;
         failures = 0;
       }
     }, (error: unknown) => {
@@ -28,7 +32,11 @@ export function startPdfCapabilityMonitor(probe: () => Promise<unknown>) {
     }).finally(() => {
       inFlight = undefined;
       if (!stopped) {
-        timer = setTimeout(run, failures ? Math.min(60_000, 10_000 * 2 ** Math.min(failures - 1, 3)) : 60_000);
+        // Invalidated during the probe: its success was discarded, so retry soon.
+        const delay = failures
+          ? Math.min(60_000, PDF_PROBE_RETRY_MS * 2 ** Math.min(failures - 1, 3))
+          : generation !== expectedGeneration ? PDF_PROBE_RETRY_MS : PDF_PROBE_HEALTHY_INTERVAL_MS;
+        timer = setTimeout(run, delay);
         timer.unref();
       }
     });
@@ -39,7 +47,7 @@ export function startPdfCapabilityMonitor(probe: () => Promise<unknown>) {
     invalidate() {
       generation++;
       readyUntil = 0;
-      if (!inFlight && !stopped) { clearTimeout(timer); timer = setTimeout(run, 10_000); timer.unref(); }
+      if (!inFlight && !stopped) { clearTimeout(timer); timer = setTimeout(run, PDF_PROBE_RETRY_MS); timer.unref(); }
     },
     async stop() {
       stopped = true;

@@ -41,13 +41,18 @@ async function main(): Promise<void> {
     process.env.BACKGROUND_JOB_QUEUE ??
       process.argv.find((arg) => arg.startsWith('--queue='))?.slice(8),
   );
-  const concurrency = intEnv(queue === BackgroundJobQueue.HEAVY ? 'HEAVY_WORKER_CONCURRENCY' : 'LIGHT_WORKER_CONCURRENCY', queue === BackgroundJobQueue.HEAVY ? 1 : 2, 1, 8);
+  const pdfBrowserReuse = queue === BackgroundJobQueue.HEAVY && process.env.PDF_BROWSER_REUSE !== '0';
+  const requestedConcurrency = intEnv(queue === BackgroundJobQueue.HEAVY ? 'HEAVY_WORKER_CONCURRENCY' : 'LIGHT_WORKER_CONCURRENCY', queue === BackgroundJobQueue.HEAVY ? 1 : 2, 1, 8);
+  // The reused PDF browser is serial (docs/audits 2026-09-30 PDF plan T1): extra
+  // HEAVY slots would only queue behind it and burn their lease/render budgets.
+  const concurrency = pdfBrowserReuse ? 1 : requestedConcurrency;
+  if (concurrency !== requestedConcurrency) {
+    console.warn(`[worker] HEAVY_WORKER_CONCURRENCY=${requestedConcurrency} clamped to 1 while PDF_BROWSER_REUSE is enabled`);
+  }
   assertWorkerPoolCapacity(databasePoolConfig(process.env.DATABASE_URL!, { role: 'worker' }).max!, concurrency);
-  if (queue === BackgroundJobQueue.HEAVY) {
-    if (process.env.PDF_BROWSER_REUSE !== '0') {
-      const { enableWorkerPdfBrowserReuse } = await import('../lib/pdf/render');
-      enableWorkerPdfBrowserReuse();
-    }
+  if (pdfBrowserReuse) {
+    const { enableWorkerPdfBrowserReuse } = await import('../lib/pdf/render');
+    enableWorkerPdfBrowserReuse();
   }
   const handlers = await loadBackgroundJobHandlers(queue);
   const smartBotConnector =

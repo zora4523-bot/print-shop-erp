@@ -374,4 +374,10 @@ describe('PDF queue availability', () => {
     await expect(waitForOrderPdfJob('j', { expected: { ...expected, actorId: 'other' } })).resolves.toEqual({ status: 'failed', errorCode: 'JobNotFound' });
     expect(dbMock.backgroundWorkerHeartbeat.findFirst).not.toHaveBeenCalled();
   });
+  it('never reports a RUNNING job unavailable from a stale PDF capability heartbeat', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.RUNNING });
+    dbMock.backgroundWorkerHeartbeat.findFirst.mockResolvedValue(null);
+    await expect(waitForOrderPdfJob('j', { expected, timeoutMs: 1_000 })).resolves.toEqual({ status: 'timeout', phase: 'running' });
+    expect(dbMock.backgroundWorkerHeartbeat.findFirst).not.toHaveBeenCalled();
+  });
 });

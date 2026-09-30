@@ -282,3 +282,22 @@ it('bounds context creation even when its promise ignores a closed browser', asy
   creating.resolve({ close: vi.fn() } as unknown as BrowserContext);
   await pool.close();
 });
+
+it('a task cancelled while the stale browser retires never launches a fresh Chromium', async () => {
+  const { pool, launch, browsers } = setup({ maxUses: 1 });
+  await pool.run(async () => 'first');
+  const old = browsers[0]!;
+  const closing = deferred();
+  vi.mocked(old.close).mockImplementation(() => closing.promise.then(() => old.child.exit()));
+  const controller = new AbortController();
+  const task = vi.fn();
+  const second = pool.run(task, { signal: controller.signal });
+  await vi.waitFor(() => expect(old.close).toHaveBeenCalledOnce());
+  controller.abort();
+  closing.resolve();
+  await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+  expect(launch).toHaveBeenCalledTimes(1);
+  expect(task).not.toHaveBeenCalled();
+  await pool.close();
+  expect(browsers).toHaveLength(1);
+});

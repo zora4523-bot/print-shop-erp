@@ -140,3 +140,12 @@ it('does not cache or publish a PDF whose uploaded artwork failed', async () => 
   expect(await handleBatchPrintJob(job)).toMatchObject({ issues: [{ position: 1, message: '图稿加载失败，请检查图稿后重试' }] });
   expect(m.write).not.toHaveBeenCalled();
 });
+
+it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError', 'TargetCloseError'])(
+  'rethrows PDF infrastructure failures (%s) so the durable job retries instead of reporting the order',
+  async (name) => {
+    m.render.mockRejectedValueOnce(Object.assign(new Error('infra'), { name }));
+    await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name });
+    expect(m.write).not.toHaveBeenCalled();
+  },
+);

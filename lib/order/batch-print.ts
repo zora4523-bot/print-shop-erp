@@ -9,6 +9,7 @@ import { getSetting } from '@/lib/settings';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
 import { readPdfArtifact, writePdfArtifact, cleanupOldPdfArtifacts } from '@/lib/pdf/artifacts';
+import { isPdfInfrastructureFailure } from '@/lib/pdf/capability';
 import { databaseNow } from '@/lib/background-jobs/clock';
 import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from '@/lib/background-jobs/heartbeat-policy';
 import { enqueueBackgroundJob, BackgroundJobLeaseLostError } from '@/lib/background-jobs/repository';
@@ -144,6 +145,9 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
       await job.assertLease?.();
       if (error instanceof BatchPrintSelectionError) return { completed: index, issues: error.issues };
       if (error instanceof BatchPrintAccessError || error instanceof BackgroundJobLeaseLostError) throw error;
+      // Infrastructure failures are not the order's fault: rethrow so the worker
+      // invalidates PDF capability and the durable job retries (CLAUDE.md §15.4).
+      if (isPdfInfrastructureFailure(error)) throw error;
       return { completed: index, issues: [{ position: index + 1, message: error instanceof Error && error.name === 'PrintArtworkUnavailableError'
         ? '图稿加载失败，请检查图稿后重试' : '工单生成失败，请检查打印内容后重试' }] };
     }

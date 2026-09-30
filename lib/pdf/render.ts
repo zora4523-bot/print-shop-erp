@@ -40,13 +40,16 @@ export type RenderPdfOptions = {
   context?: BrowserContext;
   // Durable workers abort this when they can no longer prove lease ownership.
   signal?: AbortSignal;
+  // Pool budget override. It starts only once the render owns the browser, so
+  // time spent queued behind another render never counts against it.
+  budgetMs?: number;
 };
 
 export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
   if (workerPool && !opts.browser && !opts.launch) {
     return workerPool.run(
       (browser, context, signal) => renderHtmlToPdf({ ...opts, browser, context, signal }),
-      { ...(opts.signal ? { signal: opts.signal } : {}), budgetMs: PDF_WORKER_RENDER_BUDGET_MS },
+      { ...(opts.signal ? { signal: opts.signal } : {}), budgetMs: opts.budgetMs ?? PDF_WORKER_RENDER_BUDGET_MS },
     );
   }
   const puppeteer = await import('puppeteer');
@@ -54,7 +57,7 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     const pool = new PdfBrowserPool(() => puppeteer.default.launch({ ...pdfLaunchOptions(), ...opts.launch }));
     try {
       return await pool.run((browser, context, signal) => renderHtmlToPdf({ ...opts, browser, context, signal }),
-        { signal: opts.signal, budgetMs: PDF_WORKER_RENDER_BUDGET_MS });
+        { signal: opts.signal, budgetMs: opts.budgetMs ?? PDF_WORKER_RENDER_BUDGET_MS });
     } finally { await pool.close(); }
   }
   const browser = opts.browser;

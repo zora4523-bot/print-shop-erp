@@ -234,3 +234,24 @@ it('closes the reused browser after draining without blocking startup on the pro
   expect(pdfMocks.enable).toHaveBeenCalledOnce();
   expect(pdfMocks.close).toHaveBeenCalledAfter(runBackgroundWorkerMock);
 });
+
+it('clamps HEAVY concurrency to 1 while the serial PDF browser is reused', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  vi.stubEnv('HEAVY_WORKER_CONCURRENCY', '4');
+  vi.stubEnv('DATABASE_POOL_MAX', '20');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  pdfMocks.check.mockResolvedValueOnce({ bytes: 1234 });
+  await runBackgroundWorkerProcess();
+  expect(runBackgroundWorkerMock).toHaveBeenCalledWith(expect.objectContaining({ concurrency: 1 }));
+  expect(warn.mock.calls.flat().join('')).toContain('clamped to 1');
+});
+it('keeps the configured HEAVY concurrency when PDF browser reuse is disabled', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  vi.stubEnv('HEAVY_WORKER_CONCURRENCY', '4');
+  vi.stubEnv('DATABASE_POOL_MAX', '20');
+  vi.stubEnv('PDF_BROWSER_REUSE', '0');
+  pdfMocks.check.mockResolvedValueOnce({ bytes: 1234 });
+  await runBackgroundWorkerProcess();
+  expect(pdfMocks.enable).not.toHaveBeenCalled();
+  expect(runBackgroundWorkerMock).toHaveBeenCalledWith(expect.objectContaining({ concurrency: 4 }));
+});
