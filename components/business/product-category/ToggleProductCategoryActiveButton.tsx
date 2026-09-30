@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { setProductCategoryNodeActiveAction } from '@/actions/owner-product-categories';
 import type { ProductCategoryNodeMutationResult } from '@/actions/owner-product-categories.types';
 import { ActionNotice } from '@/components/ui-business';
@@ -16,9 +17,9 @@ export function ToggleProductCategoryActiveButton({
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<
-    ProductCategoryNodeMutationResult | null,
+    AppliedActiveState<ProductCategoryNodeMutationResult> | null,
     FormData
-  >(async () => setProductCategoryNodeActiveAction(nodeId, nextActive), null);
+  >(async () => withAppliedActive(await setProductCategoryNodeActiveAction(nodeId, nextActive), nextActive), null);
 
   const visibleState = pending ? null : state;
   const error = visibleState?.status === 'error' ? visibleState.message : null;
@@ -43,7 +44,7 @@ export function ToggleProductCategoryActiveButton({
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '分类已停用' : '分类已启用'}
+          title={visibleState?.appliedActive ? '分类已启用' : '分类已停用'}
         />
       ) : null}
     </div>

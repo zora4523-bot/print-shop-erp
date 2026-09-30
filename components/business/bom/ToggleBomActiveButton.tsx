@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { setBomActiveAction } from '@/actions/owner-boms';
 import type { BomMutationResult } from '@/actions/owner-boms.types';
 import { ActionNotice } from '@/components/ui-business';
@@ -20,9 +21,9 @@ export function ToggleBomActiveButton({
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<
-    BomMutationResult | null,
+    AppliedActiveState<BomMutationResult> | null,
     FormData
-  >(async () => setBomActiveAction(bomId, nextActive), null);
+  >(async () => withAppliedActive(await setBomActiveAction(bomId, nextActive), nextActive), null);
 
   // Surface BOTH the invariant/error message AND any invalid field
   // errors — setBomActiveAction can return either shape, and a toggle
@@ -61,7 +62,7 @@ export function ToggleBomActiveButton({
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '用料清单已停用' : '用料清单已启用'}
+          title={visibleState?.appliedActive ? '用料清单已启用' : '用料清单已停用'}
         />
       ) : null}
     </div>

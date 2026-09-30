@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { setPartyActiveAction } from '@/actions/owner-parties';
 import type { PartyMutationResult } from '@/actions/owner-parties.types';
 import { ActionNotice } from '@/components/ui-business';
@@ -16,9 +17,9 @@ export function TogglePartyActiveButton({
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<
-    PartyMutationResult | null,
+    AppliedActiveState<PartyMutationResult> | null,
     FormData
-  >(async () => setPartyActiveAction(partyId, nextActive), null);
+  >(async () => withAppliedActive(await setPartyActiveAction(partyId, nextActive), nextActive), null);
 
   const visibleState = pending ? null : state;
   const error = visibleState?.status === 'error' ? visibleState.message : null;
@@ -53,7 +54,7 @@ export function TogglePartyActiveButton({
         <ActionNotice
           tone="success"
           title={
-            currentlyActive ? '客户/供应商已停用' : '客户/供应商已启用'
+            visibleState?.appliedActive ? '客户/供应商已启用' : '客户/供应商已停用'
           }
         />
       ) : null}
