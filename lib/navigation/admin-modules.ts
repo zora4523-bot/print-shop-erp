@@ -181,7 +181,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     label: '账单',
     routeBase: '/owner/agent-bills',
     iconName: 'Wallet',
-    breadcrumbLabel: '代理商月度账单',
+    breadcrumbLabel: '外部销售月账单',
     menuSection: 'finance',
     status: 'implemented',
     menuOrder: 30,

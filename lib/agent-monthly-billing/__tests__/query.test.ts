@@ -15,7 +15,7 @@ const { dbMock } = vi.hoisted(() => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
     },
-    order: { count: vi.fn() },
+    order: { count: vi.fn(), findMany: vi.fn() },
     user: { findMany: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -27,6 +27,7 @@ import {
   getAgentMonthlyBillDetail,
   getAgentMonthlyBillingStats,
   listAgentMonthlyBills,
+  listUnbilledAgentOrders,
 } from '../query';
 
 beforeEach(() => {
@@ -104,4 +105,17 @@ describe('agent monthly billing owner queries', () => {
     // 客户名称/简称停用后明细改列工单名称：关联只取名称，金额等仍读成员快照。
     expect(query.include.items.include.order).toEqual({ select: { customName: true } });
   });
+});
+
+it('locates the same unbilled population using Shanghai settlement month and bounded paging', async () => {
+  dbMock.order.count.mockResolvedValue(31);
+  dbMock.order.findMany.mockResolvedValue([]);
+  const result = await listUnbilledAgentOrders({ page: 999, period: '2026-09' });
+  expect(result.page).toBe(2);
+  expect(dbMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    skip: 30, take: 30, where: expect.objectContaining({
+      billingMode: 'CHARGE', settlementType: 'EXTERNAL_SALES', agentMonthlyBillItem: { is: null },
+      settledAt: { gte: new Date('2026-08-31T16:00:00Z'), lt: new Date('2026-09-30T16:00:00Z') },
+    }),
+  }));
 });

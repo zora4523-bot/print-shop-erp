@@ -1,3 +1,5 @@
+import { getAgentBillDashboard } from '@/lib/agent-monthly-billing/dashboard-query';
+import { BillDashboard } from '@/components/business/agent-monthly-billing/BillDashboard';
 import { buildTableHref } from '@/lib/admin/table';
 import { randomUUID } from 'node:crypto';
 import Form from 'next/form';
@@ -43,11 +45,12 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
   const actor = await requirePermission('bill:view:all');
   const raw = await searchParams;
   const { period, status, agentUserId, page } = parseAgentBillFilters(raw);
-  const [result, stats, accounts, recentExports] = await Promise.all([
+  const [result, stats, accounts, recentExports, dashboard] = await Promise.all([
     listAgentMonthlyBills({ period, status, agentUserId, page }),
     getAgentMonthlyBillingStats(),
     listAgentBillAccounts(),
     listRecentAgentMonthlyBillExports(actor.id),
+    getAgentBillDashboard(actor),
   ]);
 
   return (
@@ -87,8 +90,14 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         />
       </div>
 
+      <div className="flex flex-wrap gap-3">
+        <Link href="/owner/agent-bills?status=DRAFT" className={buttonVariants({ variant: 'outline' })}>待确认 {stats.draftBillCount} 张</Link>
+        <Link href="/owner/agent-bills?status=CONFIRMED" className={buttonVariants({ variant: 'outline' })}>查看待收账单</Link>
+        <Link href="/owner/agent-bills/unbilled" className={buttonVariants({ variant: 'outline' })}>查看未出账工单</Link>
+      </div>
+      <BillDashboard data={dashboard} accounts={accounts} expanded={!period && !status && !agentUserId} />
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <GenerateAgentMonthlyBillsForm defaultPeriod={previousShanghaiMonth()} />
+        <GenerateAgentMonthlyBillsForm defaultPeriod={period ?? previousShanghaiMonth()} />
         <p className="mt-2 text-xs text-muted-foreground">
           仅可选择已结束的月份。
         </p>
