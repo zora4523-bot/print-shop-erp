@@ -18,6 +18,15 @@ function flatten(items: ReturnType<typeof getAdminMenuItems>): AdminMenuItem[] {
 }
 
 describe('getAdminMenuItems', () => {
+  it('销售总览独立于报价工作台，其他角色不可见', () => {
+    const items = flatten(getAdminMenuItems({ role: Role.SALES }));
+    expect(items[0]).toMatchObject({ href: '/sales/overview', label: '我的总览', requiredPermission: 'bill:view:self' });
+    expect(getActiveAdminMenuHref('/sales/overview', items)).toBe('/sales/overview');
+    expect(getActiveAdminMenuHref('/sales/bills', items)).toBe('/sales/bills');
+    for (const role of [Role.ADMIN, Role.WORKER]) {
+      expect(flatten(getAdminMenuItems({ role })).map((item) => item.href)).not.toContain('/sales/overview');
+    }
+  });
   it('销售有工作台入口，管理员入口独立于经营工作台，师傅不可见', () => {
     for (const role of [Role.SALES, Role.ADMIN]) {
       const items = flatten(getAdminMenuItems({ role }));

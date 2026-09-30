@@ -79,9 +79,9 @@ it('lists members by order name and marks unnamed orders instead of repeating th
   const html = await renderDetail();
   const headers = (html.match(/<th[^>]*>[^<]*<\/th>/g) ?? []).map((cell) => cell.replace(/<[^>]+>/g, ''));
   expect(headers).toEqual(['工单', '工单名称', '结算状态', '版本', '结算时间', '金额']);
-  const rows = html.match(/<tr class="border-t">[\s\S]*?<\/tr>/g) ?? [];
+  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
   const nameCell = (row: string | undefined) =>
-    (row?.match(/<td class="p-3">[\s\S]*?<\/td>/g) ?? [])[1]?.replace(/<[^>]+>/g, '');
+    (row?.match(/<td[^>]*>[\s\S]*?<\/td>/g) ?? [])[1]?.replace(/<[^>]+>/g, '');
   expect(nameCell(rows.find((row) => row.includes('/orders/order-0')))).toBe('未命名工单当前名称');
   expect(nameCell(rows.find((row) => row.includes('/orders/order-1')))).toBe('中秋礼盒当前名称');
   expect(html).not.toContain('客户');
@@ -124,7 +124,7 @@ it('keeps DRAFT rows visibly provisional and totals DRAFT, CONFIRMED and PAID se
     expect(cards[index]).toContain(amount);
   }
   expect(cards[0]).toContain('金额未定稿');
-  const rows = html.match(/<li[^>]*>[\s\S]*?<\/li>/g) ?? [];
+  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
   expect(rows.filter((row) => row.includes('整理中') && row.includes('金额未定稿'))).toHaveLength(2);
   expect(html).toContain('href="/sales/bills/draft-1?returnTo=');
   expect(list).toHaveBeenCalledWith(actor, { period: '2026-08' });
@@ -139,7 +139,7 @@ it('uses the same sales-facing status names in the filter, the rows and the deta
   const options = html.match(/<option[^>]*>[^<]*<\/option>/g) ?? [];
   expect(options.map((option) => option.replace(/<[^>]+>/g, ''))).toEqual(['全部', '整理中', '待支付', '已结清']);
   for (const adminOnly of ['草稿', '已确认·待收', '已收']) expect(html).not.toContain(adminOnly);
-  const rows = html.match(/<li[^>]*>[\s\S]*?<\/li>/g) ?? [];
+  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
   expect(rows.find((row) => row.includes('/sales/bills/confirmed'))).toContain('待支付');
   expect(rows.find((row) => row.includes('/sales/bills/paid'))).toContain('已结清');
 });
@@ -162,4 +162,36 @@ it('shows zero totals and an empty state for an empty filtered list', async () =
   expect(html).toContain('当前筛选条件下暂无账单');
   expect(html.match(/0\.00/g)).toHaveLength(3);
   expect(list).toHaveBeenCalledWith(actor, { status: 'DRAFT' });
+});
+
+it('shows the overview by default and keeps status when drilling into a month', async () => {
+  list.mockResolvedValue({ ...listResult([bill]), trend: [{ period: '2026-08', draft: '10.00', confirmed: '20.00', paid: '30.00' }] });
+  const html = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({ status: 'CONFIRMED', period: '2026-07' }) }));
+  expect(html).toContain('账期概览');
+  expect(html).not.toContain('<details');
+  expect(html).toContain('我的全部账单，最近 1 个有账单的月份');
+  expect(html).toContain('period=2026-08&amp;status=CONFIRMED#sales-bill-results');
+  expect(html).toContain('id="sales-bill-results"');
+  expect(html).toContain('导出当前筛选 CSV');
+  expect(html).toContain('href="/api/sales/bills/export?period=2026-07&amp;status=CONFIRMED"');
+});
+
+it('uses one responsive list and keeps whole-bill amounts while paging matching rows', async () => {
+  const items = Array.from({ length: 65 }, (_, i) => ({ ...bill.items[0], id: `entry-${i}`, orderId: `entry-${i}`, orderNoSnapshot: `BATCH-${String(i).padStart(3, '0')}`, order: { customName: `明细 ${i}` } }));
+  detail.mockResolvedValue({ ...bill, items });
+  const html = renderToStaticMarkup(await DetailPage({ params: Promise.resolve({ id: bill.id }), searchParams: Promise.resolve({ q: 'BATCH-', page: '3' }) }));
+  const desktop = html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? '';
+  expect(desktop.match(/<tr class="grid /g)).toHaveLength(5);
+  expect(desktop).toContain('md:table-row');
+  expect(html.match(/href="\/orders\/entry-60"/g)).toHaveLength(1);
+  for (const block of [desktop]) {
+    expect(block).toContain('BATCH-060');
+    expect(block).toContain('BATCH-064');
+    expect(block).toContain('60.15');
+    expect(block).not.toContain('BATCH-059');
+  }
+  expect(html).toContain('当前匹配 65 单');
+  expect(html).toContain('120.30');
+  expect(html).toContain('导出匹配明细 CSV');
+  expect(html).toContain('href="/api/sales/bills/bill-a/export?q=BATCH-"');
 });

@@ -122,4 +122,15 @@ describe('requestAgentMonthlyBillExportAction', () => {
       requestAgentMonthlyBillExportAction(null, form()),
     ).resolves.toEqual({ status: 'invalid', message: '账期不合法' });
   });
+
+  it('keeps a recoverable inline failure on the current page without disclosing errors', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    backgroundJobsModeMock.mockReturnValue('inline');
+    exportMock.processAgentMonthlyBillExportInline.mockRejectedValueOnce(new Error('private filesystem path'));
+    const result = await requestAgentMonthlyBillExportAction(null, form());
+    expect(result).toMatchObject({ status: 'error' });
+    expect(JSON.stringify(result)).not.toContain('private');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/agent-bills');
+    log.mockRestore();
+  });
 });

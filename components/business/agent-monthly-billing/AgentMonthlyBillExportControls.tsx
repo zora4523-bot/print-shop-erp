@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { FileSpreadsheet, RefreshCw } from 'lucide-react';
 import {
   requestAgentMonthlyBillExportAction,
   type AgentMonthlyBillExportActionResult,
@@ -11,11 +11,11 @@ import {
   AgentMonthlyBillExportStatus,
   type AgentMonthlyBillStatus,
 } from '@/generated/prisma/enums';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
+import { SalesBillExportButton } from '@/components/business/billing/SalesBillExportButton';
 import { StatusBadge } from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { AGENT_MONTHLY_BILL_EXPORT_STATUS_REGISTRY } from '@/lib/ui/status-registry';
-import { cn } from '@/lib/utils';
 
 export type AgentMonthlyBillExportView = {
   id: string;
@@ -28,6 +28,8 @@ export type AgentMonthlyBillExportView = {
   createdAt: string;
   lastErrorCode: string | null;
 };
+
+class ExportPollingError extends Error {}
 
 export function AgentMonthlyBillExportControls({
   requestKey,
@@ -55,51 +57,95 @@ export function AgentMonthlyBillExportControls({
     .sort();
   const pendingSignature = pendingIds.join(',');
   const [liveMessage, setLiveMessage] = useState('');
+  const [pollingIssue, setPollingIssue] = useState<{ signature: string; message: string } | null>(null);
+  const pollingPaused = pollingIssue?.signature === pendingSignature;
+  const [pollingAttempt, setPollingAttempt] = useState(0);
   const lastActionRef = useRef<AgentMonthlyBillExportActionResult | null>(null);
+  const feedback = currentExportFeedback(state, recent);
 
   useEffect(() => {
     if (state === lastActionRef.current) return;
     lastActionRef.current = state;
-    if (state?.status === 'queued' || state?.status === 'success') {
+    if (state?.status === 'queued' || state?.status === 'success' || state?.status === 'error') {
       router.refresh();
     }
   }, [router, state]);
 
   useEffect(() => {
-    if (!pendingSignature) return;
+    if (!pendingSignature || pollingPaused) return;
     const ids = pendingSignature.split(',');
     let cancelled = false;
+    let inFlight = false;
+    const controller = new AbortController();
+    function pause(message: string) {
+      if (cancelled) return;
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+      controller.abort();
+      setPollingIssue({ signature: pendingSignature, message });
+      setLiveMessage(message);
+    }
     const poll = async () => {
-      const results = await Promise.all(
-        ids.map(async (id) => {
-          const response = await fetch(
-            `/api/owner/agent-bills/exports/${encodeURIComponent(id)}/status`,
-            { cache: 'no-store' },
+      if (inFlight || cancelled) return;
+      inFlight = true;
+      try {
+        const results = await Promise.all(
+          ids.map(async (id) => {
+            const response = await fetch(
+              `/api/owner/agent-bills/exports/${encodeURIComponent(id)}/status`,
+              { cache: 'no-store', signal: controller.signal },
+            );
+            if (response.status === 401 || response.status === 403) throw new ExportPollingError('登录已失效，请重新登录后查看导出记录。');
+            if (!response.ok) throw new ExportPollingError('暂时无法查看导出进度，请手动刷新。');
+            const body = (await response.json()) as {
+              export?: { status?: AgentMonthlyBillExportStatus };
+            };
+            const status = body.export?.status;
+            if (!status || !Object.values(AgentMonthlyBillExportStatus).includes(status)) throw new ExportPollingError('暂时无法查看导出进度，请手动刷新。');
+            return status;
+          }),
+        );
+        if (
+          !cancelled &&
+          results.some(
+            (status) =>
+              status !== null && status !== AgentMonthlyBillExportStatus.PENDING,
+          )
+        ) {
+          // The current request's terminal feedback announces its specific result.
+          // Older pending exports have no action feedback, so announce them here.
+          const requested = lastActionRef.current;
+          const hasCurrentResult = requested?.status === 'queued' && ids.some(
+            (id, index) => id === requested.exportId && results[index] !== AgentMonthlyBillExportStatus.PENDING,
           );
-          if (!response.ok) return null;
-          const body = (await response.json()) as {
-            export?: { status?: AgentMonthlyBillExportStatus };
-          };
-          return body.export?.status ?? null;
-        }),
-      );
-      if (
-        !cancelled &&
-        results.some(
-          (status) =>
-            status !== null && status !== AgentMonthlyBillExportStatus.PENDING,
-        )
-      ) {
-        setLiveMessage('月账单导出状态已更新。');
-        router.refresh();
+          if (!hasCurrentResult) setLiveMessage('月账单导出状态已更新。');
+          router.refresh();
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) pause(error instanceof ExportPollingError ? error.message : '网络连接失败，请手动刷新导出进度。');
+      } finally {
+        inFlight = false;
       }
     };
     const interval = window.setInterval(() => void poll(), 3_000);
+    const timeout = window.setTimeout(() => {
+      pause('导出仍可能在后台生成，自动检查已暂停。可手动刷新，无需重复提交。');
+      controller.abort();
+    }, 120_000);
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearInterval(interval);
+      window.clearTimeout(timeout);
     };
-  }, [pendingSignature, router]);
+  }, [pendingSignature, pollingAttempt, pollingPaused, router]);
+
+  function refresh() {
+    setPollingIssue(null);
+    setLiveMessage('');
+    setPollingAttempt((value) => value + 1);
+    router.refresh();
+  }
 
   return (
     <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm">
@@ -110,7 +156,7 @@ export function AgentMonthlyBillExportControls({
         <div>
           <h2 className="flex items-center gap-2 font-semibold">
             <FileSpreadsheet aria-hidden="true" className="size-4" />
-            异步导出
+            导出账单
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
             导出当前筛选结果。下载文件保留 24 小时。
@@ -130,7 +176,9 @@ export function AgentMonthlyBillExportControls({
           </Button>
         </form>
       </div>
-      {state ? <ActionFeedback state={state} /> : null}
+      {feedback ? <ActionFeedback state={feedback} /> : null}
+      {pendingIds.length > 0 && pollingIssue?.signature === pendingSignature ? <p className="text-sm text-muted-foreground">{pollingIssue.message}</p> : null}
+      {state?.status === 'error' ? <Button type="button" variant="outline" onClick={refresh}>刷新导出记录</Button> : null}
 
       {recent.length > 0 ? (
         <div className="border-t pt-3">
@@ -141,7 +189,7 @@ export function AgentMonthlyBillExportControls({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => router.refresh()}
+                onClick={refresh}
               >
                 <RefreshCw aria-hidden="true" />
                 刷新
@@ -173,17 +221,10 @@ export function AgentMonthlyBillExportControls({
                       {definition.label}
                     </StatusBadge>
                     {item.status === AgentMonthlyBillExportStatus.READY ? (
-                      <a
+                      <SalesBillExportButton
                         href={`/api/owner/agent-bills/exports/${item.id}`}
-                        download
-                        className={cn(
-                          buttonVariants({ variant: 'outline', size: 'sm' }),
-                          'min-h-11',
-                        )}
-                      >
-                        <Download aria-hidden="true" />
-                        下载
-                      </a>
+                        label="下载"
+                      />
                     ) : null}
                   </div>
                 </li>
@@ -196,6 +237,24 @@ export function AgentMonthlyBillExportControls({
   );
 }
 
+function currentExportFeedback(
+  state: AgentMonthlyBillExportActionResult | null,
+  recent: readonly AgentMonthlyBillExportView[],
+): AgentMonthlyBillExportActionResult | null {
+  if (state?.status !== 'queued') return state;
+  const current = recent.find((item) => item.id === state.exportId);
+  if (current?.status === AgentMonthlyBillExportStatus.READY) {
+    return { status: 'success', exportId: state.exportId };
+  }
+  if (current?.status === AgentMonthlyBillExportStatus.FAILED) {
+    return { status: 'error', message: '导出文件生成失败，请重新导出。' };
+  }
+  if (current?.status === AgentMonthlyBillExportStatus.EXPIRED) {
+    return { status: 'error', message: '导出文件已过期，请重新导出。' };
+  }
+  return state;
+}
+
 function ActionFeedback({
   state,
 }: {
@@ -204,7 +263,7 @@ function ActionFeedback({
   if (state.status === 'queued') {
     return (
       <p role="status" className="text-xs text-success-foreground">
-        已进入大文件队列，生成后会显示下载按钮。
+        正在生成导出文件，完成后会显示下载按钮。
       </p>
     );
   }

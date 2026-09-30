@@ -1434,7 +1434,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   );
   await expect(filters).toBeVisible();
   const views = filters.getByRole('navigation', { name: '销售工单视图' });
-  for (const label of ['全部', '需关注', '进行中', '已发货', '已完成', '已取消', '草稿']) {
+  for (const label of ['全部', '需关注', '进行中', '已发货', '已结算', '已取消', '草稿']) {
     await expect(views.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
   }
   await expect(
@@ -1443,9 +1443,9 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
     }),
   ).toBeVisible();
 
-  const list = page.getByRole('list', { name: '销售工单列表' });
+  const list = page.locator('[data-slot="sales-orders-list"]');
   await expect(list).toBeVisible();
-  const card = list.locator(`[data-sales-order-card][data-order-id="${data.orderId}"]`);
+  const card = list.locator(`[data-order-id="${data.orderId}"]:visible`);
   await expect(card).toHaveCount(1);
   await expect(card).toContainText(longOrderName);
   await expect(card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ })).toHaveAttribute('href', `/orders/${data.orderId}`);

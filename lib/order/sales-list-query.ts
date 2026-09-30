@@ -24,6 +24,7 @@ import {
   orderListOrderBy,
   parseOrderListQuery,
   type OrderListQuery,
+  type OrderListSearchParams,
   type OrderListViewKey,
 } from './list-query';
 import { selectOrderCustomerFee } from './customer-fee';
@@ -36,6 +37,29 @@ export const SALES_ORDER_LIST_VIEWS = [
   'cancelled',
   'draft',
 ] as const satisfies readonly OrderListViewKey[];
+
+export type SalesOrderListQuery = OrderListQuery & { createdMonth?: string };
+
+/** Sales filters are explicit; hidden administrator parameters never affect this workspace. */
+export function parseSalesOrderListQuery(params: OrderListSearchParams) {
+  const parsed = parseOrderListQuery({
+    q: params.q,
+    view: params.view,
+    page: params.page,
+    pageSize: params.pageSize,
+    selected: params.selected,
+    scroll: params.scroll,
+  });
+  const rawMonth = Array.isArray(params.createdMonth) ? params.createdMonth[0] : params.createdMonth;
+  const createdMonth = validCreatedMonth(rawMonth);
+  if (rawMonth?.trim() && !createdMonth) parsed.issues.push('下单月份格式应为 YYYY-MM，请重新选择');
+  return { ...parsed, query: sanitizeSalesOrderListQuery({ ...parsed.query, createdMonth }) };
+}
+
+function validCreatedMonth(value: string | undefined): string | undefined {
+  const month = value?.trim();
+  return month && /^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/.test(month) ? month : undefined;
+}
 
 export type SalesOrderListView = (typeof SALES_ORDER_LIST_VIEWS)[number];
 
@@ -62,6 +86,8 @@ export type SalesOrderListRow = {
   totalAmount: string;
   promisedDate: string | null;
   dueAlert: { kind: 'overdue' | 'due-soon'; days: number } | null;
+  createdAt: string;
+  shippedAt: string | null;
   updatedAt: string;
   bill?: { id: string; period: string; status: 'DRAFT' | 'CONFIRMED' | 'PAID' } | null;
   receiver: {
@@ -104,6 +130,7 @@ export type SalesOrderListRow = {
     reviewRemark: string | null;
     reviewedAt: string;
   } | null;
+  shipments: Array<{ carrier: string; trackingNo: string }>;
   shipment: {
     carrier: string;
     trackingNo: string;
@@ -169,6 +196,8 @@ const salesOrderSelect = {
   confirmedFee: true,
   settledFee: true,
   promisedDate: true,
+  createdAt: true,
+  shippedAt: true,
   updatedAt: true,
   agentMonthlyBillItem: { select: { bill: { select: { id: true, period: true, status: true, agentUserId: true } } } },
   submitterId: true,
@@ -240,8 +269,8 @@ type SalesOrderRecord = Prisma.OrderGetPayload<{
  * switches to the compact sales surface.
  */
 export function sanitizeSalesOrderListQuery(
-  query: OrderListQuery,
-): OrderListQuery {
+  query: SalesOrderListQuery,
+): SalesOrderListQuery {
   const view = SALES_ORDER_LIST_VIEWS.includes(query.view as SalesOrderListView)
     ? query.view
     : undefined;
@@ -253,6 +282,7 @@ export function sanitizeSalesOrderListQuery(
   }).query;
   return {
     ...normalized,
+    createdMonth: validCreatedMonth(query.createdMonth),
     selectedOrderId: query.selectedOrderId,
     scrollY: query.scrollY,
   };
@@ -277,13 +307,25 @@ function salesViewWhere(
 
 export function buildSalesOrderWhere(
   actor: { id: string; role: Role },
-  query: OrderListQuery,
+  query: SalesOrderListQuery,
   latestRejectedOrderIds: readonly string[] = [],
 ): Prisma.OrderWhereInput {
   if (actor.role !== Role.SALES) {
     throw new Error('销售工单列表只接受 SALES 角色');
   }
   const conditions: Prisma.OrderWhereInput[] = [getOrderScopeFilter(actor)];
+  const createdMonth = validCreatedMonth(query.createdMonth);
+  if (createdMonth) {
+    const year = Number(createdMonth.slice(0, 4));
+    const month = Number(createdMonth.slice(5));
+    const offset = 8 * 60 * 60 * 1000;
+    conditions.push({
+      createdAt: {
+        gte: new Date(Date.UTC(year, month - 1, 1) - offset),
+        lt: new Date(Date.UTC(year, month, 1) - offset),
+      },
+    });
+  }
   const q = query.filters.q?.trim();
   if (q) {
     const contains = { contains: q, mode: Prisma.QueryMode.insensitive };
@@ -345,7 +387,7 @@ export async function getSalesLatestRejectedOrderIds(actor: {
 
 export async function getSalesOrderListPageWindow(
   actor: { id: string; role: Role },
-  query: OrderListQuery,
+  query: SalesOrderListQuery,
   latestRejectedOrderIdsPromise: Promise<readonly string[]> =
     getSalesLatestRejectedOrderIds(actor),
 ): Promise<SalesOrderPageWindow> {
@@ -362,7 +404,7 @@ export async function getSalesOrderListPageWindow(
 
 export async function listSalesOrdersPage(
   actor: { id: string; role: Role },
-  query: OrderListQuery,
+  query: SalesOrderListQuery,
   windowPromise: Promise<SalesOrderPageWindow> =
     getSalesOrderListPageWindow(actor, query),
 ): Promise<PaginatedResult<SalesOrderListRow>> {
@@ -492,11 +534,14 @@ export async function getSalesOrderListSummary(
   now: Date = new Date(),
   latestRejectedOrderIdsPromise: Promise<readonly string[]> =
     getSalesLatestRejectedOrderIds(actor),
+  query?: SalesOrderListQuery,
 ): Promise<SalesOrderListSummary> {
   if (actor.role !== Role.SALES) {
     throw new Error('销售工单汇总只接受 SALES 角色');
   }
-  const scope = getOrderScopeFilter(actor);
+  const scope = query
+    ? buildSalesOrderWhere(actor, { ...sanitizeSalesOrderListQuery(query), view: undefined })
+    : getOrderScopeFilter(actor);
   const { start, end } = shanghaiMonthRange(now);
   const todoPromise = latestRejectedOrderIdsPromise.then(
     (latestRejectedOrderIds) =>
@@ -596,6 +641,8 @@ function mapSalesOrderRow(
     totalAmount: selectOrderCustomerFee(row).amount,
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,
     dueAlert,
+    createdAt: row.createdAt.toISOString(),
+    shippedAt: row.shippedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
     bill: row.agentMonthlyBillItem && row.agentMonthlyBillItem.bill.agentUserId === row.submitterId ? {
       id: row.agentMonthlyBillItem.bill.id, period: row.agentMonthlyBillItem.bill.period, status: row.agentMonthlyBillItem.bill.status,
@@ -631,6 +678,10 @@ function mapSalesOrderRow(
           ).toISOString(),
         }
       : null,
+    shipments: trackingShipments.map((shipment) => ({
+      carrier: carrierLabel(shipment.carrierCode, shipment.expressCode),
+      trackingNo: shipment.trackingNo!.trim(),
+    })),
     shipment: primaryShipment
       ? {
           carrier: carrierLabel(

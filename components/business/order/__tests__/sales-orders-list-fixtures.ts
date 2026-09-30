@@ -18,6 +18,8 @@ export function row(): SalesOrderListRow {
     totalAmount: '404.30',
     promisedDate: '2026-08-30',
     dueAlert: { kind: 'due-soon', days: 3 },
+    createdAt: '2026-08-26T16:00:00.000Z',
+    shippedAt: null,
     updatedAt: '2026-08-27T07:00:00.000Z',
     receiver: {
       name: 'Lam',
@@ -62,6 +64,7 @@ export function row(): SalesOrderListRow {
       createdAt: '2026-08-27T07:30:00.000Z',
     },
     rejectedChangeRequest: null,
+    shipments: [{ carrier: '中通', trackingNo: '75312884629891' }],
     shipment: {
       carrier: '中通',
       trackingNo: '75312884629891',

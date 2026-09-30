@@ -23,6 +23,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   workbench: '工作台',
   foreman: '生产管理',
   sales: '销售',
+  overview: '我的总览',
   worker: '师傅',
   orders: '工单列表',
   purchases: '采购单',

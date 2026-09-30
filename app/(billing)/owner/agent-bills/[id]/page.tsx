@@ -1,5 +1,9 @@
-import { BillItemName } from '@/components/business/agent-monthly-billing/BillItemName';
-import { BillItemEvidence } from '@/components/business/agent-monthly-billing/BillItemEvidence';
+import { BillItemsList } from '@/components/business/agent-monthly-billing/BillItemsList';
+import { billItemPage } from '@/lib/agent-monthly-billing/item-list';
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
+import { buildTableHref } from '@/lib/admin/table';
+import Form from 'next/form';
+import { Input } from '@/components/ui/input';
 import { BillDetailDisclosure } from '@/components/business/agent-monthly-billing/BillDetailDisclosure';
 import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
@@ -18,20 +22,22 @@ import {
   ConfirmAgentMonthlyBillForm,
   MarkAgentMonthlyBillPaidForm,
 } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
-import { PageHeader, StatusBadge, TableScrollArea } from '@/components/ui-business';
+import { PageHeader, StatusBadge, EmptyState, FilterClearLink } from '@/components/ui-business';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
-import { buttonVariants } from '@/components/ui/button';
-import { billListReturnHref, remainingCreditAmount } from '@/lib/agent-monthly-billing/presentation';
-import { OrderStatusSnapshotBadge } from '@/components/business/agent-monthly-billing/OrderStatusSnapshotBadge';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { billListReturnHref } from '@/lib/agent-monthly-billing/presentation';
 
-type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ returnTo?: string | string[] }> };
+type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ returnTo?: string | string[]; q?: string | string[]; page?: string | string[] }> };
 
 export default async function AgentMonthlyBillDetailPage({ params, searchParams }: PageProps) {
   await requirePermission('bill:view:all');
   const { id } = await params;
-  const returnHref = billListReturnHref((await searchParams)?.returnTo);
+  const search = await searchParams ?? {};
+  const returnHref = billListReturnHref(search.returnTo);
   const bill = await getAgentMonthlyBillDetail(id);
   if (!bill) notFound();
+  const members = billItemPage(bill.items, search);
+  const basePath = `/owner/agent-bills/${bill.id}`;
 
   return (
     <div className="space-y-6">
@@ -95,55 +101,19 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
         </section>
       ) : null}
 
-      <section className="space-y-3">
+      <section aria-labelledby="agent-bill-items-title" className="space-y-4">
         <div>
-          <h2 className="font-semibold">账单明细</h2>
+          <h2 id="agent-bill-items-title" className="font-semibold">账单明细</h2>
+          <p className="mt-1 text-sm text-muted-foreground">当前匹配 {members.total} / {bill.items.length} 单；上方金额为整张账单合计。</p>
         </div>
-        <TableScrollArea label="月度账单成员" className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 text-left">工单</th>
-                <th className="px-4 py-2 text-left">工单名称</th>
-                <th className="px-4 py-2 text-left">状态 / 纸单版本</th>
-                <th className="px-4 py-2 text-left">结算时间</th>
-                <th className="px-4 py-2 text-right">结算费</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {bill.items.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-4 py-3 align-top">
-                    <Link
-                      href={`/orders/${item.orderId}`}
-                      className="font-medium hover:underline"
-                    >
-                      {item.orderNoSnapshot}
-                    </Link>
-                    <div className="mt-2"><BillItemEvidence item={item} period={bill.period} /></div>
-                    {bill.status !== AgentMonthlyBillStatus.DRAFT && new Decimal(remainingCreditAmount(item.settledFeeSnapshot, item.credits)).gt(0) ? (
-                      <Link href={`/owner/agent-bills/${bill.id}/credits/${item.id}/new`} className={buttonVariants({ size: 'sm', variant: 'outline' })}>
-                        录入抵扣
-                      </Link>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3 align-top">
-                    <BillItemName item={item} />
-                  </td>
-                  <td className="px-4 py-3 align-top text-xs text-muted-foreground">
-                    <OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /> · v{item.workOrderVersionSnapshot}
-                  </td>
-                  <td className="px-4 py-3 align-top text-xs text-muted-foreground">
-                    {formatDateTimeShanghai(item.settledAtSnapshot)}
-                  </td>
-                  <td className="px-4 py-3 text-right align-top font-sans tabular-nums">
-                    {formatMoney(item.settledFeeSnapshot)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </TableScrollArea>
+        <Form action={basePath} id="agent-bill-item-search" key={members.q} className="flex flex-wrap items-end gap-3">
+          <input type="hidden" name="returnTo" value={returnHref} />
+          <label className="grid gap-1 text-sm">查找账单内工单<Input name="q" type="search" defaultValue={members.q} placeholder="工单名称 / 工单号" maxLength={100} /></label>
+          <Button type="submit" variant="outline">搜索</Button>
+          {members.q ? <FilterClearLink formId="agent-bill-item-search" href={buildTableHref(basePath, {}, { returnTo: returnHref })} className={buttonVariants({ variant: 'ghost' })}>清除筛选</FilterClearLink> : null}
+        </Form>
+        {members.rows.length ? <BillItemsList items={members.rows} period={bill.period} billId={bill.id} billStatus={bill.status} /> : <EmptyState title="未找到匹配的工单" />}
+        <AdminPagination basePath={basePath} page={members.page} pageCount={members.pageCount} total={members.total} pageSize={members.pageSize} queryParams={{ q: members.q || undefined, returnTo: returnHref }} />
       </section>
 
       {bill.adjustments.length > 0 ? (

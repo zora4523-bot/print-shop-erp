@@ -64,6 +64,7 @@ vi.mock('@/lib/order/sales-list-query', () => ({
   getSalesLatestRejectedOrderIds: getSalesLatestRejectedOrderIdsMock,
   listSalesOrdersPage: listSalesOrdersPageMock,
   sanitizeSalesOrderListQuery: vi.fn((query) => query),
+  parseSalesOrderListQuery: vi.fn(() => ({ issues: [], query: { filters: {}, page: 1, pageSize: 20, sort: 'createdAt', dir: 'desc' } })),
 }));
 
 vi.mock('@/lib/order/admin-workspace', () => ({
@@ -202,6 +203,19 @@ beforeEach(() => {
 });
 
 describe('OrdersListContent', () => {
+  it('passes the applied month to summaries and pagination together', async () => {
+    const query = { filters: {} as import('@/lib/order/list-query').OrderListQuery['filters'], page: 2, pageSize: 20, sort: 'createdAt' as const, dir: 'desc' as const, createdMonth: '2025-01' };
+    await SalesOrdersListContent({ actor: { id: 'sales-1', role: Role.SALES }, parsed: { query, issues: [] } });
+    expect(getSalesOrderListSummaryMock).toHaveBeenCalledWith(
+      { id: 'sales-1', role: Role.SALES }, expect.any(Date), expect.any(Promise), query,
+    );
+    const node = await SalesOrdersListSection({ query, pagePromise: Promise.resolve({ rows: [], total: 50, page: 2, pageCount: 3, pageSize: 20 }) });
+    const list = findElement(node, salesOrdersListMock);
+    expect(list?.props.query).toMatchObject({ createdMonth: '2025-01', page: 2 });
+    const footer = list?.props.footer as React.ReactElement<{ queryParams: { createdMonth?: string } }>;
+    expect(footer.props.queryParams.createdMonth).toBe('2025-01');
+  });
+
   it('其他角色没有工单列表，直接 404 且不读取任何工单数据', async () => {
     await expect(
       OrdersListContent({

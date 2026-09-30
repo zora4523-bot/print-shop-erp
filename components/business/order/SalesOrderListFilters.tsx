@@ -2,8 +2,8 @@ import Form from 'next/form';
 import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { buildTableHref } from '@/lib/admin/table';
-import type { OrderListQuery } from '@/lib/order/list-query';
 import type {
+  SalesOrderListQuery,
   SalesOrderListSummary,
   SalesOrderListView,
 } from '@/lib/order/sales-list-query';
@@ -37,14 +37,17 @@ export function SalesOrderListFilters({
   summary,
   issues,
 }: {
-  query: OrderListQuery;
+  query: SalesOrderListQuery;
   summary: SalesOrderListSummary;
   issues: readonly string[];
 }) {
   const activeView = query.view ?? 'all';
   const q = query.filters.q ?? '';
+  const createdMonth = query.createdMonth ?? '';
+  const filtered = Boolean(q || createdMonth);
   const baseParams = {
     q: q || undefined,
+    createdMonth: createdMonth || undefined,
     pageSize: query.pageSize !== 20 ? query.pageSize : undefined,
   };
 
@@ -60,13 +63,13 @@ export function SalesOrderListFilters({
             我的工单
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {summary.todo} 单需关注 · 本月已发 {summary.shippedThisMonth} 单
+            {filtered ? `当前筛选：${summary.all} 单 · ${summary.todo} 单需关注` : `${summary.todo} 单需关注 · 本月已发 ${summary.shippedThisMonth} 单`}
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">共 {summary.all} 单</p>
+        {createdMonth ? <p className="text-xs text-muted-foreground">下单月份 {createdMonth}</p> : null}
       </div>
 
-      <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
+      <div className="flex min-w-0 flex-col gap-3">
         <nav
           aria-label="销售工单视图"
           className="flex min-w-0 flex-wrap gap-2 xl:flex-1"
@@ -113,14 +116,14 @@ export function SalesOrderListFilters({
           })}
         </nav>
 
-        {/* key 只跟已应用的搜索词走：清除 / 应用后按 URL 重置输入，切视图不丢未提交输入。 */}
+        {/* Applied filters reset input values; switching views preserves pending edits. */}
         <Form
-          key={q}
+          key={`${q}:${createdMonth}`}
           id={SALES_ORDER_FILTER_FORM_ID}
           action="/orders"
           role="search"
           scroll={false}
-          className="flex w-full min-w-0 flex-wrap items-center gap-2 xl:ml-auto xl:w-auto xl:shrink-0 xl:flex-nowrap"
+          className="flex w-full min-w-0 flex-wrap items-end gap-2"
         >
           {query.view ? (
             <input type="hidden" name="view" value={query.view} />
@@ -128,7 +131,11 @@ export function SalesOrderListFilters({
           {query.pageSize !== 20 ? (
             <input type="hidden" name="pageSize" value={query.pageSize} />
           ) : null}
-          <div className="relative min-w-0 flex-1 xl:w-60 xl:flex-none">
+          <label className="grid min-w-0 flex-1 gap-1 text-xs text-muted-foreground sm:max-w-48">
+            下单月份
+            <Input type="month" name="createdMonth" defaultValue={createdMonth} className="min-w-0 bg-background text-foreground" />
+          </label>
+          <div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1 sm:max-w-sm">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -143,13 +150,14 @@ export function SalesOrderListFilters({
             />
           </div>
           <Button type="submit" variant="outline">
-            搜索
+            应用筛选
           </Button>
-          {q ? (
+          {filtered ? (
             <FilterClearLink
               href={buildTableHref('/orders', {}, {
                 ...baseParams,
                 q: undefined,
+                createdMonth: undefined,
                 view: query.view,
               })}
               formId={SALES_ORDER_FILTER_FORM_ID}

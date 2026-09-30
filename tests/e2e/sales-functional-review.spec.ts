@@ -115,8 +115,8 @@ test('销售搜索、分类、抽屉、详情和草稿编辑回显', async ({ pa
   const errors = trackErrors(page);
   await salesLogin(page, '/orders');
   await page.getByRole('searchbox').fill(id);
-  await page.getByRole('button', { name: '搜索', exact: true }).click();
-  const card = page.locator(`[data-order-id="${id}"]`);
+  await page.getByRole('button', { name: '应用筛选', exact: true }).click();
+  const card = page.locator(`[data-order-id="${id}"]:visible`);
   await expect(card).toBeVisible();
   await page.getByRole('navigation', { name: '销售工单视图' }).getByRole('link', { name: /^草稿/ }).click();
   await expect(card).toBeVisible();
@@ -188,7 +188,7 @@ test('销售交期修改与取消申请可提交撤回，原工单不提前变�
   await expect(page.getByRole('button', { name: '撤回申请', exact: true })).toBeVisible();
   expect((await readOrder(id)).status).toBe('CONFIRMED');
   await page.goto(`/orders?q=${id}`);
-  const card = page.locator(`[data-order-id="${id}"]`);
+  const card = page.locator(`[data-order-id="${id}"]:visible`);
   await expect(card.getByText('取消申请中', { exact: true })).toBeVisible();
   await expect(card.getByText('修改申请中', { exact: true })).toHaveCount(0);
   await card.getByRole('link', { name: '查看详情', exact: true }).click();
@@ -213,14 +213,14 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
   for (const status of new Set(Object.values(groups).flat())) ids.set(status, await seed(status, E2E_USERS.sales.username, batch));
   const errors = trackErrors(page);
   await salesLogin(page, `/orders?q=${batch}`);
-  const cards = page.locator('[data-sales-order-card]');
+  const cards = page.locator('[data-sales-order-card]:visible, [data-sales-order-row]:visible');
   await expect(cards).toHaveCount(16);
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   const counts = new Map<string, number>();
   try {
     const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
-    const { rows } = await db.query('SELECT status, COUNT(*)::int AS count FROM "Order" WHERE "submitterId"=$1 GROUP BY status', [salesId]);
+    const { rows } = await db.query('SELECT status, COUNT(*)::int AS count FROM "Order" WHERE "submitterId"=$1 AND "orderNo" ILIKE $2 GROUP BY status', [salesId, `%${batch}%`]);
     for (const row of rows) counts.set(row.status, row.count);
   } finally { await db.end(); }
   const labels = { doing: '进行中', shipped: '已发货', done: '已结算', cancelled: '已取消', draft: '草稿' };
@@ -233,7 +233,7 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
     await expect.poll(async () => (await cards.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-order-id')))).sort()).toEqual(statuses.map((status) => ids.get(status)).sort());
     for (const status of statuses) {
       const id = ids.get(status)!;
-      const card = page.locator(`[data-order-id="${id}"]`);
+      const card = page.locator(`[data-order-id="${id}"]:visible`);
       await expect(card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ })).toHaveAttribute('href', `/orders/${id}`);
       await card.getByRole('button', { name: /销售回归工单/, exact: false }).click();
       const drawer = page.getByRole('dialog');
@@ -313,11 +313,15 @@ test('销售列表、详情和编辑页在六视口及明暗主题下可用', as
       const result = await new AxeBuilder({ page }).include('#admin-main').analyze();
       expect(result.violations.map(({ id: rule, nodes }) => ({ rule, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) })), `${path}: ${width} dark=${dark}`).toEqual([]);
       if (width <= 393 && path.startsWith('/orders?')) {
-        await page.locator(`[data-order-id="${id}"]`).getByRole('button', { name: /销售回归工单/, exact: false }).tap();
+        await page.locator(`[data-order-id="${id}"]:visible`).getByRole('button', { name: /销售回归工单/, exact: false }).tap();
         await expect(page.getByRole('dialog'), `touch: ${width} dark=${dark}, url=${page.url()}`).toBeVisible();
         await page.getByRole('button', { name: '关闭', exact: true }).tap();
         await expect(page.getByRole('dialog')).toHaveCount(0);
-        await expect(page).toHaveURL(new RegExp(`/orders\\?q=${id}$`));
+        await expect(page).toHaveURL((url) => url.pathname === '/orders'
+          && url.searchParams.get('q') === id
+          && !url.searchParams.has('selected')
+          && !url.hash
+          && (!url.searchParams.has('scroll') || /^\d+$/.test(url.searchParams.get('scroll')!)));
       }
     }
   }

@@ -69,7 +69,9 @@ export async function requestAgentMonthlyBillExportAction(
     if (error instanceof InvalidAgentMonthlyBillExportRequestError) {
       return { status: 'invalid', message: error.message };
     }
-    throw error;
+    console.error('[agent-monthly-bill-export] request failed', error instanceof Error ? error.name : 'UnknownError');
+    revalidatePath('/owner/agent-bills');
+    return { status: 'error', message: '暂时无法生成导出文件，请刷新导出记录后重试。' };
   }
 }
 

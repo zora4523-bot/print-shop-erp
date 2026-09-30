@@ -136,6 +136,7 @@ function getSidebarCollapseServerSnapshot(): Record<string, boolean> {
 }
 const PINNED_HREFS = new Set([
   '/owner',
+  '/sales/overview',
   '/workbench',
   '/orders',
   '/orders/new',

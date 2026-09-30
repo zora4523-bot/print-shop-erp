@@ -27,8 +27,12 @@ describe('SalesOrdersList', () => {
     expect(html).toContain(
       'data-slot="sales-orders-list" class="min-w-0"',
     );
-    expect(html).toContain('aria-label="销售工单列表" class="grid gap-2"');
+    expect(html).toContain('aria-label="销售工单列表" class="grid gap-2 xl:hidden"');
     expect(html).toContain('data-sales-order-card=""');
+    expect(html).toContain('data-sales-order-row=""');
+    expect(html).toContain('aria-label="销售工单明细表"');
+    expect(html).toContain('2026/08/27');
+    expect(html).toContain('下单 / 交货');
     expect(html).toContain(
       'data-slot="sales-orders-pagination" class="mt-4"',
     );

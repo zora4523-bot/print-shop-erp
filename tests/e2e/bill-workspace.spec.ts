@@ -103,9 +103,9 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
       await page.getByText('账单概览', { exact: true }).click();
       await sales.goto(`/sales/bills?period=${source.period}`);
       await selectBillTheme(sales, theme);
-      await expect(sales.getByRole('region', { name: '我的月账单' })).toContainText('1 单');
-      await sales.getByText('账单趋势', { exact: true }).click();
-      const overview = sales.getByRole('region', { name: '我的账期概览' });
+      await expect(sales.getByRole('region', { name: '我的月账单', exact: true })).toContainText('1 单');
+      await expect(sales.getByRole('heading', { name: '账期概览', exact: true })).toBeVisible();
+      const overview = sales.getByRole('list', { name: '我的账期概览' });
       await expect(overview.getByRole('link')).toHaveCount(2);
       await waitForBillPaint(sales);
       expect(await sales.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -133,7 +133,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
     }
   }
   await sales.goto(`/orders?q=${source.orderNo}`);
-  const orderCard = sales.locator(`[data-order-id="${source.orderId}"]`);
+  const orderCard = sales.locator(`[data-order-id="${source.orderId}"]:visible`);
   await expect(orderCard.getByRole('link', { name: `${source.period} 账单 · 已结清` })).toHaveAttribute('href', `/sales/bills/${sourceId}`);
   // The independently generated account has no ownership of these bills.
   const otherContext = await browser.newContext({ baseURL });

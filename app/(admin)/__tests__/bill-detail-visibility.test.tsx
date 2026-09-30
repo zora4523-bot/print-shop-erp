@@ -85,7 +85,7 @@ describe('bill detail visibility boundary', () => {
     expect(html).toContain('500.00');
     expect(html).toContain('20260801-0001');
     // 客户名称/简称停用（业主 2026-09-27）：明细改列工单名称，冻结的客户快照不再展示。
-    expect(html).toContain('<th class="p-3">工单名称</th>');
+    expect(html).toContain('<th class="p-3 text-left">工单名称</th>');
     expect(html).toContain('中秋礼盒');
     expect(html).not.toContain('客户');
     for (const forbidden of ['内部财务甲', '内部成本', '9999.00']) expect(html).not.toContain(forbidden);
@@ -100,8 +100,8 @@ describe('bill detail visibility boundary', () => {
         order: { customName: '   ' } }],
     });
     const html = renderToStaticMarkup(await SalesBillDetailPage({ params: Promise.resolve({ id: 'bill-1' }) }));
-    const row = html.match(/<tr class="border-t">[\s\S]*?<\/tr>/)?.[0] ?? '';
-    const cells = [...row.matchAll(/<td class="p-3">([\s\S]*?)<\/td>/g)].map((match) => match[1]);
+    const row = html.match(/<tr class="grid [\s\S]*?<\/tr>/)?.[0] ?? '';
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((match) => match[1]);
     expect(cells[1]).toBe('未命名工单<span class="block text-xs text-muted-foreground">当前名称</span>');
     expect(html).not.toContain('外部客户甲');
   });
@@ -120,9 +120,9 @@ describe('bill detail visibility boundary', () => {
     });
     const html = renderToStaticMarkup(await AgentMonthlyBillDetailPage({ params: Promise.resolve({ id: 'agent-bill-1' }) }));
     expect(requirePermissionMock).toHaveBeenCalledWith('bill:view:all');
-    const headers = [...html.matchAll(/<th class="px-4 py-2 text-left">([^<]*)<\/th>/g)].map((match) => match[1]);
-    expect(headers).toEqual(['工单', '工单名称', '状态 / 纸单版本', '结算时间']);
-    const nameCells = [...html.matchAll(/<td class="px-4 py-3 align-top">([^<]*<span class="block text-xs text-muted-foreground">当前名称<\/span>)<\/td>/g)].map((match) => match[1].replace(/<[^>]+>/g, ""));
+    const headers = [...html.matchAll(/<th class="p-3 text-left">([^<]*)<\/th>/g)].map((match) => match[1]);
+    expect(headers).toEqual(['工单', '工单名称', '结算状态', '版本', '结算时间']);
+    const nameCells = [...html.matchAll(/<td[^>]*>([^<]*<span class="block text-xs text-muted-foreground">当前名称<\/span>)<\/td>/g)].map((match) => match[1].replace(/<[^>]+>/g, ""));
     expect(nameCells).toEqual(['中秋礼盒当前名称', '未命名工单当前名称']);
     for (const customer of ['外部客户甲', '外部客户乙', '客户']) expect(html).not.toContain(customer);
   });
@@ -271,4 +271,27 @@ describe('bill detail visibility boundary', () => {
     expect(requirePermissionMock).not.toHaveBeenCalled();
     expect(getAdminBillDetailMock).not.toHaveBeenCalled();
   });
+});
+
+it('paginates and searches administrator bill items without changing whole-bill amounts', async () => {
+  requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
+  getAgentMonthlyBillDetailMock.mockResolvedValue({
+    id: 'agent-bill-1', period: '2026-08', status: 'DRAFT',
+    agentDisplayNameSnapshot: '外部销售甲', agentUsernameSnapshot: 'sales-a',
+    memberSubtotal: '800.00', adjustmentAmount: '0.00', totalAmount: '800.00',
+    confirmedAt: null, paidAt: null, receipt: null, adjustments: [],
+    items: Array.from({ length: 61 }, (_, i) => ({
+      id: `item-${i}`, orderId: `order-${i}`, orderNoSnapshot: `SEARCH-${String(i).padStart(3, '0')}`,
+      orderStatusSnapshot: 'SETTLED', workOrderVersionSnapshot: 1,
+      settledFeeSnapshot: '10.00', settledAtSnapshot: finishedAt, credits: [], order: { customName: `工单 ${i}` },
+    })),
+  });
+  const html = renderToStaticMarkup(await AgentMonthlyBillDetailPage({ params: Promise.resolve({ id: 'agent-bill-1' }), searchParams: Promise.resolve({ q: 'SEARCH-', page: '3', returnTo: '/owner/agent-bills?status=DRAFT' }) }));
+  expect(html).toContain('当前匹配 61 / 61 单');
+  expect(html).toContain('800.00');
+  const table = html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? '';
+  expect(table.match(/<tr class="grid /g)).toHaveLength(1);
+  expect(table).toContain('SEARCH-060');
+  expect(table).not.toContain('SEARCH-059');
+  expect(html).toContain('q=SEARCH-');
 });
