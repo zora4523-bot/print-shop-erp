@@ -4,6 +4,7 @@ import type { OrderCreationLifecycle } from './order-creation-editor';
 import type { SampleOrderFormState, SampleOrderContext, SavedSampleDraft } from './sample-order-types';
 export type { SampleOrderFormState, SampleOrderContext, SavedSampleDraft } from './sample-order-types';
 import { useCallback, useId, useRef, useState } from 'react';
+import { useOrderCompletion, useOrderLeaveNavigation } from './order-creation-leave';
 import { useRouter } from 'next/navigation';
 import { createOrderAction, submitOrderAction } from '@/actions/order';
 import { quoteSampleOrderAction } from '@/actions/create-order-quote';
@@ -88,6 +89,8 @@ export function SampleOrderForm({
 }: SampleOrderFormProps) {
   const uid = useId();
   const router = useRouter();
+  const leave = useOrderLeaveNavigation();
+  const [completion, setCompletion] = useState<{ draft: SavedSampleDraft; intent: 'draft' | 'submit' | 'fees' } | null>(null);
   const requestId = useRef<{ key: string; id: string } | null>(null);
   const {
     name,
@@ -231,7 +234,7 @@ export function SampleOrderForm({
     }
   }
   async function submit(editFees = false) {
-    if (!draft) return;
+    if (!draft || busy || uploading) return;
     setBusy(true);
     lifecycle?.onBusyChange?.(true);
     setError(null);
@@ -242,10 +245,7 @@ export function SampleOrderForm({
       );
       if (result.status === 'success') {
         requestId.current = null;
-        completeSavedSample(draft, editFees ? 'fees' : 'submit', lifecycle, onComplete, (url) => {
-          router.push(url);
-          router.refresh();
-        });
+        setCompletion({ draft, intent: editFees ? 'fees' : 'submit' });
         return;
       }
       if (result.status === 'quote_changed') {
@@ -275,6 +275,19 @@ export function SampleOrderForm({
       setBusy(false);
       lifecycle?.onBusyChange?.(false);
     }
+  }
+  useOrderCompletion(completion, busy || uploading, (completed) => {
+    setCompletion(null);
+    if (lifecycle?.submissionId) leave?.finishOrder(lifecycle.submissionId);
+    completeSavedSample(completed.draft, completed.intent, lifecycle, onComplete, (url) => {
+      if (leave) leave.navigate(url);
+      else router.push(url);
+    });
+  });
+  function completeDraft() {
+    if (!draft || busy || uploading || leave?.pending) return;
+    requestId.current = null;
+    setCompletion({ draft, intent: 'draft' });
   }
   if (externalSalesAccounts?.length === 0 && !draft) return <NoExternalSalesEmptyState />;
   return (
@@ -348,7 +361,8 @@ export function SampleOrderForm({
           <Button
             type="button"
             variant="outline"
-            onClick={() => { requestId.current = null; completeSavedSample(draft, 'draft', lifecycle, onComplete, (url) => router.push(url)); }}
+            disabled={busy || uploading || leave?.pending}
+            onClick={completeDraft}
           >
             {lifecycle?.retainResult ? '保存并继续下一张' : '查看已保存工单'}
           </Button>

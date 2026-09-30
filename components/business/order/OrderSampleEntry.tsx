@@ -35,7 +35,9 @@ export function useSampleOrderEntry(draftScope: string, workbenchTransferId?: st
   return { samplePurpose, chooseSamplePurpose };
 }
 
-export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees, externalSalesAccounts, onExternalSalesChange }: {
+export function OrderSampleEntry({ orderKey, active, editorSnapshot, onEditorSnapshot, lifecycle, form, purpose, options, crafts, draftScope, itemIndex, initialItem, choosePurpose, onRouteChange, canEditFees, externalSalesAccounts, onExternalSalesChange }: {
+  orderKey: string;
+  active: boolean;
   editorSnapshot?: SampleOrderEditorSnapshot;
   onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void;
   lifecycle?: OrderCreationLifecycle;
@@ -55,13 +57,16 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
   // 样品提交或打样文件上传中锁住页头返回（§8.3）；状态上报工作台统一的离开保护。
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const trackedLifecycle: OrderCreationLifecycle | undefined = lifecycle ? {
+  const trackedLifecycle: OrderCreationLifecycle = {
+    onCreated: () => {}, onCompleted: () => {},
     ...lifecycle,
-    onBusyChange: (value) => { setBusy(value); lifecycle.onBusyChange?.(value); },
+    submissionId: orderKey,
+    onBusyChange: (value) => { setBusy(value); lifecycle?.onBusyChange?.(value); },
     onUploadingChange: setUploading,
-  } : undefined;
-  const leave = useOrderLeaveReport(lifecycle?.submissionId && `${lifecycle.submissionId}:sample`,
-    { active: true, dirty: false, pendingFileCount: 0, submitted: false, busy: busy || uploading });
+  };
+  // 此处只上报忙碌锁；实际编辑内容及保存结果由 useSampleWorkbenchDraft 单独上报。
+  const leave = useOrderLeaveReport(`${orderKey}:sample-busy`,
+    { active, dirty: false, pendingFileCount: 0, submitted: false, busy: busy || uploading });
   const values = form.getValues();
   const sampleForm: SampleOrderFormState = {
     ...EMPTY_SAMPLE_FORM,
@@ -75,7 +80,7 @@ export function OrderSampleEntry({ editorSnapshot, onEditorSnapshot, lifecycle, 
     <WorkbenchCalculator options={options} crafts={crafts}
       draftScope={`order-create:${draftScope}`}
       externalSalesAccounts={externalSalesAccounts}
-      createEntry={{ onExternalSalesChange, editorSnapshot, onEditorSnapshot, lifecycle: trackedLifecycle, canEditFees, purpose, form: sampleForm,
+      createEntry={{ purposeStorageKey: `order-create-purpose:v1:${draftScope}`, onExternalSalesChange, editorSnapshot, onEditorSnapshot, lifecycle: trackedLifecycle, canEditFees, purpose, form: sampleForm,
         item: values.items[itemIndex] ?? initialItem,
         context: { customName: values.customName, packageRequirement: values.packageRequirement, externalSalesUserId: values.externalSalesUserId,
           promisedDate: values.promisedDate,

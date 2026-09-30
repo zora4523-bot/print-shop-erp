@@ -36,9 +36,9 @@ function readEntries(key: string): Entry[] {
  * - 因此每张表单渲染进自己的常驻宿主节点（portal），只有当前工单的宿主被挂进
  *   文档；其余宿主脱离文档保活。React 实例、react-hook-form 状态、effect 全部保留，
  *   文档里任何时刻只有一张表单：id 唯一、只提交/校验/播报当前表单、隐藏实例不可聚焦。
- * - 副作用以 `active` 控制：只有当前实例登记 editor、挂离开守卫；自动保存照常
- *   （各自 draftScope 独立）。切换前仍同步调用 `editor.save()`：它落本地草稿，
- *   并给工作台的「未上传文件」离开守卫与「撤销移除」后的重挂载提供快照。
+ * - 副作用以 `active` 控制：只有当前实例登记 editor；所有实例上报离开状态，自动保存照常
+ *   （各自 draftScope 独立）。切换前由 leave.saveDrafts 核对实际保存结果；失败则留在本单。
+ *   editor.capture 只保留内存内容与持久化基线，供撤销移除后的重挂载使用。
  */
 function whenIdle(task: () => void) {
   if (typeof window.requestIdleCallback === 'function') {
@@ -63,7 +63,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const active = entries.find((entry) => entry.id === activeId);
   const showResult = Boolean(active?.done || active?.recovered);
-  const navigationLocked = locked || sampleBusy || Boolean(active?.created && !showResult);
+  const entryNavigationLocked = locked || sampleBusy || Boolean(active?.created && !showResult);
   // 离开保护收口在工作台一处：各表单 / 打样入口上报状态，所有站内离开入口经 leave.guard。
   const leave = useOrderCreationLeave({
     labelFor: (key) => {
@@ -73,6 +73,8 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
     },
     removedFileCount: removed ? snapshots[removed.id]?.files.flat().length ?? 0 : 0,
   });
+
+  const navigationLocked = entryNavigationLocked || leave.pending;
 
   useEffect(() => {
     let cancelled = false;
@@ -102,9 +104,11 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   }, []);
 
   function retainCurrent() {
+    if (leave.pending) return false;
     if (showResult) return true;
     if (!editor.current?.canLeave || navigationLocked) return false;
-    const snapshot = editor.current.save();
+    if (!leave.saveDrafts(activeId)) return false;
+    const snapshot = editor.current.capture();
     setSnapshots((current) => ({ ...current, [activeId]: snapshot }));
     return true;
   }
@@ -148,7 +152,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const canStartNextBatch = entries.length > 0 && entries.every((entry) => entry.created) && showResult && !sampleBusy;
 
   function startNextBatch() {
-    if (!canStartNextBatch) return;
+    if (!canStartNextBatch || leave.pending) return;
     const entry = { id: crypto.randomUUID() };
     saveEntries([entry]);
     setActiveId(entry.id);
@@ -167,7 +171,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
     {leave.dialog}
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="outline" disabled={(!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 添加工单</Button>
+        <Button type="button" variant="outline" disabled={leave.pending || (!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 添加工单</Button>
         {entries.length > 1 && !active.created ? <Button type="button" variant="outline" disabled={navigationLocked} onClick={removeCurrent}>移除当前工单</Button> : null}
         {removed ? <Button type="button" variant="outline" disabled={navigationLocked || entries.length >= MAX_BATCH_ORDERS}
           onClick={() => { if (!retainCurrent()) return; saveEntries([...entries, removed]); setActiveId(removed.id); setRemoved(null); }}>撤销移除</Button> : null}
@@ -177,7 +181,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
       <p className="text-xs text-muted-foreground">每张工单独立填写地址、设计款和费用，逐张核对后创建。创建成功后继续下一张。</p>
       <nav aria-label="待建工单" className="flex flex-wrap gap-2">
         {entries.map((entry, index) => <Button key={entry.id} type="button" variant={entry.id === activeId ? 'selected' : 'outline'}
-          disabled={!showResult && navigationLocked && entry.id !== activeId} aria-pressed={entry.id === activeId}
+          disabled={(leave.pending || (!showResult && navigationLocked)) && entry.id !== activeId} aria-pressed={entry.id === activeId}
           onClick={() => { if (entry.id !== activeId && retainCurrent()) { setActiveId(entry.id); setLocked(false); whenIdle(() => saveEntries(entriesRef.current)); } }}>
           工单 {index + 1}{entry.done ? ' · 已完成' : entry.created ? ' · 已保存' : ''}
         </Button>)}

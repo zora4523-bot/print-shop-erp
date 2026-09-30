@@ -69,7 +69,11 @@ for (const actor of ['owner', 'sales'] as const) {
         page.getByRole('button', { name: '人工定价', exact: true }),
       ).toHaveCount(0);
     }
-    // Browser-native navigation must retain the warning even though local text drafts exist.
+    // Text can already be persisted locally; queued artwork still needs leave protection (§8.3).
+    await page.getByLabel('第 1 款 设计图', { exact: true }).setInputFiles({
+      name: 'leave-protection.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64'),
+    });
+    await expect(page.getByRole('button', { name: '移除第 1 款 设计图', exact: true })).toBeVisible();
     const beforeUnload = await page.evaluate(() => {
       const event = new Event('beforeunload', { cancelable: true });
       window.dispatchEvent(event);

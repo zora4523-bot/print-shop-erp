@@ -142,3 +142,61 @@ it('④ the single-order success view offers exactly one way back to the list (t
   await back().click();
   expect(mocks.navigations).toEqual(['/orders']);
 });
+
+it('protects unsaved text in a hidden batch order and browser unload', async () => {
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: IDLE }, { id: 'b', state: { ...IDLE, active: false, dirty: true }, persist: () => 'storage' }]} />));
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+  await back().click();
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('工单 2 已填写的内容将保存为本机草稿。');
+});
+
+it('does not claim successfully persisted orders are lost when another save fails', async () => {
+  flushSync(() => root.render(<Harness orders={[
+    { id: 'a', state: { ...IDLE, dirty: true }, persist: () => null },
+    { id: 'b', state: { ...IDLE, dirty: true }, persist: () => 'storage' },
+  ]} />));
+  await back().click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '保存草稿并离开' }).click();
+  const notice = page.getByRole('alert').filter({ hasText: '本机草稿未保存' });
+  await expect.element(notice).not.toHaveTextContent('工单 1 已填写的内容');
+  await expect.element(notice).toHaveTextContent('工单 2 已填写的内容');
+  expect(mocks.push).not.toHaveBeenCalled();
+});
+
+it('locks an existing save-failure exit when a request starts', async () => {
+  const persist = () => 'storage' as const;
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: { ...IDLE, dirty: true }, persist }]} />));
+  await back().click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '保存草稿并离开' }).click();
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: { ...IDLE, dirty: true, busy: true }, persist }]} />));
+  await expect.element(page.getByRole('button', { name: '仍然离开' })).toBeDisabled();
+  page.getByRole('button', { name: '仍然离开' }).element().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  expect(mocks.push).not.toHaveBeenCalled();
+});
+
+it('returns focus to the source when dismissing a save failure', async () => {
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: { ...IDLE, dirty: true }, persist: () => 'storage' }]} />));
+  await back().click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '保存草稿并离开' }).click();
+  await page.getByRole('button', { name: '留在本页' }).click();
+  await expect.element(back()).toHaveFocus();
+});
+
+it('removes obsolete failure text after that order has been saved', async () => {
+  const persist = () => 'storage' as const;
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: { ...IDLE, dirty: true }, persist }]} />));
+  await back().click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '保存草稿并离开' }).click();
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: IDLE, persist }]} />));
+  await expect.element(page.getByRole('alert').filter({ hasText: '本机草稿未保存' })).not.toBeInTheDocument();
+});
+
+it('fails closed when an unsaved editor has no persistence callback', async () => {
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: { ...IDLE, dirty: true } }]} />));
+  await back().click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '保存草稿并离开' }).click();
+  expect(mocks.push).not.toHaveBeenCalled();
+  await expect.element(page.getByRole('alert').filter({ hasText: '本机草稿未保存' })).toBeVisible();
+});

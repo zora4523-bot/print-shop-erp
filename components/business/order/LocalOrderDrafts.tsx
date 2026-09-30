@@ -30,7 +30,7 @@ export function LocalOrderDrafts({
   baseKey: string;
   pricingScope: LocalOrderFormDraftPricingScope;
   currentId?: string;
-  onNavigate: () => boolean;
+  onNavigate: (href: string, event: { preventDefault(): void }) => void;
 }) {
   const getSnapshot = useCallback(() => {
     try {
@@ -75,9 +75,7 @@ export function LocalOrderDrafts({
                 variant: 'outline',
                 className: 'min-h-11',
               })}
-              onClick={(event) => {
-                if (!onNavigate()) event.preventDefault();
-              }}
+              onNavigate={(event) => onNavigate(`/orders/new?fromWorkbench=${encodeURIComponent(draft.id)}`, event)}
             >
               恢复草稿
             </Link>

@@ -27,7 +27,7 @@ vi.mock('@/components/business/order/OrderForm', () => ({
     const { registerEditor, active = true } = props;
     useEffect(() => {
       if (!active) return;
-      registerEditor?.({ canLeave: !busy, save: () => ({ values: createOrderSchema.parse({
+      registerEditor?.({ canLeave: !busy, capture: () => ({ values: createOrderSchema.parse({
         customName: name, customerRef: null, receiverName: null, receiverPhone: null, receiverAddress: '测试收货地址', expressCode: null, packageRequirement: null, remark: null, items: [{ name: '设计', quantity: 100, crafts: ['foil'], productId: 'product', pricingRoute: 'STOCK_BLANK', paperType: '红卡', paperWeightGsm: 160, specification: '大号封', remark: null, foilTechnique: 'FLAT', hasLocalFoil: true, frontFoilColors: ['亚金'] }],
       }), files: [] }) });
       return () => registerEditor?.(null);

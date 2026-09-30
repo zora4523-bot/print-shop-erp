@@ -111,7 +111,7 @@ it('new-order sample entry renders the selector when no salesperson was chosen a
       externalSalesUserId: null, items: [createBlankItem([])],
     } as unknown as CreateOrderInput });
     values = form.getValues();
-    return <OrderSampleEntry form={form} purpose="SAMPLE_SHIPMENT" options={WORKBENCH_CATALOG} crafts={WORKBENCH_CRAFTS}
+    return <OrderSampleEntry orderKey="sample-fixture" active form={form} purpose="SAMPLE_SHIPMENT" options={WORKBENCH_CATALOG} crafts={WORKBENCH_CRAFTS}
       draftScope="admin" itemIndex={0} initialItem={form.getValues('items.0')} canEditFees
       externalSalesAccounts={accounts}
       onExternalSalesChange={(id) => { form.setValue('externalSalesUserId', id); values = form.getValues(); }}

@@ -82,8 +82,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useOrderLeaveReport, type LocalDraftSaveFailure } from './order-creation-leave';
+import { OrderCreationLeaveBoundary, useOrderCompletion, useOrderLeaveReport, type LocalDraftSaveFailure } from './order-creation-leave';
 import { OrderCreatedSuccessView } from './OrderCreatedSuccessView';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
 import {
@@ -641,7 +640,13 @@ function UrgentOrderField({
   );
 }
 
-export function OrderForm({
+export { GuardedOrderForm as OrderForm };
+
+function GuardedOrderForm(props: OrderFormProps) {
+  return <OrderCreationLeaveBoundary><OrderForm {...props} /></OrderCreationLeaveBoundary>;
+}
+
+function OrderForm({
   crafts,
   products,
   externalSalesAccounts,
@@ -670,7 +675,6 @@ export function OrderForm({
   // （持有 externalSalesAccounts）代建时必须选择外部销售。
   const canAssignExternalSales = externalSalesAccounts !== undefined;
   const isExternalSalesActor = !canAssignExternalSales;
-  const router = useRouter();
   const initialItem = useMemo(() => {
     const firstFoil = externalCreateOrderOptions?.foilColors[0]?.name;
     const item = createExternalOrderItem(
@@ -714,7 +718,7 @@ export function OrderForm({
     control,
     register,
     handleSubmit,
-    formState: { errors, isDirty, dirtyFields },
+    formState: { errors, dirtyFields },
     setValue,
     setError,
     clearErrors,
@@ -882,6 +886,10 @@ export function OrderForm({
     (total, queue) => total + queue.length,
     0,
   );
+  const [persistedValues, setPersistedValues] = useState<CreateOrderInput>(() => initialEditor?.persistedValues ?? structuredClone(getValues()));
+  const persistedValuesRef = useRef(persistedValues);
+  const unsavedContent = JSON.stringify(getValues()) !== JSON.stringify(persistedValues);
+  const [completion, setCompletion] = useState<{ draft: NonNullable<typeof createdDraft>; manualQuote: boolean; readyForProduction: boolean } | null>(null);
   const draftFailureRef = useRef<LocalDraftSaveFailure>('storage');
   const persistLocalDraftValues = useCallback(
     (values: CreateOrderInput) => {
@@ -901,6 +909,8 @@ export function OrderForm({
         setLocalDraftDecisionComplete(true);
         setLastLocalDraftSavedAt(savedAt.toISOString());
         setLocalDraftError(null);
+        persistedValuesRef.current = structuredClone(values);
+        setPersistedValues(persistedValuesRef.current);
         return true;
       } catch {
         draftFailureRef.current = 'storage';
@@ -911,21 +921,20 @@ export function OrderForm({
     [localDraftPricingScope, localDraftStorageKey],
   );
   // 离开保护由工作台统一管理（order-creation-leave）；这里只上报本单状态并取页头返回。
-  const leave = useOrderLeaveReport(submissionId, { active, dirty: isDirty, pendingFileCount: pendingDesignFileCount,
+  const leave = useOrderLeaveReport(clientSubmissionId, { active, dirty: unsavedContent, pendingFileCount: pendingDesignFileCount,
     submitted: Boolean(submittedOrder), busy: submitting || uploading }, () => (persistLocalDraftValues(getValues()) ? null : draftFailureRef.current));
 
   useEffect(() => {
     if (!registerEditor || !active) return;
     registerEditor({
       canLeave: localDraftReady && !submitting && !uploading && !createdDraft && !pendingSubmission,
-      save: () => {
+      capture: () => {
         const values = getValues();
-        persistLocalDraftValues(values);
-        return { sample: samplePurpose ? structuredClone(sampleEditorRef.current) : undefined, values: structuredClone(values), files: itemsArray.fields.map((field) => selectedDesignQueues[field.id] ?? []) };
+        return { persistedValues: structuredClone(persistedValuesRef.current), sample: samplePurpose ? structuredClone(sampleEditorRef.current) : undefined, values: structuredClone(values), files: itemsArray.fields.map((field) => selectedDesignQueues[field.id] ?? []) };
       },
     });
     return () => registerEditor(null);
-  }, [registerEditor, active, getValues, persistLocalDraftValues, itemsArray.fields, selectedDesignQueues, samplePurpose,
+  }, [registerEditor, active, getValues, persistedValues, itemsArray.fields, selectedDesignQueues, samplePurpose,
     localDraftReady, submitting, uploading, createdDraft, pendingSubmission]);
 
   useEffect(() => {
@@ -961,7 +970,7 @@ export function OrderForm({
   }, [clientSubmissionId, isExternalSalesActor, pendingLocalDraft, reset, transferReady]);
 
   useEffect(() => {
-    if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {
+    if (!localDraftReady || pendingLocalDraft || createdDraft || !unsavedContent) {
       return;
     }
     const timer = window.setTimeout(() => {
@@ -970,7 +979,7 @@ export function OrderForm({
     return () => window.clearTimeout(timer);
   }, [
     createdDraft,
-    isDirty,
+    unsavedContent,
     localDraftReady,
     pendingLocalDraft,
     externalInputRevision,
@@ -1091,20 +1100,7 @@ export function OrderForm({
           OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS;
       }
 
-      lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderNo, intent: draft.intent });
-      if (lifecycle?.retainResult && draft.intent !== 'fees') {
-        setPendingSubmission(null);
-      } else if (draft.intent === 'submit') {
-        setSubmittedOrder({
-          orderId: draft.orderId,
-          orderNo: draft.orderNo,
-          manualQuote: submittedManualQuote,
-          readyForProduction,
-        });
-        setPendingSubmission(null);
-      } else {
-        router.push(`/orders/${draft.orderId}${draft.intent === 'fees' ? '#admin-fee-editor' : ''}`);
-      }
+      setCompletion({ draft, manualQuote: submittedManualQuote, readyForProduction });
     } catch {
       setUploadProgress(null);
       setUploadError('草稿已安全保存，但后续处理未完成，请重试。');
@@ -1112,6 +1108,19 @@ export function OrderForm({
       setUploading(false);
     }
   }
+
+  useOrderCompletion(completion, submitting || uploading, ({ draft, manualQuote, readyForProduction }) => {
+    setCompletion(null);
+    leave.finishOrder?.(clientSubmissionId);
+    lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderNo, intent: draft.intent });
+    setPendingSubmission(null);
+    if (lifecycle?.retainResult && draft.intent !== 'fees') return;
+    if (draft.intent === 'submit') {
+      setSubmittedOrder({ orderId: draft.orderId, orderNo: draft.orderNo, manualQuote, readyForProduction });
+    } else {
+      leave.navigate?.(`/orders/${draft.orderId}${draft.intent === 'fees' ? '#admin-fee-editor' : ''}`);
+    }
+  });
 
   function applyWorkbenchTransfer(input: WorkbenchItemQuoteInput): string | null {
     const requested = { ...createBlankItem(crafts), ...input.item };
@@ -1258,6 +1267,9 @@ export function OrderForm({
       }
 
       lifecycle?.onCreated({ orderId: result.orderId, orderNo: result.orderNo, intent });
+      // The server now owns the text; only unsuccessful uploads remain at risk.
+      persistedValuesRef.current = structuredClone(getValues());
+      setPersistedValues(persistedValuesRef.current);
       clearLocalDraftAfterServerCreate();
 
       const draft = {
@@ -2604,7 +2616,7 @@ export function OrderForm({
     items: externalItemErrors,
   };
   if (samplePurpose && externalCreateOrderOptions) {
-    return <OrderSampleEntry editorSnapshot={restoredSample} onEditorSnapshot={captureSampleEditor} lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
+    return <OrderSampleEntry orderKey={clientSubmissionId} active={active} editorSnapshot={restoredSample} onEditorSnapshot={captureSampleEditor} lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
       initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute}
       externalSalesAccounts={externalSalesAccounts} onExternalSalesChange={changeExternalSales} />;
@@ -2637,10 +2649,7 @@ export function OrderForm({
           baseKey={existingLocalDraftKey}
           pricingScope={localDraftPricingScope}
           currentId={workbenchTransferId}
-          onNavigate={() =>
-            !submitting && !uploading &&
-            (!isDirty || !localDraftReady || persistLocalDraftValues(getValues()))
-          }
+          onNavigate={(href, event) => leave.guard?.(href)(event)}
         />
       ) : null}
       {localDraftReady && missingLaminationIndex >= 0 ? (
@@ -3318,6 +3327,7 @@ export function OrderForm({
               </Button>
               <Link
                 href={`/orders/${createdDraft.orderId}`}
+                onNavigate={leave.guard?.(`/orders/${createdDraft.orderId}`)}
                 className={buttonVariants({ variant: 'outline' })}
               >
                 打开草稿

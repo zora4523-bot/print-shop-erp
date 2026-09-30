@@ -51,7 +51,7 @@ function mount(actor: Actor, initialEditor?: OrderEditorSnapshot) {
 }
 const orderName = () => page.getByRole('textbox', { name: '工单名称', exact: true });
 const designName = () => page.getByRole('textbox', { name: '设计款名称', exact: true });
-const savedNames = () => editor!.save().values.items.map((item) => item.name);
+const savedNames = () => editor!.capture().values.items.map((item) => item.name);
 async function ready(actor: Actor) {
   mount(actor);
   await expect.element(designName()).toBeEnabled();
@@ -65,7 +65,7 @@ function remount(actor: Actor, snapshot: OrderEditorSnapshot) {
 
 it('whole-design deletion keeps other shipping, packaging and files aligned', async () => {
   await ready('admin');
-  const snapshot = editor!.save();
+  const snapshot = editor!.capture();
   const item = snapshot.values.items[0];
   snapshot.values.items = ['a', 'b', 'a', 'c'].map((designGroupKey, index) => ({
     ...item, name: designGroupKey, designGroupKey, fig: index + 1,
@@ -92,7 +92,7 @@ it('whole-design deletion keeps other shipping, packaging and files aligned', as
   snapshot.files = [[file('A.cdr')], [file('B.cdr')], [], [file('C.cdr')]];
   remount('admin', snapshot);
   await page.getByRole('button', { name: '删除设计款', exact: true }).click();
-  const saved = editor!.save();
+  const saved = editor!.capture();
   expect(saved.values.items.map((entry) => entry.name)).toEqual(['b', 'c']);
   expect(saved.values.additionalShipments.map((entry) => entry.itemQuantities)).toEqual([[7, 9]]);
   expect(saved.values.packagingGroups.map((entry) => ({ mode: entry.mode, units: entry.itemUnitsPerBag }))).toEqual([
@@ -112,7 +112,7 @@ it('whole-design deletion keeps other shipping, packaging and files aligned', as
 
 it('removing the first specification retains its shared design files on the remaining specification', async () => {
   await ready('external-sales');
-  const snapshot = editor!.save();
+  const snapshot = editor!.capture();
   const item = snapshot.values.items[0];
   snapshot.values.items = [1, 2].map((fig) => ({ ...item, name: '共享款', designGroupKey: 'a', fig }));
   snapshot.files = [[{ id: 'shared', prepared: {
@@ -121,7 +121,7 @@ it('removing the first specification retains its shared design files on the rema
   remount('external-sales', snapshot);
   await expect.element(page.getByRole('button', { name: '删除设计款', exact: true })).not.toBeInTheDocument();
   await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
-  const saved = editor!.save();
+  const saved = editor!.capture();
   expect(saved.values.items.map((entry) => entry.fig)).toEqual([2]);
   expect(saved.files[0].map((entry) => entry.prepared.file.name)).toEqual(['shared.cdr']);
   await expect.element(page.getByRole('button', { name: '移除当前规格', exact: true })).not.toBeInTheDocument();
@@ -130,7 +130,7 @@ it('removing the first specification retains its shared design files on the rema
 for (const actor of ['admin', 'external-sales'] as const) {
   it(`${actor}: deletes all noncontiguous specifications from the design toolbar`, async () => {
     await ready(actor);
-    const snapshot = editor!.save();
+    const snapshot = editor!.capture();
     const item = snapshot.values.items[0];
     snapshot.values.items = [
       { ...item, name: 'A', designGroupKey: 'a', fig: 1 },
@@ -142,7 +142,7 @@ for (const actor of ['admin', 'external-sales'] as const) {
     await expect.element(toolbar.getByRole('button', { name: '删除设计款', exact: true })).toBeVisible();
     await toolbar.getByRole('button', { name: '删除设计款', exact: true }).click();
     expect(savedNames()).toEqual(['B']);
-    expect(editor!.save().values.items.map((entry) => entry.fig)).toEqual([2]);
+    expect(editor!.capture().values.items.map((entry) => entry.fig)).toEqual([2]);
     await expect.element(page.getByRole('tab', { name: '设计款 1', exact: true })).toHaveFocus();
     await expect.element(page.getByRole('button', { name: '删除设计款', exact: true })).not.toBeInTheDocument();
     await expect.element(page.getByRole('button', { name: '移除当前规格', exact: true })).not.toBeInTheDocument();
@@ -150,7 +150,7 @@ for (const actor of ['admin', 'external-sales'] as const) {
 
   it(`${actor}: removing an interleaved specification stays in its design`, async () => {
     await ready(actor);
-    const snapshot = editor!.save();
+    const snapshot = editor!.capture();
     const item = snapshot.values.items[0];
     snapshot.values.items = [
       { ...item, name: 'A', designGroupKey: 'a', fig: 1 },
@@ -167,7 +167,7 @@ for (const actor of ['admin', 'external-sales'] as const) {
 
   it(`${actor}: deleting a legacy design preserves the remaining hand-written name`, async () => {
     await ready(actor);
-    const snapshot = editor!.save();
+    const snapshot = editor!.capture();
     const item = snapshot.values.items[0];
     snapshot.values.customName = '整单名称';
     snapshot.values.items = [
@@ -188,7 +188,7 @@ for (const actor of ['admin', 'external-sales'] as const) {
   for (const handwritten of [true, false]) {
     it(`${actor}: legacy naming decision survives reindexing when ${handwritten ? 'equal to order name' : 'cleared'}`, async () => {
       await ready(actor);
-      const snapshot = editor!.save();
+      const snapshot = editor!.capture();
       const item = snapshot.values.items[0];
       snapshot.values.customName = '工单名';
       snapshot.values.items = ['旧款一', '旧款二'].map((name) => ({ ...item, name, designGroupKey: undefined }));
@@ -224,7 +224,7 @@ function successfulQuote(input: CreateOrderQuoteActionInput, amount: string): Cr
 
 it('a quote requested before whole-design deletion cannot overwrite the remaining design', async () => {
   await ready('external-sales');
-  const snapshot = editor!.save();
+  const snapshot = editor!.capture();
   snapshot.values.items = ['A', 'B', 'A'].map((name, index) => ({
     ...snapshot.values.items[0], name, designGroupKey: name, fig: index + 1,
   }));
@@ -290,7 +290,7 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [
     await commands.setReducedMotion(true);
     document.documentElement.classList.toggle('dark', theme === 'dark');
     await ready('admin');
-    const snapshot = editor!.save();
+    const snapshot = editor!.capture();
     const item = snapshot.values.items[0];
     snapshot.values.items = Array.from({ length: 8 }, (_, index) => ({
       ...item, name: `款名 ${index + 1}`, designGroupKey: `design-${index}`, fig: index + 1,
@@ -509,7 +509,7 @@ it('deleting the design being edited leaves the remaining design showing its own
 it('a design without a group key keeps following after gaining one through ＋ 添加规格', async () => {
   // A historical / workbench-style row without designGroupKey.
   await ready('external-sales');
-  const snapshot = editor!.save();
+  const snapshot = editor!.capture();
   snapshot.values.items = snapshot.values.items.map((item) => ({ ...item, name: '', designGroupKey: null }));
   flushSync(() => root.unmount());
   host.remove();

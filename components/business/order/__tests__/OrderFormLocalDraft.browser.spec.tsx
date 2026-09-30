@@ -55,7 +55,7 @@ const orderName = () => page.getByRole('textbox', { name: '工单名称', exact:
 async function reopenWithStoredDraft(actor: Actor) {
   mount(actor);
   await expect.element(orderName()).toBeEnabled();
-  const values = { ...editor!.save().values, customName: DRAFT_NAME };
+  const values = { ...editor!.capture().values, customName: DRAFT_NAME };
   unmount();
   localStorage.clear();
   const externalSales = actor === 'external-sales';

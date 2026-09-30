@@ -3,6 +3,7 @@ import type { CreateOrderInput } from '@/lib/auth/schemas';
 import type { PendingDesignImage } from './pending-design-image';
 
 export type SampleOrderEditorSnapshot = {
+  persistedContent?: string | null;
   purpose: 'SAMPLE_SHIPMENT' | 'PROOF';
   item: CreateOrderInput['items'][number];
   form: SampleOrderFormState;
@@ -13,6 +14,7 @@ export type SampleOrderEditorSnapshot = {
 export type OrderEditorSnapshot = {
   sample?: SampleOrderEditorSnapshot;
   values: CreateOrderInput;
+  persistedValues?: CreateOrderInput;
   files: PendingDesignImage[][];
 };
 export type OrderCreatedEntry = {
@@ -21,7 +23,7 @@ export type OrderCreatedEntry = {
   intent: 'draft' | 'submit' | 'fees';
 };
 export type OrderCreationEditor = {
-  save: () => OrderEditorSnapshot;
+  capture: () => OrderEditorSnapshot;
   canLeave: boolean;
 };
 

@@ -1,6 +1,8 @@
 'use client';
 import type { SampleOrderEditorSnapshot } from '@/components/business/order/order-creation-editor';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
+import { useOrderLeaveReport, type LocalDraftSaveFailure } from '@/components/business/order/order-creation-leave';
+import type { OrderCreationLifecycle } from '@/components/business/order/order-creation-editor';
 import { z } from 'zod';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
 import type { OrderPurposeValue } from '@/lib/order/purpose';
@@ -25,10 +27,12 @@ export function useSampleWorkbenchDraft(
   item: CreateOrderInput['items'][number],
   setItem: (item: CreateOrderInput['items'][number]) => void,
   draftScope: string,
-  initial?: { purpose: 'SAMPLE_SHIPMENT' | 'PROOF'; form: SampleOrderFormState; context?: SampleOrderContext; editorSnapshot?: SampleOrderEditorSnapshot; onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void; onExternalSalesChange?: (externalSalesUserId: string | null) => void },
+  initial?: { lifecycle?: OrderCreationLifecycle; purposeStorageKey?: string; purpose: 'SAMPLE_SHIPMENT' | 'PROOF'; form: SampleOrderFormState; context?: SampleOrderContext; editorSnapshot?: SampleOrderEditorSnapshot; onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void; onExternalSalesChange?: (externalSalesUserId: string | null) => void },
 ) {
   // Initial entry values are captured once; later edits belong to this draft.
   const [entryInitial] = useState(initial);
+  const fallbackId = useId();
+  const [persistedContent, setPersistedContent] = useState<string | null>(initial?.editorSnapshot?.persistedContent ?? null);
   const [purpose, setPurpose] = useState<OrderPurposeValue>(initial?.editorSnapshot?.purpose ?? initial?.purpose ?? 'STANDARD');
   const [context, setContext] = useState(initial?.editorSnapshot?.context ?? initial?.context);
   const [specialBusy, setSpecialBusy] = useState(false);
@@ -87,24 +91,36 @@ export function useSampleWorkbenchDraft(
       setDraftReady(true);
     });
   }, [sampleStorageKey, setItem, entryInitial]);
+  const content = JSON.stringify({ purpose, item, form: sampleForm, draft: sampleDraft, context });
+  const purposeStorageKey = initial?.purposeStorageKey;
+  const persist = useCallback((): LocalDraftSaveFailure | null => {
+    if (!draftReady) return 'unavailable';
+    try {
+      if (purpose === 'STANDARD') window.sessionStorage.removeItem(sampleStorageKey);
+      else {
+        window.sessionStorage.setItem(sampleStorageKey, content);
+        if (purposeStorageKey) window.sessionStorage.setItem(purposeStorageKey, purpose);
+      }
+      setPersistedContent(content);
+      return null;
+    } catch { return 'storage'; }
+  }, [draftReady, purpose, sampleStorageKey, content, purposeStorageKey]);
   useEffect(() => {
     if (!draftReady) return;
-    try {
-      if (purpose === 'STANDARD') { window.sessionStorage.removeItem(sampleStorageKey); return; }
-      window.sessionStorage.setItem(
-        sampleStorageKey,
-        JSON.stringify({ purpose, item, form: sampleForm, draft: sampleDraft, context }),
-      );
-    } catch {
-      /* In-memory editing remains available without browser storage. */
-    }
-  }, [draftReady, purpose, item, sampleForm, sampleDraft, sampleStorageKey, context]);
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) persist(); });
+    return () => { cancelled = true; };
+  }, [draftReady, persist]);
+  useOrderLeaveReport(`${initial?.lifecycle?.submissionId ?? fallbackId}:sample`, {
+    active: purpose !== 'STANDARD', dirty: draftReady && purpose !== 'STANDARD' && content !== persistedContent,
+    pendingFileCount: 0, submitted: Boolean(sampleDraft), busy: specialBusy,
+  }, persist);
   const onEditorSnapshot = initial?.onEditorSnapshot;
   useEffect(() => {
     if (draftReady && (purpose === 'SAMPLE_SHIPMENT' || purpose === 'PROOF')) {
-      onEditorSnapshot?.({ purpose, item, form: sampleForm, context, draft: sampleDraft });
+      onEditorSnapshot?.({ purpose, item, form: sampleForm, context, draft: sampleDraft, persistedContent });
     }
-  }, [draftReady, purpose, item, sampleForm, context, sampleDraft, onEditorSnapshot]);
+  }, [draftReady, purpose, item, sampleForm, context, sampleDraft, onEditorSnapshot, persistedContent]);
 
   function clearSampleDraft() {
     setSampleDraft(null);

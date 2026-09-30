@@ -6,6 +6,8 @@ import { page } from 'vitest/browser';
 import '@/app/globals.css';
 import { WORKBENCH_CATALOG, WORKBENCH_CRAFTS } from '@/lib/workbench/__tests__/item-fixtures';
 import type { SampleOrderQuote } from '@/lib/order/sample-order';
+import type { CreateOrderQuoteActionInput, CreateOrderQuoteMutationResult } from '@/actions/create-order-quote.types';
+import { quoteExternalCreateOrderAction } from '@/actions/create-order-quote';
 
 /**
  * 新建工单页的站内离开保护（Codex 对抗审查 2026-09-30 第三轮）：真实工作台 + 真实 OrderForm，
@@ -14,7 +16,7 @@ import type { SampleOrderQuote } from '@/lib/order/sample-order';
  */
 const mocks = vi.hoisted(() => ({
   push: vi.fn(), navigations: [] as string[], upload: vi.fn(),
-  quote: vi.fn(), create: vi.fn(),
+  quote: vi.fn(), create: vi.fn(), submit: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push, replace: vi.fn(), refresh: vi.fn() }) }));
 vi.mock('next/image', () => ({ default: ({ alt }: { alt: string }) => <span>{alt}</span> }));
@@ -35,7 +37,7 @@ vi.mock('next/link', () => ({
     }} />;
   },
 }));
-vi.mock('@/actions/order', () => ({ createOrderAction: mocks.create, submitOrderAction: vi.fn() }));
+vi.mock('@/actions/order', () => ({ createOrderAction: mocks.create, submitOrderAction: mocks.submit }));
 vi.mock('@/actions/create-order-quote', () => ({
   quoteExternalCreateOrderAction: vi.fn().mockResolvedValue({ status: 'error', message: '测试不请求报价' }),
   quoteSampleOrderAction: mocks.quote,
@@ -50,6 +52,9 @@ vi.mock('@/components/business/order/design-upload-client', async (importOrigina
 }));
 
 import { OrderCreationWorkspace } from '../OrderCreationWorkspace';
+import { OrderForm } from '../OrderForm';
+import type { OrderCreationEditor } from '../order-creation-editor';
+import { localOrderFormDraftStorageKey } from '../order-form-local-draft';
 
 const SCOPE = 'leave-test';
 const quote: SampleOrderQuote = {
@@ -58,9 +63,10 @@ const quote: SampleOrderQuote = {
 };
 let host: HTMLDivElement;
 let root: Root;
-function mount() {
+function mount(admin = false) {
   flushSync(() => root.render(<OrderCreationWorkspace crafts={WORKBENCH_CRAFTS} products={WORKBENCH_CATALOG.products}
-    externalCreateOrderOptions={WORKBENCH_CATALOG} draftScope={SCOPE} />));
+    externalCreateOrderOptions={WORKBENCH_CATALOG} draftScope={SCOPE}
+    externalSalesAccounts={admin ? [{ id: 'sales-1', displayName: '外销甲', username: 'sales-a' }] : undefined} />));
 }
 const orderName = () => page.getByRole('textbox', { name: '工单名称', exact: true });
 const back = () => page.getByRole('link', { name: '返回工单列表', exact: true });
@@ -84,7 +90,10 @@ function seedBatchWithCompletedSecond() {
 
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); vi.clearAllMocks(); mocks.navigations.length = 0;
+  vi.mocked(quoteExternalCreateOrderAction).mockReset().mockResolvedValue({ status: 'error', message: '测试不请求报价' });
+  mocks.upload.mockReset();
   mocks.quote.mockResolvedValue({ status: 'success', quote });
+  mocks.submit.mockResolvedValue({ status: 'success' });
   mocks.create.mockResolvedValue({ status: 'success', orderId: 'order-s', orderNo: 'GD-S', itemIds: ['item-1'], pricingStatus: 'AUTO' });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -161,6 +170,9 @@ it('③ the header back is locked while a proof design file uploads', async () =
   await page.getByLabelText('上传设计文件', { exact: true }).upload(new File(['design'], 'design.png', { type: 'image/png' }));
   await expect.poll(() => mocks.upload.mock.calls.length).toBe(1);
   await expect.element(back()).toHaveAttribute('aria-disabled', 'true');
+  await expect.element(page.getByRole('button', { name: '查看已保存工单', exact: true })).toBeDisabled();
+  page.getByRole('button', { name: '查看已保存工单', exact: true }).element().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  expect(mocks.push).not.toHaveBeenCalled();
   back().element().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   expect(mocks.navigations).toEqual([]);
   expect(document.querySelector('[role="alertdialog"]')).toBeNull();
@@ -185,4 +197,167 @@ it('⑤ navigates straight away when nothing would be lost (form and result view
   await back().click();
   expect(mocks.navigations).toEqual(['/orders/order-b', '/orders']);
   expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+});
+
+function failWrites(storage: Storage) {
+  const original = Storage.prototype.setItem;
+  return vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    if (this === storage) throw new DOMException('full', 'QuotaExceededError');
+    original.call(this, key, value);
+  });
+}
+
+it('blocks switching, adding and removal if the current text cannot be persisted', async () => {
+  mount();
+  await expect.element(orderName()).toBeEnabled();
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
+  const failed = failWrites(localStorage);
+  await orderName().fill('必须保留的第二单');
+  for (const name of ['工单 1', '移除当前工单', '＋ 添加工单']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await expect.element(orderName()).toHaveValue('必须保留的第二单');
+    await expect.element(page.getByRole('alert').filter({ hasText: '本机草稿未保存' })).toBeVisible();
+  }
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+  failed.mockRestore();
+  await page.getByRole('button', { name: '工单 1', exact: true }).click();
+  await page.getByRole('button', { name: '工单 2', exact: true }).click();
+  await expect.element(orderName()).toHaveValue('必须保留的第二单');
+});
+
+for (const purpose of ['打样', '寄样品']) {
+  it(`${purpose} protects its own contact edits when session storage fails`, async () => {
+    mount();
+    await expect.element(orderName()).toBeEnabled();
+    await page.getByRole('button', { name: purpose, exact: true }).click();
+    failWrites(sessionStorage);
+    await page.getByLabelText('收货地址', { exact: true }).fill('不能丢失的新地址');
+    await back().click();
+    await expect.element(dialog()).toBeVisible();
+    await dialog().getByRole('button', { name: '保存草稿并离开' }).click();
+    expect(mocks.push).not.toHaveBeenCalled();
+    await expect.element(page.getByRole('alert').filter({ hasText: '本机草稿未保存' })).toBeVisible();
+    await page.getByRole('button', { name: '留在本页' }).click();
+    await expect.element(back()).toHaveFocus();
+    await page.getByRole('button', { name: '＋ 添加工单' }).click();
+    await expect.element(page.getByLabelText('收货地址', { exact: true })).toHaveValue('不能丢失的新地址');
+  });
+}
+
+it('standalone OrderForm protects restored unsaved text even though it is now a default value', async () => {
+  let editor: OrderCreationEditor | null = null;
+  const props = { crafts: WORKBENCH_CRAFTS, products: WORKBENCH_CATALOG.products, externalCreateOrderOptions: WORKBENCH_CATALOG, draftScope: SCOPE };
+  flushSync(() => root.render(<OrderForm {...props} registerEditor={(value) => { editor = value; }} />));
+  await expect.element(orderName()).toBeEnabled();
+  failWrites(localStorage);
+  await orderName().fill('撤销后仍未保存');
+  const snapshot = editor!.capture();
+  flushSync(() => root.unmount()); root = createRoot(host);
+  flushSync(() => root.render(<OrderForm {...props} initialEditor={snapshot} />));
+  await expect.element(orderName()).toHaveValue('撤销后仍未保存');
+  await back().click();
+  await expect.element(dialog()).toHaveTextContent('本单已填写的内容将保存为本机草稿。');
+  await dialog().getByRole('button', { name: '保存草稿并离开' }).click();
+  expect(mocks.push).not.toHaveBeenCalled();
+});
+
+it('restoring a quote draft checks files in every batch order', async () => {
+  mount();
+  await expect.element(orderName()).toBeEnabled();
+  await orderName().fill('报价草稿');
+  selectCdr('整批保护.cdr');
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
+  const base = localOrderFormDraftStorageKey(SCOPE, true);
+  const saved = localStorage.getItem(base)!;
+  const id = crypto.randomUUID();
+  const currentId = JSON.parse(sessionStorage.getItem(`order-creation-batch:v1:${SCOPE}:new`)!).at(-1).id;
+  localStorage.setItem(`${localOrderFormDraftStorageKey(`${SCOPE}:batch:${currentId}`, true)}:workbench:${id}`, saved);
+  window.dispatchEvent(new StorageEvent('storage'));
+  await page.getByText('报价工单草稿（1）', { exact: true }).click();
+  await page.getByRole('link', { name: '恢复草稿', exact: true }).click();
+  await expect.element(dialog()).toHaveTextContent('工单 1 的 1 个未上传的设计文件将丢失。');
+  expect(mocks.navigations).toEqual([]);
+});
+
+it('sample fee navigation checks other orders after submission settles', async () => {
+  mount(true);
+  await expect.element(orderName()).toBeEnabled();
+  selectCdr('第一单未上传.cdr');
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
+  await page.getByRole('button', { name: '寄样品', exact: true }).click();
+  await page.getByRole('combobox', { name: '关联外部销售', exact: true }).selectOptions('sales-1');
+  await page.getByLabelText('样品名称').fill('样品');
+  await page.getByLabelText('收货人', { exact: true }).fill('测试收货人');
+  await page.getByLabelText('手机号', { exact: true }).fill('13800000000');
+  await page.getByLabelText('收货地址', { exact: true }).fill('浙江省杭州市测试地址');
+  await page.getByRole('button', { name: '核对费用', exact: true }).click();
+  await page.getByRole('button', { name: '保存工单', exact: true }).click();
+  let finish!: (value: { status: string }) => void;
+  mocks.submit.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  await page.getByRole('button', { name: '提交并编辑收费', exact: true }).click();
+  await expect.element(page.getByRole('button', { name: '保存并继续下一张', exact: true })).toBeDisabled();
+  expect(mocks.push).not.toHaveBeenCalled();
+  finish({ status: 'success' });
+  await expect.element(dialog()).toHaveTextContent('工单 1 的 1 个未上传的设计文件将丢失。');
+  expect(mocks.push).not.toHaveBeenCalled();
+  await dialog().getByRole('button', { name: '放弃修改并离开' }).click();
+  expect(mocks.push).toHaveBeenCalledWith('/orders/order-s#admin-fee-editor');
+});
+
+it('opening a server draft after an upload failure checks all queued files', async () => {
+  vi.mocked(quoteExternalCreateOrderAction).mockImplementation(async (input) => successfulQuote(input as CreateOrderQuoteActionInput));
+  mount(true);
+  await expect.element(orderName()).toBeEnabled();
+  await orderName().fill('第一张待上传');
+  selectCdr('第一张.cdr');
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
+  await orderName().fill('第二张上传失败');
+  await page.getByRole('combobox', { name: '关联外部销售', exact: true }).selectOptions('sales-1');
+  await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('张先生 13800138000 广东省佛山市南海区测试路1号');
+  selectCdr('第二张.cdr');
+  mocks.upload.mockResolvedValue({ ok: false, message: '上传失败' });
+  await page.getByRole('button', { name: '保存草稿', exact: true }).click();
+  await expect.poll(() => mocks.create.mock.calls.length).toBe(1);
+  await page.getByRole('link', { name: '打开草稿', exact: true }).click();
+  await expect.element(dialog()).toHaveTextContent('工单 1 的 1 个未上传的设计文件将丢失。');
+  await expect.element(dialog()).toHaveTextContent('工单 2 的 1 个未上传的设计文件将丢失。');
+  expect(mocks.navigations).toEqual([]);
+});
+
+function successfulQuote(input: CreateOrderQuoteActionInput): CreateOrderQuoteMutationResult {
+  const zero = { complete: true, suggestedShippingTotal: '0.00', suggestedPackagingTotal: '0.00', suggestedTotal: '0.00', components: [], errors: [] };
+  const version = { id: 'test', code: 'test', version: 1, sourceSha256: 'test' };
+  return { status: 'success', quote: {
+    factsKey: input.factsKey, knownTotal: '12.00', total: '12.00', quoteToken: 'test',
+    totalSemantics: 'COMPLETE', hasManualPricing: false, plateFee: null,
+    priceVersion: { processing: version, logistics: version },
+    items: input.items.map(() => ({ complete: true, errors: [], components: [], suggestedSubtotal: '12.00', suggestedFixedFee: '12.00', suggestedUnitPrice: '0.00', snapshot: {} })),
+    packaging: { groups: [], suggestedTotal: '0.00', requiresAdminConfirmation: false, errors: [] },
+    logistics: { ...zero, shipments: [], snapshot: { ...zero, version: 2,
+      policy: { ruleVersion: 'test', billableWeightInput: 'SERVER_ESTIMATE_WITH_ACTUAL_OVERRIDE', weightResolutionOrder: [], maxOrderQuantity: 999999, billableWeightRounding: 'CEIL_KG' },
+      input: { isSfCollect: false, shipments: [] } } },
+  } };
+}
+
+it('normal-order fee navigation checks the batch after upload and submit complete', async () => {
+  vi.mocked(quoteExternalCreateOrderAction).mockImplementation(async (input) => successfulQuote(input as CreateOrderQuoteActionInput));
+  mocks.upload.mockResolvedValue({ ok: true });
+  mount(true);
+  await expect.element(orderName()).toBeEnabled();
+  await orderName().fill('第一张有文件');
+  selectCdr('保留文件.cdr');
+  await page.getByRole('button', { name: '＋ 添加工单' }).click();
+  await orderName().fill('第二张准备收费');
+  await page.getByRole('combobox', { name: '关联外部销售', exact: true }).selectOptions('sales-1');
+  await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('张先生 13800138000 广东省佛山市南海区测试路1号');
+  const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII='), (c) => c.charCodeAt(0));
+  await page.getByLabelText('第 1 款 设计图', { exact: true }).upload(new File([png], 'design.png', { type: 'image/png' }));
+  await page.getByRole('button', { name: '创建并编辑收费', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '确认无误，提交', exact: true }).click();
+  await expect.element(dialog()).toHaveTextContent('工单 1 的 1 个未上传的设计文件将丢失。');
+  expect(mocks.push).not.toHaveBeenCalled();
+  await dialog().getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+  expect(mocks.push).toHaveBeenCalledWith('/orders/order-s#admin-fee-editor');
 });
