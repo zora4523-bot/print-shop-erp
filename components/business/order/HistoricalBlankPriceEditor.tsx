@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { confirmHistoricalBlankPriceAction } from '@/actions/historical-blank-price';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
 import { ConfirmActionController, ConfirmActionDialog, DisabledReason } from '@/components/ui-business';
 
 type Props = {
@@ -22,7 +22,7 @@ export function HistoricalBlankPriceEditor(props: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   return <Disclosure className="space-y-3 border-t pt-3">
-    <DisclosureSummary className="min-h-11 cursor-pointer py-3 text-sm font-medium">历史材料单价</DisclosureSummary>
+    <DisclosureSummary className="min-h-11 cursor-pointer gap-2 py-3 text-sm font-medium">历史材料单价<DisclosureIndicator /></DisclosureSummary>
     {message ? <p role="status" className="text-sm">{message}</p> : null}
     {props.items.map((item) => {
       const value = drafts[item.id] ?? item.unitPrice ?? '';
