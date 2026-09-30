@@ -184,7 +184,7 @@ export async function listUnbilledAgentOrders(filter: { page: number; period?: s
     const total = await tx.order.count({ where });
     const window = paginationWindow(total, pageNumber(filter.page), 30);
     const rows = await tx.order.findMany({
-      where, select: { id: true, orderNo: true, customName: true, settledAt: true, settledFee: true, submitter: { select: { displayName: true } } },
+      where, select: { id: true, orderNo: true, customName: true, settledAt: true, settledFee: true, submitter: { select: { id: true, username: true, displayName: true } } },
       orderBy: [{ settledAt: 'asc' }, { id: 'asc' }], skip: window.skip, take: window.take,
     });
     return paginatedResult(rows, total, window);

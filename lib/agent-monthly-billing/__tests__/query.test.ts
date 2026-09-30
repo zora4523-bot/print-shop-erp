@@ -113,6 +113,7 @@ it('locates the same unbilled population using Shanghai settlement month and bou
   const result = await listUnbilledAgentOrders({ page: 999, period: '2026-09' });
   expect(result.page).toBe(2);
   expect(dbMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    select: expect.objectContaining({ submitter: { select: { id: true, username: true, displayName: true } } }),
     skip: 30, take: 30, where: expect.objectContaining({
       billingMode: 'CHARGE', settlementType: 'EXTERNAL_SALES', agentMonthlyBillItem: { is: null },
       settledAt: { gte: new Date('2026-08-31T16:00:00Z'), lt: new Date('2026-09-30T16:00:00Z') },

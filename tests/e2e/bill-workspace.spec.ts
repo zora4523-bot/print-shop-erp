@@ -1,22 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { selectBillTheme } from './_bill-ui';
 import { login, withDb, E2E_USERS, E2E_PASSWORD, midPreviousShanghaiMonth, seedSettledExternalSalesOrder, uniqueSuffix } from './_helpers';
-
-async function selectTheme(page: Page, theme: 'light' | 'dark') {
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
-  await page.getByRole('button', { name: '切换界面主题', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: theme === 'dark' ? '暗色' : '浅色', exact: true }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('menu')).toHaveCount(0);
-  // Like the shared visual gates, wait for real theme transitions to finish
-  // before axe samples foreground and background colors.
-  for (let paint = 0; paint < 3; paint += 1) {
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-    await expect.poll(() => page.evaluate(() => document.getAnimations()
-      .filter((animation) => animation.playState === 'running' || animation.pending).length)).toBe(0);
-  }
-}
 
 test.use({ actionTimeout: 15_000 });
 
@@ -100,7 +85,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`/owner/agent-bills?agentUserId=${source.agentUserId}`);
     for (const theme of ['light', 'dark'] as const) {
-      await selectTheme(page, theme);
+      await selectBillTheme(page, theme);
       await page.getByText('账单概览', { exact: true }).click();
       await page.getByText('查看账期数据表', { exact: true }).click();
       const adminOverflow = await page.evaluate(() => ({
@@ -116,7 +101,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
       await page.screenshot({ path: test.info().outputPath(`bill-admin-${width}-${theme}.png`), fullPage: true });
       await page.getByText('查看账期数据表', { exact: true }).click();
       await page.getByText('账单概览', { exact: true }).click();
-      await selectTheme(sales, theme);
+      await selectBillTheme(sales, theme);
       await sales.getByRole('button', { name: `查看 ${source.orderNo} 明细`, exact: true }).tap();
       const detail = sales.getByRole('dialog');
       await expect(detail).toBeVisible();

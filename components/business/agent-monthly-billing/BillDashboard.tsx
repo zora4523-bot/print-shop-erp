@@ -11,7 +11,7 @@ const list = '/owner/agent-bills';
 function percent(value: string, max: Decimal) {
   return max.isZero() ? 0 : new Decimal(value).div(max).times(100).toNumber();
 }
-export function BillDashboard({ data, accounts, expanded }: { expanded: boolean; data: Data; accounts: Array<{ id: string; displayName: string }> }) {
+export function BillDashboard({ data, accounts, expanded }: { expanded: boolean; data: Data; accounts: Array<{ id: string; displayName: string; username: string }> }) {
   const monthMax = Decimal.max(0, ...data.periods.map((row) => new Decimal(row.total)));
   const accountMax = Decimal.max(0, ...data.accounts.map((row) => new Decimal(row.amount)));
   return <Disclosure className="min-w-0 rounded-xl border bg-card p-4" open={expanded}>
@@ -35,12 +35,34 @@ export function BillDashboard({ data, accounts, expanded }: { expanded: boolean;
       </section>
       <section className="min-w-0 space-y-3" aria-label="外部销售待收分布">
         <h2 className="font-semibold">当前待收前 10 位</h2>
-        {data.accounts.length ? <ul className="space-y-2">{data.accounts.map((row) => <li key={row.agentUserId}>
-          <Link href={buildTableHref(list, {}, { agentUserId: row.agentUserId, status: 'CONFIRMED' })} className="block min-h-11 space-y-2 rounded-md p-2 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">
-            <span className="flex justify-between gap-4 text-sm"><span className="min-w-0 break-words">{accounts.find((account) => account.id === row.agentUserId)?.displayName ?? '外部销售'}</span><span className="shrink-0 tabular-nums">{formatMoney(row.amount)} · {row.count} 张</span></span>
-            <span aria-hidden className="block h-2 overflow-hidden rounded bg-muted"><span className="block h-full bg-primary" style={{ width: `${percent(row.amount, accountMax)}%` }} /></span>
-          </Link>
-        </li>)}</ul> : <p className="text-sm text-muted-foreground">暂无待收账单</p>}
+        {data.accounts.length ? (
+          <ul className="space-y-2">
+            {data.accounts.map((row) => {
+              const account = accounts.find((entry) => entry.id === row.agentUserId);
+              return (
+                <li key={row.agentUserId}>
+                  <Link
+                    href={buildTableHref(list, {}, { agentUserId: row.agentUserId, status: 'CONFIRMED' })}
+                    className="block min-h-11 space-y-2 rounded-md p-2 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                  >
+                    <span className="flex justify-between gap-4 text-sm">
+                      <span className="min-w-0 break-words">
+                        {account?.displayName ?? '外部销售'}
+                        <span className="block break-all text-xs text-muted-foreground">
+                          {account?.username ?? row.agentUserId}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">{formatMoney(row.amount)} · {row.count} 张</span>
+                    </span>
+                    <span aria-hidden className="block h-2 overflow-hidden rounded bg-muted">
+                      <span className="block h-full bg-primary" style={{ width: `${percent(row.amount, accountMax)}%` }} />
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        ) : <p className="text-sm text-muted-foreground">暂无待收账单</p>}
       </section>
     </div>
     <Disclosure className="mt-4">

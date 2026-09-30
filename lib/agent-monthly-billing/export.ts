@@ -707,9 +707,9 @@ function buildWorkbookSheets(
 ): XlsxSheet[] {
   return [
     trackedSheet('月账单', billRows(membershipPath, context, client), rowCounts, [12, 20, 20, 12, 14, 14, 14, 16, 12, 18, 18]),
-    trackedSheet('结算成员', itemRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 12, 14, 14, 18]),
-    trackedSheet('跨月负项', adjustmentRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 14, 40, 18, 18]),
-    trackedSheet('收款回执', receiptRows(membershipPath, context, client), rowCounts, [12, 20, 14, 18, 18, 22, 18]),
+    trackedSheet('结算成员', itemRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 12, 14, 14, 18, 18, 28]),
+    trackedSheet('跨月负项', adjustmentRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 14, 40, 18, 18, 28]),
+    trackedSheet('收款回执', receiptRows(membershipPath, context, client), rowCounts, [12, 20, 14, 18, 18, 22, 18, 28]),
   ];
 }
 
@@ -771,7 +771,7 @@ async function* itemRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间', '名称依据',
+    '账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间', '名称依据', '销售账号',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
@@ -793,6 +793,7 @@ async function* itemRows(
           moneyText(item.settledFeeSnapshot),
           dateTime(item.settledAtSnapshot),
           item.orderNameAtSettlement ? '出账时名称' : '导出时名称',
+          snapshot.bill.agentUsernameSnapshot,
         ];
       }
     }
@@ -805,7 +806,7 @@ async function* adjustmentRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '目标账期', '目标代理商', '来源账期', '来源工单', '负项金额', '原因', '记录人', '创建时间',
+    '目标账期', '目标代理商', '来源账期', '来源工单', '负项金额', '原因', '记录人', '创建时间', '销售账号',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
@@ -814,7 +815,8 @@ async function* adjustmentRows(
       orderBy: { sequence: 'asc' },
     });
     for (const row of rows) {
-      for (const adjustment of parseExportSnapshot(row.payload).adjustments) {
+      const snapshot = parseExportSnapshot(row.payload);
+      for (const adjustment of snapshot.adjustments) {
         yield [
           adjustment.targetPeriod,
           adjustment.targetAgentDisplayNameSnapshot,
@@ -824,6 +826,7 @@ async function* adjustmentRows(
           adjustment.reason,
           adjustment.createdByDisplayName,
           dateTime(adjustment.createdAt),
+          snapshot.bill.agentUsernameSnapshot,
         ];
       }
     }
@@ -835,7 +838,7 @@ async function* receiptRows(
   context: ExportExecutionContext,
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
-  yield ['账期', '代理商', '收款金额', '收款时间', '收款方式', '流水号', '记录人'];
+  yield ['账期', '代理商', '收款金额', '收款时间', '收款方式', '流水号', '记录人', '销售账号'];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
       where: { id: { in: snapshotIds } },
@@ -843,7 +846,8 @@ async function* receiptRows(
       orderBy: { sequence: 'asc' },
     });
     for (const row of rows) {
-      for (const receipt of parseExportSnapshot(row.payload).receipts) {
+      const snapshot = parseExportSnapshot(row.payload);
+      for (const receipt of snapshot.receipts) {
         yield [
           receipt.period,
           receipt.agentDisplayNameSnapshot,
@@ -852,6 +856,7 @@ async function* receiptRows(
           receipt.paymentMethod,
           receipt.referenceNo,
           receipt.recordedByDisplayName,
+          snapshot.bill.agentUsernameSnapshot,
         ];
       }
     }

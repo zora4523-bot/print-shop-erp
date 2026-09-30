@@ -20,6 +20,7 @@ export default async function CreditPage({ params }: { params: Promise<{ id: str
   const remaining = remainingCreditAmount(item.settledFeeSnapshot, item.credits);
   return <div className="mx-auto w-full max-w-3xl space-y-6">
     <PageHeader title="录入抵扣" subtitle={`${bill.period} · ${item.orderNoSnapshot}`} back={{ href: `/owner/agent-bills/${id}`, label: '返回月账单' }} />
+    <p className="break-words">{bill.agentDisplayNameSnapshot} · <span className="break-all">{bill.agentUsernameSnapshot}</span></p>
     <dl className="grid gap-4 sm:grid-cols-2">
       <div><dt className="text-sm text-muted-foreground">原结算金额</dt><dd>{formatMoney(item.settledFeeSnapshot)}</dd></div>
       <div><dt className="text-sm text-muted-foreground">剩余可抵扣</dt><dd>{formatMoney(remaining)}</dd></div>

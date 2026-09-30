@@ -99,7 +99,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       <section className="rounded-xl border bg-card p-4 shadow-sm">
         <GenerateAgentMonthlyBillsForm key={period ?? previousShanghaiMonth()} defaultPeriod={period ?? previousShanghaiMonth()} />
         <p className="mt-2 text-xs text-muted-foreground">
-          仅可选择已结束的月份。
+          仅可选择已结束的月份。生成或更新全部外部销售该月的草稿账单，不受列表筛选影响。
         </p>
       </section>
 

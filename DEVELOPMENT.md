@@ -301,3 +301,13 @@ PDF 补强验证：`node --import tsx scripts/pdf-lifecycle-check.ts` 在本机�
 - `pnpm test:migrations:fresh` 在显式隔离空库 `erp_billing_fresh_20260930_175727` 通过全部 181 个迁移及后置条件。本地开发库先备份，再应用待执行的账单依据及 PDF 能力两个可空新增字段迁移；没有覆写旧业务数据。
 - 本次日志在 `/tmp/erp-billing-0930/`（全量 `full-unit-db.log`、最终 `final-typecheck.log` / `final-lint.log`、浏览器 `e2e-acceptance.log` / `e2e-touch.log`、空库 `fresh-migrations.log`）。浏览器图片与 trace 由 Playwright 写入忽略目录 `test-results/release/`。
 - 每项任务后均调用 Claude Code（`--model opus --effort high --permission-mode plan`），任务 6 最终再次调用仍返回 `api_error_status: 429`、周额度耗尽，未实际开始模型审查。`claude-task1.json` 至 `claude-task6-final.json` 留存调用结果；不能将自主复核与自动化测试写作 Claude 审查通过。
+
+### 外部销售账号辨识与隔离补强（2026-09-30）
+
+本次基线 `3379a700`，工作树 `codex/order-leave-recovery` 起始无改动。修复同名销售在待收排行、未出账工单、抵扣录入及导出明细中无法明确区分的问题：页面补充账号，导出使用已有冻结账号快照；未出账工单的账单链接同时传递账号 ID 和账期。生成草稿旁说明其覆盖所选月份全部外部销售，不受列表筛选影响。未改变授权、金额及历史快照规则，无数据库迁移。
+
+- 自查销售列表、详情、关联明细、元数据和管理端导出入口，保留登录账号 ID 强制限定及越权拒绝。浏览器新建两个同名“大表哥”、不同登录账号的模拟工单，验证独立出账、金额、账号跳转、导出筛选、抵扣页身份，以及伪造他人账号参数和账单 ID 无法读取对方数据；夹具仅写入隔离库，不导入真实客户数据、不操作生产库。
+- 全量 Vitest：733 文件、7974 用例通过，既有 7 文件、133 用例跳过；查询/历史导出定向 19 用例通过。`pnpm typecheck`、`pnpm lint`、`pnpm check:architecture` 通过；lint 0 错误、2 条既有导航警告，UI 文案与令牌 0 违例。
+- 真实 production build/start 的原账单流程及综合浏览器用例 4 条通过；新增同名账号用例最终 1 条通过。初轮新用例因 combobox 的测试定位方式失败，改用可访问角色定位后通过。375、393、768、1024、1280、1920 宽度及明暗主题检查未出账和待收排行的 root overflow、axe；人工看图补发现手机账号列被挤成逐字换行，增加表格/账号列最小宽度及列宽断言，重新构建并通过新用例。排行夹具金额高于隔离库已有待收，避免重复运行时被旧夹具挤出前十。
+- 日志：`/tmp/erp-billing-0930/identity-full-unit.log`、`identity-targeted.log`、`identity-e2e.log`、`identity-e2e-final.log`、`identity-final-lint.log`、`identity-final-typecheck.log`、`identity-architecture.log`；截图位于忽略目录 `test-results/release/`。
+- Claude Code 对抗审查再次调用，`identity-review` 返回周额度耗尽（429，结果 `claude-identity-review.json`），未完成外部审查。自主复核和自动化验收不替代该待办。本批仅本地提交，未推送或部署。
