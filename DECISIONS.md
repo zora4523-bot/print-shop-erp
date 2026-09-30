@@ -1617,3 +1617,11 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - **理由**：业主 2026-10-01 答复。逐款核对属于管理员职责，师傅手工提交逐款数量只会产生需要额外审批的伪数据。
 - **影响范围**：`lib/production/completion-registration.ts`（拒收师傅逐款数量）、`ProductionJobPanel`（去掉申请回填）；告警逻辑不变（b6151430 仅排除已完工单人流程工单）。无迁移。
 - **相关文档**：HANDOFF「卡住的问题」2026-10-01 节。
+
+## 2026-10-01：师傅一键完成；批量完成与发货即完工按计划数量代登记
+
+- **决策**：师傅端「完成生产」按计划数量一键登记（二次确认防误触），不再输入数量；数量不一致时展开上报，走原数量审批。管理员可在工单列表「批量完成生产」；单人流程工单填物流单号确认发货（多地址为第一个地址）即按计划数量代师傅登记完成并计提成。生产日期记当天；有数量待审批、未安排师傅、师傅当天不在雇佣期、修改待审批时拦下；逐单一个事务，失败整体回滚；只做单人流程。
+- **理由**：业主 2026-10-01 答复（1–5 条全部采纳建议）：工单一旦生产就是工单数量；货已发出即证明已生产，不应因师傅漏点完成而卡住发货或漏计工资。
+- **影响范围**：`lib/production/planned-completion.ts`（新）、`registerProductionCompletionInTx`（原登记函数拆出事务内版本，行为不变）、`registerShipment` 与 `shipOrder`（`transitionWithLog.prepare` 钩子）、工单列表批量命令 `COMPLETE_PRODUCTION`、发货可用性新增 `PRODUCTION_REQUESTED` / `PRODUCTION_UNASSIGNED`。`ProductionJob.recordSource` 新增 `ADMIN_BATCH` / `SHIPMENT_AUTO`。无迁移。
+- **相关文档**：SPEC-v1.2.md「师傅一键完成、批量完成与发货即完工（2026-10-01）」。
+
