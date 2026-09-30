@@ -16,14 +16,21 @@ const CLAIMABLE_UNIT_WHERE = {
   status: { in: [ProductionOperationStatus.PENDING, ProductionOperationStatus.IN_PROGRESS] },
 };
 
+// 新流程（simpleProduction）打包无需扫码：完工登记后工单停在 PACKING、打包工序仍为 PENDING，
+// 也不写扫码认领。与 order-state / production-completion 同口径，新流程不把 PACKING 工序
+// 算作待认领对象（DECISIONS 2026-09-28）。
 function hasClaimableCurrentGeneration(order: {
   purpose: OrderPurpose;
+  simpleProduction: boolean;
   workOrderVersion: number;
-  productionOperations: ReadonlyArray<{ workOrderVersion: number }>;
+  productionOperations: ReadonlyArray<{ workOrderVersion: number; operationType: string }>;
   productionProgressSteps: ReadonlyArray<{ workOrderVersion: number }>;
 }): boolean {
+  const operations = order.simpleProduction
+    ? order.productionOperations.filter((unit) => unit.operationType !== 'PACKING')
+    : order.productionOperations;
   return order.purpose !== OrderPurpose.SAMPLE_SHIPMENT &&
-    [...order.productionOperations, ...order.productionProgressSteps]
+    [...operations, ...order.productionProgressSteps]
       .some((unit) => unit.workOrderVersion === order.workOrderVersion);
 }
 
@@ -228,6 +235,7 @@ export async function scanStagnantProductionOrders(input: {
           WHERE unit."orderId" = orders."id"
             AND unit."workOrderVersion" = orders."workOrderVersion"
             AND unit."status" IN (${ProductionOperationStatus.PENDING}::"ProductionOperationStatus", ${ProductionOperationStatus.IN_PROGRESS}::"ProductionOperationStatus")
+            AND NOT (orders."simpleProduction" AND unit."operationType" = ${'PACKING'}::"PieceworkOperationType")
         )
         OR EXISTS (
           SELECT 1
@@ -338,7 +346,8 @@ export async function loadProductionAlertFacts(input: {
       workOrderVersion: true,
       scheduledAt: true,
       purpose: true,
-      productionOperations: { where: CLAIMABLE_UNIT_WHERE, select: { workOrderVersion: true } },
+      simpleProduction: true,
+      productionOperations: { where: CLAIMABLE_UNIT_WHERE, select: { workOrderVersion: true, operationType: true } },
       productionProgressSteps: { where: CLAIMABLE_UNIT_WHERE, select: { workOrderVersion: true } },
     },
     orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
