@@ -10,7 +10,7 @@ it('uses monthly bills, constrains ownership and ignores malformed filters', asy
   await listSalesMonthlyBills(actor, { period: '2026-99', status: 'ISSUED' });
   expect(findMany.mock.calls[0][0].where).toEqual({ agentUserId: actor.id });
   await listSalesMonthlyBills(actor, { period: '2026-09', status: 'PAID' });
-  expect(findMany.mock.calls[1][0].where).toEqual({ agentUserId: actor.id, period: '2026-09', status: 'PAID' });
+  expect(findMany.mock.calls[2][0].where).toEqual({ agentUserId: actor.id, period: '2026-09', status: 'PAID' });
 });
 it('never loads another sales bill or current order prices and internal credit reasons', async () => {
   expect(await getSalesMonthlyBill(actor, 'foreign')).toBeNull();
@@ -60,4 +60,19 @@ it('limits linked allocations to the same sales account and omits internal credi
   expect(credits.select.allocations.where).toEqual({ bill: { agentUserId: actor.id } });
   expect(credits.select).not.toHaveProperty('reason');
   expect(credits.select).not.toHaveProperty('createdBy');
+});
+
+it('scopes the twelve-period overview to the actor even when filters request another account', async () => {
+  findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ period: '2026-08' }, { period: '2025-01' }]);
+  groupBy.mockResolvedValueOnce([]).mockResolvedValueOnce([
+    { period: '2025-01', status: 'DRAFT', _sum: { totalAmount: '0.10' } },
+    { period: '2026-08', status: 'CONFIRMED', _sum: { totalAmount: '123.45' } },
+  ]);
+  const result = await listSalesMonthlyBills(actor, { agentUserId: 'other', period: '2026-08', status: 'PAID' });
+  expect(findMany.mock.calls[1][0]).toEqual({ where: { agentUserId: actor.id }, select: { period: true }, distinct: ['period'], orderBy: { period: 'desc' }, take: 12 });
+  expect(groupBy.mock.calls[1][0].where).toEqual({ agentUserId: actor.id, period: { in: ['2026-08', '2025-01'] } });
+  expect(result.trend).toEqual([
+    { period: '2025-01', draft: '0.10', confirmed: '0.00', paid: '0.00' },
+    { period: '2026-08', draft: '0.00', confirmed: '123.45', paid: '0.00' },
+  ]);
 });

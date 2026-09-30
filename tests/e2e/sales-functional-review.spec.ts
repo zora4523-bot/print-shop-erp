@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
+import { selectBillTheme, waitForBillPaint } from './_bill-ui';
 import { E2E_PASSWORD, E2E_USERS, getUserIdByUsername, login, seedSettledExternalSalesOrder } from './_helpers';
 
 test.use({ hasTouch: true });
@@ -206,10 +207,10 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
   const batch = `e2e-sales-status-${randomUUID()}`;
   const groups = {
     doing: ['PENDING_FACTORY', 'REJECTED', 'CONFIRMED', 'ON_HOLD', 'RELEASED', 'FOILING', 'PACKING', 'SUBMITTED', 'SCHEDULING', 'IN_PRODUCTION', 'COMPLETED'],
-    shipped: ['SHIPPED'], done: ['SETTLED', 'FINISHED'], cancelled: ['CANCELLED'], draft: ['DRAFT'],
+    shipped: ['SHIPPED', 'SETTLED', 'FINISHED'], done: ['SETTLED', 'FINISHED'], cancelled: ['CANCELLED'], draft: ['DRAFT'],
   };
   const ids = new Map<string, string>();
-  for (const status of Object.values(groups).flat()) ids.set(status, await seed(status, E2E_USERS.sales.username, batch));
+  for (const status of new Set(Object.values(groups).flat())) ids.set(status, await seed(status, E2E_USERS.sales.username, batch));
   const errors = trackErrors(page);
   await salesLogin(page, `/orders?q=${batch}`);
   const cards = page.locator('[data-sales-order-card]');
@@ -222,7 +223,7 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
     const { rows } = await db.query('SELECT status, COUNT(*)::int AS count FROM "Order" WHERE "submitterId"=$1 GROUP BY status', [salesId]);
     for (const row of rows) counts.set(row.status, row.count);
   } finally { await db.end(); }
-  const labels = { doing: '进行中', shipped: '已发货', done: '已完成', cancelled: '已取消', draft: '草稿' };
+  const labels = { doing: '进行中', shipped: '已发货', done: '已结算', cancelled: '已取消', draft: '草稿' };
   for (const [view, statuses] of Object.entries(groups)) {
     const tab = page.getByRole('navigation', { name: '销售工单视图' }).getByRole('link', { name: new RegExp(`^${labels[view as keyof typeof labels]}`) });
     await expect(tab).toHaveText(`${labels[view as keyof typeof labels]}${statuses.reduce((sum, status) => sum + (counts.get(status) ?? 0), 0)}`);
@@ -289,29 +290,26 @@ test('销售列表、详情和编辑页在六视口及明暗主题下可用', as
     await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light', reducedMotion: 'reduce' });
     for (const path of [`/orders?q=${id}`, `/orders/${id}`, `/orders/${id}/edit`]) {
       await page.goto(path);
-      await page.evaluate(async (enabled) => {
-        const theme = enabled ? 'dark' : 'light';
-        localStorage.setItem('erp-theme', theme);
-        document.documentElement.classList.toggle('dark', enabled);
-        document.documentElement.dataset.theme = theme;
-        document.documentElement.style.colorScheme = theme;
-        // Sample the settled palette, not a frame midway through theme transitions.
-        for (let paint = 0; paint < 3; paint += 1) {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
-        }
-      }, dark);
+      await selectBillTheme(page, dark ? 'dark' : 'light');
       await healthy(page);
       await expect(page.locator('h1:visible')).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: initial ${width} dark=${dark}`).toBeLessThanOrEqual(width);
       if (path.startsWith('/orders?')) {
         await expect(page.locator(`[data-order-id="${id}"]:visible`)).toBeVisible();
+        const views = page.getByRole('navigation', { name: '销售工单视图' });
+        for (const tab of await views.getByRole('link').all()) {
+          const box = await tab.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+        }
       } else if (path.endsWith('/edit')) {
         await expect(page.getByRole('textbox', { name: /工单备注/ })).toBeVisible();
       } else {
         await expect(page.locator('[data-slot="sales-order-detail"]:visible')).toBeVisible();
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: loaded ${width} dark=${dark}`).toBeLessThanOrEqual(width);
+      await waitForBillPaint(page);
       const result = await new AxeBuilder({ page }).include('#admin-main').analyze();
       expect(result.violations.map(({ id: rule, nodes }) => ({ rule, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) })), `${path}: ${width} dark=${dark}`).toEqual([]);
       if (width <= 393 && path.startsWith('/orders?')) {
@@ -430,8 +428,8 @@ test('管理员确认月账单后销售查看同一金额和冻结明细，其�
   await expect(page.getByRole('button', { name: '标记已收' })).toBeVisible();
   await page.context().clearCookies();
   await login(page, { from: '/sales/bills', username: fixture.agentUsername, password: E2E_PASSWORD });
-  await page.getByRole('link', { name: '查看详情', exact: true }).click();
-  await expect(page).toHaveURL(`/sales/bills/${billId}`, { timeout: 20_000 });
+  await page.getByRole('link', { name: `查看 ${fixture.period} 账单详情`, exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === `/sales/bills/${billId}` && url.searchParams.get('returnTo') === '/sales/bills?page=1', { timeout: 20_000 });
   await expect(page.getByText(fixture.orderNo, { exact: true })).toBeVisible();
   await expect(page.getByText(/¥\s*123\.45/).first()).toBeVisible();
   await healthy(page);

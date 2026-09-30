@@ -42,7 +42,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { EmptyState, StatusBadge, useCopyToClipboard } from '@/components/ui-business';
-import { promisedDateAlertDefinition } from '@/lib/ui/status-registry';
+import { promisedDateAlertDefinition, SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { SalesOrderStatusBadge } from './SalesOrderStatusBadge';
 import { SalesOrderProgress } from './SalesOrderProgress';
 import { UrgentBadge } from './UrgentBadge';
@@ -277,18 +277,18 @@ function SalesOrderCard({
           >
             <Copy aria-hidden="true" />
           </Button>
-          <span>v{order.revision}</span>
+          <span>记录版本 {order.revision}</span>
         </div>
 
         <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <DueDate order={order} />
-          <span>
+          {order.itemCount > 0 ? <span>
             <b className="font-medium text-foreground">{order.itemCount}</b> 款 ·{' '}
             <b className="font-medium text-foreground tabular-nums">
               {order.totalQuantity.toLocaleString('zh-CN')}
             </b>{' '}
             个
-          </span>
+          </span> : <span>款式与数量未填写</span>}
           <span className="max-w-full truncate" title={order.craftSummary}>
             {order.craftSummary}
           </span>
@@ -300,6 +300,9 @@ function SalesOrderCard({
             {order.pricingAttentionReason}
           </p>
         ) : null}
+        {order.bill ? <Link href={`/sales/bills/${order.bill.id}`} className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'mt-2 max-w-full whitespace-normal text-left')}>
+          {order.bill.period} 账单 · {SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[order.bill.status].label}
+        </Link> : null}
         {order.rejectedChangeRequest ? (
           <p className="mt-2 border-l-2 border-destructive pl-2 text-xs font-medium text-destructive">
             {order.rejectedChangeRequest.type === 'CANCEL' ? '取消申请被拒' : '修改申请被拒'} ·{' '}
@@ -556,7 +559,8 @@ function SalesOrderDrawer({
           ) : null}
         </DrawerSection>
 
-        <DrawerSection title={`款式 · ${order.itemCount} 款`}>
+        <DrawerSection title={order.itemCount ? `款式 · ${order.itemCount} 款` : '款式'}>
+          {!order.itemCount ? <p className="text-sm text-muted-foreground">款式与数量未填写</p> : null}
           <ul className="divide-y">
             {order.items.map((item) => (
               <li key={item.id} className="flex min-w-0 items-center gap-3 py-2.5">

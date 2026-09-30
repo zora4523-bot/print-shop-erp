@@ -8,6 +8,11 @@ import { SalesOrdersList } from '../SalesOrdersList';
 import { query, row } from './sales-orders-list-fixtures';
 
 describe('SalesOrdersList', () => {
+  it('不把缺少款式和数量的记录显示为零件生产', () => {
+    const html = renderToStaticMarkup(<SalesOrdersList orders={[{ ...row(), itemCount: 0, totalQuantity: 0, items: [] }]} query={query()} nowIso="2026-09-30T00:00:00Z" />);
+    expect(html).toContain('款式与数量未填写');
+    expect(html).not.toContain('>0</b> 款');
+  });
   it('renders the sales card fields without exposing workshop details', () => {
     const html = renderToStaticMarkup(
       <SalesOrdersList

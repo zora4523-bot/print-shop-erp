@@ -8,6 +8,7 @@ test('管理员代外部销售建单保留人工价格并校验改量', async ({
   page,
 }) => {
   test.setTimeout(120_000);
+  const orderName = `人工定价验证 ${Date.now()}`;
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await login(page, {
@@ -20,7 +21,7 @@ test('管理员代外部销售建单保留人工价格并校验改量', async ({
     .selectOption({ label: 'E2E 销售 · e2e-sales' });
   await page
     .getByRole('textbox', { name: '工单名称', exact: true })
-    .fill(`人工定价验证 ${Date.now()}`);
+    .fill(orderName);
   await page
     .getByRole('textbox', { name: '收货地址', exact: true })
     .fill('张先生 13800138000 广东省佛山市南海区测试路1号');
@@ -52,10 +53,10 @@ test('管理员代外部销售建单保留人工价格并校验改量', async ({
   await packaging.getByRole('button', { name: '确认当前人工价格' }).click();
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
   await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+$/, { timeout: 45_000 });
+  const id = page.url().split('/').pop();
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   try {
-    const id = page.url().split('/').pop();
     const png = await sharp({
       create: { width: 64, height: 64, channels: 3, background: 'white' },
     })
@@ -103,6 +104,12 @@ test('管理员代外部销售建单保留人工价格并校验改量', async ({
   } finally {
     await db.end();
   }
+  await page.context().clearCookies();
+  await login(page, { from: `/orders?q=${encodeURIComponent(orderName)}`, username: E2E_USERS.sales.username, password: E2E_PASSWORD });
+  await expect(page.locator(`[data-order-id="${id}"]`)).toContainText(orderName);
+  await page.context().clearCookies();
+  await login(page, { from: `/orders?q=${encodeURIComponent(orderName)}`, username: E2E_USERS.billingSales.username, password: E2E_PASSWORD });
+  await expect(page.locator('[data-sales-order-card]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

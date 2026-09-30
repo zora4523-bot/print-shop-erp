@@ -51,6 +51,13 @@ beforeEach(() => {
 });
 
 describe('sales list query boundary', () => {
+  it('returns the owned bill link but never exposes a mismatched account relation', async () => {
+    const bill = { id: 'bill-a', period: '2026-08', status: 'CONFIRMED', agentUserId: actor.id };
+    dbMock.order.findFirst.mockResolvedValue(orderRecord({ submitterId: actor.id, agentMonthlyBillItem: { bill } }));
+    expect((await getSalesOrderByOrderNo(actor, 'GD-260827-001'))?.bill).toEqual({ id: 'bill-a', period: '2026-08', status: 'CONFIRMED' });
+    dbMock.order.findFirst.mockResolvedValue(orderRecord({ submitterId: actor.id, agentMonthlyBillItem: { bill: { ...bill, agentUserId: 'other' } } }));
+    expect((await getSalesOrderByOrderNo(actor, 'GD-260827-001'))?.bill).toBeNull();
+  });
   it('已结算工单纳入销售完结队列，仍限制为本人提交', () => {
     const query = sanitizeSalesOrderListQuery(parseOrderListQuery({ view: 'done' }).query);
     expect(buildSalesOrderWhere(actor, query, [])).toEqual({ AND: [
@@ -58,7 +65,7 @@ describe('sales list query boundary', () => {
     ] });
   });
 
-  it('所有新旧状态恰好归入一个生命周期分类，汇总和筛选口径相同', async () => {
+  it('已发货包含已结算，其他生命周期分类与汇总一致', async () => {
     const statuses = Object.values(OrderStatus);
     dbMock.order.groupBy.mockResolvedValue(statuses.map((status) => ({ status, _count: { _all: 1 } })));
     const summary = await getSalesOrderListSummary(actor);
@@ -71,7 +78,7 @@ describe('sales list query boundary', () => {
       expect(where.AND[0]).toEqual({ submitterId: actor.id });
       const predicate = where.AND[1].status;
       const matched = typeof predicate === 'string' ? [predicate] : predicate.in;
-      classified.push(...matched);
+      if (view !== 'done') classified.push(...matched);
       expect(summary[view]).toBe(matched.length);
       if (view === 'done') expect(matched).toEqual([OrderStatus.SETTLED, OrderStatus.FINISHED]);
       if (view === 'cancelled') expect(matched).toEqual([OrderStatus.CANCELLED]);
@@ -371,7 +378,7 @@ describe('sales list query boundary', () => {
       all: 21,
       todo: 2,
       doing: 7,
-      shipped: 5,
+      shipped: 11,
       done: 6,
       cancelled: 1,
       draft: 2,

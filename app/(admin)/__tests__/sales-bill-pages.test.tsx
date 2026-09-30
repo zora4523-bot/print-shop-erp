@@ -17,7 +17,7 @@ const bill = {
   id: 'bill-a', period: '2026-08', status: 'PAID', memberSubtotal: new Decimal('120.30'),
   adjustmentAmount: new Decimal(0), totalAmount: new Decimal('120.30'),
   confirmedAt: null, paidAt: new Date('2026-09-02T00:00:00Z'), receipt: null,
-  adjustments: [], items: ['CANCELLED', 'SETTLED'].map((status, index) => ({
+  _count: { items: 2 }, adjustments: [], items: ['CANCELLED', 'SETTLED'].map((status, index) => ({
     id: `item-${index}`, orderId: `order-${index}`, orderNoSnapshot: `WO-${index}`,
     orderStatusSnapshot: status, workOrderVersionSnapshot: 2,
     settledFeeSnapshot: new Decimal('60.15'), settledAtSnapshot: new Date('2026-08-20T00:00:00Z'),
@@ -26,7 +26,7 @@ const bill = {
   })),
 };
 function listResult(rows: Array<typeof bill>, amounts = { DRAFT: '0.00', CONFIRMED: '0.00', PAID: '0.00' }) {
-  return { rows, total: rows.length, page: 1, pageSize: 30, pageCount: 1,
+  return { rows, trend: [], total: rows.length, page: 1, pageSize: 30, pageCount: 1,
     summary: Object.fromEntries(Object.entries(amounts).map(([status, amount]) => [status, { amount, count: 0 }])) };
 }
 beforeEach(() => {
@@ -124,8 +124,8 @@ it('keeps DRAFT rows visibly provisional and totals DRAFT, CONFIRMED and PAID se
     expect(cards[index]).toContain(amount);
   }
   expect(cards[0]).toContain('金额未定稿');
-  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
-  expect(rows.filter((row) => row.includes('整理中 / 金额未定稿'))).toHaveLength(2);
+  const rows = html.match(/<li[^>]*>[\s\S]*?<\/li>/g) ?? [];
+  expect(rows.filter((row) => row.includes('整理中') && row.includes('金额未定稿'))).toHaveLength(2);
   expect(html).toContain('href="/sales/bills/draft-1?returnTo=');
   expect(list).toHaveBeenCalledWith(actor, { period: '2026-08' });
 });
@@ -139,7 +139,7 @@ it('uses the same sales-facing status names in the filter, the rows and the deta
   const options = html.match(/<option[^>]*>[^<]*<\/option>/g) ?? [];
   expect(options.map((option) => option.replace(/<[^>]+>/g, ''))).toEqual(['全部', '整理中', '待支付', '已结清']);
   for (const adminOnly of ['草稿', '已确认·待收', '已收']) expect(html).not.toContain(adminOnly);
-  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
+  const rows = html.match(/<li[^>]*>[\s\S]*?<\/li>/g) ?? [];
   expect(rows.find((row) => row.includes('/sales/bills/confirmed'))).toContain('待支付');
   expect(rows.find((row) => row.includes('/sales/bills/paid'))).toContain('已结清');
 });

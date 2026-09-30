@@ -7,16 +7,9 @@ import {
 import type { StatusDefinition, StatusRegistry } from '../ui/status-registry';
 
 /**
- * 销售视角的工单词表：内部 11 态压成销售能对客户复述的进度词——
- * SCHEDULING / IN_PRODUCTION / COMPLETED 一律「生产中」，所以这张表
- * 不能与 ORDER_STATUS_REGISTRY 合并（管理端那三态是 排产中 / 生产中 /
- * 已完工，且带「（历史）」标记）。label 与管理端有意不同；tone 用共享
- * 六档（lib/ui/status-registry.ts 的 StatusTone），不再自带第二套色板。
- *
- * tone 取值原则：销售 label 与管理端 label 相同的状态，tone 跟随
- * ORDER_STATUS_REGISTRY；唯一例外是 COMPLETED——销售看到的是「生产中」，
- * success 会把「已完工」提前承诺给客户，故与 SCHEDULING / IN_PRODUCTION
- * 一起留在 info。
+ * 销售进度沿用共享状态色：排产及加工显示生产中；包装和已报完工显示
+ * 待打包发货。后者仍用 info，表示配送流程尚未结束。
+ * 词表独立于管理员历史状态标签，不能直接合并到 ORDER_STATUS_REGISTRY。
  */
 const SALES_ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
@@ -31,7 +24,7 @@ const SALES_ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.SUBMITTED]: { label: '待工厂处理', tone: 'info' },
   [OrderStatus.SCHEDULING]: { label: '生产中', tone: 'info', dot: true },
   [OrderStatus.IN_PRODUCTION]: { label: '生产中', tone: 'info', dot: true },
-  [OrderStatus.COMPLETED]: { label: '生产中', tone: 'info', dot: true },
+  [OrderStatus.COMPLETED]: { label: '待打包发货', tone: 'info', dot: true },
   [OrderStatus.SHIPPED]: { label: '已发货', tone: 'success' },
   [OrderStatus.FINISHED]: { label: '已完成', tone: 'neutral' },
   [OrderStatus.CANCELLED]: { label: '已取消', tone: 'danger' },

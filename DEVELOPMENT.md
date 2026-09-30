@@ -311,3 +311,24 @@ PDF 补强验证：`node --import tsx scripts/pdf-lifecycle-check.ts` 在本机�
 - 真实 production build/start 的原账单流程及综合浏览器用例 4 条通过；新增同名账号用例最终 1 条通过。初轮新用例因 combobox 的测试定位方式失败，改用可访问角色定位后通过。375、393、768、1024、1280、1920 宽度及明暗主题检查未出账和待收排行的 root overflow、axe；人工看图补发现手机账号列被挤成逐字换行，增加表格/账号列最小宽度及列宽断言，重新构建并通过新用例。排行夹具金额高于隔离库已有待收，避免重复运行时被旧夹具挤出前十。
 - 日志：`/tmp/erp-billing-0930/identity-full-unit.log`、`identity-targeted.log`、`identity-e2e.log`、`identity-e2e-final.log`、`identity-final-lint.log`、`identity-final-typecheck.log`、`identity-architecture.log`；截图位于忽略目录 `test-results/release/`。
 - Claude Code 对抗审查再次调用，`identity-review` 返回周额度耗尽（429，结果 `claude-identity-review.json`），未完成外部审查。自主复核和自动化验收不替代该待办。本批仅本地提交，未推送或部署。
+
+
+### 历史数据本地回放（2026-09-30）
+
+基线 `21a90b4c`，独立工作树 `codex/order-leave-recovery`，起始干净；主目录已有未跟踪文件未处理。来源为本机 `历史订单` 的两份大表哥工作簿及已经提取的 JSON，原文件只读。输入不进 Git；708 行原总费用逐行核对工作簿无差异。
+
+`node --conditions=react-server --import tsx scripts/seed-sales-history-preview.ts /绝对路径/已核对源数据.json --generate-bills` 要求先按本文件 E2E 前置准备测试库与测试用户，显式配置 `E2E_DATABASE_URL`、`E2E_DATABASE_CONFIRM_DATABASE`；普通 `DATABASE_URL` 必须是不同的参考库，并限制 localhost。源字段契约见 `scripts/lib/sales-history-preview.ts`。事务仅追加独立 `history-dabiaoge-<输入哈希>` 测试账号和 `HIST-` 工单；相同输入再次运行只复用完整批次，部分批次拒绝，修改转换规则需使用新的隔离库。`--generate-bills` 调用原按月全账号生成命令，因此会处理该隔离库同月份其他测试账号的合资格工单；不用于生产导入。
+
+本次最终验收库 `erp_e2e_dabiaoge_final_0930` 从已准备的隔离模板复制，708 行中 638 行分项合计与总费用一致，模拟结算金额 197402.60 元；69 行缺总额、1 行总额与分项相差 60 元，共 70 行保持草稿。已结束的 11 个月覆盖 636 行，生成草稿 197275.80 元；2026-09 的两行不提前出账。最多一个月 303 条。源日期含 2025 与 2026 年，按原值保留，没有根据工作簿名修改年份。
+
+每行备注明确“历史回放测试”，测试发货／结算日期借用原日期，不代表真实履约；未导入收款，所有账单保持草稿。缺失设计图、原表多款的分配关系和真实运单不能从现有字段还原，本次不伪造这些事实；工单项只按整行聚合，款数不能作为原多款迁移结果。临时输入、核对结果、运行日志与浏览器截图在 `/tmp/erp-dabiaoge-0930/`，不提交客户源数据或账号密码。
+
+
+本批验证与交付：
+
+- 全量 Vitest：735 文件、7982 用例通过，原有 7 文件／133 用例跳过；后续缺失数量提示及金额精度校验分别通过 29 项 UI/状态定向用例与 4 项导入解析用例。生产构建（含 TypeScript）、独立类型检查、完整 lint、UI 文案／令牌及架构门禁通过；lint 0 错误、2 条既有导航警告。无数据库迁移。
+- 真实 production build/start 的管理员代销售建单、账单完整流转、两端明细／跨月抵扣和销售功能共 21 条独立浏览器用例最终通过。包括新建后只在所选账号列表出现、另一账号查询为空、越权账单拒绝访问，以及工单与所属月账单链接。初轮缺测试管理员密码为环境前置失败，补齐后执行；旧账单 URL 断言补充实际返回参数。主题测试曾在继承色尚未完成绘制时取色，改走真实主题菜单并等待实际动画结束，未关闭 axe 规则；失败日志与最终复测均保留。
+- 六视口（375×667、393×852、768×1024、1024×768、1280×800、1920×1080）与明暗主题验证销售列表、详情、编辑；账单两端在六宽度验证概览、列表和弹窗。覆盖 root overflow、axe、触控打开/关闭、焦点返回。手机筛选改为换行，并断言七个入口均完整处于横向可视范围。人工查看历史数据下的手机账单、费用弹窗、工单卡片和管理员概览。
+- 真实历史回放：11 张账单与原行核对，303 条大账单逐页走完 11 页，成员数与唯一工单号均为 303，末页 3 条；搜索末项只显示该项，顶部 128006.60 元整账金额保持不变。管理员按回放账号筛选同为 11 张、197275.80 元草稿。销售账号隔离预览保留在 `http://127.0.0.1:3336/sales/bills`；端口 3000 与原开发库没有切换。
+- 证据：`/tmp/erp-dabiaoge-0930/unit.log`、`targeted-final.log`、`ui-final-unit.log`、`import-unit.log`、`build-final.log`、`typecheck-last.log`、`lint-last.log`、`architecture-last.log`、`e2e-final.log`、`e2e-recheck.log`、`responsive-tabs-final.log`、`real-pagination.log`；截图和来源核对仅留本机临时目录。代码及测试不携带客户源数据。
+- Claude Code 本次使用 Opus 只读对抗审查命令，但返回周额度耗尽 `429`，模型未执行，记录在 `claude-review.json`；外部审查仍待完成。仅本地提交，不推送或部署。

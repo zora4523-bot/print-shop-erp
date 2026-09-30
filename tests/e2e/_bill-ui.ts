@@ -7,6 +7,10 @@ export async function selectBillTheme(page: Page, theme: 'light' | 'dark') {
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
+  await waitForBillPaint(page);
+}
+
+export async function waitForBillPaint(page: Page) {
   // Like the shared visual gates, wait for real theme transitions to finish
   // before axe samples foreground and background colors.
   for (let paint = 0; paint < 3; paint += 1) {

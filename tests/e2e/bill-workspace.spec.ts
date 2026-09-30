@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { selectBillTheme } from './_bill-ui';
+import { selectBillTheme, waitForBillPaint } from './_bill-ui';
 import { login, withDb, E2E_USERS, E2E_PASSWORD, midPreviousShanghaiMonth, seedSettledExternalSalesOrder, uniqueSuffix } from './_helpers';
 
 test.use({ actionTimeout: 15_000 });
 
 // Independent append-only accounts avoid altering any existing financial history.
 test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', async ({ page, browser, baseURL }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(240_000);
   expect(process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED).toBe('1');
   const targetDate = midPreviousShanghaiMonth();
   const sourceDate = new Date(targetDate);
@@ -78,7 +78,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   const sales = await salesContext.newPage();
   sales.on('pageerror', (error) => pageErrors.push(error.message));
   await login(sales, { username: source.agentUsername, password: E2E_PASSWORD, from: `/sales/bills?period=${source.period}` });
-  await sales.getByRole('link', { name: '查看详情', exact: true }).click();
+  await sales.getByRole('link', { name: `查看 ${source.period} 账单详情`, exact: true }).click();
   await expect(sales.getByRole('link', { name: '返回我的对客应付账单' })).toHaveAttribute('href', `/sales/bills?period=${source.period}`);
   for (const width of [375, 393, 768, 1024, 1280, 1920]) {
     await sales.setViewportSize({ width, height: 900 });
@@ -101,7 +101,20 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
       await page.screenshot({ path: test.info().outputPath(`bill-admin-${width}-${theme}.png`), fullPage: true });
       await page.getByText('查看账期数据表', { exact: true }).click();
       await page.getByText('账单概览', { exact: true }).click();
+      await sales.goto(`/sales/bills?period=${source.period}`);
       await selectBillTheme(sales, theme);
+      await expect(sales.getByRole('region', { name: '我的月账单' })).toContainText('1 单');
+      await sales.getByText('账单趋势', { exact: true }).click();
+      const overview = sales.getByRole('region', { name: '我的账期概览' });
+      await expect(overview.getByRole('link')).toHaveCount(2);
+      await waitForBillPaint(sales);
+      expect(await sales.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect((await new AxeBuilder({ page: sales }).include('#admin-main').analyze()).violations).toEqual([]);
+      await sales.screenshot({ path: test.info().outputPath(`bill-sales-list-${width}-${theme}.png`), fullPage: true });
+      await overview.getByRole('link', { name: new RegExp(`^${target.period}`) }).tap();
+      await expect(sales.getByLabel('周期', { exact: true })).toHaveValue(target.period);
+      await sales.goto(`/sales/bills?period=${source.period}`);
+      await sales.getByRole('link', { name: `查看 ${source.period} 账单详情`, exact: true }).tap();
       await sales.getByRole('button', { name: `查看 ${source.orderNo} 明细`, exact: true }).tap();
       const detail = sales.getByRole('dialog');
       await expect(detail).toBeVisible();
@@ -119,6 +132,9 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
       await expect(sales.getByRole('button', { name: `查看 ${source.orderNo} 明细`, exact: true })).toBeFocused();
     }
   }
+  await sales.goto(`/orders?q=${source.orderNo}`);
+  const orderCard = sales.locator(`[data-order-id="${source.orderId}"]`);
+  await expect(orderCard.getByRole('link', { name: `${source.period} 账单 · 已结清` })).toHaveAttribute('href', `/sales/bills/${sourceId}`);
   // The independently generated account has no ownership of these bills.
   const otherContext = await browser.newContext({ baseURL });
   const other = await otherContext.newPage();

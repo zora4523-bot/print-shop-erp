@@ -540,3 +540,11 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 `/api/health/jobs` 新增 `pdf: {ready: boolean | null}`：durable 仅在当前发布版本的活跃 HEAVY 心跳明确上报 PDF 可用时为 true；inline 为 null（不代表 Web 渲染已检查）。失能产生 `pdf-worker-unavailable` 告警，jobs 返回 503，但不单独使 Web ready 失败。发布 jobs gate 在能力未知/失能时拒绝放行。PDF 等待端点要求相同版本和有效能力；已生成产物仍先按原授权规则读取。
 
 direct 生成失败返回 `X-Request-Id`，与只包含随机关联号、白名单错误码、模式、阶段和耗时的日志对应。容量、浏览器、字体、版本、产物存储不可用返回 503；其他渲染失败保留 500。图稿不完整时继续提供含原有警告的 PDF，但不保存到 direct 完成缓存；批量打印原有严格图稿校验不变。
+
+
+### 2026-09-30：销售工单与月账单浏览
+
+- 销售工单查询仍以当前登录账号的 `submitterId` 限定。`shipped` 视图包含 `SHIPPED`、`SETTLED`、`FINISHED`，`done`（界面“已结算”）为后两者的子集；各视图有交集，不应相加计算总单量。`COMPLETED` 显示“待打包发货”。
+- 销售工单列表及同源单条预览 DTO 增加可空 `bill: { id, period, status }`；仅当关联月账单的 `agentUserId` 与工单 `submitterId` 相同时投影。账单详情仍独立校验登录账号，不依赖列表链接授权。
+- `/sales/bills` 返回每张账单的成员数量，以及本人最近 12 个有账单月份的按状态金额。趋势不随列表筛选收窄，顶部统计仍按筛选条件汇总；各查询处于同一 RepeatableRead 事务。草稿金额不计入待支付。
+- `/sales/bills/:id` 支持 `q`（最多 100 字，工单号／展示名称）和 `page`（每页 30 条，越界收敛到末页）；有有效结算依据时按冻结名称搜索，否则按明确标为当前名称的回退值搜索。分页只限制展示，整张账单总额和抵扣保持不变。`returnTo` 沿用内部账单列表白名单。

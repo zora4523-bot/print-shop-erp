@@ -63,6 +63,7 @@ export type SalesOrderListRow = {
   promisedDate: string | null;
   dueAlert: { kind: 'overdue' | 'due-soon'; days: number } | null;
   updatedAt: string;
+  bill?: { id: string; period: string; status: 'DRAFT' | 'CONFIRMED' | 'PAID' } | null;
   receiver: {
     name: string | null;
     phone: string | null;
@@ -169,6 +170,8 @@ const salesOrderSelect = {
   settledFee: true,
   promisedDate: true,
   updatedAt: true,
+  agentMonthlyBillItem: { select: { bill: { select: { id: true, period: true, status: true, agentUserId: true } } } },
+  submitterId: true,
   receiverName: true,
   receiverPhone: true,
   receiverAddress: true,
@@ -261,7 +264,7 @@ function salesViewWhere(
 ): Prisma.OrderWhereInput | null {
   if (view === 'todo') return salesNeedsActionWhere(latestRejectedOrderIds);
   if (view === 'doing') return { status: { in: [...ACTIVE_SALES_STATUSES] } };
-  if (view === 'shipped') return { status: OrderStatus.SHIPPED };
+  if (view === 'shipped') return { status: { in: [OrderStatus.SHIPPED, ...FINISHED_SALES_STATUSES] } };
   if (view === 'done') {
     return {
       status: { in: [...FINISHED_SALES_STATUSES] },
@@ -531,7 +534,7 @@ export async function getSalesOrderListSummary(
     all: [...counts.values()].reduce((sum, value) => sum + value, 0),
     todo,
     doing: count(...ACTIVE_SALES_STATUSES),
-    shipped: count(OrderStatus.SHIPPED),
+    shipped: count(OrderStatus.SHIPPED, ...FINISHED_SALES_STATUSES),
     done: count(...FINISHED_SALES_STATUSES),
     cancelled: count(OrderStatus.CANCELLED),
     draft: count(OrderStatus.DRAFT),
@@ -594,6 +597,9 @@ function mapSalesOrderRow(
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,
     dueAlert,
     updatedAt: row.updatedAt.toISOString(),
+    bill: row.agentMonthlyBillItem && row.agentMonthlyBillItem.bill.agentUserId === row.submitterId ? {
+      id: row.agentMonthlyBillItem.bill.id, period: row.agentMonthlyBillItem.bill.period, status: row.agentMonthlyBillItem.bill.status,
+    } : null,
     receiver: {
       name: row.receiverName,
       phone: row.receiverPhone,

@@ -1,6 +1,7 @@
 import 'server-only';
 import { Role } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
+import Decimal from 'decimal.js';
 
 import { paginationWindow, paginatedResult } from '@/lib/admin/table';
 import { agentBillWhere, parseAgentBillFilters, type AgentBillSearchParams } from './list-filter';
@@ -10,6 +11,7 @@ type Actor = { id: string; role: Role };
 const select = {
   id: true, period: true, status: true, memberSubtotal: true,
   adjustmentAmount: true, totalAmount: true, confirmedAt: true, paidAt: true,
+  _count: { select: { items: true } },
 } as const;
 
 function scope(actor: Actor) {
@@ -29,7 +31,17 @@ export async function listSalesMonthlyBills(actor: Actor, filter: AgentBillSearc
       skip: window.skip, take: window.take,
     });
     const summary = await summarizeAgentBills(tx, where);
-    return { ...paginatedResult(rows, total, window), summary };
+    const periods = await tx.agentMonthlyBill.findMany({
+      where: scope(actor), select: { period: true }, distinct: ['period'], orderBy: { period: 'desc' }, take: 12,
+    });
+    const groups = periods.length ? await tx.agentMonthlyBill.groupBy({
+      by: ['period', 'status'], where: { ...scope(actor), period: { in: periods.map((row) => row.period) } }, _sum: { totalAmount: true },
+    }) : [];
+    const trend = periods.map(({ period }) => {
+      const amount = (status: string) => new Decimal(groups.find((group) => group.period === period && group.status === status)?._sum.totalAmount?.toString() ?? 0).toFixed(2);
+      return { period, draft: amount('DRAFT'), confirmed: amount('CONFIRMED'), paid: amount('PAID') };
+    }).reverse();
+    return { ...paginatedResult(rows, total, window), summary, trend };
   }, { isolationLevel: 'RepeatableRead' });
 }
 
