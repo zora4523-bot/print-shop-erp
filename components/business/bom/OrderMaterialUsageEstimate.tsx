@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { OrderMaterialUsageEstimate as Estimate } from '@/lib/bom';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
 import { TableScrollArea } from '@/components/ui-business';
+import { formatDecimalQuantity } from '@/lib/format/quantity';
 
 function sourceLabel(source: Estimate['items'][number]['source']): string {
   if (source === 'BLANK') return '纸张规格物料清单';
@@ -54,7 +55,7 @@ export function OrderMaterialUsageEstimate({
                     <td className="py-3 pr-3 align-top">
                       #{item.sequence} · {externalPriceBusinessText(item.itemName)}
                       <div className="font-sans tabular-nums text-xs text-muted-foreground">
-                        数量 {item.quantity}
+                        数量 {item.quantity.toLocaleString('zh-CN')}
                       </div>
                     </td>
                     <td className="py-3 pr-3 align-top">{sourceLabel(item.source)}</td>
@@ -63,7 +64,7 @@ export function OrderMaterialUsageEstimate({
                         <>
                           {externalPriceBusinessText(item.bom.name)}
                           <div className="font-sans tabular-nums text-xs text-muted-foreground">
-                            v{item.bom.version} / 基准 {item.bom.baseQuantity}
+                            v{item.bom.version} / 基准 {item.bom.baseQuantity.toLocaleString('zh-CN')}
                           </div>
                         </>
                       ) : (
@@ -80,8 +81,8 @@ export function OrderMaterialUsageEstimate({
                           {item.materials.map((material) => (
                             <li key={material.materialId}>
                               {material.code} · {externalPriceBusinessText(material.name)}
-                              <span className="ml-2 font-sans tabular-nums text-xs">
-                                {material.quantity} {material.unit}
+                              <span className="ml-2 whitespace-nowrap font-sans tabular-nums text-xs">
+                                {formatDecimalQuantity(material.quantity)} {material.unit}
                               </span>
                             </li>
                           ))}
@@ -108,8 +109,8 @@ export function OrderMaterialUsageEstimate({
                     <span>
                       {material.code} · {externalPriceBusinessText(material.name)}
                     </span>
-                    <span className="font-sans tabular-nums text-xs">
-                      {material.quantity} {material.unit}
+                    <span className="whitespace-nowrap font-sans tabular-nums text-xs">
+                      {formatDecimalQuantity(material.quantity)} {material.unit}
                     </span>
                   </div>
                 ))}
