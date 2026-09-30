@@ -170,6 +170,8 @@ describe('agent monthly bill actions', () => {
       markAgentMonthlyBillPaidAction('bill-1', null, form),
     ).resolves.toMatchObject({ status: 'success', billStatus: 'PAID' });
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/agent-bills');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/sales/bills');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/sales/bills/[id]', 'page');
     expect(revalidatePathMock).toHaveBeenCalledWith(
       '/owner/agent-bills/bill-1',
     );

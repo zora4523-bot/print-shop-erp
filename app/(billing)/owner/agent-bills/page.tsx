@@ -1,3 +1,4 @@
+import { buildTableHref } from '@/lib/admin/table';
 import { randomUUID } from 'node:crypto';
 import Form from 'next/form';
 import Link from 'next/link';
@@ -34,7 +35,7 @@ import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 
-export const metadata = { title: '代理商月度账单' };
+export const metadata = { title: '外部销售月账单' };
 
 type PageProps = { searchParams: Promise<AgentBillSearchParams> };
 
@@ -52,7 +53,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
   return (
     <div className="min-w-0 space-y-6">
       <PageHeader
-        title="代理商月度账单"
+        title="外部销售月账单"
         subtitle="按结算月份归集外部销售工单。"
         actions={
           <Link
@@ -120,7 +121,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
           </NativeSelect>
         </label>
         <label className="min-w-0 max-w-full basis-full space-y-1 text-xs text-muted-foreground sm:w-auto sm:basis-auto">
-          <span>代理商</span>
+          <span>外部销售</span>
           <NativeSelect
             name="agentUserId"
             defaultValue={agentUserId ?? ''}
@@ -178,7 +179,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         />
       ) : (
         <TableScrollArea
-          label="代理商月度账单列表"
+          label="外部销售月账单列表"
           className="min-w-0 max-w-full rounded-xl border bg-card shadow-sm"
         >
           <table className="w-full min-w-[48rem] text-sm">
@@ -187,9 +188,9 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                 <th className="px-4 py-2 text-left">账期</th>
                 <th className="px-4 py-2 text-left">外部销售</th>
                 <th className="px-4 py-2 text-right">工单</th>
-                <th className="px-4 py-2 text-right">成员小计</th>
-                <th className="px-4 py-2 text-right">负项</th>
-                <th className="px-4 py-2 text-right">应收</th>
+                <th className="px-4 py-2 text-right">工单合计</th>
+                <th className="px-4 py-2 text-right">抵扣</th>
+                <th className="px-4 py-2 text-right">账单金额</th>
                 <th className="px-4 py-2 text-center">状态</th>
                 <th className="px-4 py-2 text-left">锁定 / 结清</th>
                 <th className="px-4 py-2" />
@@ -224,7 +225,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link
-                      href={`/owner/agent-bills/${bill.id}`}
+                      href={buildTableHref(`/owner/agent-bills/${bill.id}`, {}, { returnTo: buildTableHref('/owner/agent-bills', {}, { period, status, agentUserId, page: result.page }) })}
                       className={buttonVariants({ size: 'sm', variant: 'outline' })}
                     >
                       详情

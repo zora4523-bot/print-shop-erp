@@ -1,4 +1,5 @@
 import Form from 'next/form';
+import { buildTableHref } from '@/lib/admin/table';
 import Link from 'next/link';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listSalesMonthlyBills } from '@/lib/agent-monthly-billing/sales-query';
@@ -37,7 +38,7 @@ export default async function SalesBillsPage({ searchParams }: { searchParams: P
     </Form>
     {rows.length === 0 ? <EmptyState title="当前筛选条件下暂无账单" /> : <TableScrollArea label="我的月账单">
       <table className="w-full text-sm"><thead><tr><th className="p-3 text-left">周期</th><th className="p-3 text-right">总额</th><th className="p-3">状态</th><th className="p-3">详情</th></tr></thead>
-        <tbody>{rows.map((row) => <tr key={row.id} className="border-t"><td className="p-3">{row.period}</td><td className="p-3 text-right tabular-nums">{formatMoney(row.totalAmount)}</td><td className="p-3 text-center"><StatusBadge tone={SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[row.status].tone}>{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[row.status].label}{row.status === 'DRAFT' ? ' / 金额未定稿' : ''}</StatusBadge></td><td className="p-3 text-center"><Link href={`/sales/bills/${row.id}`} className={buttonVariants({ variant: 'outline' })}>查看详情</Link></td></tr>)}</tbody>
+        <tbody>{rows.map((row) => <tr key={row.id} className="border-t"><td className="p-3">{row.period}</td><td className="p-3 text-right tabular-nums">{formatMoney(row.totalAmount)}</td><td className="p-3 text-center"><StatusBadge tone={SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[row.status].tone}>{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[row.status].label}{row.status === 'DRAFT' ? ' / 金额未定稿' : ''}</StatusBadge></td><td className="p-3 text-center"><Link href={buildTableHref(`/sales/bills/${row.id}`, {}, { returnTo: buildTableHref('/sales/bills', {}, { period: filters.period, status: filters.status, page: result.page }) })} className={buttonVariants({ variant: 'outline' })}>查看详情</Link></td></tr>)}</tbody>
       </table>
     </TableScrollArea>}
     <AdminPagination basePath="/sales/bills" page={result.page} pageCount={result.pageCount} total={result.total} pageSize={result.pageSize} queryParams={{ period: filters.period, status: filters.status }} />

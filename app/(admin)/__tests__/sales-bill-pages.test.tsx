@@ -125,7 +125,7 @@ it('keeps DRAFT rows visibly provisional and totals DRAFT, CONFIRMED and PAID se
   expect(cards[0]).toContain('金额未定稿');
   const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
   expect(rows.filter((row) => row.includes('整理中 / 金额未定稿'))).toHaveLength(2);
-  expect(html).toContain('href="/sales/bills/draft-1"');
+  expect(html).toContain('href="/sales/bills/draft-1?returnTo=');
   expect(list).toHaveBeenCalledWith(actor, { period: '2026-08' });
 });
 it('uses the same sales-facing status names in the filter, the rows and the detail badge', async () => {

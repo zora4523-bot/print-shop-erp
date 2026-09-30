@@ -17,13 +17,13 @@ type BillFormAction = (
 function Feedback({ state }: { state: AgentMonthlyBillActionResult | null }) {
   if (!state) return null;
   if (state.status === 'success') {
-    return <p className="text-xs text-success-foreground">{state.message}</p>;
+    return <p role="status" className="text-xs text-success-foreground">{state.message}</p>;
   }
   if (state.status === 'error') {
-    return <p className="text-xs text-destructive">{state.message}</p>;
+    return <p role="alert" className="text-xs text-destructive">{state.message}</p>;
   }
   const messages = Object.values(state.fieldErrors).flat();
-  return <p className="text-xs text-destructive">{messages[0] ?? '请检查输入'}</p>;
+  return <p role="alert" className="text-xs text-destructive">{messages[0] ?? '请检查输入'}</p>;
 }
 
 export function GenerateAgentMonthlyBillsForm({
@@ -156,7 +156,7 @@ export function CreateAgentMonthlyBillCreditForm({
       <input type="hidden" name="sourceItemId" value={sourceItemId} />
       <div className="space-y-1">
         <label htmlFor={`credit-amount-${sourceItemId}`} className="text-xs text-muted-foreground">
-          负项金额（上限 {formatMoney(sourceAmount)}）
+          抵扣金额（剩余上限 {formatMoney(sourceAmount)}）
         </label>
         <Input
           id={`credit-amount-${sourceItemId}`}
@@ -178,7 +178,7 @@ export function CreateAgentMonthlyBillCreditForm({
         />
       </div>
       <Button type="submit" variant="outline" disabled={pending} className="self-end">
-        {pending ? '正在记录…' : '记录负项'}
+        {pending ? '正在记录…' : '录入抵扣'}
       </Button>
       <div className="sm:col-span-3">
         <Feedback state={state} />
