@@ -129,7 +129,7 @@ export type CustomerCartonPricingTierRow = {
   fee: PricingNumericFieldState;
 };
 
-export type CustomerCartonPricingFields = {
+type CustomerCartonPricingFields = {
   tiers: readonly CustomerCartonPricingTierRow[];
   segmentLength: PricingNumericFieldState;
   segmentFee: PricingNumericFieldState;
@@ -150,7 +150,7 @@ export type CustomerShippingZoneRow = {
   incrementKilograms: number;
 };
 
-export type CustomerShippingPricingFields = {
+type CustomerShippingPricingFields = {
   unitWeights: readonly CustomerShippingUnitWeightRow[];
   maxQuantity: PricingNumericFieldState;
   zones: readonly CustomerShippingZoneRow[];

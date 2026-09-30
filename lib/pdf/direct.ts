@@ -59,7 +59,7 @@ export function waitForPdf(result: Promise<Buffer>, signal: AbortSignal): Promis
  * renders get this grace, then are aborted so their requests answer, Next's
  * graceful shutdown completes and the process exits normally.
  */
-export const PDF_WEB_SHUTDOWN_GRACE_MS = 15_000;
+const PDF_WEB_SHUTDOWN_GRACE_MS = 15_000;
 
 type ShutdownProcess = Pick<NodeJS.Process, 'once' | 'listenerCount' | 'kill' | 'pid'>;
 
@@ -117,6 +117,6 @@ export function renderDirectOrderPdf(input: {
   return waitForPdf(result, input.signal);
 }
 
-export class PdfBusyError extends Error {
+class PdfBusyError extends Error {
   constructor() { super('PDF capacity reached'); this.name = 'PdfBusyError'; }
 }

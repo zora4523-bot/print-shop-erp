@@ -55,6 +55,7 @@
     "ts-prune",
     "tw-animate-css"
   ],
-  "ignoreBinaries": ["pgbackrest"],
+  // pgrep is supplied by POSIX hosts for the owned-process PDF lifecycle check.
+  "ignoreBinaries": ["pgbackrest", "pgrep"],
   "exclude": ["cycles"]
 }

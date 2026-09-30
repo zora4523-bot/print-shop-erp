@@ -17,7 +17,6 @@ export {
   type OrderSubmissionReviewReceiver,
 } from './OrderSubmissionReviewDialog';
 export {
-  OrderSubmissionSuccess,
   type OrderSubmissionSuccessAction,
   type OrderSubmissionSuccessProps,
 } from './OrderSubmissionSuccess';

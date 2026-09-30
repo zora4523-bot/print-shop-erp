@@ -101,7 +101,7 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
 // Keep this in sync with the file tree in `app/`; if a layout-only
 // shell becomes a real page, drop the entry here. 单测会遍历 app 下的
 // page 路由，发现可点击祖先没有 page 时直接失败。
-export const LAYOUT_ONLY_PATHS: ReadonlySet<string> = new Set<string>([
+const LAYOUT_ONLY_PATHS: ReadonlySet<string> = new Set<string>([
   '/foreman',
   '/sales',
   '/owner/prices',
@@ -110,7 +110,7 @@ export const LAYOUT_ONLY_PATHS: ReadonlySet<string> = new Set<string>([
 
 // 纯分组段：既无页面、也没有独立业务含义（通知目标 / 事件规则都在
 // 「推送配置」一页里维护）。面包屑直接跳过，父级就是推送配置。
-export const SKIPPED_BREADCRUMB_PATHS: ReadonlySet<string> = new Set<string>([
+const SKIPPED_BREADCRUMB_PATHS: ReadonlySet<string> = new Set<string>([
   '/owner/notifications/channels',
   '/owner/notifications/rules',
 ]);
@@ -165,7 +165,7 @@ export function resolveSegmentLabel(
   return pageHeading ?? null;
 }
 
-export type BreadcrumbCrumb = {
+type BreadcrumbCrumb = {
   href: string;
   label: string;
   linkable: boolean;

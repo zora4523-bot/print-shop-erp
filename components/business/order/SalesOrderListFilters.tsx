@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { FilterClearLink, LinkPendingHint } from '@/components/ui-business';
 
 /** 销售工单搜索表单的 id，供「清除筛选」在导航时 reset 未提交的输入。 */
-export const SALES_ORDER_FILTER_FORM_ID = 'sales-order-filters';
+const SALES_ORDER_FILTER_FORM_ID = 'sales-order-filters';
 
 const SALES_TABS: Array<{
   id: 'all' | SalesOrderListView;

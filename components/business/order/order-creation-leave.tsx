@@ -34,7 +34,7 @@ const FAILURE_TEXT: Record<LocalDraftSaveFailure, string> = {
 const subject = (label: string) => (label === '本单' ? label : `${label} `);
 const belongsTo = (key: string, orderId: string) => key === orderId || key.startsWith(`${orderId}:`);
 
-export function planOrderCreationLeave(
+function planOrderCreationLeave(
   reports: Readonly<Record<string, OrderLeaveState>>,
   labelFor: (key: string) => string,
   removedFileCount = 0,
