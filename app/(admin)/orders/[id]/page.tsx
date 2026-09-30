@@ -609,12 +609,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     </Fragment>),
     customerCharges: (<Fragment key="customerCharges">{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <div>
-            <h3 className="text-base font-semibold">对客收费明细</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              对客收费与工厂成本分开统计。
-            </p>
-          </div>
+          <h3 className="text-base font-semibold">对客收费明细</h3>
           <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
             {order.customerCharges.map((charge) => (
               <li
@@ -629,9 +624,12 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                         : ''}
                       {charge.category.name}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {charge.description}
-                    </p>
+                    {/* 说明与收费类别同名时（如「对客快递费」）不再重复一行。 */}
+                    {charge.description && charge.description.trim() !== charge.category.name ? (
+                      <p className="text-xs text-muted-foreground">
+                        {charge.description}
+                      </p>
+                    ) : null}
                   </div>
                   <Badge
                     variant={
@@ -1144,9 +1142,12 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             <div className="min-w-0">
               <h3 className="text-base font-semibold">已生成计件工资</h3>
             </div>
-            <strong className="admin-wrap-anywhere font-sans tabular-nums text-primary">
-              合计 {formatMoney(pieceworkSummary.total)}
-            </strong>
+            {/* 工资合计不是风险或失败，不用红色（ui-规范 §8.2）；无明细时空态已说明，不再显示「合计 ¥ 0.00」。 */}
+            {pieceworkSummary.items.length > 0 ? (
+              <strong className="admin-wrap-anywhere font-sans tabular-nums text-foreground">
+                合计 {formatMoney(pieceworkSummary.total)}
+              </strong>
+            ) : null}
           </div>
           {pieceworkSummary.items.length === 0 ? (
             <TableEmptyState

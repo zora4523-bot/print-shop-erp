@@ -46,8 +46,10 @@ export function OrderActivity({ orderId, initialPage }: { orderId: string; initi
     } finally { loading.current = false; setPending(false); }
   }
   return <section className={styles.activity} aria-label="操作事件">
-    <p className={styles.count}>已显示 {page.events.length} 条</p>
-    {page.events.length === 0 ? <p className={styles.count}>暂无动态</p> : null}
+    {/* 无记录只保留一个空态，不再同时显示「已显示 0 条」。 */}
+    {page.events.length === 0
+      ? <p className={styles.count}>暂无动态</p>
+      : <p className={styles.count}>已显示 {page.events.length} 条</p>}
     <ol ref={list} tabIndex={-1} aria-label="工单事件记录">
       {page.events.map((event, index) => <li key={event.id}>
         {index === 0 || event.date !== page.events[index - 1]?.date ? <h3 className={styles.date}>{event.date}</h3> : null}

@@ -143,9 +143,9 @@ export function OrderCostEntryForm({
         </label>
       </div>
       <p className="text-xs text-muted-foreground">
-        计件和外协成本由业务流水自动计入，这里不重复录入。
+        {/* 「计件和外协无需录入」已在分区标题下说明，这里只写填写条件（ui-规范 §7 第 4、7 律）。 */}
         {isSfCollect ? '顺丰到付工单不可录入物流费。' : ''}
-        普通成本必须为正数；更正时添加“成本调整”正数或负数，保留完整审计流水。同时填写数量和单价时，金额必须与两者乘积一致。
+        普通成本填正数；更正已记成本用“成本调整”，可填负数。填写数量和单价时，金额须等于两者乘积。
       </p>
       <Button type="submit" disabled={pending} className="min-h-11">
         {pending ? '正在保存…' : '添加成本明细'}

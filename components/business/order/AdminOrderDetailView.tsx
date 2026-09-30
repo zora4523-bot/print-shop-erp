@@ -199,7 +199,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
           </section> : null}
 
           <section id={itemDetails ? 'detail-design-files' : undefined} aria-labelledby="order-detail-items-title">
-            <div className={styles.sectionHeading}><h2 id="order-detail-items-title">款式明细</h2><span>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')} 个</span><span className={styles.hint}>点设计图查看大图</span></div>
+            <div className={styles.sectionHeading}><h2 id="order-detail-items-title">款式明细</h2><span>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')} 个</span>{model.items.some((item) => item.images.length > 0) ? <span className={styles.hint}>点设计图查看大图</span> : null}</div>
             <div className={styles.itemList}>
               {model.items.length === 0 ? <TableEmptyState variant="compact" title="未记录款式" description="请在编辑页核对款式资料。" /> : model.items.map((item) => {
                 const id = `order-detail-item-${item.id}`;
@@ -252,7 +252,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
           <div id="order-production-records" tabIndex={-1} className={styles.sectionHeading}><h2>生产记录</h2></div>
           {renderSections(['detail-production-records', 'detail-business-records'])}
           {(!simpleProduction || model.works.length > 0) && <section className={styles.ledger} aria-label="报工流水">
-            <div className={styles.sectionHeading}><h2>报工流水</h2><span>当前版本 · 最近 {model.works.length} 条</span></div>
+            <div className={styles.sectionHeading}><h2>报工流水</h2>{model.works.length > 0 ? <span>当前版本 · 最近 {model.works.length} 条</span> : null}</div>
             {model.works.length === 0 ? <p className={styles.emptyHint}>暂无报工记录</p> : <ol>{model.works.map((work) => <li key={work.id} className={styles.workRow}>
               <time>{work.at}</time><span>{work.label}{work.cumulative !== null ? <small>累计 {work.cumulative} {work.unit}</small> : null}</span><b>{work.actor}</b><strong>{work.quantity === null ? '—' : `${work.quantity} ${work.unit}`}</strong>
             </li>)}</ol>}

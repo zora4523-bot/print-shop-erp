@@ -577,7 +577,8 @@ export function OrderCommercialDetailsManager({
           </ol>
         ) : (
           <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-            当前价格待管理员确认，请在上方“工厂核价确认”中直接填写制烫金版费；确认后才能维护逐款明细。
+            {/* 不写「上方“工厂核价确认”」：物流待核对时页面没有这张表，桌面端它也在右侧而非上方。 */}
+            工单价格确认后才能维护逐款制版明细；核价时可直接填写制烫金版费。
           </p>
         )}
       </div>
