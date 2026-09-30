@@ -48,7 +48,7 @@ export async function exportSalesBillList(actor: Actor, params: URLSearchParams)
   const cells: CsvCell[][] = [['账期', '状态', '金额口径', '工单数', '工单合计（元）', '抵扣金额（元）', '账单金额（元）', '确认时间', '结清时间']];
   for (const bill of rows) cells.push([
     bill.period, SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label,
-    bill.status === 'DRAFT' ? '暂计，金额未定稿' : '已确认应付', String(bill._count.items),
+    amountBasisLabel(bill.status), String(bill._count.items),
     csvDecimal(bill.memberSubtotal), csvDecimal(bill.adjustmentAmount), csvDecimal(bill.totalAmount),
     formatDateTimeShanghai(bill.confirmedAt, ''), formatDateTimeShanghai(bill.paidAt, ''),
   ]);
@@ -64,20 +64,51 @@ export async function exportSalesBillItems(actor: Actor, id: string, params: URL
   if (!bill) throw new SalesBillExportNotFoundError();
   const items = filterBillItems(bill.items, parsed.data);
   assertRowLimit(items.length);
-  const cells: CsvCell[][] = [['账期', '账单状态', '金额口径', '工单号', '工单名称', '名称依据', '结算时状态', '纸单版本', '结算时间', '结算金额（元）', '加工费（元）', '其他费用明细']];
+  const statusLabel = SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label;
+  const basis = amountBasisLabel(bill.status);
+  const cells: CsvCell[][] = [['行类型', '账期', '账单状态', '金额口径', '工单号', '工单名称', '名称依据', '结算时状态', '纸单版本', '结算时间', '工单金额（元）', '加工费（元）', '其他费用明细']];
   for (const item of items) {
     const name = billItemName(item);
     const evidence = readBillSettlementDetail(item.settlementDetailSnapshot, item.settledFeeSnapshot);
     cells.push([
-      bill.period, SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label,
-      bill.status === 'DRAFT' ? '暂计，金额未定稿' : '已确认应付',
+      '工单', bill.period, statusLabel, basis,
       item.orderNoSnapshot, name.name, name.current ? '当前名称' : '结算时名称', billOrderStatus(item.orderStatusSnapshot).label,
       String(item.workOrderVersionSnapshot), formatDateTimeShanghai(item.settledAtSnapshot), csvDecimal(item.settledFeeSnapshot),
       evidence ? csvDecimal(evidence.processingAmount) : null,
       evidence ? evidence.charges.map((charge) => `${charge.description}：${charge.amount} 元`).join('；') || '无其他费用' : '费用明细待补',
     ]);
   }
+  const summaryRow = (kind: string, label: string, amount: CsvCell, note: string | null = null): CsvCell[] =>
+    [kind, bill.period, statusLabel, basis, null, label, note, null, null, null, amount, null, null];
+  if (parsed.data) {
+    // 抵扣与账单合计是整张账单的口径，不能冒充筛选结果之和。
+    cells.push(summaryRow('说明', '筛选结果，非全账单', null, '抵扣与账单合计请清除筛选后导出完整账单明细'));
+  } else {
+    for (const adjustment of bill.adjustments) {
+      const source = adjustment.credit.sourceItem;
+      cells.push([
+        '抵扣', bill.period, statusLabel, basis, source.orderNoSnapshot, '抵扣', `来源：${source.bill.period} 货款账单`,
+        null, null, null, csvDecimal(adjustment.amount), null, null,
+      ]);
+    }
+    // 合计直接取账单冻结值，不在导出端重算。
+    cells.push(summaryRow('合计', '工单合计', csvDecimal(bill.memberSubtotal)));
+    cells.push(summaryRow('合计', '抵扣', csvDecimal(bill.adjustmentAmount)));
+    cells.push(summaryRow('合计', '账单金额', csvDecimal(bill.totalAmount)));
+  }
   return { csv: csvDocument(cells), fileName: `my-bill-${bill.period}${parsed.data ? '-filtered' : ''}.csv` };
+}
+
+function amountBasisLabel(status: AgentMonthlyBillStatus): string {
+  switch (status) {
+    case AgentMonthlyBillStatus.DRAFT: return '暂计，金额未定稿';
+    case AgentMonthlyBillStatus.CONFIRMED: return '已确认应付';
+    case AgentMonthlyBillStatus.PAID: return '已结清';
+    default: {
+      const unreachable: never = status;
+      throw new Error(`未知账单状态：${String(unreachable)}`);
+    }
+  }
 }
 
 function assertRowLimit(count: number) {

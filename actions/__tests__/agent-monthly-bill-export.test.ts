@@ -7,6 +7,10 @@ const {
   permissionsMock,
   revalidatePathMock,
   InvalidRequestError,
+  ExpiredError,
+  NotPendingError,
+  NotFoundError,
+  ActorInvalidError,
 } = vi.hoisted(() => ({
   backgroundJobsModeMock: vi.fn(),
   exportMock: {
@@ -16,6 +20,10 @@ const {
   permissionsMock: { requirePermission: vi.fn() },
   revalidatePathMock: vi.fn(),
   InvalidRequestError: class extends Error {},
+  ExpiredError: class extends Error {},
+  NotPendingError: class extends Error {},
+  NotFoundError: class extends Error {},
+  ActorInvalidError: class extends Error {},
 }));
 
 vi.mock('@/lib/auth/permissions', () => ({
@@ -26,6 +34,10 @@ vi.mock('@/lib/background-jobs/mode', () => ({
 }));
 vi.mock('@/lib/agent-monthly-billing/export', () => ({
   InvalidAgentMonthlyBillExportRequestError: InvalidRequestError,
+  AgentMonthlyBillExportExpiredError: ExpiredError,
+  AgentMonthlyBillExportNotPendingError: NotPendingError,
+  AgentMonthlyBillExportNotFoundError: NotFoundError,
+  AgentMonthlyBillExportActorInvalidError: ActorInvalidError,
   requestAgentMonthlyBillExport: exportMock.requestAgentMonthlyBillExport,
   processAgentMonthlyBillExportInline:
     exportMock.processAgentMonthlyBillExportInline,
@@ -123,14 +135,32 @@ describe('requestAgentMonthlyBillExportAction', () => {
     ).resolves.toEqual({ status: 'invalid', message: '账期不合法' });
   });
 
-  it('keeps a recoverable inline failure on the current page without disclosing errors', async () => {
-    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it.each([
+    ['expired', () => new ExpiredError('x'), '已过期'],
+    ['concurrently processed', () => new NotPendingError('x'), '已在处理'],
+    ['owned by another admin', () => new NotFoundError('x'), '已失效'],
+    ['requested by a demoted admin', () => new ActorInvalidError('x'), '无权导出'],
+  ])('keeps a known %s inline failure on the page with a friendly message', async (_label, make, text) => {
     backgroundJobsModeMock.mockReturnValue('inline');
-    exportMock.processAgentMonthlyBillExportInline.mockRejectedValueOnce(new Error('private filesystem path'));
+    exportMock.processAgentMonthlyBillExportInline.mockRejectedValueOnce(make());
     const result = await requestAgentMonthlyBillExportAction(null, form());
     expect(result).toMatchObject({ status: 'error' });
-    expect(JSON.stringify(result)).not.toContain('private');
+    expect(result.status === 'error' && result.message).toContain(text);
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/agent-bills');
-    log.mockRestore();
+  });
+
+  it('rethrows unknown inline failures so the error boundary and Sentry see them', async () => {
+    backgroundJobsModeMock.mockReturnValue('inline');
+    const failure = new Error('private filesystem path');
+    exportMock.processAgentMonthlyBillExportInline.mockRejectedValueOnce(failure);
+    await expect(requestAgentMonthlyBillExportAction(null, form())).rejects.toBe(failure);
+    // The export row is already FAILED; the record list is still invalidated.
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/agent-bills');
+  });
+
+  it('rethrows unknown request failures (e.g. database errors)', async () => {
+    const failure = new Error('connection reset');
+    exportMock.requestAgentMonthlyBillExport.mockRejectedValueOnce(failure);
+    await expect(requestAgentMonthlyBillExportAction(null, form())).rejects.toBe(failure);
   });
 });
