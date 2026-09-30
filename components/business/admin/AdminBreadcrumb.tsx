@@ -275,11 +275,11 @@ export function AdminBreadcrumb() {
                   // useRender，不接受 Radix 的 asChild —— 走 render
                   // prop 把 <a> 替换成 next/link。
                   <BreadcrumbLink
-                    className="block truncate"
+                    className="inline-flex min-h-11 min-w-0 max-w-full items-center"
                     title={label}
                     render={<Link href={href} prefetch={false} />}
                   >
-                    {label}
+                    <span className="min-w-0 truncate">{label}</span>
                   </BreadcrumbLink>
                 ) : (
                   // Layout-only ancestor: not navigable AND not the

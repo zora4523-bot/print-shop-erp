@@ -185,5 +185,43 @@ export function collectGeometryIssues(): string[] {
     if (Math.abs(dx) > 1) issues.push(`selection-column:${describe(header)}:dx${f(dx)}`);
   }
 
+  // ---- 5. breadcrumb text alignment ---------------------------------------
+  // Interactive ancestors can have 44px targets while the current page is a
+  // 20px text box. Their containers may align even when a block link leaves its
+  // text at the top, so compare actual text lines rather than element boxes.
+  for (const list of document.querySelectorAll<HTMLElement>('[data-slot=breadcrumb-list]')) {
+    if (!isVisible(list)) continue;
+    let topmost: { label: string; rect: DOMRect } | undefined;
+    let bottommost: { label: string; rect: DOMRect } | undefined;
+    for (const item of list.querySelectorAll<HTMLElement>(':scope > [data-slot=breadcrumb-item]')) {
+      if (!isVisible(item)) continue;
+      const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          return node.textContent?.trim() && parent && isVisible(parent) &&
+            !parent.closest('.sr-only, [aria-hidden=true], svg')
+            ? NodeFilter.FILTER_ACCEPT
+            : NodeFilter.FILTER_REJECT;
+        },
+      });
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const line = [...range.getClientRects()].find((rect) => rect.width > 0 && rect.height > 0);
+        if (!line) continue;
+        const current = { label: node.textContent!.trim().slice(0, 20), rect: line };
+        if (!topmost || centerY(current.rect) < centerY(topmost.rect)) topmost = current;
+        if (!bottommost || centerY(current.rect) > centerY(bottommost.rect)) bottommost = current;
+        break;
+      }
+    }
+    // Compare the complete row; adjacent-only comparisons miss 0/2/4px drift.
+    if (topmost && bottommost) {
+      const dy = centerY(bottommost.rect) - centerY(topmost.rect);
+      if (dy > 2) issues.push(`breadcrumb-misaligned:${topmost.label}→${bottommost.label}:dy${f(dy)}`);
+    }
+  }
+
   return issues;
 }

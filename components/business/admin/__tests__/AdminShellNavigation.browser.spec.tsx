@@ -32,6 +32,7 @@ vi.mock('@/actions/account', () => ({ signOutAction: vi.fn() }));
 
 import { AdminHeader } from '../AdminHeader';
 import { AppSidebar } from '../AppSidebar';
+import { BreadcrumbEntity, BreadcrumbEntityProvider } from '../breadcrumb-entity';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -60,30 +61,63 @@ async function renderShell(
   role: Role,
   theme = 'light',
   environment = 'development',
+  entityLabel: string | null = null,
 ) {
   document.documentElement.classList.toggle('dark', theme === 'dark');
   document.documentElement.dataset.theme = theme;
   flushSync(() => root.render(
-    <SidebarProvider>
+    <SidebarProvider className="admin-viewport">
       <AppSidebar
         menuGroups={getAdminMenuItems({ role })}
         roleBadge={ADMIN_ROLE_BADGE[role]}
       />
-      <SidebarInset id="admin-main">
-        <AdminHeader
-          displayName="导航测试账号"
-          roleLabel={ADMIN_ROLE_BADGE[role]}
-          environmentLabel={environment}
-        />
-        <div className="p-6">
-          <h1>导航测试页面</h1>
-        </div>
+      <SidebarInset id="admin-main" tabIndex={-1} className="min-w-0">
+        <BreadcrumbEntityProvider>
+          <AdminHeader
+            displayName="导航测试账号"
+            roleLabel={ADMIN_ROLE_BADGE[role]}
+            environmentLabel={environment}
+          />
+          <div className="p-6">
+            {entityLabel ? <BreadcrumbEntity label={entityLabel} /> : null}
+            <h1>导航测试页面</h1>
+          </div>
+        </BreadcrumbEntityProvider>
       </SidebarInset>
     </SidebarProvider>,
   ));
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   });
+}
+
+function assertBreadcrumbTextAlignment(header: HTMLElement) {
+  const items = [...header.querySelectorAll<HTMLElement>('[data-slot="breadcrumb-item"]')]
+    .filter((item) => item.checkVisibility());
+  const centers: number[] = [];
+  for (const item of items) {
+    const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.textContent?.trim() && !node.parentElement?.closest('.sr-only')
+        ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+    });
+    const text = walker.nextNode();
+    expect(text, item.outerHTML).not.toBeNull();
+    const range = document.createRange();
+    range.selectNodeContents(text!);
+    const line = range.getBoundingClientRect();
+    const center = line.top + line.height / 2;
+    centers.push(center);
+    const box = item.getBoundingClientRect();
+    // Measure glyphs, not only the centered 44px anchor box.
+    expect(Math.abs(center - (box.top + box.height / 2)), item.textContent ?? '').toBeLessThanOrEqual(2);
+    const link = item.querySelector('a');
+    if (link) {
+      expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+      expect(link.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+    }
+  }
+  expect(centers.length).toBeGreaterThan(0);
+  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(2);
 }
 
 async function settleMobileSidebar() {
@@ -158,6 +192,7 @@ describe.each([Role.SALES, Role.ADMIN])('%s shared navigation', (role) => {
         expect(header.querySelectorAll('button button')).toHaveLength(0);
         const headerRect = header.getBoundingClientRect();
         expect(headerRect.height).toBe(56);
+        assertBreadcrumbTextAlignment(header);
         expect(headerRect.right).toBeLessThanOrEqual(width + 1);
         const radii = [...header.querySelectorAll('button')].map(
           (button) => getComputedStyle(button).borderRadius,
@@ -293,4 +328,51 @@ it('账号始终展开，不受旧折叠偏好影响', async () => {
   await expect.element(page.getByRole('navigation', { name: '后台主导航' }).getByRole('link', { name: '用户管理', exact: true })).toBeVisible();
   expect(group.querySelector('a')?.getAttribute('aria-current')).toBe('page');
   await expect.element(page.getByRole('button', { name: '财务 展开' })).toBeVisible();
+});
+
+describe('breadcrumb text alignment in the real admin shell', () => {
+  const cases = [
+    { path: '/orders/new', parentHref: '/orders', current: '新建工单' },
+    { path: '/sales/bills', parentHref: null, current: '我的货款账单' },
+    { path: '/orders', parentHref: null, current: '工单列表' },
+    {
+      path: '/owner/agent-bills/cabcdefghijklmnopqrstuvwx/credits/czyxwvutsrqponmlkjihgfedcb/new',
+      parentHref: '/owner/agent-bills/cabcdefghijklmnopqrstuvwx',
+      current: '录入抵扣',
+      entityLabel: '2026 年 8 月外部销售货款核对记录及补充说明超长标题',
+    },
+  ];
+  for (const theme of ['light', 'dark']) {
+    for (const [width, height] of viewports) {
+      it(`${theme} ${width}: aligns linked, layout-only, single and long-title crumbs`, async () => {
+        await page.viewport(width, height);
+        for (const scenario of cases) {
+          route.pathname = scenario.path;
+          await renderShell(Role.SALES, theme, 'production', scenario.entityLabel);
+          const header = host.querySelector<HTMLElement>('header')!;
+          assertBreadcrumbTextAlignment(header);
+          const current = header.querySelector<HTMLElement>('[aria-current="page"]')!;
+          expect(current.textContent).toBe(scenario.current);
+          expect(current.getAttribute('aria-disabled')).toBe('true');
+          expect(header.getBoundingClientRect().height).toBe(56);
+          expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+          if (scenario.parentHref) {
+            const link = header.querySelector<HTMLAnchorElement>(`a[href="${scenario.parentHref}"]`)!;
+            expect(link).not.toBeNull();
+            link.focus();
+            expect(document.activeElement).toBe(link);
+            if (scenario.entityLabel) {
+              expect(link.title).toBe(scenario.entityLabel);
+              const text = link.querySelector<HTMLElement>('span')!;
+              expect(text).not.toBeNull();
+              expect(getComputedStyle(text).textOverflow).toBe('ellipsis');
+              expect(getComputedStyle(text).whiteSpace).toBe('nowrap');
+              if (width <= 768) expect(text.scrollWidth).toBeGreaterThan(text.clientWidth);
+            }
+          }
+          if (scenario.path === '/sales/bills') expect(header.querySelector('a[href="/sales"]')).toBeNull();
+        }
+      });
+    }
+  }
 });

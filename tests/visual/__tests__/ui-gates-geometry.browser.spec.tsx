@@ -44,3 +44,100 @@ it('accepts controls that share a bottom edge', () => {
   </div>`);
   expect(collectGeometryIssues().filter((issue) => issue.startsWith('row-misaligned'))).toEqual([]);
 });
+
+const breadcrumbItemStyle = 'display:inline-flex;align-items:center;min-width:0';
+const breadcrumbTextStyle = 'display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+
+function mountBreadcrumb(items: string) {
+  mount(`<nav aria-label="面包屑导航">
+    <ol data-slot="breadcrumb-list" style="display:flex;align-items:center;gap:8px;list-style:none;margin:0;padding:0;font-size:14px;line-height:20px">
+      ${items}
+    </ol>
+  </nav>`);
+}
+
+function textCenter(selector: string): number {
+  const range = document.createRange();
+  range.selectNodeContents(host!.querySelector(selector)!);
+  const rect = range.getClientRects()[0];
+  return rect.top + rect.height / 2;
+}
+
+it('flags the 12px text offset inside a 44px block breadcrumb link', () => {
+  mountBreadcrumb(`
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}">
+      <a href="/orders" style="${breadcrumbTextStyle};min-height:44px">工单列表</a>
+    </li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}">
+      <span data-slot="breadcrumb-page" style="display:block">新建工单</span>
+    </li>
+  `);
+  expect(textCenter('[data-slot="breadcrumb-page"]') - textCenter('a')).toBeCloseTo(12, 1);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('breadcrumb-misaligned'))).toHaveLength(1);
+});
+
+it('accepts centered breadcrumb links with truncated inner text and a plain ancestor', () => {
+  mountBreadcrumb(`
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}"><span>管理</span></li>
+    <li data-slot="breadcrumb-separator" aria-hidden="true"><span style="position:relative;top:8px">›</span></li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle};max-width:80px">
+      <a href="/orders" style="display:inline-flex;align-items:center;min-height:44px;min-width:0">
+        <span style="${breadcrumbTextStyle};min-width:0" title="很长的工单列表名称需要省略">很长的工单列表名称需要省略</span>
+      </a>
+    </li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}">
+      <span data-slot="breadcrumb-page" style="display:block">新建工单</span>
+    </li>
+  `);
+  const label = host!.querySelector<HTMLElement>('a span')!;
+  expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
+  expect(textCenter('[data-slot="breadcrumb-page"]') - textCenter('a span')).toBeCloseTo(0, 1);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('breadcrumb-misaligned'))).toEqual([]);
+});
+
+it('flags a misaligned visible layout-only ancestor without requiring a link', () => {
+  mountBreadcrumb(`
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}">
+      <span style="display:block;min-height:44px">规则配置中心</span>
+    </li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}">
+      <span data-slot="breadcrumb-page">新建价格</span>
+    </li>
+  `);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('breadcrumb-misaligned'))).toHaveLength(1);
+});
+
+it('ignores hidden ancestors and screen-reader-only text when aligning visible breadcrumbs', () => {
+  mountBreadcrumb(`
+    <li data-slot="breadcrumb-item" style="display:none"><a href="/owner" style="display:block;min-height:44px">后台管理</a></li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}">
+      <a href="/orders" style="display:inline-flex;align-items:center;min-height:44px">
+        <span class="sr-only" style="position:absolute;top:0;left:0">返回上级</span>
+        <span style="visibility:hidden;position:absolute;top:0">隐藏说明</span>
+        <span>工单列表</span>
+      </a>
+    </li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}"><span data-slot="breadcrumb-page">新建工单</span></li>
+  `);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('breadcrumb-misaligned'))).toEqual([]);
+});
+
+it.each([[2, 0], [3, 1]])('allows at most 2px between breadcrumb text centers: %ipx', (offset, issueCount) => {
+  mountBreadcrumb(`
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}"><span>工单列表</span></li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}">
+      <span data-slot="breadcrumb-page" style="position:relative;top:${offset}px">新建工单</span>
+    </li>
+  `);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('breadcrumb-misaligned'))).toHaveLength(issueCount);
+});
+
+it('flags cumulative drift across the full breadcrumb even when adjacent offsets are only 2px', () => {
+  mountBreadcrumb(`
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}"><span>工单列表</span></li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}"><span style="position:relative;top:2px">工单详情</span></li>
+    <li data-slot="breadcrumb-item" style="${breadcrumbItemStyle}"><span data-slot="breadcrumb-page" style="position:relative;top:4px">编辑工单</span></li>
+  `);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('breadcrumb-misaligned')))
+    .toEqual(['breadcrumb-misaligned:工单列表→编辑工单:dy4.0']);
+});
