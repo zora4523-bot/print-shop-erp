@@ -170,3 +170,18 @@ it('ignores numbers inside code and configuration blocks', () => {
   mount(`<code style="display:block;width:40px;overflow-wrap:anywhere;white-space:pre-wrap;font-size:16px">port=15432,5000</code>`);
   expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([]);
 });
+
+it('checks negative amounts and quantities that sit directly against a Chinese unit', () => {
+  mount(`<div style="width:40px;font-size:16px;line-height:24px"><span style="display:block;overflow-wrap:anywhere">¥ -1,999.00</span></div>
+    <div style="width:40px;font-size:16px;line-height:24px"><span style="display:block;overflow-wrap:anywhere">12,345件</span></div>`);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([
+    'number-split:span「-1,999.00」',
+    'number-split:span「12,345」',
+  ]);
+});
+
+it('still ignores hyphenated identifiers whose segments wrap', () => {
+  mount(`<p style="width:40px;overflow-wrap:anywhere;font-size:16px">GD-260824-001</p>
+    <p style="width:40px;overflow-wrap:anywhere;font-size:16px">e2e-sales-16d7ca8d-5532-40d8</p>`);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([]);
+});

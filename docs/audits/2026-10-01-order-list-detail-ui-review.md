@@ -104,6 +104,7 @@
 - 销售：`lib/order/sales-list-query.ts`、`SalesOrdersList.tsx`。
 - 共享：`components/ui/disclosure.tsx`（新增 `DisclosureIndicator`）、`components/ui-business/StatCard.tsx`；门禁 `tests/visual/ui-gates-geometry.ts` + 4 个正反例。
 - 验证：`pnpm lint`、`pnpm typecheck`、`pnpm check:architecture`、`pnpm test:backup` 通过；单测 743 个文件全部通过（全量跑时 6 个 `*.postgres.test.ts` 因与本机开发服务器争用同一副本库超时，换到无连接的独立副本后 17 项全过）；Browser Mode 全量 73 个文件 / 991 项通过；在审查服务器上逐项复核了修后渲染（1280 / 768 / 375）。
+- Codex（本机默认模型，只读）审查 7 个提交：UI 改动无问题；指出 `number-split` 把中文与连字符都当作词边界，「12,345件」「¥ -1,999.00」会被漏检。已改为只以 ASCII 字母数字与连字符编号为边界、负号计入数字，补 2 组正反例（门禁单测 16 项通过），并重新在全部管理端与销售端路由 × 6 视口探测。
 - 未做：E2E 与六视口页面门禁未在本机跑（需另建 E2E 隔离库），`tests/e2e/admin-workspace-filter.spec.ts` 的断言已同步改为「未计入：待核价 1 单」。
 
 ## 六、清理

@@ -229,7 +229,9 @@ export function collectGeometryIssues(): string[] {
   // 「¥」后的空格处换行，数字本身必须在同一行。只看像数量/金额的独立数字：
   // 带千分位或小数点，或不超过 8 位；工单号、电话、长地址里的数字串不算，
   // 代码 / 配置块里的数字（如 /owner/pigsty 的端口号）也不算。
-  const NUMBER_TOKEN = /(?<![\p{L}\p{N}_-])\d[\d,]*(?:\.\d+)?(?![\p{L}\p{N}_-])/gu;
+  // 边界只看 ASCII 字母数字与连字符编号：中文单位紧贴数字（「12,345件」）仍算数量，
+  // 负号属于数字（「¥ -1,999.00」）；「GD-260824-001」这类连字符编号整体排除。
+  const NUMBER_TOKEN = /(?<![A-Za-z0-9_]|[A-Za-z0-9_]-)-?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9_]|-[A-Za-z0-9])/g;
   const numberWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
@@ -245,8 +247,9 @@ export function collectGeometryIssues(): string[] {
     const text = numberNode.textContent ?? '';
     for (const match of text.matchAll(NUMBER_TOKEN)) {
       const token = match[0];
-      const quantityLike = /[,.]/.test(token) || token.length <= 8;
-      if (token.length < 2 || token.length > 15 || !quantityLike) continue;
+      const digits = token.replace(/^-/, '');
+      const quantityLike = /[,.]/.test(digits) || digits.length <= 8;
+      if (digits.length < 2 || digits.length > 15 || !quantityLike) continue;
       const range = document.createRange();
       range.setStart(numberNode, match.index);
       range.setEnd(numberNode, match.index + token.length);
