@@ -264,8 +264,9 @@ export async function listWorkerOrders(
               return {
                 ...workerOrderCard(order),
                 operationCount: currentJobs.length,
+                // 改版承接为 0 数量的任务（CARRIED）其工序已完成，同样计为已完成。
                 completedOperationCount: currentJobs.filter(
-                  (job) => job.status === 'COMPLETED',
+                  (job) => job.status === 'COMPLETED' || job.status === 'CARRIED',
                 ).length,
                 // 改版淘汰的真实生产仍保留提成，故汇总本人在该单的全部代次工资；
                 // amount 为 NULL 是待管理员补价，不计入。

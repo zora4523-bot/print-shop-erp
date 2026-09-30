@@ -421,6 +421,8 @@ describe('worker order list pagination', () => {
           // 改版淘汰的真实生产保留提成（DECISIONS 2026-09-28），但不计入当前代次步骤数。
           { workOrderVersion: 1, status: 'COMPLETED', wages: [{ amount: '5.00' }] },
           { workOrderVersion: 2, status: 'PENDING', wages: [] },
+          // 改版承接为 0 数量的任务，工序已完成。
+          { workOrderVersion: 2, status: 'CARRIED', wages: [] },
         ],
       },
       {
@@ -437,7 +439,7 @@ describe('worker order list pagination', () => {
     expect(query.select.productionJobs.where).toEqual({ workerId: worker.id });
     expect(query.select.productionJobs.select.wages.where).toEqual({ workerId: worker.id });
     expect(result.rows.map((row) => [row.id, row.pieceworkAmount, row.completedOperationCount, row.operationCount])).toEqual([
-      ['simple', '17.30', 1, 2],
+      ['simple', '17.30', 2, 3],
       ['legacy', '7.10', 1, 1],
     ]);
   });
