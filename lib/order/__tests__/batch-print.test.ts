@@ -12,7 +12,8 @@ vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: m.order }));
 vi.mock('@/lib/order/print-html', () => ({ buildPrintHtml: m.html }));
 vi.mock('@/lib/settings', () => ({ getSetting: async () => ({ name: 'Factory' }) }));
 vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: m.render }));
-vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifact: m.write, cleanupOldPdfArtifacts: vi.fn() }));
+vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifact: m.write, cleanupOldPdfArtifacts: vi.fn(),
+  PdfArtifactStorageError: class extends Error { constructor() { super('PDF artifact storage unavailable'); this.name = 'PdfArtifactStorageError'; } } }));
 vi.mock('@/lib/pdf/order-snapshot', () => ({ orderPdfSnapshotKey: (order: { id: string; version: number }) => `${order.id}:${order.version}` }));
 import { BatchPrintAccessError, BatchPrintSelectionError, requestBatchPrint, handleBatchPrintJob, batchPrintStatus, downloadBatchPrint } from '../batch-print';
 const payload = { actorId: 'admin', baseUrl: 'https://example.test', orders: [{ id: 'a', key: 'a:1' }, { id: 'b', key: 'b:1' }] };
@@ -149,3 +150,8 @@ it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError', 'TargetCloseEr
     expect(m.write).not.toHaveBeenCalled();
   },
 );
+
+it('classifies a raw cache write failure (ENOSPC) as storage infrastructure and rethrows it', async () => {
+  m.write.mockRejectedValueOnce(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }));
+  await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name: 'PdfArtifactStorageError' });
+});
