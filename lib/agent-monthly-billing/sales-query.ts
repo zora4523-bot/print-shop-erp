@@ -1,6 +1,10 @@
 import 'server-only';
-import { AgentMonthlyBillStatus, Role } from '@/generated/prisma/enums';
+import { Role } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
+
+import { paginationWindow, paginatedResult } from '@/lib/admin/table';
+import { agentBillWhere, parseAgentBillFilters, type AgentBillSearchParams } from './list-filter';
+import { summarizeAgentBills } from './list-summary';
 
 type Actor = { id: string; role: Role };
 const select = {
@@ -13,13 +17,20 @@ function scope(actor: Actor) {
   return { agentUserId: actor.id };
 }
 
-export async function listSalesMonthlyBills(actor: Actor, filter: { period?: string; status?: string } = {}) {
-  const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(filter.period ?? '') ? filter.period : undefined;
-  const status = Object.values(AgentMonthlyBillStatus).find((value) => value === filter.status);
-  return db.agentMonthlyBill.findMany({
-    where: { ...scope(actor), ...(period ? { period } : {}), ...(status ? { status } : {}) },
-    select, orderBy: [{ period: 'desc' }, { id: 'desc' }],
-  });
+export async function listSalesMonthlyBills(actor: Actor, filter: AgentBillSearchParams = {}) {
+  const parsed = parseAgentBillFilters(filter);
+  // Ownership always comes from the authenticated actor, never from query parameters.
+  const where = agentBillWhere({ ...parsed, ...scope(actor) });
+  return db.$transaction(async (tx) => {
+    const total = await tx.agentMonthlyBill.count({ where });
+    const window = paginationWindow(total, parsed.page, 30);
+    const rows = await tx.agentMonthlyBill.findMany({
+      where, select, orderBy: [{ period: 'desc' }, { id: 'desc' }],
+      skip: window.skip, take: window.take,
+    });
+    const summary = await summarizeAgentBills(tx, where);
+    return { ...paginatedResult(rows, total, window), summary };
+  }, { isolationLevel: 'RepeatableRead' });
 }
 
 export async function getSalesMonthlyBill(actor: Actor, id: string) {

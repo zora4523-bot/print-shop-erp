@@ -28,6 +28,7 @@ import {
   openAgentMonthlyBillExportArtifact,
 } from './export-artifact';
 import { isAgentBillPeriod } from './period';
+import { agentBillWhere } from './list-filter';
 
 const EXPORT_SCHEMA_VERSION = 1;
 const EXPORT_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -312,9 +313,7 @@ export async function requestAgentMonthlyBillExport(input: {
       const snapshotAt = await databaseClockNow(tx);
       const snapshotWhere: Prisma.AgentMonthlyBillWhereInput = {
         createdAt: { lte: snapshotAt },
-        ...(filter.period ? { period: filter.period } : {}),
-        ...(filter.status ? { status: filter.status } : {}),
-        ...(filter.agentUserId ? { agentUserId: filter.agentUserId } : {}),
+        ...agentBillWhere(filter),
       };
       const sourceRows = await tx.agentMonthlyBill.findMany({
         where: snapshotWhere,

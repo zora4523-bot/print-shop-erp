@@ -10,15 +10,14 @@ const { dbMock } = vi.hoisted(() => ({
   dbMock: {
     agentMonthlyBill: {
       aggregate: vi.fn(),
+      groupBy: vi.fn(),
       count: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
     },
     order: { count: vi.fn() },
     user: { findMany: vi.fn() },
-    $transaction: vi.fn(async (operations: Array<Promise<unknown>>) =>
-      Promise.all(operations),
-    ),
+    $transaction: vi.fn(),
   },
 }));
 
@@ -32,6 +31,8 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  dbMock.$transaction.mockImplementation((callback) => callback(dbMock));
+  dbMock.agentMonthlyBill.groupBy.mockResolvedValue([]);
   dbMock.agentMonthlyBill.aggregate.mockResolvedValue({
     _sum: { totalAmount: '321.00' },
     _count: { _all: 2 },

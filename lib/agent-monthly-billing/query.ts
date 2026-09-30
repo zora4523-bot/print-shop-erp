@@ -1,4 +1,6 @@
-import type { Prisma } from '../../generated/prisma/client';
+import { paginationWindow, paginatedResult } from '@/lib/admin/table';
+import { agentBillWhere } from './list-filter';
+import { summarizeAgentBills } from './list-summary';
 import {
   AgentMonthlyBillStatus,
   OrderBillingMode,
@@ -32,13 +34,11 @@ export async function listAgentMonthlyBills(
   if (filter.period) assertAgentBillPeriod(filter.period);
   const page = pageNumber(filter.page);
   const take = pageSize(filter.pageSize);
-  const where: Prisma.AgentMonthlyBillWhereInput = {
-    ...(filter.period ? { period: filter.period } : {}),
-    ...(filter.status ? { status: filter.status } : {}),
-    ...(filter.agentUserId ? { agentUserId: filter.agentUserId } : {}),
-  };
-  const [rows, total] = await db.$transaction([
-    db.agentMonthlyBill.findMany({
+  const where = agentBillWhere(filter);
+  return db.$transaction(async (tx) => {
+    const total = await tx.agentMonthlyBill.count({ where });
+    const window = paginationWindow(total, page, take);
+    const rows = await tx.agentMonthlyBill.findMany({
       where,
       select: {
         id: true,
@@ -55,18 +55,12 @@ export async function listAgentMonthlyBills(
         _count: { select: { items: true } },
       },
       orderBy: [{ period: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
-      skip: (page - 1) * take,
-      take,
-    }),
-    db.agentMonthlyBill.count({ where }),
-  ]);
-  return {
-    rows,
-    page,
-    pageSize: take,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / take)),
-  };
+      skip: window.skip,
+      take: window.take,
+    });
+    const summary = await summarizeAgentBills(tx, where);
+    return { ...paginatedResult(rows, total, window), summary };
+  }, { isolationLevel: 'RepeatableRead' });
 }
 
 export async function getAgentMonthlyBillDetail(id: string) {

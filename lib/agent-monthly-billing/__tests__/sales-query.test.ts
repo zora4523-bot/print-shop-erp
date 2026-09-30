@@ -1,11 +1,11 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
-const { findMany, findFirst } = vi.hoisted(() => ({ findMany: vi.fn(), findFirst: vi.fn() }));
+const { findMany, findFirst, count, groupBy } = vi.hoisted(() => ({ findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn(), groupBy: vi.fn() }));
 vi.mock('server-only', () => ({}));
-vi.mock('@/lib/db', () => ({ db: { agentMonthlyBill: { findMany, findFirst } } }));
+vi.mock('@/lib/db', () => { const db = { agentMonthlyBill: { findMany, findFirst, count, groupBy } }; return { db: { ...db, $transaction: (callback: (tx: typeof db) => unknown) => callback(db) } }; });
 import { getSalesMonthlyBill, listSalesMonthlyBills } from '../sales-query';
 const actor = { id: 'sales-a', role: Role.SALES };
-beforeEach(() => { findMany.mockReset().mockResolvedValue([]); findFirst.mockReset().mockResolvedValue(null); });
+beforeEach(() => { count.mockReset().mockResolvedValue(0); groupBy.mockReset().mockResolvedValue([]); findMany.mockReset().mockResolvedValue([]); findFirst.mockReset().mockResolvedValue(null); });
 it('uses monthly bills, constrains ownership and ignores malformed filters', async () => {
   await listSalesMonthlyBills(actor, { period: '2026-99', status: 'ISSUED' });
   expect(findMany.mock.calls[0][0].where).toEqual({ agentUserId: actor.id });
@@ -40,4 +40,17 @@ it('selects only customer-facing receipt facts and frozen item identity/status',
     orderStatusSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true,
     order: { select: { customName: true } },
   });
+});
+
+it('bounds pages and summarizes the complete owned result, not just the visible page', async () => {
+  count.mockResolvedValue(61);
+  groupBy.mockResolvedValue([{ status: 'CONFIRMED', _sum: { totalAmount: { toFixed: () => '100.10' } }, _count: { _all: 61 } }]);
+  const result = await listSalesMonthlyBills(actor, { page: '999999', agentUserId: 'foreign' });
+  expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { agentUserId: actor.id }, skip: 60, take: 30 }));
+  expect(groupBy).toHaveBeenCalledWith(expect.objectContaining({ where: { agentUserId: actor.id }, by: ['status'] }));
+  expect(result).toMatchObject({ page: 3, pageCount: 3, total: 61, summary: { CONFIRMED: { amount: '100.10', count: 61 }, PAID: { amount: '0.00', count: 0 } } });
+});
+it('denies a non-sales list before reading aggregates', async () => {
+  await expect(listSalesMonthlyBills({ id: 'admin', role: Role.ADMIN })).rejects.toThrow();
+  expect(count).not.toHaveBeenCalled();
 });

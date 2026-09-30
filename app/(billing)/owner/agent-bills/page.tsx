@@ -18,7 +18,7 @@ import {
   listAgentMonthlyBills,
 } from '@/lib/agent-monthly-billing/query';
 import { listRecentAgentMonthlyBillExports } from '@/lib/agent-monthly-billing/export';
-import { isAgentBillPeriod } from '@/lib/agent-monthly-billing/period';
+import { parseAgentBillFilters, type AgentBillSearchParams } from '@/lib/agent-monthly-billing/list-filter';
 import { GenerateAgentMonthlyBillsForm } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
 import { AgentMonthlyBillExportControls } from '@/components/business/agent-monthly-billing/AgentMonthlyBillExportControls';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -36,34 +36,12 @@ import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '代理商月度账单' };
 
-type PageProps = {
-  searchParams: Promise<{
-    period?: string;
-    status?: string;
-    agentUserId?: string;
-    page?: string;
-  }>;
-};
-
-function parseStatus(value: string | undefined): AgentMonthlyBillStatus | undefined {
-  return value &&
-    (Object.values(AgentMonthlyBillStatus) as string[]).includes(value)
-    ? (value as AgentMonthlyBillStatus)
-    : undefined;
-}
-
-function parsePage(value: string | undefined): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-}
+type PageProps = { searchParams: Promise<AgentBillSearchParams> };
 
 export default async function AgentMonthlyBillsPage({ searchParams }: PageProps) {
   const actor = await requirePermission('bill:view:all');
   const raw = await searchParams;
-  const period = raw.period && isAgentBillPeriod(raw.period) ? raw.period : undefined;
-  const status = parseStatus(raw.status);
-  const agentUserId = raw.agentUserId?.trim() || undefined;
-  const page = parsePage(raw.page);
+  const { period, status, agentUserId, page } = parseAgentBillFilters(raw);
   const [result, stats, accounts, recentExports] = await Promise.all([
     listAgentMonthlyBills({ period, status, agentUserId, page }),
     getAgentMonthlyBillingStats(),
@@ -86,6 +64,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         }
       />
 
+      <p className="text-sm text-muted-foreground">全部账期与外部销售的当前待收款、未出账工单。</p>
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard
           label="待收款"
@@ -165,6 +144,15 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
           清除筛选
         </FilterClearLink>
       </Form>
+
+      <section aria-label="筛选结果汇总" className="space-y-3">
+        <p className="text-sm text-muted-foreground">当前筛选结果 · {result.total} 张账单，汇总包含所有分页。</p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatCard label="草稿金额" value={formatMoney(result.summary.DRAFT.amount)} hint="未计入待收款" />
+          <StatCard label="待收款" value={formatMoney(result.summary.CONFIRMED.amount)} tone="warning" />
+          <StatCard label="已结清金额" value={formatMoney(result.summary.PAID.amount)} tone="success" />
+        </div>
+      </section>
 
       <AgentMonthlyBillExportControls
         requestKey={randomUUID()}
@@ -255,7 +243,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         pageCount={result.pageCount}
         total={result.total}
         pageSize={result.pageSize}
-        queryParams={{ period: raw.period, status: raw.status, agentUserId: raw.agentUserId }}
+        queryParams={{ period, status, agentUserId }}
       />
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <FileClock className="size-4" />

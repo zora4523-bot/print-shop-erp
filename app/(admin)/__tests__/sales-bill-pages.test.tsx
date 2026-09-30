@@ -24,11 +24,15 @@ const bill = {
     order: { customName: index === 0 ? null : '中秋礼盒' },
   })),
 };
+function listResult(rows: Array<typeof bill>, amounts = { DRAFT: '0.00', CONFIRMED: '0.00', PAID: '0.00' }) {
+  return { rows, total: rows.length, page: 1, pageSize: 30, pageCount: 1,
+    summary: Object.fromEntries(Object.entries(amounts).map(([status, amount]) => [status, { amount, count: 0 }])) };
+}
 beforeEach(() => {
   vi.resetAllMocks();
   permission.mockResolvedValue(actor);
   detail.mockResolvedValue(bill);
-  list.mockResolvedValue([]);
+  list.mockResolvedValue(listResult([]));
 });
 const renderDetail = async () => renderToStaticMarkup(await DetailPage({ params: Promise.resolve({ id: bill.id }) }));
 
@@ -104,12 +108,12 @@ it('returns not found when the scoped bill lookup finds no bill', async () => {
   await expect(renderDetail()).rejects.toThrow('NEXT_NOT_FOUND');
 });
 it('keeps DRAFT rows visibly provisional and totals DRAFT, CONFIRMED and PAID separately', async () => {
-  list.mockResolvedValue([
+  list.mockResolvedValue(listResult([
     { ...bill, id: 'draft-1', status: 'DRAFT', totalAmount: new Decimal('10.10') },
     { ...bill, id: 'draft-2', status: 'DRAFT', totalAmount: new Decimal('20.20') },
     { ...bill, id: 'confirmed', status: 'CONFIRMED', totalAmount: new Decimal('40.40') },
     { ...bill, id: 'paid', status: 'PAID', totalAmount: new Decimal('50.50') },
-  ]);
+  ], { DRAFT: '30.30', CONFIRMED: '40.40', PAID: '50.50' }));
   const html = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({ period: '2026-08' }) }));
   expect(html).toContain('统计范围：当前筛选结果');
   const cards = html.split('data-slot="dashboard-kpi"').slice(1).map((part) => part.split('</div></div>')[0]);
@@ -125,11 +129,11 @@ it('keeps DRAFT rows visibly provisional and totals DRAFT, CONFIRMED and PAID se
   expect(list).toHaveBeenCalledWith(actor, { period: '2026-08' });
 });
 it('uses the same sales-facing status names in the filter, the rows and the detail badge', async () => {
-  list.mockResolvedValue([
+  list.mockResolvedValue(listResult([
     { ...bill, id: 'draft', status: 'DRAFT' },
     { ...bill, id: 'confirmed', status: 'CONFIRMED' },
     { ...bill, id: 'paid', status: 'PAID' },
-  ]);
+  ]));
   const html = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({}) }));
   const options = html.match(/<option[^>]*>[^<]*<\/option>/g) ?? [];
   expect(options.map((option) => option.replace(/<[^>]+>/g, ''))).toEqual(['全部', '整理中', '待支付', '已结清']);
