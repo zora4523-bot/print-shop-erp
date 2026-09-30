@@ -45,7 +45,6 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
       <ReceiptNotice receipt={receipt} noun={receiptNoun} />
       <ScopedPageHeader
         title="新建采购单"
-        subtitle="创建采购单不会增加库存；到货后可分批收货。"
         back={{ href: '/owner/purchases', label: '返回采购单' }}
       />
 

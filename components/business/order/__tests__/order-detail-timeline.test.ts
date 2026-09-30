@@ -13,7 +13,7 @@ describe('orderCancelImpact', () => {
     ).toEqual([
       { label: '取消未开工的生产工序', value: '2 个' },
       { label: '进行中工序需人工收尾', value: '1 个' },
-      { label: '已报工记录保留金额快照', value: '3 个' },
+      { label: '已报工工资保留', value: '3 个' },
       { label: '外协单需人工处理', value: '1 单已发出或进行中' },
     ]);
   });

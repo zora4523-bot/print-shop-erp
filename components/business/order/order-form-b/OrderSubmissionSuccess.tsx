@@ -13,7 +13,7 @@ export type OrderSubmissionSuccessProps = {
   orderNumber: string;
   title?: string;
   statusLabel: string;
-  description: string;
+  description?: string;
   manualQuote?: boolean;
   primaryAction: OrderSubmissionSuccessAction;
   secondaryAction?: OrderSubmissionSuccessAction;
@@ -57,9 +57,9 @@ export function OrderSubmissionSuccess({
         >
           {statusLabel}
         </p>
-        <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-muted-foreground">
+        {description ? <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-muted-foreground">
           {description}
-        </p>
+        </p> : null}
       </div>
       <div
         className={cn(

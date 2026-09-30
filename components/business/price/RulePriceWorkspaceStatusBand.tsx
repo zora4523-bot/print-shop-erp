@@ -93,10 +93,12 @@ export function RulePriceWorkspaceStatusBand({
   }
 
   const status = {
-    CURRENT: ['当前生效', '用于之后的新工单计价。'],
+    CURRENT: ['当前生效', ''],
     SCHEDULED: ['等待生效', '计划版本生效前不能再发起调价。'],
     UNAVAILABLE: ['暂无生效价', '请在价格版本中检查。'],
   }[workspaceStatus];
+
+  const description = createDraftBlockedReason ?? status[1];
 
   return (
     <section
@@ -106,9 +108,7 @@ export function RulePriceWorkspaceStatusBand({
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge variant="secondary">{status[0]}</Badge>
-          <p className="text-sm text-muted-foreground">
-            {createDraftBlockedReason ?? status[1]}
-          </p>
+          {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
         </div>
         {createDraftEditor ? null : createDraftHref ? (
           <PriceWorkspaceLink

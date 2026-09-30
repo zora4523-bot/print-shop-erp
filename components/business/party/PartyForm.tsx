@@ -178,7 +178,7 @@ export function PartyForm(props: Props) {
             <TextField
               id="code"
               label="编码"
-              hint="大小写不敏感；修改前请确认外部对接影响。"
+              hint="大小写不敏感。"
               required
               disabled={pending}
               error={errs.code?.[0]}

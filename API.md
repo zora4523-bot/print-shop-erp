@@ -7,6 +7,10 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-10-01 导出展示名称
+
+月账单 XLSX 的工作表为“月账单 / 工单明细 / 跨月抵扣 / 收款回执”，外部销售账号、金额及日期列的取值边界不变；工单状态使用与账单页面相同的业务名称，未知状态不回显原始枚举。计件结算 XLSX 的前两表为“计件结算 / 报工明细”，工序、条目和单位使用业务名称；规则校验码连同结算/报工编号与工价版本放在独立“核验记录”表。已生成文件不重写，下载地址、权限、金额精度和源数据版本约束不变。
+
 ## 2026-09-30 外部销售账单与导出
 
 - `GET /api/sales/bills/export`：当前数据库校验的 `bill:view:self` 会话（仅 SALES）；接受 `period=YYYY-MM`、`status=DRAFT|CONFIRMED|PAID`，空值表示全部，非法值返回 400。账号范围强制来自会话，忽略传入 `agentUserId`；忽略 `page`，导出全部筛选结果而非当前分页。

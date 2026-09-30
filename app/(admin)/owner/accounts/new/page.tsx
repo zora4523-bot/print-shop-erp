@@ -16,7 +16,6 @@ export default async function NewAccountPage() {
     <FormPage>
       <PageHeader
         title="新建用户"
-        subtitle="新账号默认启用；师傅需选岗位，开机师傅还需选机器类型。"
         back={{ href: '/owner/accounts', label: '返回用户管理' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">

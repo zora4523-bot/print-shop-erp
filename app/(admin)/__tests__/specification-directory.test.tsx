@@ -20,7 +20,14 @@ it('三条路线分别展示，彩印不套用空白封尺寸且无写入口', a
   expect(html).toContain('迷你封50×80');
   expect(html).toContain('大号88×165');
   expect(html).toContain('专版烫金');
-  expect(html).toContain('尚未建立统一规格目录');
+  expect(html).not.toContain('暂无彩印规格');
+  expect(html).not.toContain('尚未建立统一规格目录');
   expect(html).not.toContain('<form');
   expect(html).not.toContain('<button');
+});
+it('无彩印产品时显示单一真实空态', async () => {
+  mocks.find.mockResolvedValue([]);
+  const html = renderToStaticMarkup(await SpecificationsPage());
+  expect(html.match(/>暂无彩印规格</g)).toHaveLength(1);
+  expect(html).not.toContain('尚未建立统一规格目录');
 });

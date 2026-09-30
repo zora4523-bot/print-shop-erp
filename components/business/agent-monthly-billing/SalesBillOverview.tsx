@@ -15,7 +15,7 @@ export function SalesBillOverview({ months, status }: { months: Month[]; status?
   return <section aria-labelledby="sales-bill-overview-title" className="min-w-0 space-y-3 rounded-xl border bg-card p-4">
     <div>
       <h2 id="sales-bill-overview-title" className="font-semibold">账期概览</h2>
-      <p className="mt-1 text-sm text-muted-foreground">我的全部账单，最近 {months.length} 个有账单的月份。</p>
+      <p className="mt-1 text-sm text-muted-foreground">全部账单 · 最近 {months.length} 个账期</p>
     </div>
     <ul aria-label="我的账期概览" className="grid min-w-0 gap-x-6 gap-y-1 lg:grid-cols-2">
       {months.map((month) => <li key={month.period} className="min-w-0">
@@ -33,7 +33,7 @@ export function SalesBillOverview({ months, status }: { months: Month[]; status?
       <span className="inline-flex items-center gap-1.5"><span aria-hidden className="size-2 rounded-full bg-info" />{statusRegistry.DRAFT.label}</span>
       <span className="inline-flex items-center gap-1.5"><span aria-hidden className="size-2 rounded-full bg-warning" />{statusRegistry.CONFIRMED.label}</span>
       <span className="inline-flex items-center gap-1.5"><span aria-hidden className="size-2 rounded-full bg-success" />{statusRegistry.PAID.label}</span>
-      <span>点击账期查看明细；{statusRegistry.DRAFT.label}金额未计入{statusRegistry.CONFIRMED.label}。</span>
+      <span>{statusRegistry.DRAFT.label}金额未计入{statusRegistry.CONFIRMED.label}。</span>
     </div>
   </section>;
 }

@@ -222,7 +222,7 @@ export function orderChangeReviewResultMessage(requestStatus: string): string {
   if (requestStatus === 'CANCELLED') {
     return '取消申请已批准，工单已取消。';
   }
-  return '修改申请已批准，工单已按最新规则更新。';
+  return '修改申请已批准。';
 }
 
 export async function reviewOrderChangeRequestWithRecovery(
@@ -712,7 +712,7 @@ function OrderChangePreviewFeedback({ previewPending, hasPreview, previewError, 
     <>
       {previewPending && !hasPreview ? (
         <p role="status" className="text-sm text-muted-foreground">
-          正在按当前价格规则生成审批预览…
+          正在核对修改后费用…
         </p>
       ) : null}
       {previewError ? (

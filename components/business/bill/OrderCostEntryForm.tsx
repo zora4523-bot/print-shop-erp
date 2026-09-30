@@ -103,7 +103,7 @@ export function OrderCostEntryForm({
             inputMode="decimal"
             step="0.01"
             min={isAdjustment ? undefined : '0.01'}
-            placeholder={isAdjustment ? '正数或负数冲正' : '必须大于 0'}
+            placeholder={isAdjustment ? '正数或负数，最多两位小数' : '必须大于 0'}
           />
         </label>
         <label className="space-y-1 text-sm">
@@ -143,9 +143,8 @@ export function OrderCostEntryForm({
         </label>
       </div>
       <p className="text-xs text-muted-foreground">
-        计件和外协成本由业务流水自动计入，这里不重复录入。
         {isSfCollect ? '顺丰到付工单不可录入物流费。' : ''}
-        普通成本必须为正数；更正时添加“成本调整”正数或负数，保留完整审计流水。同时填写数量和单价时，金额必须与两者乘积一致。
+        同时填写数量和单价时，金额须等于数量 × 单价。
       </p>
       <Button type="submit" disabled={pending} className="min-h-11">
         {pending ? '正在保存…' : '添加成本明细'}

@@ -105,7 +105,6 @@ export default async function OwnerNotificationsPage({
       />
       <PageHeader
         title="推送配置"
-        subtitle="管理企业微信通知目标、通知规则和投递记录。"
       />
 
       {mock ? (
@@ -119,7 +118,6 @@ export default async function OwnerNotificationsPage({
       <SmartBotConnectionPanel
         status={smartBotConnection.status}
         lastSeenAt={smartBotConnection.lastSeenAt}
-        mock={mock}
       />
 
       {recentFailures > 0 ? (
@@ -160,7 +158,6 @@ export default async function OwnerNotificationsPage({
           <TableEmptyState
             variant="compact"
             title="没有待人工处理的消息"
-            description="当前没有结果不明或自动重试已耗尽的投递。"
           />
         ) : (
           <TableScrollArea label="待人工处理的推送" className="rounded-xl border bg-card shadow-sm">
@@ -248,7 +245,6 @@ export default async function OwnerNotificationsPage({
           <TableEmptyState
             variant="compact"
             title="尚无推送日志"
-            description="规则触发或发送测试消息后，最近结果会显示在这里。"
           />
         ) : (
           <TableScrollArea label="最近推送日志" className="rounded-xl border bg-card shadow-sm">
@@ -320,7 +316,6 @@ function NotificationChannelsSection({ channels }: {
         <TableEmptyState
           variant="compact"
           title="尚未配置企业微信通知目标"
-          description="新建智能机器人通知目标并完成群绑定后，才能把通知规则投递到对应群。"
           action={
             <Link
               href="/owner/notifications/channels/new"
@@ -489,11 +484,9 @@ function NotificationRulesSection({ rules }: {
 function SmartBotConnectionPanel({
   status,
   lastSeenAt,
-  mock,
 }: {
   status: SmartBotConnectionStatus | null;
   lastSeenAt: Date | null;
-  mock: boolean;
 }) {
   const presentation = smartBotConnectionPresentation(status);
   return (
@@ -510,10 +503,9 @@ function SmartBotConnectionPanel({
             : '暂无心跳记录'}
         </span>
       </div>
-      <p className={presentation.danger ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>
+      {presentation.description ? <p className={presentation.danger ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>
         {presentation.description}
-        {mock ? ' 当前为测试模式，不会向企业微信真实发送。' : ''}
-      </p>
+      </p> : null}
     </div>
   );
 }
@@ -530,7 +522,7 @@ function smartBotConnectionPresentation(
     case 'CONNECTED':
       return {
         label: '已连接',
-        description: '后台处理进程已通过企业微信认证，可以接收群绑定消息并主动推送。',
+        description: '',
         badgeVariant: 'default',
         danger: false,
       };

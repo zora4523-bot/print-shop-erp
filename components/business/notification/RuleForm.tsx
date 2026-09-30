@@ -71,9 +71,6 @@ export function RuleForm({
         <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
           {notificationEventLabel(eventType)}
         </div>
-        <p className="text-xs text-muted-foreground">
-          事件类型固定，不可修改。
-        </p>
       </div>
 
       <div className="space-y-2">
@@ -130,17 +127,16 @@ export function RuleForm({
         {managementRole ? (
           <div className="rounded-md border bg-muted/20 px-3 py-3 text-sm">
             <p>
-              此事件固定路由到
+              接收人：
               <strong>
                 {managementRole === 'factoryConfirmer'
                   ? '工厂确认人'
                   : '老板'}
               </strong>
-              ，不使用本规则的群绑定。请到{' '}
+              {' · '}
               <Link href="/owner/settings" className="font-medium underline">
-                系统设置
-              </Link>{' '}
-              配置该角色的开关和接收群。
+                管理接收群
+              </Link>
             </p>
             {/* Preserve legacy bindings for rollback compatibility. Runtime
                 routing ignores them for managed events, and direct form
@@ -236,7 +232,7 @@ export function RuleForm({
           aria-label="启用此规则"
         />
         <span className="min-w-0 py-3">
-          启用此规则（关闭后此事件不再触发推送）
+          启用此规则
         </span>
       </label>
 

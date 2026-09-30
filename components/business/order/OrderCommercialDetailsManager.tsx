@@ -365,7 +365,6 @@ function PlateDetailEditor({
           </span>
           <Badge variant="outline">已移除（保留历史）</Badge>
         </div>
-        <p className="mt-1">移除操作人和原因已记录在工单价格修订与日志中。</p>
       </div>
     );
   }
@@ -515,6 +514,7 @@ export function OrderCommercialDetailsManager({
   const Heading = headingLevel === 3 ? 'h3' : 'h2';
   const Subheading = headingLevel === 3 ? 'h4' : 'h3';
   const scope = useContext(OrderEditorAuxiliaryContext);
+  const plateItems = items.filter((item) => item.independentPlateEligible || item.plateDetails.length > 0);
   const hasActiveEditor = scope?.mainBlocked || Object.values(scope?.entries ?? {}).some((entry) => entry.dirty || entry.pending);
   return (
     <section id="commercial-fees" className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -541,11 +541,11 @@ export function OrderCommercialDetailsManager({
         />
       </div>
 
-      <div className="space-y-3 border-t pt-4">
+      {!allowPlateDetailMaintenance || plateItems.length > 0 ? <div className="space-y-3 border-t pt-4">
         <Subheading className="text-sm font-semibold">按款式制版明细</Subheading>
         {allowPlateDetailMaintenance ? (
           <ol className="space-y-4">
-            {items.map((item) => (
+            {plateItems.map((item) => (
               <li key={item.id} className="space-y-3 rounded-lg border p-3">
                 <p className="text-sm font-medium">
                   #{item.sequence} · {item.name}
@@ -567,11 +567,7 @@ export function OrderCommercialDetailsManager({
                     priceRevision={priceRevision}
                     detail={null}
                   />
-                ) : (
-                  <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-                    该款式没有独立制版费：无烫金款不能录入；彩印烫金已包含在整款价中。
-                  </p>
-                )}
+                ) : null}
               </li>
             ))}
           </ol>
@@ -580,7 +576,7 @@ export function OrderCommercialDetailsManager({
             当前价格待管理员确认，请在上方“工厂核价确认”中直接填写制烫金版费；确认后才能维护逐款明细。
           </p>
         )}
-      </div>
+      </div> : null}
     </section>
   );
 }

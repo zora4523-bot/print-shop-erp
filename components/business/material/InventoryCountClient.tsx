@@ -579,13 +579,6 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
               className="mt-3"
             />
           ) : null}
-          <p className="mt-2 text-xs text-muted-foreground">
-            未录入的库位不会被改动；实盘数为 0 表示该库位全部盘亏。
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            提交时会带上你录入那一刻看到的账面数。如果这之后有人动过某个库位的库存，
-            那一行不会被过账，会点名要求重数，其余行照常过账。
-          </p>
         </div>
       </form>
     </section>

@@ -88,7 +88,6 @@ export default async function PieceworkSettlementPage({
 
       <PageHeader
         title="工序计件结算"
-        subtitle="按员工和日期查看计件工资。"
         actions={
           <div className="flex flex-wrap gap-2">
             <a
@@ -98,7 +97,7 @@ export default async function PieceworkSettlementPage({
               download
             >
               <Download className="mr-2 size-4" />
-              导出新账本
+              导出计件结算
             </a>
             <Link
               href="/owner/salary/daily"
@@ -139,9 +138,6 @@ export default async function PieceworkSettlementPage({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-semibold">待锁定报工</h2>
-              <p className="text-sm text-muted-foreground">
-                先核对数量和历史生产，再锁定当日已登记工资。
-              </p>
             </div>
             <LockPieceworkSettlementDayForm
               workDate={workDate}
@@ -153,7 +149,6 @@ export default async function PieceworkSettlementPage({
             <EmptyState
               icon={FileText}
               title={`${workDate} 没有待锁定报工`}
-              description="无需操作，或当日报工已全部锁定。"
             />
           ) : (
             <TableScrollArea label="待锁定报工明细" className="rounded-xl border bg-card shadow-sm">
@@ -217,7 +212,6 @@ export default async function PieceworkSettlementPage({
           <EmptyState
             icon={FileText}
             title={`${workDate} 暂无符合筛选的结算`}
-            description="锁定报工后，记录会显示在这里。"
           />
         ) : (
           <TableScrollArea label="已锁定计件结算" className="rounded-xl border bg-card shadow-sm">

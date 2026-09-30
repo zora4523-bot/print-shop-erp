@@ -88,7 +88,7 @@ export function UnknownNotificationActions({
             disabled={pending}
             trigger={
               <Button type="button" size="xs" variant="outline" disabled={pending}>
-                {retryPending ? '正在入队…' : '确认未送达并重发'}
+                {retryPending ? '正在安排重发…' : '确认未送达并重发'}
               </Button>
             }
             onConfirm={() => setActiveDecision('retry')}>

@@ -27,7 +27,7 @@ export const SampleExternalSalesField = forwardRef<HTMLSelectElement, {
           <option key={account.id} value={account.id}>{account.displayName} · {account.username}</option>
         ))}
       </NativeSelect>
-      <FieldError id={`${id}-sales-hint`} reservedLines={1} hint="工单归属所选外部销售并按外部销售结算。">
+      <FieldError id={`${id}-sales-hint`} reservedLines={1}>
         {error ?? undefined}
       </FieldError>
     </div>

@@ -142,6 +142,7 @@ function mount(
                 displayName: '外部销售张先生',
                 username: 'zhang',
               },
+              { id: 'sales-2', displayName: '外部销售张先生', username: 'zhang-new' },
             ],
             blockedReason: null,
           },
@@ -889,4 +890,27 @@ describe('administrator edit design', () => {
       await userEvent.keyboard('{Escape}');
     });
   }
+});
+
+
+it('shows account reassignment consequences only when the actual account changes', async () => {
+  mount();
+  await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('1100');
+  await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+  const review = page.getByRole('alertdialog', { name: '保存工单修改', exact: true });
+  await expect.element(review).toBeVisible();
+  await expect.element(review).not.toHaveTextContent('原账号将无法查看此工单');
+  await page.getByRole('button', { name: '再改改', exact: true }).click();
+  await page.getByText('工单信息', { exact: true }).click();
+  await page.getByRole('combobox', { name: '关联外部销售' }).selectOptions('sales-2');
+  expect(host.textContent).not.toContain('原账号将无法查看此工单');
+  await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+  await expect.element(review).toHaveTextContent('原账号将无法查看此工单');
+  const dialog = document.querySelector('[role="alertdialog"]')!;
+  expect(dialog.textContent?.match(/原账号将无法查看此工单/g)).toHaveLength(1);
+  expect(dialog.textContent).toContain('zhang-new');
+  expect(mocks.preview.mock.lastCall?.[0].fields.externalSalesUserId).toBe('sales-2');
+  expect(mocks.save).not.toHaveBeenCalled();
+  await page.getByRole('button', { name: '再改改', exact: true }).click();
+  expect(mocks.save).not.toHaveBeenCalled();
 });

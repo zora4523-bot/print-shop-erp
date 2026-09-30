@@ -870,7 +870,7 @@ function OrderForm({
     : localDraftSnapshot === LOCAL_DRAFT_STORAGE_UNAVAILABLE
       ? '浏览器暂时无法使用本地草稿；本次填写不会自动保存在本机。'
       : localDraftSnapshot && !storedLocalDraft
-        ? '本地旧草稿已损坏或版本过旧，已安全忽略。'
+        ? '旧草稿无法恢复，请重新填写。'
         : null;
   const localDraftStatusError = localDraftError ?? detectedLocalDraftError;
   const pendingState = resolveOrderFormPendingState({
@@ -901,7 +901,7 @@ function OrderForm({
       );
       if (!serialized) {
         draftFailureRef.current = 'unserializable';
-        setLocalDraftError('当前表单无法安全序列化，本地草稿未更新。');
+        setLocalDraftError('本机草稿未保存，请留在本页，检查填写内容后重试。');
         return false;
       }
       try {
@@ -2077,7 +2077,7 @@ function OrderForm({
             ? response.message
             : response.status === 'invalid'
               ? Object.values(response.fieldErrors).flat().join('；')
-              : '报价响应与当前工单不一致，请重试';
+              : '当前报价不可用，请重新报价。';
         setQuoteViews(
           Object.fromEntries(
             fieldIds.map((fieldId, index) => [
@@ -2744,7 +2744,6 @@ function OrderForm({
                       <FieldError
                         id="externalSalesUserId-hint"
                         reservedLines={1}
-                        hint="工单归属所选外部销售并按外部销售结算。"
                       >
                         {errors.externalSalesUserId?.message}
                       </FieldError>
@@ -3100,9 +3099,7 @@ function OrderForm({
                 ? localDraftStatusError
                 : lastLocalDraftSavedAt
                 ? `草稿已保存 ${formatLocalDraftTime(lastLocalDraftSavedAt)}`
-                : initialExternalPriceSnapshot
-                  ? `加工 v${initialExternalPriceSnapshot.processing.version} / 物流 v${initialExternalPriceSnapshot.logistics.version} · 草稿未保存`
-                  : '草稿未保存'
+                : '草稿未保存'
             }
             fieldErrors={externalFieldErrors}
             errorFocusRequest={errorFocusRequest}

@@ -124,12 +124,11 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
     expect(editable.frontFoilColors).toBe('金色');
     expect(editable.backFoilColors).toBe('红金');
     expect(html).toContain('现货大号');
-    expect(html).toContain('正反面烫金颜色');
     expect(html.match(/data-slot="checkbox"/g)).toHaveLength(2);
     expect(html).toContain('aria-label="选择款式 1：现货大号"');
     expect(html).toContain('aria-label="本次申请需要添加一款"');
-    expect(html).toContain('目录规格');
-    expect(html).toContain('规格只显示与当前计价路线、纸张和克重一致');
+    expect(html).toContain('选择要修改的款式');
+    expect(html).not.toContain('规格只显示与当前计价路线、纸张和克重一致');
     expect(html).not.toContain('class="size-4 shrink-0"');
     expect(html).not.toMatch(/<input[^>]*value="大号90×165"/);
     expect(html).not.toMatch(/产品表!C2|规格表!A4:C4/);

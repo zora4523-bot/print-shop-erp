@@ -279,7 +279,7 @@ export function AdminBreadcrumb() {
                     title={label}
                     render={<Link href={href} prefetch={false} />}
                   >
-                    <span className="min-w-0 truncate">{label}</span>
+                    <span className="min-w-0 truncate" title={label}>{label}</span>
                   </BreadcrumbLink>
                 ) : (
                   // Layout-only ancestor: not navigable AND not the

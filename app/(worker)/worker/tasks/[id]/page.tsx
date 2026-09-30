@@ -239,7 +239,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
             <Metric label="返工记录" value={progress.reworkQty} />
           </dl>
           <p className="mt-3 text-sm text-muted-foreground">
-            此步骤仅推进生产进度，不产生计件工资。
+            不计薪
           </p>
         </section>
 
@@ -350,7 +350,7 @@ function LegacyTaskDetail({
         eyebrow={<span className="font-sans tabular-nums">{task.orderItem.order.orderNo}</span>}
         status={<>{task.orderItem.order.isUrgent ? <UrgentBadge /> : null}<StatusBadge tone="neutral">历史任务</StatusBadge></>}
         title={`#${task.orderItem.sequence} · ${task.orderItem.name}`}
-        subtitle={`${task.craft.name} · 此记录来自旧派工流程，仅供查阅`}
+        subtitle={task.craft.name}
       />
       <section className="rounded-xl border bg-card p-4 text-sm shadow-sm">
         <h2 className="font-semibold">历史完工记录</h2>

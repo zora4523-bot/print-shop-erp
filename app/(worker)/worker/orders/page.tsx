@@ -37,15 +37,14 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
 
   return (
     <div className="min-w-0 space-y-4">
-      <PageHeader size="worker" title="我的工单" subtitle="展示与你固定计件岗位或共享无计件进度相关的工单。" className="worker-wrap-anywhere" />
+      <PageHeader size="worker" title="我的工单" className="worker-wrap-anywhere" />
 
       {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
       <Form id="worker-order-filters" key={JSON.stringify([sp.q ?? ''])} action="/worker/orders" className="flex flex-wrap gap-2 rounded-xl border bg-card p-3"><label className="min-w-0 flex-1"><span className="sr-only">工单号或名称</span><Input name="q" defaultValue={sp.q} maxLength={100} placeholder="工单号或名称" className="w-full" /></label><Button type="submit">搜索</Button>{sp.q && <FilterClearLink formId="worker-order-filters" href="/worker/orders" className="inline-flex min-h-11 items-center underline">清除筛选</FilterClearLink>}</Form>
       {orders.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title="暂无工序工单"
-          description="价格确认并生成对应工序后，工单会自动显示。"
+          title={sp.q ? '没有匹配的工单' : '暂无工单'}
         />
       ) : (
         <ul className="space-y-3">

@@ -68,7 +68,7 @@ test('同名大表哥账号：未出账定位、排行、操作与销售隔离',
   expect(secondBill.total).toBe(secondFee);
   for (const bill of bills) {
     await page.goto(`/owner/agent-bills/${bill.id}`);
-    await page.getByRole('button', { name: '确认并冻结账单', exact: true }).click();
+    await page.getByRole('button', { name: '确认账单', exact: true }).click();
     await expect(page.getByRole('button', { name: '标记已收', exact: true })).toBeVisible();
   }
   await page.goto('/owner/agent-bills');
@@ -92,8 +92,8 @@ test('同名大表哥账号：未出账定位、排行、操作与销售隔离',
     const sales = await salesContext.newPage();
     sales.on('pageerror', (error) => errors.push(error.message));
     await login(sales, { username: first.agentUsername, password: E2E_PASSWORD, from: `/sales/bills?period=${first.period}&agentUserId=${second.agentUserId}` });
-    await expect(sales.getByRole('region', { name: '我的月账单' })).toContainText(formatMoney(firstFee));
-    await expect(sales.getByRole('region', { name: '我的月账单' })).not.toContainText(formatMoney(secondFee));
+    await expect(sales.getByRole('region', { name: '我的月账单', exact: true })).toContainText(formatMoney(firstFee));
+    await expect(sales.getByRole('region', { name: '我的月账单', exact: true })).not.toContainText(formatMoney(secondFee));
     await sales.goto(`/sales/bills/${secondBill.id}`);
     await expect(sales.getByRole('heading', { name: '找不到这个页面，或你没有访问权限', exact: true })).toBeVisible();
     expect((await sales.request.get(`/api/owner/agent-bills/${secondBill.id}`)).status()).toBe(401);

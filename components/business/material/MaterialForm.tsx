@@ -137,7 +137,7 @@ export function MaterialForm(props: Props) {
         <TextField
           id="code"
           label="物料编码"
-          hint="大小写不敏感；修改前请确认对库存对接的影响。"
+          hint="大小写不敏感。"
           required
           disabled={pending}
           error={errs.code?.[0]}

@@ -52,7 +52,6 @@ export function TestChannelButton({
         variant="secondary"
         pending={pending}
         pendingLabel="正在发送…"
-        title="发送测试消息（测试模式下不会实际发送）"
         onClick={() => {
           setResult(null);
           startTransition(async () => {

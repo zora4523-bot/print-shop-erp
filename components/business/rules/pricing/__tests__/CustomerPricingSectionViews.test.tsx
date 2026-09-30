@@ -85,7 +85,7 @@ describe('CustomerPricingSectionViews', () => {
     expect(text).toContain('局部烫金 · 机烫费与制版费');
     expect(text).toContain('制烫金版费');
     expect(text).toContain('默认 0 元 · 可人工添加');
-    expect(text).toContain('版费默认 0 元');
+    expect(text).not.toContain('版费默认 0 元');
     expect(html).not.toContain('aria-label="价格参数"');
     expect(html).not.toContain('value="999.99"');
     expect(text).not.toContain('元/版');
@@ -276,4 +276,14 @@ describe('CustomerPricingSectionViews', () => {
       inputMarkup(html, '单色烫金1千档含版费套餐价'),
     ).toContain('value="200"');
   });
+});
+
+
+it.each([500, 1500])('renders the configured threshold %i without a contradictory fixed example', (threshold) => {
+  const html = renderToStaticMarkup(<CustomerMachinePricingSectionView rate={field('rate', '0.06')} flatFee={field('flat', '33')} jumpQuantity={field('jump', threshold)} plateFee={field('plate', 0)} />);
+  expect(html).toContain(`value="${threshold}"`);
+  expect(html).toContain('value="0.06"');
+  expect(html).toContain('value="33"');
+  expect(visibleText(html)).toContain('数量 ≥ 跳变点');
+  expect(visibleText(html)).not.toMatch(/999|1,000|1000|示例/);
 });

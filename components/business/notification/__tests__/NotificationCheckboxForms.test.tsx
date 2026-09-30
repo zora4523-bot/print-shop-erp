@@ -56,7 +56,8 @@ describe('notification form checkbox contracts', () => {
     expect(html).not.toContain('<select');
     expect(html).not.toContain('WECOM_GROUP_WEBHOOK');
     expect(html).not.toContain('name="webhookUrl"');
-    expect(html).toContain('先保存通知目标，再生成绑定码');
+    expect(html).toContain('绑定后可启用');
+    expect(html).not.toContain('先保存通知目标，再生成绑定码');
   });
 
   it('allows an already-bound smart-bot target to keep its active state', () => {
@@ -78,8 +79,8 @@ describe('notification form checkbox contracts', () => {
 
     expect(html).toContain('value="企业微信群"');
     expect(html).toContain('name="transport" value="WECOM_SMART_BOT"');
-    expect(html).toContain('已绑定群聊');
-    expect(html).toContain('••••a1b2');
+    expect(html).not.toContain('已绑定群聊');
+    expect(html).not.toContain('••••a1b2');
     expect(html).toContain('aria-checked="true"');
     expect(checkboxRoots(html)[0]).not.toContain('data-disabled=""');
   });

@@ -24,7 +24,7 @@ export function OrderExternalSalesField({ association, disabled, error }: {
         disabled={disabled || Boolean(blockedReason)}
         required
         aria-invalid={Boolean(error)}
-        aria-describedby={`external-sales-hint${error ? ' external-sales-error' : ''}`}
+        aria-describedby={[blockedReason ? 'external-sales-hint' : '', error ? 'external-sales-error' : ''].filter(Boolean).join(' ') || undefined}
         className="w-full"
       >
         {!current ? <option value="">不适用</option> : null}
@@ -39,9 +39,7 @@ export function OrderExternalSalesField({ association, disabled, error }: {
           </option>
         ))}
       </NativeSelect>
-      <p id="external-sales-hint" className="text-xs text-muted-foreground">
-        {blockedReason ?? '保存后工单及后续对账归属所选账号，原账号将无法查看此工单。'}
-      </p>
+      {blockedReason ? <p id="external-sales-hint" className="text-xs text-muted-foreground">{blockedReason}</p> : null}
       {error ? <p id="external-sales-error" className="text-xs text-destructive">{error}</p> : null}
     </div>
   );

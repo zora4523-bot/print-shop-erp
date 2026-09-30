@@ -137,9 +137,6 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <div>
             <h2 className="text-base font-semibold">外协金额确认</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              可在回货后补录最终金额；后续更正会保留原金额、新金额、原因和操作人。
-            </p>
           </div>
           <OutsourceAmountForm
             id={row.id}
@@ -180,9 +177,6 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card shadow-sm">
         <div className="border-b px-4 py-3 sm:px-6">
           <h2 className="text-base font-semibold">外协付款</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            仅记录工厂向外协厂支付的加工费，不进入销售账单或员工工资。
-          </p>
         </div>
 
         <dl className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">

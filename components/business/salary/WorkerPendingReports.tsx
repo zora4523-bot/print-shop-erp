@@ -15,7 +15,6 @@ export async function WorkerPendingReports({ actor, from, to, page }: {
   return <section aria-labelledby="pending-reports-heading" className="min-w-0 space-y-3">
     <h2 id="pending-reports-heading" className="font-semibold">未结算报工（{result.total}）</h2>
     {result.total === 0 ? <p className="text-sm text-muted-foreground">所选日期没有未结算报工。</p> : <>
-      <p className="text-sm text-muted-foreground">以下为本人报工及调整明细，待核定金额以管理员核定为准。</p>
       <ul className="space-y-3">{result.rows.map((row) => <li key={row.id} className="min-w-0 space-y-2 rounded-xl border bg-card p-4 text-sm">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <p className="worker-wrap-anywhere min-w-0 font-medium">{row.operation.order.orderNo} · {operations[row.operation.operationType]}</p>

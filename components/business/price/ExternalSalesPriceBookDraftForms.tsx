@@ -569,9 +569,6 @@ export function CreateCustomerPriceBookDraftForm({
             changeReasonHintId,
           )}
         />
-        <p id={changeReasonHintId} className="text-xs text-muted-foreground">
-          用于调价记录。
-        </p>
         <FieldErrorMessages
           id={changeReasonErrorId}
           messages={errors.changeReason}

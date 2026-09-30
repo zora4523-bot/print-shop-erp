@@ -178,7 +178,6 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
         {canStartNextBatch ? <Button type="button" variant="outline" onClick={startNextBatch}>开始新一批</Button> : null}
         <span className="text-sm text-muted-foreground">已完成 {entries.filter((entry) => entry.done).length} / {entries.length} 张</span>
       </div>
-      <p className="text-xs text-muted-foreground">每张工单独立填写地址、设计款和费用，逐张核对后创建。创建成功后继续下一张。</p>
       <nav aria-label="待建工单" className="flex flex-wrap gap-2">
         {entries.map((entry, index) => <Button key={entry.id} type="button" variant={entry.id === activeId ? 'selected' : 'outline'}
           disabled={(leave.pending || (!showResult && navigationLocked)) && entry.id !== activeId} aria-pressed={entry.id === activeId}

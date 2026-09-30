@@ -87,10 +87,8 @@ export function SalaryRuleSettingsForm({
 
       <div className="rounded-lg border bg-muted/20 p-3 text-sm">
         <p className="font-medium">{selected.label}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{selected.description}</p>
         <p className="mt-2 text-xs text-muted-foreground">
           当前版本：{current ? `自 ${formatDateTime(current.effectiveFrom)} 起生效` : '尚未配置'}。
-          已生成的工资不受影响，仍按生成时的规则计算。
         </p>
       </div>
 
@@ -119,7 +117,6 @@ export function SalaryRuleSettingsForm({
       ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>{pending ? '正在保存…' : '保存新规则版本'}</Button>
-        <span className="text-xs text-muted-foreground">保存会自动关闭相交的上一版本，不会修改历史工资单。</span>
       </div>
     </form>
   );

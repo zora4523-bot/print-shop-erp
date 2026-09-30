@@ -222,10 +222,6 @@ export function CreateBundleForm({
                 >
                   打开下载链接
                 </Button>
-                <p className="text-xs text-muted-foreground">
-                  {formatDateTimeShanghai(new Date(state.expiresAt))} 过期。复制上方完整
-                  URL 发给外协。
-                </p>
               </div>
             }
           />

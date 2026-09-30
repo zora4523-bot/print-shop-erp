@@ -196,9 +196,6 @@ function EditorFeesSection({
         <Disclosure className="rounded-xl border bg-card">
           <DisclosureSummary className="px-4 py-3">核对自动报价与待核费用</DisclosureSummary>
           <div className="border-t p-4">
-            <p className="text-xs text-muted-foreground">
-              人工费用单独核定，完成后页面将读取最新金额。请先保存其他修改。
-            </p>
 
             <OrderPricingReviewForm
               key={`${order.revision}:${order.editVersion}`}

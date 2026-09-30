@@ -36,8 +36,8 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await expect(page.locator(`a[href="/orders/${source.orderId}"]`)).toBeVisible();
   const sourceId = await generate(source.period);
   await page.getByRole('link', { name: '详情', exact: true }).click();
-  await expect(page.getByText('草稿金额（未定稿）', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '确认并冻结账单', exact: true }).click();
+  await expect(page.getByText('整单金额（未定稿）', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '确认账单', exact: true }).click();
   await expect(page.getByRole('button', { name: '标记已收', exact: true })).toBeVisible();
   await page.getByLabel('收款方式', { exact: true }).fill('测试转账');
   await page.getByRole('button', { name: '标记已收', exact: true }).click();
@@ -46,12 +46,12 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await page.getByLabel(/^抵扣金额/).fill('30.00');
   await page.getByLabel('原因', { exact: true }).fill('仅管理员可见的质量调整');
   await page.getByRole('button', { name: '录入抵扣', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('已记录负项');
+  await expect(page.getByRole('status')).toContainText('抵扣已记录');
   await expect(page.getByLabel(/^抵扣金额/)).toHaveAccessibleName(/70\.00/);
   const targetId = await generate(target.period);
   await page.goto(`/owner/agent-bills/${targetId}`);
   await expect(page.getByText('本月抵扣明细')).toBeVisible();
-  await page.getByRole('button', { name: '确认并冻结账单', exact: true }).click();
+  await page.getByRole('button', { name: '确认账单', exact: true }).click();
   await expect(page.getByRole('heading', { name: '收款记录', exact: true })).toBeVisible();
   await expect(page.getByText('零元自动结清')).toBeVisible();
   await withDb(async (db) => {

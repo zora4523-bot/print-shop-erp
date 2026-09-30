@@ -60,7 +60,6 @@ export default async function ForemanCdrPage({
     <div className="space-y-6">
       <PageHeader
         title="CDR 汇总下载"
-        subtitle="按日期选择工单，生成 24 小时有效的外协下载链接。"
       />
 
       {mock ? (
@@ -97,10 +96,6 @@ export default async function ForemanCdrPage({
           />
         </Suspense>
       </ErrorBoundary>
-
-      <p className="text-xs text-muted-foreground">
-        提示：生成下载包后请尽快发送外协。链接 24 小时后自动失效，过期需重新生成。
-      </p>
     </div>
   );
 }
