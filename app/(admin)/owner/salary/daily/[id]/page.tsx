@@ -66,7 +66,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
             <a
               href={`/api/salary/piecework/export?date=${salaryDateKey}&workerId=${salary.workerId}`}
               className={buttonVariants({ variant: 'outline' })}
-            
+
               download
             >
               导出 Excel

@@ -219,7 +219,7 @@ describe('administrator edit design', () => {
       it(`${width}×${height} ${theme}: usable controls and no overflow`, async () => {
         await page.viewport(width, height);
         document.documentElement.classList.toggle('dark', theme === 'dark');
-        mount();
+        mount({ foilColors: ['亚金', '红色'], items: [{ ...item, frontFoilColors: ['哑金', '亚金'] }] });
         await expect
           .element(page.getByRole('heading', { name: '编辑工单', exact: true }))
           .toBeVisible();
@@ -589,6 +589,45 @@ describe('administrator edit design', () => {
         frontFoilColors: ['亚金', '红色'], backFoilColors: [],
       },
     ]);
+  });
+
+  it('does not offer another alias for a saved color and keeps name-only updates color-free', async () => {
+    mount({ foilColors: ['亚金', '红色'], items: [{ ...item, frontFoilColors: ['哑金'] }] });
+    const front = page.getByRole('group', { name: '第 1 款正面烫金', exact: true });
+    await expect.element(front.getByRole('button', { name: '哑金', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect.element(front.getByRole('button', { name: '亚金', exact: true })).not.toBeInTheDocument();
+    await page.getByRole('textbox', { name: '第 1 款名称', exact: true }).fill('更正款名');
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
+    expect(mocks.preview.mock.calls[0][0].items).toEqual([
+      { operation: 'UPDATE', itemId: 'item-1', name: '更正款名' },
+    ]);
+  });
+
+  it('preserves historical aliases until one is explicitly removed with the keyboard', async () => {
+    mount({ foilColors: ['亚金', '红色'], items: [{ ...item, frontFoilColors: ['哑金', '亚金'] }] });
+    const front = page.getByRole('group', { name: '第 1 款正面烫金', exact: true });
+    const old = front.getByRole('button', { name: '哑金', exact: true });
+    await expect.element(old).toHaveAttribute('aria-pressed', 'true');
+    await expect.element(front.getByRole('button', { name: '亚金', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    (old.element() as HTMLButtonElement).focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(old).not.toBeInTheDocument();
+    await expect.element(front.getByRole('button', { name: '亚金', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
+    expect(mocks.preview.mock.calls[0][0].items[0]).toMatchObject({ frontFoilColors: ['亚金'], backFoilColors: [] });
+  });
+
+  it('disambiguates saved aliases whose display labels collide and removes only the chosen spelling', async () => {
+    mount({ foilColors: ['红色', '红金', '亚金'], items: [{ ...item, frontFoilColors: ['红色', '红金'] }] });
+    const front = page.getByRole('group', { name: '第 1 款正面烫金', exact: true });
+    await expect.element(front.getByRole('button', { name: '红色', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect.element(front.getByRole('button', { name: '红金', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await front.getByRole('button', { name: '红色', exact: true }).click();
+    await page.getByRole('button', { name: '保存修改…', exact: true }).click();
+    await expect.poll(() => mocks.preview.mock.calls.length).toBe(1);
+    expect(mocks.preview.mock.calls[0][0].items[0]).toMatchObject({ frontFoilColors: ['红金'], backFoilColors: [] });
   });
 
   it('keeps recorded foil visible when it is absent from the current catalog and does not rewrite it', async () => {

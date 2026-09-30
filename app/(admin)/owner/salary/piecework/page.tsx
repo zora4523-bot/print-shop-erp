@@ -93,7 +93,7 @@ export default async function PieceworkSettlementPage({
             <a
               href={`/api/salary/piecework-settlements/export?from=${workDate}&to=${workDate}`}
               className={buttonVariants({ variant: 'outline' })}
-            
+
               download
             >
               <Download className="mr-2 size-4" />

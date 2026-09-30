@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { OrderItemPricingRoute } from '@/generated/prisma/enums';
 import type { OrderChangeCatalogProduct } from '@/lib/order/change-request-catalog-identity';
+import { createOrderChangeRequestSchema } from '@/lib/auth/schemas';
 
 vi.mock('@/actions/order', () => ({
   createOrderChangeRequestAction: vi.fn(),
@@ -54,6 +55,32 @@ const catalogProducts: OrderChangeCatalogProduct[] = [
 ];
 
 describe('OrderChangeRequestForm 业务语言投影', () => {
+  it.each([{ colors: ['哑金'] }, { colors: ['哑金', '亚金'] }, { colors: ['红色', '红金'] }])(
+    '历史颜色 $colors 只改名时省略颜色并通过命令校验', ({ colors }) => {
+      const item = { ...sourceItem, frontFoilColors: colors, foilColors: colors, backFoilColors: [] };
+      const editable = createOrderChangeEditableItem(item);
+      editable.selected = true;
+      editable.name = '修改后的款名';
+      const items = buildSelectedOrderItemChanges([item], { [item.id]: editable });
+      expect(items[0]).not.toHaveProperty('frontFoilColors');
+      expect(items[0]).not.toHaveProperty('backFoilColors');
+      expect(createOrderChangeRequestSchema.safeParse({
+        orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+        type: 'MODIFY', modifyKind: 'OTHER', reason: '核对名称', items,
+      }).success).toBe(true);
+    },
+  );
+
+  it('用户明确换成另一别名仍发送颜色字段', () => {
+    const item = { ...sourceItem, frontFoilColors: ['哑金'] };
+    const editable = createOrderChangeEditableItem(item);
+    editable.selected = true;
+    editable.frontFoilColors = '亚金';
+    expect(buildSelectedOrderItemChanges([item], { [item.id]: editable })[0]).toMatchObject({
+      frontFoilColors: ['亚金'], backFoilColors: ['红金'],
+    });
+  });
+
   it('用工单版本和款式事实建立稳定的草稿身份', () => {
     const input = {
       orderId: 'order-1',
@@ -208,8 +235,6 @@ describe('OrderChangeRequestForm 业务语言投影', () => {
         itemId: 'item-2',
         name: sourceItem.name,
         quantity: 2_500,
-        frontFoilColors: ['金色'],
-        backFoilColors: ['红金'],
       },
     ]);
     expect(

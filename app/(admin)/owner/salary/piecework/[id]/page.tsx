@@ -73,7 +73,7 @@ export default async function PieceworkSettlementDetailPage({
             <a
               href={`/api/salary/piecework-settlements/export?from=${workDate}&to=${workDate}&workerId=${settlement.reporterId}`}
               className={buttonVariants({ variant: 'outline' })}
-            
+
               download
             >
               导出计件结算
