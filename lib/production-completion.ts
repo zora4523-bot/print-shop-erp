@@ -157,6 +157,85 @@ function blocked(
   return { completed: false, blockedBy: reason, uncoveredItems };
 }
 
+/**
+ * 必需外协这一段完成条件（缺单 / 未收货 / 款式数量覆盖不足）。
+ * maybeCompleteProductionOrder 与发货闸口（lib/order.ts
+ * assertShipOrderReadinessInTx）共用同一份判定：旧扫码模式的打包工序
+ * 首次报工就会把工单推进到 PACKING，完成闸口被外协挡住时工单仍停在
+ * PACKING，发货闸口若只看「在途外协」就会放行缺外协的工单。
+ * 返回 null 表示外协条件已满足或不适用（requiresOutsource 快照为假）。
+ */
+export async function findRequiredOutsourceBlocker(
+  tx: Pick<ProductionCompletionTx, 'outsourceOrder' | 'orderItem' | 'craft'>,
+  orderId: string,
+  order: { requiresOutsource?: boolean },
+): Promise<ProductionCompletionOutcome | null> {
+  if (!outsourceCoverageApplies(order)) return null;
+  // where 里的 orderId 同时解决了 OutsourceOrder.orderId 可空的问题：
+  // 别的工单的、以及没挂工单的外协单都不会进这个集合，所以下面的覆盖集
+  // 只由「本工单的未取消外协单」构成。覆盖判定必须复用这一份结果，不要
+  // 另开一次查询。
+  const outsourceOrders = await tx.outsourceOrder.findMany({
+    where: { orderId, status: { not: OutsourceStatus.CANCELLED } },
+    select: {
+      id: true,
+      status: true,
+      orderItemIds: true,
+      itemSnapshots: {
+        select: { orderItemId: true, quantity: true },
+      },
+    },
+  });
+  if (outsourceOrders.length === 0) return blocked('OUTSOURCE_MISSING');
+  if (
+    !outsourceOrders.every((row) => row.status === OutsourceStatus.RECEIVED)
+  ) {
+    return blocked('OUTSOURCE_NOT_RECEIVED');
+  }
+
+  // 款式级数量覆盖校验（业主仍接受「款式」而非「款式 × 工艺」）。
+  // 放在「全部收货」之后，但刻意放在 INTERNAL_TASKS 之前：最后一张
+  // 外协单收货时就要把缺口告诉主管，不能等到内部任务全部完工。
+  const items = await tx.orderItem.findMany({
+    where: { orderId },
+    select: {
+      id: true,
+      sequence: true,
+      name: true,
+      quantity: true,
+      crafts: true,
+    },
+  });
+  const craftIds = [...new Set(items.flatMap((item) => item.crafts))];
+  // 按 id 取字典再在 JS 里筛 isOutsource（而不是 where isOutsource:
+  // true 扫全表）：in 列表被本工单的工艺数收敛住。
+  // **不加 isActive 过滤**——历史工单引用的
+  // 已停用工艺仍然要参与判定，同 getOrderDetail 解析工艺名的理由。
+  const crafts =
+    craftIds.length === 0
+      ? []
+      : await tx.craft.findMany({
+          where: { id: { in: craftIds } },
+          select: { id: true, isOutsource: true },
+        });
+  const uncovered = findUndercoveredOutsourceItems(
+    items,
+    collectOutsourceCraftIds(crafts),
+    outsourceOrders,
+  );
+  if (uncovered.length > 0) {
+    return blocked(
+      'OUTSOURCE_COVERAGE',
+      uncovered.map((item) => ({
+        id: item.id,
+        sequence: item.sequence,
+        name: item.name,
+      })),
+    );
+  }
+  return null;
+}
+
 export async function maybeCompleteProductionOrder(
   tx: ProductionCompletionTx,
   orderId: string,
@@ -260,70 +339,8 @@ export async function maybeCompleteProductionOrder(
   // 与 getOrderDetail 的「暂不能完工」横幅共用同一个前置谓词。不共用会
   // 出现「页面说不能完工、闸口其实照样完工」的反向漂移。
   const coverageApplies = outsourceCoverageApplies(order);
-  if (coverageApplies) {
-    // where 里的 orderId 同时解决了 OutsourceOrder.orderId 可空的问题：
-    // 别的工单的、以及没挂工单的外协单都不会进这个集合，所以下面的覆盖集
-    // 只由「本工单的未取消外协单」构成。覆盖判定必须复用这一份结果，不要
-    // 另开一次查询。
-    const outsourceOrders = await tx.outsourceOrder.findMany({
-      where: { orderId, status: { not: OutsourceStatus.CANCELLED } },
-      select: {
-        id: true,
-        status: true,
-        orderItemIds: true,
-        itemSnapshots: {
-          select: { orderItemId: true, quantity: true },
-        },
-      },
-    });
-    if (outsourceOrders.length === 0) return blocked('OUTSOURCE_MISSING');
-    if (
-      !outsourceOrders.every((row) => row.status === OutsourceStatus.RECEIVED)
-    ) {
-      return blocked('OUTSOURCE_NOT_RECEIVED');
-    }
-
-    // 款式级数量覆盖校验（业主仍接受「款式」而非「款式 × 工艺」）。
-    // 放在「全部收货」之后，但刻意放在 INTERNAL_TASKS 之前：最后一张
-    // 外协单收货时就要把缺口告诉主管，不能等到内部任务全部完工。
-    const items = await tx.orderItem.findMany({
-      where: { orderId },
-      select: {
-        id: true,
-        sequence: true,
-        name: true,
-        quantity: true,
-        crafts: true,
-      },
-    });
-    const craftIds = [...new Set(items.flatMap((item) => item.crafts))];
-    // 按 id 取字典再在 JS 里筛 isOutsource（而不是 where isOutsource:
-    // true 扫全表）：in 列表被本工单的工艺数收敛住。
-    // **不加 isActive 过滤**——历史工单引用的
-    // 已停用工艺仍然要参与判定，同 getOrderDetail 解析工艺名的理由。
-    const crafts =
-      craftIds.length === 0
-        ? []
-        : await tx.craft.findMany({
-            where: { id: { in: craftIds } },
-            select: { id: true, isOutsource: true },
-          });
-    const uncovered = findUndercoveredOutsourceItems(
-      items,
-      collectOutsourceCraftIds(crafts),
-      outsourceOrders,
-    );
-    if (uncovered.length > 0) {
-      return blocked(
-        'OUTSOURCE_COVERAGE',
-        uncovered.map((item) => ({
-          id: item.id,
-          sequence: item.sequence,
-          name: item.name,
-        })),
-      );
-    }
-  }
+  const outsourceBlocker = await findRequiredOutsourceBlocker(tx, orderId, order);
+  if (outsourceBlocker) return outsourceBlocker;
 
   // 收下最后一张外协单时，即使内部任务尚未完成，也要先把外协
   // 覆盖缺口结构化返回给收货 UI。否则 INTERNAL_TASKS 早退会吞掉唯一个

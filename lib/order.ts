@@ -111,6 +111,7 @@ import {
 } from './order/submit-external-order';
 import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
+import { findRequiredOutsourceBlocker, type ProductionCompletionTx } from './production-completion';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -1075,6 +1076,7 @@ type StatusTxClient = {
           status: OrderStatus;
           purpose?: string;
           simpleProduction?: boolean;
+          requiresOutsource?: boolean;
           submitterId: string;
           receiverAddress: string | null;
           receiverPhone: string | null;
@@ -1212,6 +1214,7 @@ type TransitionOptions = {
     order: {
       purpose?: string;
       simpleProduction?: boolean;
+      requiresOutsource?: boolean;
       settlementType: OrderSettlementType;
       pricingStatus: string;
       workOrderVersion: number;
@@ -1265,6 +1268,7 @@ async function transitionWithLog(
         status: true,
         submitterId: true,
         simpleProduction: true,
+        requiresOutsource: true,
         receiverAddress: true,
         receiverPhone: true,
         settlementType: true,
@@ -1916,6 +1920,8 @@ export async function assertShipOrderReadinessInTx(
     isVersionedCommand: boolean;
     hasSubmittedShipmentDetails: boolean;
     simpleProduction?: boolean;
+    /** Order.requiresOutsource snapshot; drives the shared outsource completion gate. */
+    requiresOutsource: boolean;
   },
 ): Promise<StoredShipOrderShipment[]> {
   if (input.simpleProduction) {
@@ -2031,6 +2037,24 @@ export async function assertShipOrderReadinessInTx(
     throw new OrderInvariantError(
       '该工单仍有已发送或进行中的外协单，收货或取消后才能发货',
     );
+  }
+  // PACKING is not proof of completion: the legacy scan flow advances to
+  // PACKING on the first packing report, and the completion gate may then
+  // stay blocked on required outsourcing. Re-run that same outsource gate.
+  const outsourceBlocker = await findRequiredOutsourceBlocker(
+    tx as unknown as ProductionCompletionTx,
+    input.orderId,
+    { requiresOutsource: input.requiresOutsource },
+  );
+  if (outsourceBlocker?.blockedBy === 'OUTSOURCE_MISSING') {
+    throw new OrderInvariantError('该工单含外协工艺但尚无外协单，外协收货后才能发货');
+  }
+  if (outsourceBlocker?.blockedBy === 'OUTSOURCE_COVERAGE') {
+    const names = outsourceBlocker.uncoveredItems.map((item) => `款式 ${item.sequence}「${item.name}」`).join('、');
+    throw new OrderInvariantError(`${names} 的外协数量未覆盖工单数量，补齐外协并收货后才能发货`);
+  }
+  if (outsourceBlocker) {
+    throw new OrderInvariantError('该工单外协尚未全部收货，收货后才能发货');
   }
   return storedShipments;
 }
@@ -2355,6 +2379,7 @@ export async function shipOrder(
           isVersionedCommand: Boolean(command),
           hasSubmittedShipmentDetails: requestedShipments.length > 0,
           simpleProduction: pricingOrder.simpleProduction,
+          requiresOutsource: pricingOrder.requiresOutsource === true,
         });
         if (requestedShipments.length > 0) {
           await applyShipOrderShipmentFactsInTx(prismaTx, {

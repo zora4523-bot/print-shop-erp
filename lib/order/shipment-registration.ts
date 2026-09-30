@@ -52,7 +52,7 @@ export async function registerShipment(raw: ShipmentRegistrationInput, actor: { 
       if (order.status !== OrderStatus.PACKING && order.status !== OrderStatus.COMPLETED) throw new OrderInvariantError('工单尚未完工，请完工后确认发货');
       if (order.confirmedFee === null || !['ADMIN_CONFIRMED', 'AUTO_CONFIRMED', 'LEGACY_CONFIRMED'].includes(order.pricingStatus)) throw new OrderInvariantError('费用尚未确认，请先核价');
       if (order.isSfCollect && input.carrierCode !== 'SF') throw new OrderInvariantError('本单为顺丰到付，请选择顺丰或先更正物流费用');
-      await assertShipOrderReadinessInTx(tx, { orderId: order.id, workOrderVersion: order.workOrderVersion, settlementType: order.settlementType, isVersionedCommand: true, hasSubmittedShipmentDetails: true, simpleProduction: order.simpleProduction });
+      await assertShipOrderReadinessInTx(tx, { orderId: order.id, workOrderVersion: order.workOrderVersion, settlementType: order.settlementType, isVersionedCommand: true, hasSubmittedShipmentDetails: true, simpleProduction: order.simpleProduction, requiresOutsource: order.requiresOutsource });
     }
     // Do not clear previously registered logistics when saving corrections after shipment.
     if (shipment.status === ShipmentStatus.SHIPPED && (!input.trackingNo || !input.carrierCode || (input.carrierCode === 'OTHER' && !input.carrierName))) throw new OrderInvariantError('已发货地址须保留完整物流资料');

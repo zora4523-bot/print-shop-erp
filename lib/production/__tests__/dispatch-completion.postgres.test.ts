@@ -235,7 +235,7 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(job.workerId).toBe(worker.id); expect(job.manualPricing).toBe(true);
     await registerProductionCompletion(completion(job, '200'), worker);
     expect((await db.productionWage.findFirstOrThrow({ where: { jobId: job.id } })).amount).toBeNull();
-    await db.$transaction(async tx => { await expect(assertShipOrderReadinessInTx(tx, { orderId: redo.order.id, workOrderVersion: 1, settlementType: 'NO_CHARGE', isVersionedCommand: false, hasSubmittedShipmentDetails: true, simpleProduction: true })).resolves.toHaveLength(1); });
+    await db.$transaction(async tx => { await expect(assertShipOrderReadinessInTx(tx, { orderId: redo.order.id, workOrderVersion: 1, settlementType: 'NO_CHARGE', isVersionedCommand: false, hasSubmittedShipmentDetails: true, simpleProduction: true, requiresOutsource: false })).resolves.toHaveLength(1); });
     const ready = await db.order.findUniqueOrThrow({ where: { id: redo.order.id }, include: { shipments: true } });
     const shipmentInput = { orderId: ready.id, shipmentId: ready.shipments[0].id, expectedVersion: ready.shipments[0].registrationVersion, expectedRevision: ready.revision, expectedEditVersion: ready.editVersion, expectedWorkOrderVersion: ready.workOrderVersion, expectedPriceRevision: ready.priceRevision, idempotencyKey: randomUUID(), trackingNo: 'TEST12345', carrierCode: 'ZTO' as const, carrierName: '', confirm: true };
     await registerShipment(shipmentInput, admin); await registerShipment(shipmentInput, admin);
