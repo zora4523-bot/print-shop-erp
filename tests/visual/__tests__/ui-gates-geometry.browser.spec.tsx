@@ -141,3 +141,32 @@ it('flags cumulative drift across the full breadcrumb even when adjacent offsets
   expect(collectGeometryIssues().filter((issue) => issue.startsWith('breadcrumb-misaligned')))
     .toEqual(['breadcrumb-misaligned:工单列表→编辑工单:dy4.0']);
 });
+
+// 2026-10-01：看板卡金额在窄卡里被 overflow-wrap:anywhere 折成「¥ / 15,395.2 / 9」。
+const narrowCard = 'style="width:40px;font-size:16px;line-height:24px;font-variant-numeric:tabular-nums"';
+
+it('flags a money amount whose digits are split across lines', () => {
+  mount(`<div ${narrowCard}><span style="display:block;overflow-wrap:anywhere">¥ 15,395.29</span></div>`);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([
+    'number-split:span「15,395.29」',
+  ]);
+});
+
+it('accepts a money amount that only wraps at the space after the currency sign', () => {
+  mount(`<div style="width:64px;font-size:16px;line-height:24px"><span style="display:block">¥ 15,395.29</span></div>`);
+  // 64px 放不下整串：只在「¥」后换行，数字整体在第二行。
+  expect(host!.querySelector('span')!.getBoundingClientRect().height).toBe(48);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([]);
+});
+
+it('ignores long digit runs that are identifiers or addresses, not quantities', () => {
+  mount(`<p style="width:60px;overflow-wrap:anywhere;font-size:16px">A座12345678901234567890</p>
+    <p style="width:60px;overflow-wrap:anywhere;font-size:16px">GD-260824-001</p>
+    <p style="width:60px;overflow-wrap:anywhere;font-size:16px">13800138000</p>`);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([]);
+});
+
+it('ignores numbers inside code and configuration blocks', () => {
+  mount(`<code style="display:block;width:40px;overflow-wrap:anywhere;white-space:pre-wrap;font-size:16px">port=15432,5000</code>`);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([]);
+});
