@@ -25,3 +25,12 @@
 PDF 协议超时改为两个渲染预算的最大值，当前仍为 60 秒，既有预算关系测试保留。`pgrep` 是 POSIX 系统命令，由独立 PDF 进程生命周期检查使用，在 Knip 的外部二进制声明中明确登记，未屏蔽源码导出检查。
 
 清单只移除 8 个准确条目：已被页面使用的 `PageHeaderProps`（两个扫描器）、被 worker 动态导入路径覆盖的 render 四个 ts-prune 条目，以及本次改为私有的两个价格字段类型。没有批量刷新清单，也没有加入未经核对的新候选豁免。扫描结果与这份清单比较为零新增、零待移除；160 项定向测试、完整类型和 lint 通过。CI 中继续按原门禁运行完整扫描。
+
+## 首轮 CI：依赖安全补丁
+
+PR #32 首轮 `Quality` 运行 `36766861290` 的生产依赖审计报告 5 条公告。按上游已修复版本最小升级：
+
+- `next`、`@next/env`、`eslint-config-next` 同步为 `16.3.6`，对应 [Next.js 公告](https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j)。当前项目未使用 Node `next/og` 的 `ImageResponse`；依然安装补丁，不以未发现入口替代安全门禁。
+- 对实际依赖树中的 `fast-uri` 3.x 和 `brace-expansion` 5.x 使用有上限范围的 override，分别锁到 `3.1.8`、`5.0.12`。依据 [fast-uri 公告](https://github.com/fastify/fast-uri/security/advisories/GHSA-hrr3-gc8f-f4qj) 及 brace-expansion 的 [解析递归](https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-6j4f-fj2g-mc7p)、[嵌套递归](https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-qhr7-859c-m2p7)、[二次复杂度](https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-q2hr-2g5m-vwhr) 公告；未全量升级无关依赖。
+
+已先阅读安装版 Next 16 升级文档，保留现有路由和构建配置。用 Git 归档及候选清单/锁文件创建无 `node_modules` 的干净目录，`pnpm install --frozen-lockfile` 通过；`pnpm audit --prod --json` 为 0 条公告，完整 typecheck、lint 和 `pnpm check:dead-code --check` 通过。Next 补丁后的全量浏览器组件测试 75 文件、1,047 项通过；后续离开确认缺陷的新增测试及生产构建、远端同 SHA 检查单独记录。
