@@ -600,7 +600,7 @@ function mapSalesOrderRow(
   const pricingAttentionReason =
     row.status !== OrderStatus.DRAFT &&
     row.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION
-      ? '价格待管理员确认'
+      ? '价格待工厂确认'
       : null;
   const items = row.items.map((item) => {
     const design = item.designs[0];

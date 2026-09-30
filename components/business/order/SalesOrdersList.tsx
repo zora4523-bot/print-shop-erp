@@ -626,7 +626,7 @@ function isStylePhotoFileName(fileName: string) {
 // 逾期 / 临期的文案与色调统一取自 lib/ui/status-registry 的
 // promisedDateAlertDefinition（§6：业务组件不写本地 tone 类名）。
 function DueDate({ order }: { order: SalesOrderListRow }) {
-  if (!order.promisedDate) return <span>交货未设置</span>;
+  if (!order.promisedDate) return <span>交期未设</span>;
   const shortDate = order.promisedDate.slice(5);
   if (order.dueAlert) {
     const definition = promisedDateAlertDefinition(order.dueAlert.kind, order.dueAlert.days);
