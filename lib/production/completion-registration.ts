@@ -114,7 +114,7 @@ export async function registerProductionCompletion(raw: CompletionInput, actor: 
       await tx.orderLog.create({ data: { orderId: job.orderId, operatorId: actor.id, action: 'PRODUCTION_QUANTITY_REJECTED', remark: input.reason,
         changedFields: { jobId: job.id, rejectedRevision: job.revision, workerId: job.workerId, requestedQty: job.requestedQty?.toString() ?? null, workDate: day, requestReason: job.requestReason, notActuallyProduced: true } } });
       await tx.productionJob.update({ where: { id: job.id }, data: { status: historical ? 'CANCELLED' : 'PENDING', requestedQty: null, requestReason: null, requestedAt: null, workDate: null,
-        snapshot: { ...snapshot, registrationPricing: null, registrationRequestHash: null }, revision: { increment: 1 } } });
+        snapshot: { ...snapshot, registrationPricing: null, registrationRequestHash: null, requestedItemQuantities: null }, revision: { increment: 1 } } });
       await tx.productionFactReview.upsert({ where: { jobId: job.id }, create: { jobId: job.id, jobRevision: job.revision + 1, status: 'UNPRODUCED', periodStart: job.workDate, periodEnd: job.workDate, reason: input.reason, evidence: { notActuallyProduced: true }, createdById: actor.id, resolvedById: actor.id, resolvedAt: new Date() },
         update: { status: 'UNPRODUCED', jobRevision: job.revision + 1, reason: input.reason, resolvedById: actor.id, resolvedAt: new Date(), revision: { increment: 1 } } });
       if (historical) await reconcileResolvedHistoryInTx(tx, job.orderId, actor.id);
@@ -139,7 +139,8 @@ export async function registerProductionCompletion(raw: CompletionInput, actor: 
     if (input.mode === 'COMPLETE' && (!quantity.eq(job.plannedQty.toString()) || itemDeviation)) {
       if (!input.reason) throw new Error('请填写数量修改原因');
       await tx.productionJob.update({ where: { id: job.id }, data: { status: 'REQUESTED', requestedQty: input.quantity, requestReason: input.reason, requestedAt: now, workDate,
-        snapshot: { ...snapshot, registrationPricing: basis, registrationRequestHash: requestHash }, revision: { increment: 1 } } });
+        // The per-item split is kept for the approval form to prefill; approval still re-validates it.
+        snapshot: { ...snapshot, registrationPricing: basis, registrationRequestHash: requestHash, requestedItemQuantities: itemDeviation ? input.itemQuantities! : null }, revision: { increment: 1 } } });
       await tx.orderLog.create({ data: { orderId: job.orderId, operatorId: actor.id, action: 'PRODUCTION_QUANTITY_REQUESTED', remark: input.reason, changedFields: { jobId: job.id, plannedQty: job.plannedQty.toString(), requestedQty: input.quantity, ...(itemDeviation ? { requestedItemQuantities: input.itemQuantities } : {}), workDate: day, pricing: basis } } });
       return { orderId: job.orderId, status: 'REQUESTED' };
     }

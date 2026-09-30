@@ -132,6 +132,12 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(pending.status).toBe('REQUESTED');
     expect(await db.productionWage.count({ where: { jobId: job.id } })).toBe(0);
     expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('RELEASED');
+    // The requested split is persisted for the approval form, and approving it records that split.
+    expect((pending.snapshot as { requestedItemQuantities?: unknown }).requestedItemQuantities).toEqual({ [first.id]: '0', [second.id]: '2000' });
+    await registerProductionCompletion({ ...completion(pending, '2000'), mode: 'APPROVE', reason: '核实只做了 B 款', itemQuantities: { [first.id]: '0', [second.id]: '2000' } }, admin);
+    const approved = await db.productionJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(approved.status).toBe('COMPLETED');
+    expect((approved.snapshot as { actualItemQuantities?: unknown }).actualItemQuantities).toEqual({ [first.id]: '0', [second.id]: '2000' });
   });
   it('holds altered quantity without wages, rejects bypass, then approves exactly once', async () => {
     const f = await assigned();
