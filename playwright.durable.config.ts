@@ -16,7 +16,7 @@ const durableEnv = {
   E2E_DURABLE_MODE: '1',
   E2E_DURABLE_WORKER_CONTROL: '1',
   E2E_DURABLE_ARTIFACT_ROOT: artifactRoot,
-  BACKGROUND_JOBS_MODE: 'durable',
+  BACKGROUND_JOBS_MODE: 'durable', PDF_ORDER_MODE: 'queued',
   BACKGROUND_JOB_QUEUE: 'HEAVY',
   APP_VERSION: process.env.E2E_CANDIDATE_SHA || process.env.APP_VERSION || 'e2e-durable-candidate',
   ORDER_EXPORT_ARTIFACT_DIR: path.join(artifactRoot, 'order-exports'),

@@ -523,7 +523,11 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 - `resolveUnknownNotification` 对已删除事件（`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED`）的 `NOT_DELIVERED_RETRY` 在写入前拒绝（`RETIRED_EVENT`），action 返回“该通知事件已停用，无法重发；请核对后确认已送达或忽略”；`DELIVERED` / `IGNORED` 照常可用。同组仍有 `RETRYING` 日志（升级前已确认未送达）时，已删除事件在最后一条 UNKNOWN 收尾后**不**重新入队（2026-09-26 修复：此前会把任务改回 PENDING，处理器拒绝后这些日志永远停在 RETRYING）：同一事务内以 CAS（`id` + `deliveryKey` + `RETRYING` + `deliveryStateVersion`）把它们关闭为 `FAILED`（`IGNORED` 沿用“人工忽略：理由”，`DELIVERED` 记“人工核对：未送达；事件已停用，不再重发”），任务保持 `DEAD`、`lastErrorCode` 改为 `NotificationReplayTerminalError`（运维页不再给“去通知页处置”），审计行 `after.retiredEventClosedLogs` 逐条记录；返回值 `retiredClosedCount` 供 action 提示。通知页由服务端纯函数 `lib/notification/unknown-retry-availability.ts` 给出不可重发原因，组件据此禁用按钮。
 - 升级前已处于 `RETRYING` 的同组日志：对最后一条 `UNKNOWN` 选择“确认已送达”或“忽略”时，事件已删除则不再重新入队，这些日志在同一事务内按 CAS 关闭为 `FAILED`（确认已送达时记“人工核对：未送达；事件已停用，不再重发”，忽略时沿用忽略理由），任务保持 `DEAD`（`ec43cf66`）。
 
-### PDF 状态查询与恢复（2026-09-30）
+### PDF 单张下载、状态查询与恢复（2026-09-30）
+
+单张下载默认 `PDF_ORDER_MODE=direct`：在 Web Node 进程生成，不入队、不要求 HEAVY 心跳或产物存储。相同账号/角色/工单/完整打印内容/base URL 合并并发请求，最多缓存五分钟（每进程 32 MiB、16 份；超大文件只返回不缓存）。每进程最多四个不同请求在途，Chromium 串行执行，每次独立上下文；包含等待在内上限 45 秒。超过容量返回恢复页 503 `PDF_BUSY`；客户端断开只结束自己的等待（499 空响应），不取消其他订阅者。每次下载仍复核当前身份、资源所有权和完整内容（包括未升版修改），内容改变返回 409。`regenerate=1` 绕过完成缓存，但仍合并同内容的在途请求。HTTP 始终 `private, no-store`，与服务内部短时复用不同。
+
+`PDF_ORDER_MODE=queued` 可回退到原 durable 队列路径；后台模式为 inline 时仍直接生成。已有 `jobId` 在 durable 模式下继续走原授权任务，不会误生成新任务；重复、空或非法 jobId 返回 400。旧任务内容标识与当前内容不同或缺失时拒绝返回产物，提示重新生成。批量打印接口始终沿用原队列。单张 PDF 的 `view=inline` 协议保留，页面“打印”入口使用 `/print/orders/:id?autoprint=1`，减少对浏览器 PDF 插件的依赖。
 
 `GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
 

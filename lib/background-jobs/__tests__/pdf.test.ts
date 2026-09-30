@@ -52,6 +52,18 @@ beforeEach(() => {
   dbMock.user.findUnique.mockResolvedValue({ role: Role.ADMIN, isActive: true });
 });
 
+it.each(['older-content', undefined])('rejects a completed task with a stale or missing content binding (%s)', async (snapshotKey) => {
+  dbMock.backgroundJob.findUnique.mockResolvedValue({
+    type: 'ORDER_PDF',
+    payload: { orderId: 'order-1', expectedWorkOrderVersion: 3, actor: { id: 'user-1', role: Role.ADMIN }, snapshotKey },
+    status: BackgroundJobStatus.SUCCEEDED,
+    result: { artifactName: 'old.pdf' },
+  });
+  await expect(waitForOrderPdfJob('job', { expected: {
+    orderId: 'order-1', actorId: 'user-1', actorRole: Role.ADMIN, workOrderVersion: 3, snapshotKey: 'current-content',
+  } })).resolves.toEqual({ status: 'failed', errorCode: 'OrderPdfVersionStaleError' });
+});
+
 describe('durable order PDF jobs', () => {
   it('coalesces one authorized snapshot and separates actors, versions and explicit regeneration', async () => {
     enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job-1' } });

@@ -110,6 +110,9 @@ function runCheckEnv(
 }
 
 describe('portable PDF deployment configuration', () => {
+  it('rejects an unknown single-order execution mode', async () => {
+    expect((await runCheckEnv({ PDF_ORDER_MODE: 'unknown' })).code).toBe(1);
+  });
   it('rejects an unpinned production browser', async () => {
     expect((await runCheckEnv({ PDF_CHROMIUM_VERSION: '' })).code).toBe(1);
   });

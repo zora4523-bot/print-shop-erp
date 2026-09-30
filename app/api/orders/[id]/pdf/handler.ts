@@ -11,7 +11,7 @@ import {
   buildOrderPdfFilename,
   buildPrintHtml,
 } from '@/lib/order/print-html';
-import { renderHtmlToPdf } from '@/lib/pdf/render';
+import { renderDirectOrderPdf } from '@/lib/pdf/direct';
 import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { getSetting } from '@/lib/settings';
@@ -22,8 +22,8 @@ import {
 } from '@/lib/background-jobs/pdf';
 
 // Node runtime: Puppeteer needs it (spawns Chromium).
-// HTTP responses remain private/no-store. Durable jobs reuse an authorized
-// content snapshot for a bounded window; every download checks access again.
+// Single downloads use bounded direct rendering/cache; legacy job links retain
+// their authorized queue path. Every response rechecks access and full content.
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -68,12 +68,17 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   }
 
   const { name: factoryName } = await getSetting('factory_name');
+  const snapshotKey = orderPdfSnapshotKey(order, factoryName);
+  const requestedJobId = requestUrl.searchParams.get('jobId');
+  if (requestUrl.searchParams.getAll('jobId').length > 1 || (requestedJobId !== null && (!/^[A-Za-z0-9_-]{1,64}$/.test(requestedJobId) || backgroundJobsMode() !== 'durable'))) {
+    return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });
+  }
+  const renderMode = process.env.PDF_ORDER_MODE || 'direct';
+  if (!['direct', 'queued'].includes(renderMode)) {
+    return pdfStatusPage({ title: 'PDF 生成服务暂不可用', message: '打印配置异常，请联系管理员；也可以使用网页打印。', code: 'PDF_CONFIGURATION_INVALID', status: 503, retryUrl: pdfRetryUrl(_req.url) });
+  }
   let pdf: Buffer;
-  if (backgroundJobsMode() === 'durable') {
-    const requestedJobId = new URL(_req.url).searchParams.get('jobId');
-    if (requestedJobId && !/^[A-Za-z0-9_-]{1,64}$/.test(requestedJobId)) {
-      return NextResponse.json({ error: 'Invalid job id' }, { status: 400 });
-    }
+  if (requestedJobId !== null || (renderMode === 'queued' && backgroundJobsMode() === 'durable')) {
     const jobId =
       requestedJobId ??
       (await enqueueOrderPdfJob({
@@ -82,7 +87,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
         actor: { id: session.user.id, role: session.user.role },
         baseUrl,
         ...(requestUrl.searchParams.get('regenerate') === '1' ? { regenerationKey: randomUUID() } : {}),
-        snapshotKey: orderPdfSnapshotKey(order, factoryName),
+        snapshotKey,
       }));
     const result = await waitForOrderPdfJob(jobId, {
       timeoutMs: statusOnly ? 1_000 : Number(process.env.PDF_JOB_WAIT_MS) || 10_000,
@@ -92,6 +97,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
         actorId: session.user.id,
         actorRole: session.user.role,
         workOrderVersion: order.workOrderVersion,
+        snapshotKey,
       },
     });
     if (result.status === 'unavailable' || result.status === 'delayed') {
@@ -99,7 +105,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
         title: result.status === 'unavailable' ? 'PDF 生成服务暂不可用' : 'PDF 等待时间较长',
         message: result.status === 'unavailable'
           ? 'PDF 生成服务未就绪。可以使用网页打印，或联系管理员恢复服务后重试。'
-          : '已暂停自动刷新，请稍后重试以查看生成结果。',
+          : '已暂停自动查询，请稍后重试以查看生成结果。',
         code: result.status === 'unavailable' ? 'PDF_WORKER_UNAVAILABLE' : 'PDF_QUEUE_DELAYED',
         status: 503,
         retryUrl: pdfRetryUrl(_req.url, jobId),
@@ -133,15 +139,19 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     }
   } else {
     try {
-      const html = await buildPrintHtml(order, { factoryName });
-      pdf = await renderHtmlToPdf({ html, signal: _req.signal });
+      pdf = await renderDirectOrderPdf({
+        orderId: id, actorId: session.user.id, actorRole: session.user.role, snapshotKey, baseUrl,
+        html: () => buildPrintHtml(order, { factoryName }), signal: _req.signal,
+        regenerate: requestUrl.searchParams.get('regenerate') === '1',
+      });
     } catch (error) {
       // Log a fixed event only: renderer exceptions can contain paths, URLs and secrets.
+      if (_req.signal.aborted) return new Response(null, { status: 499, headers: { 'Cache-Control': 'private, no-store' } });
       console.error('[order-pdf] PDF_GENERATION_FAILED');
       return pdfStatusPage({
         title: 'PDF 生成失败',
         ...pdfFailure(error instanceof Error ? error.name : null),
-        status: 500,
+        status: error instanceof Error && error.name === 'PdfBusyError' ? 503 : 500,
         retryUrl: pdfRetryUrl(_req.url),
       });
     }
@@ -166,10 +176,11 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   if (!currentOrder) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
-  if (currentOrder.workOrderVersion !== order.workOrderVersion) {
+  const { name: currentFactoryName } = await getSetting('factory_name');
+  if (currentOrder.workOrderVersion !== order.workOrderVersion || orderPdfSnapshotKey(currentOrder, currentFactoryName) !== snapshotKey) {
     return pdfStatusPage({
-      title: '工单版本已更新',
-      message: '生成期间工单已升版，旧 PDF 已丢弃。请重新生成当前版。',
+      title: '工单内容已更新',
+      message: '生成期间工单内容已更新，请重新生成当前内容。',
       status: 409,
       retryUrl: pdfRetryUrl(_req.url),
     });
@@ -183,6 +194,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
+      'X-Content-Type-Options': 'nosniff',
       'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)).replace(/^attachment/, view === 'inline' ? 'inline' : 'attachment'),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 /** Public allowlist: never interpolate renderer diagnostics or persisted error text. */
 export function pdfFailure(code: string | null) {
   switch (code) {
+    case 'PdfBusyError': return { code: 'PDF_BUSY', message: '当前下载较多，请稍后重试；也可以使用网页打印。' };
     case 'PdfBrowserUnavailableError': return { code: 'PDF_BROWSER_UNAVAILABLE', message: 'PDF 浏览器未就绪，可以使用网页打印，或联系管理员检查服务。' };
     case 'TimeoutError': return { code: 'PDF_RENDER_TIMEOUT', message: '生成超过等待时间，可以使用网页打印，或稍后重新生成。' };
     case 'PrintFontUnavailableError': return { code: 'PDF_FONT_UNAVAILABLE', message: '打印字体未就绪，请联系管理员检查 PDF 服务。' };

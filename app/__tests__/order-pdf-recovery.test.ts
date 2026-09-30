@@ -31,7 +31,7 @@ it('recovers a ready job whose PDF file was removed without exposing its diagnos
   });
   missingFile.stack = `Error: ENOENT\n at private-stack-frame (${artifactPath}:1:2)`;
   mocks.session.mockResolvedValue({ user: { id: 'admin-recovery', role: Role.ADMIN } });
-  mocks.order.mockResolvedValue({ id: 'order-recovery', workOrderVersion: 3 });
+  mocks.order.mockResolvedValue({ id: 'order-recovery', workOrderVersion: 3, items: [] });
   mocks.wait.mockResolvedValue({ status: 'ready', artifactName });
   mocks.read.mockRejectedValue(missingFile);
 

@@ -1,8 +1,9 @@
 import type { Browser, BrowserContext } from 'puppeteer';
 
-/** Worker-local, serial reuse. Every render gets a separate incognito context. */
+/** Process-local, serial reuse. Every render gets a separate incognito context. */
 export class PdfBrowserPool {
   private browser?: Browser;
+  private disposing?: Promise<void>;
   private tail: Promise<unknown> = Promise.resolve();
   private idle?: ReturnType<typeof setTimeout>;
   private uses = 0;
@@ -18,6 +19,8 @@ export class PdfBrowserPool {
     clearTimeout(this.idle);
     const queued = performance.now();
     const result = this.tail.then(async () => {
+      signal?.throwIfAborted();
+      await this.disposing;
       signal?.throwIfAborted();
       if (this.browser && (!this.browser.connected || this.uses >= this.maxUses || Date.now() - this.born >= 300_000)) await this.dispose();
       const start = performance.now();
@@ -68,7 +71,11 @@ export class PdfBrowserPool {
     const browser = this.browser;
     this.browser = undefined;
     this.uses = 0;
-    if (browser) await browser.close().catch(() => undefined);
+    if (!browser) { await this.disposing; return; }
+    const closing = browser.close().catch(() => undefined);
+    this.disposing = closing;
+    try { await closing; }
+    finally { if (this.disposing === closing) this.disposing = undefined; }
   }
 }
 class PdfBrowserUnavailableError extends Error {

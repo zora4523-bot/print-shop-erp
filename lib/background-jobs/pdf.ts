@@ -186,6 +186,7 @@ export async function waitForOrderPdfJob(
       actorId: string;
       actorRole: Role;
       workOrderVersion: number;
+      snapshotKey?: string;
     };
   } = {},
 ): Promise<OrderPdfJobWaitResult> {
@@ -209,6 +210,9 @@ export async function waitForOrderPdfJob(
       // Do not reveal whether a caller-supplied job id exists or belongs to a
       // different user/order.
       return { status: 'failed', errorCode: 'JobNotFound' };
+    }
+    if (options.expected?.snapshotKey && asRecord(job.payload).snapshotKey !== options.expected.snapshotKey) {
+      return { status: 'failed', errorCode: 'OrderPdfVersionStaleError' };
     }
     if (job.status === BackgroundJobStatus.SUCCEEDED) {
       const result = asRecord(job.result);

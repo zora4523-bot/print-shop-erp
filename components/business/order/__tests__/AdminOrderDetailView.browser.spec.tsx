@@ -416,7 +416,7 @@ it('opens the selected style supplement and preserves fee and print destinations
   expect(fees.textContent).toContain('入袋费');
   expect(fees.textContent).toContain('费用记录');
   expect(fees.textContent).toContain('¥ 570.00');
-  expect(host.querySelector('a[href="/api/orders/detail-order-1/pdf?view=inline"]')).not.toBeNull();
+  expect(host.querySelector('a[href="/print/orders/detail-order-1?autoprint=1"]')).not.toBeNull();
   expect(geometryFailures(host, 1280)).toEqual([]);
 });
 

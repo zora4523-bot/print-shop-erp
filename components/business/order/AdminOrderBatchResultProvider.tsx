@@ -94,7 +94,7 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
                     <span className="text-xs font-normal text-muted-foreground">{row.label}</span>
                     {row.outcome === 'success' && (receipt.command === 'RELEASE_AND_CREATE_PRINT' || receipt.command === 'CREATE_PRINT') ? (
                       <a
-                        href={`/api/orders/${encodeURIComponent(row.order.id)}/pdf?view=inline`}
+                        href={`/print/orders/${encodeURIComponent(row.order.id)}?autoprint=1`}
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={`去打印工单 ${row.order.orderNo}`}

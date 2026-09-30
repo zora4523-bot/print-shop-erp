@@ -57,3 +57,25 @@ it('releases idle browsers and relaunches on demand', async () => {
     await pool.close();
   } finally { vi.useRealTimers(); }
 });
+
+it('waits for an aborted browser to finish closing before starting another render', async () => {
+  const { pool, browser, launch } = setup();
+  let close!: () => void;
+  vi.mocked(browser.close).mockImplementationOnce(() => new Promise<void>((resolve) => { close = resolve; }));
+  const controller = new AbortController();
+  let fail!: (reason: Error) => void;
+  const first = pool.run(() => new Promise((_resolve, reject) => { fail = reject; }), controller.signal);
+  const rejected = expect(first).rejects.toThrow('aborted');
+  await vi.waitFor(() => expect(fail).toBeTypeOf('function'));
+  controller.abort(); fail(new Error('aborted'));
+  const task = vi.fn(async () => 'next');
+  const second = pool.run(task);
+  await Promise.resolve();
+  expect(task).not.toHaveBeenCalled();
+  expect(launch).toHaveBeenCalledTimes(1);
+  close();
+  await rejected;
+  expect(await second).toBe('next');
+  expect(launch).toHaveBeenCalledTimes(2);
+  await pool.close();
+});

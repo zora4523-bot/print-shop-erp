@@ -373,3 +373,5 @@ PDF 接口在账号和工单绑定校验通过后检查 HEAVY 心跳，使用与
 `PDF_WORKER_UNAVAILABLE` 表示 durable 路径没有近期 HEAVY 心跳，不能据此断言图稿损坏。开发使用 `pnpm dev` 启动完整依赖；若使用 `dev:web`，需单独管理 worker。管理员在后台任务页查看在线进程和失败记录，先检查 worker 启动日志，再运行 `pnpm check:pdf`。生产按部署指南使用同一账号、环境、Chromium 版本和共享存储检查，不能用改为 inline 绕过。
 
 字体、浏览器版本、分页和存储错误分别按页面白名单错误码定位；不要把底层异常、签名图片 URL 或凭证粘贴到页面。用户可以进入“网页打印”，其权限和内容检查独立执行。`PDF_BROWSER_REUSE=0` 仅回退性能优化，不放宽任何生成验证或任务授权。
+
+单张默认 direct 时不会因 HEAVY 离线返回 PDF_WORKER_UNAVAILABLE；看到该码应核对是否配置 queued 或仍在访问旧 jobId。PDF_BUSY 表示当前 Web 进程达到单张生成容量，稍后重试或使用网页打印，不要增加自动重试风暴。配置错误 PDF_CONFIGURATION_INVALID 需核对 PDF_ORDER_MODE=direct/queued。打印按钮现在打开 HTML 打印页；内嵌 PDF 查看器不可用时，仍可网页打印或下载后用系统查看器打开。直接模式不能生成时检查 Web 运行账号的 Chromium 和字体配置；生产排障不能关闭权限、内容或分页检查。

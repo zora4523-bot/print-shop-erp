@@ -507,7 +507,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       ) : null}</Fragment>),
     printActions: (<Fragment key="printActions"><div className="flex min-w-0 flex-wrap items-center gap-2">
             <a
-              href={`/api/orders/${order.id}/pdf?view=inline`}
+              href={`/print/orders/${order.id}?autoprint=1`}
               target="_blank"
               rel="noopener noreferrer"
               className={buttonVariants({ variant: 'outline', size: 'sm' })}

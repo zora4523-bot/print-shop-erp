@@ -271,3 +271,5 @@ OrderLog 与 BusinessAuditLog 的 before。生产执行步骤（dry-run → 业�
 `pnpm dev:web` 保留仅 Web 入口，适用于外部进程管理或手动控制 worker 的测试；它本身不保证 durable PDF 可用。`pnpm check:pdf` 使用当前环境、当前 Chromium 与内嵌字体，实际生成一页中文 PDF，并验证存储往返；只操作自己的随机探针产物。
 
 PDF 恢复验收：满足本文件 E2E 隔离前置后运行 `pnpm exec playwright test --config=playwright.pdf.config.ts`。测试使用真实 Next 开发服务及独立 HEAVY worker，覆盖服务离线、六视口双主题、触控、axe、就地状态查询、生成和重复下载；不代表生产构建、真实 OSS 图稿或通知验收。
+
+单张下载现默认 `PDF_ORDER_MODE=direct`，不依赖后台 worker；`pnpm dev` 仍管理其他业务需要的 LIGHT/HEAVY。直接路径验收使用 `E2E_PDF_ORDER_MODE=direct pnpm exec playwright test --config=playwright.pdf.config.ts`：仅启动 Web，覆盖多页下载、缓存、匿名拒绝、不入队及 HTML 打印准备。未指定该测试变量时验证 queued 恢复路径，`playwright.durable.config.ts` 也显式固定 queued 以保留原任务链验收。两种模式都保留下载协议与授权检查。

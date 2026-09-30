@@ -263,4 +263,10 @@ BOM 在原版本机制内支持纸张＋规格目标；历史产品目标保留�
 
 ### PDF worker 运行保障（2026-09-30）
 
-HEAVY 在登记心跳前执行 `lib/pdf/preflight.ts`：真实 Chromium 中文 PDF、嵌入字体与私有产物存储往返，失败不消费任务。`lib/pdf/browser-pool.ts` 仅在 HEAVY 内启用；一个浏览器串行执行，每任务独立 BrowserContext，无共享 cookie/页面。50 次、5 分钟寿命、60 秒空闲、断连或任务失败会回收；排队受 worker 并发及池上限限制，单次复用请求信号上限 60 秒；停机先排空任务再关闭浏览器。`PDF_BROWSER_REUSE=0` 可回退逐次启动，Web inline 和调用方注入浏览器不启用池。worker 结构化日志只含内部等待/浏览器准备/渲染耗时、是否复用和 Node RSS，不含订单正文、图片地址或凭证；Node RSS 不代表 Chromium 子进程峰值。模板、金额、权限、版本及任务幂等规则不变。
+HEAVY 在登记心跳前执行 `lib/pdf/preflight.ts`：真实 Chromium 中文 PDF、嵌入字体与私有产物存储往返，失败不消费任务。HEAVY 启动时启用 `lib/pdf/browser-pool.ts`；一个浏览器串行执行，每任务独立 BrowserContext，无共享 cookie/页面。50 次、5 分钟寿命、60 秒空闲、断连或任务失败会回收；排队受 worker 并发及池上限限制，单次复用请求信号上限 60 秒；停机先排空任务再关闭浏览器。`PDF_BROWSER_REUSE=0` 可回退逐次启动，通用渲染函数不会自行启用池；Web 单张入口的独立池见下节。worker 结构化日志只含内部等待/浏览器准备/渲染耗时、是否复用和 Node RSS，不含订单正文、图片地址或凭证；Node RSS 不代表 Chromium 子进程峰值。模板、金额、权限、版本及任务幂等规则不变。
+
+### 单张 PDF 直接生成（2026-09-30 后续简化）
+
+单张入口默认采用 `lib/pdf/direct.ts`，独立于后台任务模式；上一段的 HEAVY 池仍服务队列，Web 使用另一个受限的进程内池。直接路径不持久化任务或产物，避免将 worker、共享存储和状态轮询作为单张下载的必需条件。32 MiB/16 份/五分钟完成缓存，以账号、角色、工单、内容标识及 base URL 为键；四个不同在途请求上限，串行渲染，45 秒整体预算，独立 BrowserContext。字节缓存不替代路由的最终授权及内容复核。完成缓存过期时惰性清理，进程退出全部释放；浏览器 60 秒空闲后回收，取消后的回收完成前不启动下一浏览器。
+
+并发和缓存上限为每个 Web 进程，不是集群配额；多副本部署需按 Web + HEAVY 进程树评估内存和 CPU。`PDF_ORDER_MODE=queued` 保留回退能力，旧 jobId 和批量打印不迁移、不删除。PDF_BROWSER_REUSE 控制 HEAVY 池；Web 直接模式的受限池随 direct 模式启用，回退整个直接路径使用 PDF_ORDER_MODE。

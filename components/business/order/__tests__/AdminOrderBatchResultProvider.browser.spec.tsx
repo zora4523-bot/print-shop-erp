@@ -91,15 +91,15 @@ describe('batch receipt print handoff', () => {
     mount();
     flushSync(() => receipt.begin(command, reviewedOrders()));
     await expect.element(page.getByText('正在逐单处理…', { exact: true })).toBeVisible();
-    expect(document.querySelectorAll('a[href$="/pdf?view=inline"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href$="?autoprint=1"]')).toHaveLength(0);
     flushSync(() => receipt.complete(mixedResult(command)));
     await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
 
-    expect(document.querySelectorAll('a[href$="/pdf?view=inline"]')).toHaveLength(2);
+    expect(document.querySelectorAll('a[href$="?autoprint=1"]')).toHaveLength(2);
     for (const order of reviewedOrders().slice(0, 2)) {
       const link = page.getByRole('link', { name: `去打印工单 ${order.orderNo}`, exact: true });
       await expect.element(link).toBeVisible();
-      await expect.element(link).toHaveAttribute('href', `/api/orders/${encodeURIComponent(order.id)}/pdf?view=inline`);
+      await expect.element(link).toHaveAttribute('href', `/print/orders/${encodeURIComponent(order.id)}?autoprint=1`);
       await expect.element(link).toHaveAttribute('target', '_blank');
       await expect.element(link).toHaveAttribute('rel', 'noopener noreferrer');
       // Native PDF anchors never enter Next's prefetch/router pipeline.
@@ -124,7 +124,7 @@ describe('batch receipt print handoff', () => {
     finish(command);
     await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
     expect(document.querySelectorAll('[data-outcome="success"]')).toHaveLength(2);
-    expect(document.querySelectorAll('a[href$="/pdf?view=inline"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href$="?autoprint=1"]')).toHaveLength(0);
   });
 
   it.each([
@@ -136,7 +136,7 @@ describe('batch receipt print handoff', () => {
     flushSync(() => receipt.begin('RELEASE_AND_CREATE_PRINT', reviewedOrders()));
     flushSync(() => receipt.complete(response));
     await expect.element(page.getByRole('dialog', { name: '批量处理结果', exact: true })).toBeVisible();
-    expect(document.querySelectorAll('a[href$="/pdf?view=inline"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href$="?autoprint=1"]')).toHaveLength(0);
   });
 });
 
