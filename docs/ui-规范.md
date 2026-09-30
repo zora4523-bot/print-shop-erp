@@ -140,7 +140,7 @@ gates:
 | 高风险确认 | `AlertDialog`（只经 `ConfirmActionDialog` 使用） |
 | 抽屉 | `Sheet` |
 | 行菜单 | `DropdownMenu` |
-| 行内展开 | `Disclosure` |
+| 行内展开 | `Disclosure`；摘要末尾的状态提示用 `DisclosureIndicator`（箭头 + 当前可做的「展开 / 收起」，只跟随自身 `<details>`） |
 | 表格 | `Table` 家族（自带可聚焦横滚 region） |
 | 导航 | `Sidebar`、`Breadcrumb` |
 | 通用状态 | `Badge`（仅非状态标签：计数角标、类型、启停两态）、`Skeleton`、`Tooltip`（辅助，不作唯一载体） |
@@ -375,6 +375,7 @@ gates:
 - 触控目标最低 44×44 CSS px（`≤768` 视口门禁失败）；桌面精确指针且视口 >920px 时，工单行内允许 24px 紧凑目标、行尾按钮 32px（`UI-SYSTEM.md`「管理端工单列表」）。
 - 视口高度保留 `100vh` 回退，支持时依次 `100svh`、`100dvh`；处理 safe area（§2.6）。
 - 长中文、订单号、地址和备注可换行或提供全文访问，不静默裁字（`.admin-wrap-anywhere` / `.worker-wrap-anywhere`）。
+- 金额、计数等数字不得在数字内部折行（2026-10-01）：金额只允许在「¥」后的空格处换行，窄卡片先放宽列或改排版，不对数字用 `.admin-wrap-anywhere` / `break-words`。门禁：`tests/visual/ui-gates-geometry.ts` 的 `number-split`（工单号、电话、长地址、代码块中的数字不算）。
 - `focus-visible` 焦点圈必须可见且与表面对比 ≥3:1；原子件内部 `ring-2` / `ring-3` / `/50` 差异不作统一要求。
 - 保持 heading、label、键盘、焦点陷阱、焦点返回和 reduced-motion 契约；自定义浮层不允许（一律 Base UI Dialog / Sheet / AlertDialog）。
 - 图标按钮必须有 `aria-label`。
