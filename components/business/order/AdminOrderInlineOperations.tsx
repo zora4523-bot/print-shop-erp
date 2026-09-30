@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useId, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -16,7 +15,6 @@ export function AdminOrderInlineOperations({ order, disabled = false, onComplete
   disabled?: boolean;
   onCompleted?: (message: string) => void;
 }) {
-  const router = useRouter();
   const panelId = useId();
   const [mode, setMode] = useState<'pricing' | 'shipping' | null>(null);
   const [openedModes, setOpenedModes] = useState({ pricing: false, shipping: false });
@@ -27,8 +25,7 @@ export function AdminOrderInlineOperations({ order, disabled = false, onComplete
     else setReceipt(message);
     setMode(null);
     setOpenedModes({ pricing: false, shipping: false });
-    router.refresh();
-  }, [onCompleted, router]);
+  }, [onCompleted]);
   const pricingFinished = useCallback(() => finish('核价已确认'), [finish]);
   useEffect(() => {
     const reveal = (event: Event) => {

@@ -1,7 +1,6 @@
 'use client';
 
 import { useId, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { addOrderShipmentAction } from '@/actions/order-shipment';
 import type {
   AddOrderShipmentInput,
@@ -51,7 +50,6 @@ export function AddOrderShipmentForm({
   ...guard
 }: Props) {
   const uid = useId();
-  const router = useRouter();
   const [opened, setOpened] = useState(false);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? '');
   const [quantities, setQuantities] = useState<Record<string, string>>({});
@@ -114,7 +112,6 @@ export function AddOrderShipmentForm({
             receiverAddress: '',
             destinationProvince: '',
           });
-          router.refresh();
         }
       } catch {
         setError('添加地址未完成，请刷新工单核对后重试');

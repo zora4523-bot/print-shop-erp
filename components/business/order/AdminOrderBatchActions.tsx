@@ -2,7 +2,6 @@
 
 import {
   useActionState,
-  useEffect,
   useRef,
   useState,
   useTransition,
@@ -60,15 +59,10 @@ export function AdminOrderBatchActions({
   >(requestOrderExportAction, null);
   const busy = pending || batchResult.pending || exportPending;
 
-  // A completed response means the request key has fulfilled its idempotency
-  // purpose. Refresh the server component so a later, intentional export (or
-  // a changed selection) receives a fresh UUID and cannot collide with the
-  // membership snapshot that was just persisted.
-  useEffect(() => {
-    if (exportState?.status === 'queued' || exportState?.status === 'success') {
-      router.refresh();
-    }
-  }, [exportState, router]);
+  // A completed export request has fulfilled its idempotency key. The action
+  // revalidates /orders on every queued/success branch, so its response
+  // already carries a fresh render with a new UUID; no extra router.refresh()
+  // (DECISIONS 2026-08-27).
 
   function run(command: AdminOrderBatchCommand, reviewedOrders: BatchOrderSnapshot[]) {
     if (inFlightRef.current) return;
@@ -92,12 +86,9 @@ export function AdminOrderBatchActions({
         });
         setMessage(resultMessage(result, reviewedOrders.length - eligible.length));
         batchResult.complete(result);
-        if (
-          result.status === 'partial_failure' ||
-          (result.status === 'success' && result.result.successCount > 0)
-        ) {
-          router.refresh();
-        }
+        // Success already revalidated /orders in the action response. Only
+        // the result-unknown branch forces a second read (DECISIONS 2026-08-27).
+        if (result.status === 'partial_failure') router.refresh();
       } catch {
         setMessage('未能确认批量处理结果，请先打开工单核对实际记录，再决定是否重试');
         batchResult.complete(null);

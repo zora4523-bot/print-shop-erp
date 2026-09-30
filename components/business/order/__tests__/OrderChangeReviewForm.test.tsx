@@ -351,12 +351,13 @@ describe('OrderChangePricingPreviewPanel', () => {
     expect(source).toContain('disabled={rejectDisabled}');
   });
 
-  it('distinguishes a stale no-op from an applied approval and refreshes once', () => {
+  it('distinguishes a stale no-op from an applied approval and relies on action revalidation', () => {
     expect(orderChangeReviewResultMessage('STALE')).toContain('申请未执行');
     expect(orderChangeReviewResultMessage('STALE')).toContain('已标记为失效');
     expect(orderChangeReviewResultMessage('APPROVED')).toContain('已批准');
-    expect(source).toContain('refreshedResultRef.current === resultKey');
-    expect(source).toContain('router.refresh()');
+    // Both STALE and applied reviews return after revalidatePath; a second
+    // full-route refresh is redundant (DECISIONS 2026-08-27).
+    expect(source).not.toContain('router.refresh()');
   });
 
   it('routes both approval and rejection through L2 confirmation instead of direct mutation buttons', () => {

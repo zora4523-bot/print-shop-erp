@@ -131,7 +131,8 @@ it.each(['pricing'] as const)('%s completes and reports once after its pending f
   finish({ status: 'success' });
   await expect.poll(() => completed.mock.calls.length).toBe(1);
   expect(completed).toHaveBeenCalledWith(kind === 'pricing' ? '核价已确认' : '工单已发货');
-  await expect.poll(() => refresh.mock.calls.length).toBe(1);
+  // The finalize action revalidated; no second full-route refresh (DECISIONS 2026-08-27).
+  expect(refresh).not.toHaveBeenCalled();
   expect(action).toHaveBeenCalledTimes(1);
 });
 

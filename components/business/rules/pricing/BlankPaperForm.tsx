@@ -48,8 +48,8 @@ export function BlankPaperForm({
   );
   useEffect(() => {
     if (result?.status === 'success') {
+      // addBlankPaperAction revalidated this path; push alone renders it fresh.
       router.push('/owner/rules/customer-pricing?section=blank');
-      router.refresh();
     }
   }, [result, router]);
   return (

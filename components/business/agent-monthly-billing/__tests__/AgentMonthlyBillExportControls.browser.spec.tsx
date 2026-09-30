@@ -78,8 +78,11 @@ it.each([
   mount();
   await userEvent.click(page.getByRole('button', { name: '导出当前结果（1 张）', exact: true }));
   await expect.element(page.getByText('正在生成导出文件，完成后会显示下载按钮。', { exact: true })).toBeVisible();
+  // The queued action result relies on the action's revalidatePath; only the
+  // polling loop refreshes once the export turns terminal.
+  expect(refresh).not.toHaveBeenCalled();
   poll?.();
-  await expect.poll(() => refresh.mock.calls.length).toBe(2);
+  await expect.poll(() => refresh.mock.calls.length).toBe(1);
   mount(status);
   await expect.element(page.getByText(message, { exact: true })).toBeVisible();
   expect(host.textContent).not.toContain('正在生成导出文件');

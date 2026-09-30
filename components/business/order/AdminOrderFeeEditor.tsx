@@ -1,8 +1,7 @@
 'use client';
-import { useActionState, useEffect, useState, useTransition } from 'react';
+import { useActionState, useState, useTransition } from 'react';
 import { formatUnitPrice } from '@/lib/format/unit-price';
 import { formatMoney } from '@/lib/dashboard/format';
-import { useRouter } from 'next/navigation';
 import { previewOrderPricingReviewAction, finalizeOrderPricingAction } from '@/actions/order';
 import type { PreviewOrderPricingReviewResult, FinalizeOrderPricingMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
@@ -19,7 +18,6 @@ function errorMessage(result: PreviewOrderPricingReviewResult | FinalizeOrderPri
   return null;
 }
 export function AdminOrderFeeEditor({ orderId, canEditCommercial = false }: { orderId: string; canEditCommercial?: boolean }) {
-  const router = useRouter();
   const [previewState, previewAction] = useActionState<PreviewOrderPricingReviewResult | null, unknown>(previewOrderPricingReviewAction, null);
   const [result, saveAction] = useActionState<FinalizeOrderPricingMutationResult | null, unknown>(finalizeOrderPricingAction, null);
   const [busy, startTransition] = useTransition();
@@ -31,7 +29,6 @@ export function AdminOrderFeeEditor({ orderId, canEditCommercial = false }: { or
   const rows = preview ? adminFeeRows(preview) : [];
   const total = preview ? feeEditorTotal(preview, rows, values) : null;
   const error = errorMessage(result) ?? errorMessage(previewState);
-  useEffect(() => { if (result?.status === 'success') router.refresh(); }, [result, router]);
   return <section id="admin-fee-editor" className="min-w-0 space-y-4 rounded-xl border bg-card p-4">
     <Button type="button" className="min-h-11" variant="outline" aria-expanded={open} disabled={busy || auxiliary.blocked} onClick={() => { setOpen(!open); if (!open) startTransition(() => previewAction({ orderId, editAll: true })); }}>编辑全部收费</Button>
     {open ? <>

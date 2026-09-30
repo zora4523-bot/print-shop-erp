@@ -1,7 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useId } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useId } from 'react';
 import { revokeBundleAction } from '@/actions/foreman-cdr';
 import type { RevokeBundleResult } from '@/actions/foreman-cdr.types';
 import {
@@ -11,16 +10,14 @@ import {
 } from '@/components/ui-business';
 
 export function RevokeBundleForm({ bundleId }: { bundleId: string }) {
-  const router = useRouter();
   const formId = useId();
   const [state, formAction, pending] = useActionState<RevokeBundleResult | null, FormData>(
     revokeBundleAction,
     null,
   );
 
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
+  // revokeBundleAction revalidates /foreman/cdr on success; the action
+  // response already carries the fresh list (DECISIONS 2026-08-27).
 
   return (
     <div className="mt-2 space-y-1">

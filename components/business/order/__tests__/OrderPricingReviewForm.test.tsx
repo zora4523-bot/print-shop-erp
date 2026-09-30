@@ -420,6 +420,7 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     expect(html).toContain('费用已确认，正在刷新工单状态');
     expect(harness.confirmDisabled).toBe(true);
     expect(harness.previewAction).toHaveBeenCalledTimes(1);
-    expect(harness.refresh).toHaveBeenCalledTimes(1);
+    // finalizeOrderPricingAction revalidates; its response re-renders the page (DECISIONS 2026-08-27).
+    expect(harness.refresh).not.toHaveBeenCalled();
   });
 });

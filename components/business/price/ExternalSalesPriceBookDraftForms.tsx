@@ -649,8 +649,8 @@ export function PublishCustomerPriceBookDraftForm({
 
   useEffect(() => {
     if (state?.status !== 'success') return;
+    // publishCustomerPriceBookDraftAction revalidated the price-version paths.
     router.replace(RULE_CENTER_HREFS.priceVersions);
-    router.refresh();
   }, [router, state]);
 
   if (impact && !hasChanges) {
@@ -964,10 +964,8 @@ export function CancelScheduledCustomerPriceBookForm({
     null,
   );
   const formId = useId();
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
+  // Success revalidates the price-book paths; no extra router.refresh()
+  // (DECISIONS 2026-08-27).
 
   return (
     <form
@@ -1024,10 +1022,8 @@ export function RescheduleCustomerPriceBookForm({
   const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom);
   const errorId = `${inputId}-error`;
   const errors = mutationFieldErrors(state);
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
+  // Success revalidates the price-book paths; no extra router.refresh()
+  // (DECISIONS 2026-08-27).
 
   return (
     <form
@@ -1300,11 +1296,9 @@ export function CustomerPriceBookDraftRuleForm({
 
   useEffect(() => {
     if (state?.status !== 'success') return;
-    if (successHref) {
-      router.replace(successHref);
-      return;
-    }
-    router.refresh();
+    // updateCustomerPriceRuleDraftAction revalidated the price-book paths, so
+    // staying on this page needs no extra router.refresh() (DECISIONS 2026-08-27).
+    if (successHref) router.replace(successHref);
   }, [router, state, successHref]);
   const prefix = `price-rule-${rule.id}`;
   const isProcessing = rule.editorMode === 'PROCESSING';

@@ -1,7 +1,6 @@
 'use client';
 
 import { useActionState, useCallback, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { confirmOutsourceAmountAction } from '@/actions/outsource';
 import type { OutsourceAmountMutationResult } from '@/actions/outsource.types';
 import { Button } from '@/components/ui/button';
@@ -19,7 +18,6 @@ export function OutsourceAmountForm({
   currentAmount: string | null;
   initialIdempotencyKey: string;
 }) {
-  const router = useRouter();
   const [amount, setAmount] = useState(currentAmount ?? '');
   const [reason, setReason] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState(
@@ -41,11 +39,10 @@ export function OutsourceAmountForm({
       if (result.status === 'success') {
         setAmount(result.amount);
         setReason('');
-        router.refresh();
       }
       return result;
     },
-    [id, router],
+    [id],
   );
   const [state, action, pending] = useActionState<
     OutsourceAmountMutationResult | null,

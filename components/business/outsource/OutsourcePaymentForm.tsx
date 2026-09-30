@@ -8,7 +8,6 @@ import {
   useState,
   type FormEvent,
 } from 'react';
-import { useRouter } from 'next/navigation';
 import { recordOutsourcePaymentAction } from '@/actions/outsource';
 import type { OutsourcePaymentMutationResult } from '@/actions/outsource.types';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -69,7 +68,6 @@ export function OutsourcePaymentForm({
   remainingAmount,
   initialIdempotencyKey,
 }: Props) {
-  const router = useRouter();
   const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -94,11 +92,10 @@ export function OutsourcePaymentForm({
       );
       if (result.status === 'success') {
         formRef.current?.reset();
-        router.refresh();
       }
       return result;
     },
-    [id, router],
+    [id],
   );
   const [state, action, pending] = useActionState<
     OutsourcePaymentMutationResult | null,

@@ -302,8 +302,8 @@ export function AdminOrderEditor(props: Props) {
         }
         if (result.status === 'saved') {
           allowNavigation();
+          // The save action revalidated /orders/[id]; push alone renders it fresh.
           router.push(`/orders/${props.orderId}`);
-          router.refresh();
         }
       } catch {
         setError('保存结果未确认，请刷新核对工单后再操作。');

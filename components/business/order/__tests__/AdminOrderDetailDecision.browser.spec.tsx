@@ -141,7 +141,8 @@ describe('admin detail print recall workflow', () => {
     });
     resolve(completeResult());
     await expect.element(page.getByText('已确认 v3 打印完成', { exact: true })).toBeVisible();
-    expect(refresh).toHaveBeenCalledOnce();
+    // The action revalidated; its response already carries the fresh page (DECISIONS 2026-08-27).
+    expect(refresh).not.toHaveBeenCalled();
     expect(batchAction).toHaveBeenCalledOnce();
   });
 
@@ -153,7 +154,7 @@ describe('admin detail print recall workflow', () => {
     await submitRecall();
     await expect.element(page.getByText('工单版本已变化，请刷新核对。', { exact: true })).toBeVisible();
     expect(document.body.textContent).not.toContain('已确认 v3 打印完成');
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
     expect(batchAction).toHaveBeenCalledOnce();
   });
 

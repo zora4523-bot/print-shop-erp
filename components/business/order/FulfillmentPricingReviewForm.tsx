@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState, useTransition, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   finalizeFulfillmentPricingAction,
   previewFulfillmentPricingAction,
@@ -59,7 +58,6 @@ function readCommand(form: HTMLFormElement, orderId: string, isSfCollect: boolea
 }
 
 export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments, variant = 'page', onSuccess }: Props) {
-  const router = useRouter();
   const [target, setTarget] = useState(currentValue);
   const [edited, setEdited] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -137,8 +135,8 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
         });
         if (result.status === 'success') {
           setConfirmed(true);
-          if (onSuccess) onSuccess();
-          else router.refresh();
+          // The action revalidated; its response re-renders the page (DECISIONS 2026-08-27).
+          onSuccess?.();
         } else {
           setError(failureText(result));
           setAccepted(null);

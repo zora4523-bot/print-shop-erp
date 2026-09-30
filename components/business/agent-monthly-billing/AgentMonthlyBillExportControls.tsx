@@ -63,13 +63,12 @@ export function AgentMonthlyBillExportControls({
   const lastActionRef = useRef<AgentMonthlyBillExportActionResult | null>(null);
   const feedback = currentExportFeedback(state, recent);
 
+  // queued / success / error all return after the action's revalidatePath,
+  // so the response already carries the fresh export list; only the polling
+  // loop and the manual refresh button re-read it (DECISIONS 2026-08-27).
   useEffect(() => {
-    if (state === lastActionRef.current) return;
     lastActionRef.current = state;
-    if (state?.status === 'queued' || state?.status === 'success' || state?.status === 'error') {
-      router.refresh();
-    }
-  }, [router, state]);
+  }, [state]);
 
   useEffect(() => {
     if (!pendingSignature || pollingPaused) return;

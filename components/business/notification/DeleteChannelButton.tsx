@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,7 +23,6 @@ export function DeleteChannelButton({
   disabled,
   disabledReason,
 }: Props) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -68,9 +66,10 @@ export function DeleteChannelButton({
               setErrorMessage(result.message);
               return;
             }
-            // Direct action calls do not refresh the client RSC cache by
-            // themselves; fetch the list again so the removed row disappears.
-            router.refresh();
+            // deleteChannelAction revalidates /owner/notifications on success.
+            // Next applies that fresh render from the action response even for
+            // a direct (non-form) call, so the removed row disappears without
+            // a second router.refresh() (DECISIONS 2026-08-27).
           });
         }}>
         <ConfirmActionDialog action={`删除“${channelName}”？`} changes={[]} consequences={[
