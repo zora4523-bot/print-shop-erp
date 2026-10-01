@@ -1628,3 +1628,11 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - **理由**：业主 2026-10-01 对审查 D-9、D-13～D-15、S-3、L-9/L-10 的答复。
 - **影响范围**：仅界面与内联操作 DTO（`lib/order/admin-inline-operations.ts` 在可下发时不返回 fulfillment）；状态注册表标签变更影响管理端所有该状态徽章与日志文案，打印模板使用自己的状态标签、像素基线不受影响。无迁移。
 - **相关文档**：[审查记录](docs/audits/2026-10-01-order-list-detail-ui-review.md)、`docs/ui-规范.md`「管理员工单详情布局」2026-10-01 补充、`UI-SYSTEM.md`「管理端工单详情」。
+
+## 2026-10-01：师傅一键完成；批量完成与发货即完工按计划数量代登记
+
+- **决策**：师傅端「完成生产」按计划数量一键登记（二次确认防误触），不再输入数量；数量不一致时展开上报，走原数量审批。管理员可在工单列表「批量完成生产」；单人流程工单填物流单号确认发货（多地址为第一个地址）即按计划数量代师傅登记完成并计提成。生产日期记当天；有数量待审批、未安排师傅、师傅当天不在雇佣期、修改待审批时拦下；逐单一个事务，失败整体回滚；只做单人流程。
+- **理由**：业主 2026-10-01 答复（1–5 条全部采纳建议）：工单一旦生产就是工单数量；货已发出即证明已生产，不应因师傅漏点完成而卡住发货或漏计工资。
+- **影响范围**：`lib/production/planned-completion.ts`（新）、`registerProductionCompletionInTx`（原登记函数拆出事务内版本，行为不变）、`registerShipment` 与 `shipOrder`（`transitionWithLog.prepare` 钩子）、工单列表批量命令 `COMPLETE_PRODUCTION`、发货可用性新增 `PRODUCTION_REQUESTED` / `PRODUCTION_UNASSIGNED`。`ProductionJob.recordSource` 新增 `ADMIN_BATCH` / `SHIPMENT_AUTO`。无迁移。
+- **相关文档**：SPEC-v1.2.md「师傅一键完成、批量完成与发货即完工（2026-10-01）」。
+

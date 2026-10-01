@@ -281,10 +281,10 @@ export function AdminBreadcrumb({ role }: { role?: Role } = {}) {
                   // prop 把 <a> 替换成 next/link。
                   <BreadcrumbLink
                     className="inline-flex min-h-11 min-w-0 max-w-full items-center"
-                    title={label}
                     render={<Link href={href} prefetch={false} />}
                   >
-                    <span className="min-w-0 truncate">{label}</span>
+                    {/* The truncating element carries the full text (visual gate: hidden-clipping). */}
+                    <span className="min-w-0 truncate" title={label}>{label}</span>
                   </BreadcrumbLink>
                 ) : (
                   // Layout-only ancestor: not navigable AND not the

@@ -9,6 +9,8 @@ import { lockSettlementCutoffShared } from '@/lib/finance/settlement-cutoff-lock
 import { shipmentRegistrationSchema, type ShipmentRegistrationInput } from './shipment-registration-schema';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { dispatchNotification } from '@/lib/notification/dispatch';
+import { dispatchProductionCompletionNotification, type ProductionCompletionNotification } from '@/lib/production-completion';
+import { completePlannedProductionInTx, PlannedCompletionError } from '@/lib/production/planned-completion';
 
 export const SHIPMENT_IMAGE_LIMIT = 512 * 1024;
 export async function normalizeShipmentImage(bytes: Uint8Array): Promise<Uint8Array> {
@@ -34,7 +36,7 @@ export async function registerShipment(raw: ShipmentRegistrationInput, actor: { 
     // Same lock order as monthly billing and the settlement writer.
     await lockSettlementCutoffShared(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(input.orderId)}))`;
-    const order = await tx.order.findUnique({ where: { id: input.orderId }, include: { shipments: { orderBy: { sequence: 'asc' } } } });
+    let order = await tx.order.findUnique({ where: { id: input.orderId }, include: { shipments: { orderBy: { sequence: 'asc' } } } });
     const shipment = order?.shipments.find((row) => row.id === input.shipmentId);
     if (!order || !shipment) throw new OrderInvariantError('找不到发货地址，请刷新工单');
     const replay = await tx.orderLog.findFirst({ where: { orderId: order.id, action: 'SHIPMENT_REGISTERED', changedFields: { path: ['requestId'], equals: input.idempotencyKey } } });
@@ -47,8 +49,24 @@ export async function registerShipment(raw: ShipmentRegistrationInput, actor: { 
       throw new OrderInvariantError('工单已被修改，请刷新后重新登记');
     }
     if ([OrderStatus.CANCELLED, OrderStatus.FINISHED].includes(order.status as 'CANCELLED' | 'FINISHED')) throw new OrderInvariantError('该工单已关闭，不能登记发货');
+    let productionNotification: ProductionCompletionNotification | undefined;
     if (input.confirm) {
       if (shipment.status === ShipmentStatus.SHIPPED) throw new OrderInvariantError('该地址已发货，请刷新查看');
+      // 业主 2026-10-01：单人流程填物流单号确认发货即证明已按工单数量生产完成，
+      // 先代师傅按计划数量登记并计提成；任何一步失败整体回滚。
+      if (order.simpleProduction && (order.status === OrderStatus.RELEASED || order.status === OrderStatus.FOILING)) {
+        try {
+          productionNotification = (await completePlannedProductionInTx(tx, order.id, actor, 'SHIPMENT_AUTO')).notification;
+        } catch (error) {
+          if (error instanceof PlannedCompletionError) throw new OrderInvariantError(`确认发货前需登记生产完成：${error.message}`);
+          throw error;
+        }
+        order = await tx.order.findUniqueOrThrow({ where: { id: input.orderId }, include: { shipments: { orderBy: { sequence: 'asc' } } } });
+        // Production is registered but the order is still held (e.g. outsourcing): surface the specific reason.
+        if (order.status !== OrderStatus.PACKING && order.status !== OrderStatus.COMPLETED) {
+          await assertShipOrderReadinessInTx(tx, { orderId: order.id, workOrderVersion: order.workOrderVersion, settlementType: order.settlementType, isVersionedCommand: true, hasSubmittedShipmentDetails: true, simpleProduction: order.simpleProduction, requiresOutsource: order.requiresOutsource });
+        }
+      }
       if (order.status !== OrderStatus.PACKING && order.status !== OrderStatus.COMPLETED) throw new OrderInvariantError('工单尚未完工，请完工后确认发货');
       if (order.confirmedFee === null || !['ADMIN_CONFIRMED', 'AUTO_CONFIRMED', 'LEGACY_CONFIRMED'].includes(order.pricingStatus)) throw new OrderInvariantError('费用尚未确认，请先核价');
       if (order.isSfCollect && input.carrierCode !== 'SF') throw new OrderInvariantError('本单为顺丰到付，请选择顺丰或先更正物流费用');
@@ -89,8 +107,9 @@ export async function registerShipment(raw: ShipmentRegistrationInput, actor: { 
         shipmentStatus: { before: shipment.status, after: updated.status },
         labelAdded: Boolean(photo) },
     } });
-    return { completed, replay: false, orderNo: order.orderNo };
+    return { completed, replay: false, orderNo: order.orderNo, productionNotification };
   }, { timeout: 30_000 });
+  if ('productionNotification' in result && result.productionNotification) await dispatchProductionCompletionNotification(result.productionNotification);
   if (result.completed && backgroundJobsMode() !== 'durable') {
     await dispatchNotification('ORDER_SHIPPED', { orderId: input.orderId, orderNo: result.orderNo, trackingNo: input.trackingNo }, { dedupeKey: `notification:ORDER_SHIPPED:${input.orderId}` });
   }

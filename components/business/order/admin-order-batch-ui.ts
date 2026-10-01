@@ -30,6 +30,12 @@ export const BATCH_COMMAND_CONFIG = {
     impact: '按每张工单的已确认金额完成结算，并记录结算时间。',
     completed: '已完成结算',
   },
+  COMPLETE_PRODUCTION: {
+    label: '批量完成生产', capability: 'completeProduction', prerequisite: '需为已安排师傅的单人生产工单且无数量待审批',
+    confirmLabel: '确认完成生产',
+    impact: '按计划数量为每个待完成的生产任务代师傅登记完成（生产日期记为今天），并按工价计入师傅提成。',
+    completed: '已按计划数量登记生产完成',
+  },
 } as const;
 
 export type BatchOrderSnapshot = {
@@ -40,6 +46,7 @@ export type BatchOrderSnapshot = {
   workOrderVersion: number;
   pendingPrintJobId: string | null;
   confirmedFee: string | null;
+  productionOwners: string[];
   eligible: boolean;
   reason: string | null;
 };
@@ -72,6 +79,7 @@ export function snapshotBatchSelection(
       workOrderVersion: order?.workOrderVersion ?? 1,
       pendingPrintJobId: order?.pendingPrintJobId ?? null,
       confirmedFee: order?.feeStages.confirmed ?? null,
+      productionOwners: order?.productionOwners ?? [],
       eligible: reason === null,
       reason,
     };
@@ -91,7 +99,7 @@ export function batchConfirmationImpact(
     `已选 ${orders.length} 张，本次可处理 ${eligible.length} 张`,
     BATCH_COMMAND_CONFIG[command].impact,
     ...amounts,
-    ...eligible.map((order) => `${order.orderNo}${order.customName ? ` · ${order.customName}` : ''}${command === 'SETTLE' ? `：${formatMoney(order.confirmedFee!)}` : ` · v${order.workOrderVersion}`}`),
+    ...eligible.map((order) => `${order.orderNo}${order.customName ? ` · ${order.customName}` : ''}${command === 'SETTLE' ? `：${formatMoney(order.confirmedFee!)}` : ` · v${order.workOrderVersion}`}${command === 'COMPLETE_PRODUCTION' && order.productionOwners.length ? ` · 师傅：${order.productionOwners.join('、')}` : ''}`),
     ...excluded.map((order) => `${order.orderNo}：本次不处理；${order.reason}`),
     '逐单独立处理；已成功的工单不会因其他工单失败而回退。',
   ];
@@ -121,6 +129,9 @@ export function batchFailureReason(code: string | undefined): string {
   }
 }
 
+/** PlannedCompletionError messages are curated and name the worker or task to fix. */
+const PLANNED_COMPLETION_CODES = new Set(['NOT_SIMPLE_PRODUCTION', 'CHANGE_PENDING', 'QUANTITY_PENDING', 'UNASSIGNED_PRODUCTION', 'WORKER_UNAVAILABLE', 'NOTHING_TO_COMPLETE', 'REGISTRATION_FAILED']);
+
 export type BatchReceiptRow = {
   order: BatchOrderSnapshot;
   outcome: 'success' | 'skipped' | 'unknown' | 'not-attempted';
@@ -145,7 +156,7 @@ export function batchReceiptRows(
     }
     const result = resultById.get(order.id);
     if (result?.status === 'success') return { order, outcome: 'success', label: '成功', reason: BATCH_COMMAND_CONFIG[command].completed };
-    if (result?.status === 'skipped') return { order, outcome: 'skipped', label: '业务跳过', reason: batchFailureReason(result.code) };
+    if (result?.status === 'skipped') return { order, outcome: 'skipped', label: '业务跳过', reason: PLANNED_COMPLETION_CODES.has(result.code) ? result.message : batchFailureReason(result.code) };
     if (result?.status === 'not_attempted') return { order, outcome: 'not-attempted', label: '未执行', reason: '前序工单处理异常，本次未继续执行；请核对列表后重新选择' };
     return { order, outcome: 'unknown', label: '结果未知', reason: '未能确认处理结果；请先打开工单核对最新记录，不要直接重复提交' };
   });

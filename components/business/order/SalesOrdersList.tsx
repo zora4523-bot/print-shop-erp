@@ -280,7 +280,7 @@ function SalesOrdersTable({
                     aria-haspopup="dialog"
                     className="h-auto max-w-48 justify-start p-0 text-left font-normal tabular-nums"
                   >
-                    <span className="truncate">{order.orderNo}</span>
+                    <span className="truncate" title={order.orderNo}>{order.orderNo}</span>
                   </Button>
                   <Button
                     type="button"
@@ -306,7 +306,7 @@ function SalesOrdersTable({
                     aria-haspopup="dialog"
                     className="h-auto max-w-48 justify-start p-0 text-left font-medium"
                   >
-                    <span className="truncate">{order.customName ?? '未命名工单'}</span>
+                    <span className="truncate" title={order.customName ?? '未命名工单'}>{order.customName ?? '未命名工单'}</span>
                   </Button>
                   <OrderPurposeBadge purpose={order.purpose} />
                   {order.isUrgent ? <UrgentBadge /> : null}

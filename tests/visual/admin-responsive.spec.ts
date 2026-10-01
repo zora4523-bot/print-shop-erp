@@ -1440,7 +1440,9 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
     }),
   ).toBeVisible();
 
-  const list = page.locator('[data-slot="sales-orders-list"]');
+  // React 19 throttles Suspense reveals: right after load the streamed segment can still sit
+  // in its hidden <div id="S:n"> next to the revealed list. Only the visible list counts.
+  const list = page.locator('[data-slot="sales-orders-list"]:visible');
   await expect(list).toBeVisible();
   const card = list.locator(`[data-order-id="${data.orderId}"]:visible`);
   await expect(card).toHaveCount(1);

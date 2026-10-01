@@ -111,7 +111,8 @@ import {
 } from './order/submit-external-order';
 import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
-import { findRequiredOutsourceBlocker, type ProductionCompletionTx } from './production-completion';
+import { dispatchProductionCompletionNotification, findRequiredOutsourceBlocker, type ProductionCompletionNotification, type ProductionCompletionTx } from './production-completion';
+import { completePlannedProductionBeforeShipInTx, PlannedCompletionError } from './production/planned-completion';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -1179,8 +1180,18 @@ type CascadeTxClient = {
 // namespace as operation reporting (`print-shop-erp:order-cascade:<id>`) so
 // scanner reports cannot race a manual ship/cancel/submit on Order.status.
 
+type TransitionVersions = { revision: number; editVersion: number; workOrderVersion: number; priceRevision: number };
 type TransitionOptions = {
   remark: string | null;
+  /**
+   * Runs after the locked read and before the command guard. May change the order
+   * (e.g. register planned production before shipping); returns the versions the
+   * command guard compares against afterwards.
+   */
+  prepare?: (
+    tx: Prisma.TransactionClient,
+    order: TransitionVersions & { id: string; status: OrderStatus; simpleProduction?: boolean },
+  ) => Promise<TransitionVersions | null>;
   // Optional authz guard that runs AFTER we've fetched the row (so it
   // can see submitterId / status) but BEFORE the status-machine check.
   // Throw OrderInvariantError to reject.
@@ -1261,7 +1272,7 @@ async function transitionWithLog(
       orderId,
     )}))`;
 
-    const target_order = await txClient.order.findUnique({
+    const readTarget = () => txClient.order.findUnique({
       where: { id: orderId },
       select: {
         id: true,
@@ -1280,10 +1291,19 @@ async function transitionWithLog(
         priceRevision: true,
       },
     });
+    let target_order = await readTarget();
     if (!target_order) throw new OrderInvariantError('工单不存在');
+    let guardVersions: TransitionVersions | null = null;
+    if (opts.prepare) {
+      guardVersions = await opts.prepare(tx, target_order);
+      if (guardVersions) target_order = (await readTarget())!;
+    }
 
     if (opts.commandGuard) {
-      const guard = opts.commandGuard;
+      const guard = guardVersions
+        ? { ...opts.commandGuard, expectedRevision: guardVersions.revision, expectedEditVersion: guardVersions.editVersion,
+            expectedWorkOrderVersion: guardVersions.workOrderVersion, expectedPriceRevision: guardVersions.priceRevision }
+        : opts.commandGuard;
       const replay = await txClient.orderLog.findFirst({
         where: {
           orderId,
@@ -1421,7 +1441,7 @@ async function transitionWithLog(
       ? { ...updated, status: afterTransitionResult.status }
       : updated;
   };
-  return transaction ? work(transaction) : db.$transaction(work);
+  return transaction ? work(transaction) : db.$transaction(work, opts.prepare ? { timeout: 30_000 } : undefined);
 }
 
 /** Runs the shared submit-time quote finalizer and maps its errors to the order domain. */
@@ -2355,6 +2375,7 @@ export async function shipOrder(
     };
   }
   let notificationQueued = false;
+  let productionNotification: ProductionCompletionNotification | undefined;
   const result = await transitionWithLog(
     orderId,
     OrderStatus.SHIPPED,
@@ -2370,6 +2391,27 @@ export async function shipOrder(
       extraData:
         primaryTracking !== null ? { trackingNo: primaryTracking } : undefined,
       commandGuard,
+      // 业主 2026-10-01：单人流程录运单发货即证明已按工单数量生产完成。本函数自有事务时，
+      // 先按计划数量代师傅登记完成（同一事务，失败整体回滚），再按完工后的版本发货；
+      // 幂等指纹仍按原始请求计算。调用方传入事务时由调用方负责（见 registerShipment）。
+      ...(!transaction && commandGuard ? { prepare: async (tx: Prisma.TransactionClient, order: Parameters<NonNullable<TransitionOptions['prepare']>>[1]) => {
+        let completion: Awaited<ReturnType<typeof completePlannedProductionBeforeShipInTx>>;
+        try {
+          completion = await completePlannedProductionBeforeShipInTx(tx, order, actor, commandGuard!);
+        } catch (error) {
+          if (error instanceof PlannedCompletionError) throw new OrderInvariantError(`确认发货前需登记生产完成：${error.message}`);
+          throw error;
+        }
+        if (!completion) return null;
+        if (completion.status !== OrderStatus.PACKING && completion.status !== OrderStatus.COMPLETED) {
+          const held = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { workOrderVersion: true, settlementType: true, simpleProduction: true, requiresOutsource: true } });
+          await assertShipOrderReadinessInTx(tx, { orderId, workOrderVersion: held.workOrderVersion, settlementType: held.settlementType, isVersionedCommand: true,
+            hasSubmittedShipmentDetails: requestedShipments.length > 0, simpleProduction: held.simpleProduction, requiresOutsource: held.requiresOutsource });
+          throw new OrderInvariantError('生产已登记，但工单仍未完工，暂不能发货');
+        }
+        productionNotification = completion.notification;
+        return completion.versions;
+      } } : {}),
       cascade: async (tx, id, pricingOrder) => {
         const prismaTx = tx as unknown as Prisma.TransactionClient;
         const storedShipments = await assertShipOrderReadinessInTx(prismaTx, {
@@ -2434,6 +2476,7 @@ export async function shipOrder(
     },
     transaction,
   );
+  if (productionNotification) await dispatchProductionCompletionNotification(productionNotification);
 
   if (transaction) return { ...result, idempotentReplay: Boolean(result.idempotentReplay) };
 

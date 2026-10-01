@@ -362,9 +362,10 @@ describe('breadcrumb text alignment in the real admin shell', () => {
             link.focus();
             expect(document.activeElement).toBe(link);
             if (scenario.entityLabel) {
-              expect(link.title).toBe(scenario.entityLabel);
               const text = link.querySelector<HTMLElement>('span')!;
               expect(text).not.toBeNull();
+              // The truncating element itself carries the full label (visual gate: hidden-clipping).
+              expect(text.title).toBe(scenario.entityLabel);
               expect(getComputedStyle(text).textOverflow).toBe('ellipsis');
               expect(getComputedStyle(text).whiteSpace).toBe('nowrap');
               if (width <= 768) expect(text.scrollWidth).toBeGreaterThan(text.clientWidth);

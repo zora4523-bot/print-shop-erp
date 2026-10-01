@@ -391,6 +391,27 @@ describe('admin order workspace predicates', () => {
     );
   });
 
+  it('offers batch production completion and shipping for released single-owner orders only when nothing needs approval or assignment', () => {
+    const facts = {
+      hasPendingChange: false, manualPricing: false, confirmationPreflightOk: true, confirmedFeePresent: false,
+      pricingPending: false, hasShipment: true, hasLiveOutsource: false, hasIncompleteProduction: true,
+      printFacts: { printPending: false, pendingPrintJobId: null, canCreatePrint: false, canMarkPrinted: false },
+      status: OrderStatus.RELEASED,
+      plannedCompletion: { pendingJobs: 2, requestedJobs: 0, unassignedUnits: 0 },
+    };
+    expect(resolveAdminOrderCapabilities(facts)).toMatchObject({ completeProduction: true, ship: true });
+    expect(resolveAdminOrderCapabilities({ ...facts, plannedCompletion: { pendingJobs: 2, requestedJobs: 1, unassignedUnits: 0 } })).toMatchObject({ completeProduction: false, ship: false });
+    expect(resolveAdminOrderShipDisabledReason({ ...facts, plannedCompletion: { pendingJobs: 2, requestedJobs: 1, unassignedUnits: 0 } })).toBe('有生产数量待审批，请先在生产安排中审批');
+    expect(resolveAdminOrderCapabilities({ ...facts, plannedCompletion: { pendingJobs: 1, requestedJobs: 0, unassignedUnits: 1 } })).toMatchObject({ completeProduction: false, ship: false });
+    expect(resolveAdminOrderShipDisabledReason({ ...facts, plannedCompletion: { pendingJobs: 1, requestedJobs: 0, unassignedUnits: 1 } })).toBe('仍有未安排师傅的生产，请先排单');
+    expect(resolveAdminOrderCapabilities({ ...facts, hasPendingChange: true }).completeProduction).toBe(false);
+    expect(resolveAdminOrderCapabilities({ ...facts, status: OrderStatus.ON_HOLD })).toMatchObject({ completeProduction: false, ship: false });
+    // Scan-flow orders (no single-owner facts) keep the old rule: finish production first.
+    const { plannedCompletion: _omit, ...scanFlow } = facts;
+    void _omit;
+    expect(resolveAdminOrderCapabilities(scanFlow)).toMatchObject({ completeProduction: false, ship: false });
+  });
+
   it('matches ship and settlement capabilities to their server prerequisites', () => {
     const base = {
       hasPendingChange: false,

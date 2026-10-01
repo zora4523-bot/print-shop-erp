@@ -152,6 +152,7 @@ export type AdminOrderWorkspaceRow = {
     createPrint: boolean;
     markPrinted: boolean;
     reviewChange: boolean;
+    completeProduction: boolean;
   };
   billing: {
     id: string;
@@ -398,12 +399,12 @@ const adminOrderSelect = {
   },
   simpleProduction: true,
   requiresOutsource: true,
-  productionJobs: { select: { id: true, label: true, status: true, factReview: { select: { status: true } }, workerName: true, workOrderVersion: true, wages: { select: { amount: true } } } },
+  productionJobs: { select: { id: true, label: true, status: true, factReview: { select: { status: true } }, workerName: true, workOrderVersion: true, operationId: true, progressStepId: true, wages: { select: { amount: true } } } },
   productionOperations: {
-    select: { workOrderVersion: true, status: true, operationType: true },
+    select: { id: true, workOrderVersion: true, status: true, operationType: true },
   },
   productionProgressSteps: {
-    select: { workOrderVersion: true, status: true },
+    select: { id: true, workOrderVersion: true, status: true },
   },
   outsourceOrders: {
     select: { status: true },
@@ -440,10 +441,31 @@ type AdminOrderCapabilityFacts = {
   hasOutsourceGap?: boolean;
   hasIncompleteProduction: boolean;
   printFacts: AdminPrintFacts;
+  /** Single-owner production jobs of the current version (planned completion, DECISIONS 2026-10-01). */
+  plannedCompletion?: { pendingJobs: number; requestedJobs: number; unassignedUnits: number };
 };
 
+/** Same current-version rule as lib/production/planned-completion loadPlannedCompletion. */
+function plannedCompletionFacts(row: {
+  workOrderVersion: number;
+  productionJobs?: Array<{ status: string; workOrderVersion: number; operationId: string | null; progressStepId: string | null }>;
+  productionOperations: Array<{ id: string; status: string; workOrderVersion: number; operationType: string }>;
+  productionProgressSteps: Array<{ id: string; status: string; workOrderVersion: number }>;
+}) {
+  const jobs = (row.productionJobs ?? []).filter(job => job.workOrderVersion === row.workOrderVersion && job.status !== 'CANCELLED');
+  const linked = new Set(jobs.flatMap(job => [job.operationId, job.progressStepId]).filter((id): id is string => !!id));
+  const remaining = (unit: { id: string; status: string; workOrderVersion: number }) =>
+    unit.workOrderVersion === row.workOrderVersion && (unit.status === 'PENDING' || unit.status === 'IN_PROGRESS') && !linked.has(unit.id);
+  return {
+    pendingJobs: jobs.filter(job => job.status === 'PENDING').length,
+    requestedJobs: jobs.filter(job => job.status === 'REQUESTED').length,
+    unassignedUnits: row.productionOperations.filter(op => op.operationType !== 'PACKING' && remaining(op)).length
+      + row.productionProgressSteps.filter(remaining).length,
+  };
+}
+
 export function resolveAdminOrderShipDisabledReason(
-  input: Pick<AdminOrderCapabilityFacts, 'status' | 'pricingPending' | 'hasShipment' | 'hasLiveOutsource' | 'hasOutsourceGap' | 'hasIncompleteProduction' | 'hasPendingChange'>,
+  input: Pick<AdminOrderCapabilityFacts, 'status' | 'pricingPending' | 'hasShipment' | 'hasLiveOutsource' | 'hasOutsourceGap' | 'hasIncompleteProduction' | 'hasPendingChange' | 'plannedCompletion'>,
 ): string | null {
   return orderShippingAvailability({
     ...input,
@@ -482,6 +504,13 @@ export function resolveAdminOrderCapabilities(input: AdminOrderCapabilityFacts):
     createPrint: input.printFacts.canCreatePrint,
     markPrinted: input.printFacts.canMarkPrinted,
     reviewChange: input.hasPendingChange,
+    // Unassigned production and employment are re-checked by the server command.
+    completeProduction:
+      (input.status === OrderStatus.RELEASED || input.status === OrderStatus.FOILING || input.status === OrderStatus.PACKING) &&
+      !input.hasPendingChange &&
+      (input.plannedCompletion?.pendingJobs ?? 0) > 0 &&
+      input.plannedCompletion?.requestedJobs === 0 &&
+      input.plannedCompletion.unassignedUnits === 0,
   };
 }
 
@@ -864,6 +893,7 @@ function mapAdminOrderRow(
       !row.outsourceOrders.some((outsource) => outsource.status !== OutsourceStatus.CANCELLED),
     hasIncompleteProduction,
     printFacts,
+    ...(row.simpleProduction ? { plannedCompletion: plannedCompletionFacts(row) } : {}),
   };
   return {
     simpleProduction: row.simpleProduction,
@@ -900,6 +930,7 @@ function mapAdminOrderRow(
       row.status as (typeof ACTIVE_PROMISE_STATUSES)[number],
     ) || row.status === OrderStatus.REJECTED ? daysLeft : null,
     shipDisabledReason: row.status === OrderStatus.PACKING || row.status === OrderStatus.COMPLETED
+      || (row.simpleProduction && (row.status === OrderStatus.RELEASED || row.status === OrderStatus.FOILING))
       ? resolveAdminOrderShipDisabledReason(capabilityFacts)
       : null,
     itemCount: items.length,

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   settle: vi.fn(),
   createPrint: vi.fn(),
   markPrinted: vi.fn(),
+  completeProduction: vi.fn(),
 }));
 
 vi.mock('../admin-workflow', () => {
@@ -43,7 +44,17 @@ vi.mock('../../production/operation-materialization-service', () => {
   return { ProductionOperationMaterializationError };
 });
 
+vi.mock('../../production/planned-completion', () => {
+  class PlannedCompletionError extends Error {
+    constructor(public readonly code: string, message: string) {
+      super(message);
+    }
+  }
+  return { PlannedCompletionError, completeOrderProductionAtPlan: mocks.completeProduction };
+});
+
 import { AdminOrderWorkflowError } from '../admin-workflow';
+import { PlannedCompletionError } from '../../production/planned-completion';
 import {
   ADMIN_ORDER_BATCH_COMMANDS,
   runAdminOrderBatch,
@@ -75,6 +86,19 @@ describe('admin order batch whitelist', () => {
       'CREATE_PRINT',
       'MARK_PRINTED',
       'SETTLE',
+      'COMPLETE_PRODUCTION',
+    ]);
+  });
+
+  it('completes production per order and skips curated planned-completion refusals without aborting the batch', async () => {
+    mocks.completeProduction
+      .mockRejectedValueOnce(new PlannedCompletionError('QUANTITY_PENDING', '有 1 个生产任务数量待审批，请先审批'))
+      .mockResolvedValueOnce({ completedJobs: [{ id: 'job-b' }] });
+    const result = await runAdminOrderBatch({ requestId: 'batch-complete-1', command: 'COMPLETE_PRODUCTION', items: [item('a'), item('b')] }, admin);
+    expect(mocks.completeProduction).toHaveBeenNthCalledWith(2, { orderId: 'b', expectedRevision: 4, expectedWorkOrderVersion: 2 }, admin);
+    expect(result.items).toEqual([
+      { orderId: 'a', status: 'skipped', code: 'QUANTITY_PENDING', message: '有 1 个生产任务数量待审批，请先审批' },
+      { orderId: 'b', status: 'success', code: 'OK' },
     ]);
   });
 

@@ -52,4 +52,13 @@ describe('admin batch review and receipts', () => {
     expect(batchReceiptRows('RELEASE_AND_CREATE_PRINT', snapshotBatchSelection('RELEASE_AND_CREATE_PRINT', batchSelection(orders), orders), null)[0].outcome).toBe('unknown');
     expect(batchFailureReason('UNKNOWN')).toContain('打开工单');
   });
+  it('lists the production owners for batch completion and keeps curated completion refusals', () => {
+    const baseline = batchOrder();
+    const order = batchOrder({ capabilities: { ...baseline.capabilities, completeProduction: true }, productionOwners: ['王师傅', '李师傅'] });
+    const reviewed = snapshotBatchSelection('COMPLETE_PRODUCTION', batchSelection([order]), [order]);
+    expect(batchConfirmationImpact('COMPLETE_PRODUCTION', reviewed).join(' ')).toContain('师傅：王师傅、李师傅');
+    const rows = batchReceiptRows('COMPLETE_PRODUCTION', reviewed, { status: 'success', result: { command: 'COMPLETE_PRODUCTION', successCount: 0, skippedCount: 1, failedCount: 0, notAttemptedCount: 0,
+      items: [{ orderId: order.id, status: 'skipped', code: 'WORKER_UNAVAILABLE', message: '王师傅 今天不在雇佣期，请先改派生产任务' }] } });
+    expect(rows[0]).toMatchObject({ outcome: 'skipped', reason: '王师傅 今天不在雇佣期，请先改派生产任务' });
+  });
 });
