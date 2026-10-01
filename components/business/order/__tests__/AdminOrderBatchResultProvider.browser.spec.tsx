@@ -6,6 +6,7 @@ import { commands, page, userEvent } from 'vitest/browser';
 import type { AdminOrderBatchActionResult } from '@/actions/admin-order-workflow';
 import type { AdminOrderBatchCommand } from '@/lib/order/admin-batch';
 import type { BatchOrderSnapshot } from '../admin-order-batch-ui';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 
 vi.mock('next/link', () => ({
@@ -152,8 +153,7 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       finish('RELEASE_AND_CREATE_PRINT', orders);
       await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
       const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]')!;
-      await expect.poll(() => dialog.hasAttribute('data-starting-style')).toBe(false);
-      await Promise.all(dialog.getAnimations().map((animation) => animation.finished));
+      await waitForStableLayout();
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
       expect(dialog.scrollWidth).toBeLessThanOrEqual(dialog.clientWidth);
       for (const control of dialog.querySelectorAll<HTMLElement>('button, a[href]')) {
