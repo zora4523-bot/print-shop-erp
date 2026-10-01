@@ -414,7 +414,9 @@ it('opens the selected style supplement and preserves fee and print destinations
   await expect.poll(() => document.activeElement).toBe(selected);
   const fees = document.getElementById('order-detail-fees')!;
   expect(fees.textContent).toContain('入袋费');
-  expect(fees.textContent).toContain('费用记录');
+  // 业主 2026-10-01：费用记录三阶段卡已去掉，合计统一叫「当前金额」。
+  expect(fees.textContent).not.toContain('费用记录');
+  expect(fees.textContent).toContain('当前金额');
   expect(fees.textContent).toContain('¥ 570.00');
   expect(host.querySelector('a[href="/print/orders/detail-order-1?autoprint=1"]')).not.toBeNull();
   expect(geometryFailures(host, 1280)).toEqual([]);
@@ -440,10 +442,8 @@ it('keeps each specification file editor in its own card and opens only the sele
   await page.getByRole('button', { name: '查看设计文件', exact: true }).nth(1).click();
   await expect.element(page.getByLabelText('稿件备注 2')).toHaveValue('未提交的资料');
   expect(host.querySelectorAll('#detail-design-item-item-2')).toHaveLength(1);
-  const fees = document.getElementById('order-detail-fees')!;
-  const stage = [...fees.querySelectorAll('p')].find(p => p.textContent === '确认金额当前')!;
-  expect(stage.parentElement?.textContent).toContain('估');
   expect(host.querySelector('[data-slot="current-order-amount"]')?.textContent).toContain('估');
+  expect(document.getElementById('order-detail-fees')?.textContent).not.toContain('当前确认金额');
 });
 
 it('keeps collect-shipping and plate-fee context next to the total without contradicting the current quote', async () => {

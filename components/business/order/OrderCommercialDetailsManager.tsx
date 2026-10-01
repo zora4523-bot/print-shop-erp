@@ -14,6 +14,7 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { OrderEditorAuxiliaryContext, useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
@@ -141,16 +142,15 @@ function ManualChargeEditor({
   return (
     <div className="space-y-3 rounded-lg border p-3">
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium">
-          {charge ? charge.category.name : '添加订单级费用'}
-        </p>
-        {charge ? (
+      {/* 新增表单的标题由外层折叠摘要「添加整单费用」承担，不再重复。 */}
+      {charge ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium">{charge.category.name}</p>
           <Badge variant={removed ? 'outline' : 'secondary'}>
             {removed ? '已移除（保留历史）' : '管理员已确认'}
           </Badge>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {removed ? (
         <dl className="grid gap-2 text-xs sm:grid-cols-2">
@@ -194,7 +194,7 @@ function ManualChargeEditor({
                 inputMode="decimal"
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}
-                aria-label="订单级费用金额"
+                aria-label="整单费用金额"
               />
             </label>
           </div>
@@ -382,7 +382,7 @@ function PlateDetailEditor({
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium">
-          {detail ? `制版明细 #${detail.sequence}` : '添加制版明细'}
+          {detail ? `制版明细 #${detail.sequence}` : null}
         </p>
         {Number.isFinite(calculatedAmount) ? (
           <span className="font-sans text-xs tabular-nums">
@@ -524,7 +524,7 @@ export function OrderCommercialDetailsManager({
       </div>
 
       <div className="space-y-3">
-        <Subheading className="text-sm font-semibold">订单级其他费用</Subheading>
+        <Subheading className="text-sm font-semibold">整单其他费用</Subheading>
         {manualCharges.map((charge) => (
           <ManualChargeEditor
             key={charge.id}
@@ -533,12 +533,16 @@ export function OrderCommercialDetailsManager({
             charge={charge}
           />
         ))}
-        <ManualChargeEditor
-          key={`new-manual-${priceRevision}`}
-          orderId={orderId}
-          priceRevision={priceRevision}
-          charge={null}
-        />
+        {/* 业主 2026-10-01：缩短详情页。新增表单默认收起，仍挂载在 details 内，未提交输入不丢。 */}
+        <Disclosure>
+          <DisclosureSummary className="gap-2">添加整单费用<DisclosureIndicator /></DisclosureSummary>
+          <ManualChargeEditor
+            key={`new-manual-${priceRevision}`}
+            orderId={orderId}
+            priceRevision={priceRevision}
+            charge={null}
+          />
+        </Disclosure>
       </div>
 
       <div className="space-y-3 border-t pt-4">
@@ -560,13 +564,16 @@ export function OrderCommercialDetailsManager({
                   />
                 ))}
                 {item.independentPlateEligible ? (
-                  <PlateDetailEditor
-                    key={`new-plate-${item.id}-${priceRevision}`}
-                    orderId={orderId}
-                    orderItemId={item.id}
-                    priceRevision={priceRevision}
-                    detail={null}
-                  />
+                  <Disclosure>
+                    <DisclosureSummary className="gap-2 text-xs">添加制版明细<DisclosureIndicator /></DisclosureSummary>
+                    <PlateDetailEditor
+                      key={`new-plate-${item.id}-${priceRevision}`}
+                      orderId={orderId}
+                      orderItemId={item.id}
+                      priceRevision={priceRevision}
+                      detail={null}
+                    />
+                  </Disclosure>
                 ) : (
                   <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
                     该款式没有独立制版费：无烫金款不能录入；彩印烫金已包含在整款价中。

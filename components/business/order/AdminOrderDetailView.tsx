@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice, PageHeader, StatusBadge, TableEmptyState, useCopyToClipboard } from '@/components/ui-business';
 import { ORDER_CHANGE_REQUEST_STATUS_REGISTRY, ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
-import { formatMoney } from '@/lib/dashboard/format';
 import { OrderAmount } from './OrderAmount';
 import { cn } from '@/lib/utils';
 import { OrderDetailStickyScope } from './OrderDetailStickyScope';
@@ -25,6 +24,13 @@ export type DetailPrintRecord = {
   state: 'PENDING' | 'PRINTED' | 'SUPERSEDED';
   at: string;
 };
+
+/** 「尚未创建打印任务」只在打印仍会发生的阶段提示；草稿、驳回与发货后的终态不提示（审查 D-16）。 */
+const PRINT_HINT_STATUSES: ReadonlySet<string> = new Set([
+  'PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED', 'RELEASED', 'SCHEDULING', 'IN_PRODUCTION', 'FOILING', 'PACKING', 'COMPLETED', 'ON_HOLD',
+]);
+/** 还没进入生产的工单没有排产与提成可看，页头不放「生产安排与提成」捷径。 */
+const PRE_PRODUCTION_STATUSES: ReadonlySet<string> = new Set(['DRAFT', 'SUBMITTED', 'PENDING_FACTORY', 'REJECTED']);
 
 type Props = {
   model: AdminOrderDetailModel;
@@ -124,12 +130,12 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
     ));
   }
   const navigation = [
-    { id: 'order-detail-items-title', title: '款式资料' },
+    { id: 'order-detail-items-title', title: '款式明细' },
     { id: 'order-detail-fees', title: '费用' },
     ...(supplementary.some((section) => section.id === 'detail-delivery-records') ? [{ id: 'detail-delivery-records', title: '配送发货' }] : [{ id: 'order-delivery-summary', title: '配送发货' }]),
     { id: 'order-production-records', title: '生产记录' },
     ...(supplementary.some(section => section.id === 'detail-after-sales') ? [{ id: 'detail-after-sales', title: '售后' }] : []),
-    { id: 'order-history-records', title: '操作记录' },
+    { id: 'order-history-records', title: '工单动态' },
   ];
 
   return <div className={styles.surface} data-testid="admin-order-detail" onClickCapture={(event) => {
@@ -153,7 +159,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
             {model.isUrgent ? <StatusBadge tone="warning">急单</StatusBadge> : null}</>} />
         <p id="order-detail-overview" tabIndex={-1} className={cn(styles.meta, highlighted === 'order-detail-overview' && styles.highlight)}><span>业务员：{model.sales ?? '未填'}</span><span>交期：{model.due ?? '未设置'}{model.dueLeft ? ` · ${model.dueLeft}` : ''}</span><span>{model.items.length} 款 · {model.qty.toLocaleString('zh-CN')} 个</span></p>
         {!!productionOwners?.length && <p className="basis-full text-sm">生产师傅：{productionOwners.join("、")}</p>}
-        <a href="#detail-production-records" className="inline-flex min-h-11 items-center text-sm underline">生产安排与提成</a>
+        {!PRE_PRODUCTION_STATUSES.has(model.status) ? <a href="#detail-production-records" className="inline-flex min-h-11 items-center text-sm underline">生产安排与提成</a> : null}
         <Disclosure className="basis-full">
           <DisclosureSummary className={styles.disclosureSummary}><span>工单信息</span><ChevronDown aria-hidden="true" className={styles.disclosureChevron} /><span className={styles.expandLabel}>展开</span><span className={styles.collapseLabel}>收起</span></DisclosureSummary>
           <div className="flex flex-wrap items-center gap-3 pb-3">
@@ -175,12 +181,13 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
         <aside className={styles.aside} aria-label="工单概览与操作">
           <section id="order-detail-actions" tabIndex={-1} data-emphasis="inverse" className={cn(styles.card, styles.decision)} aria-label="当前待办"><h2 className={styles.eyebrow}>当前待办</h2>
             {decision ?? <p>{ORDER_STATUS_REGISTRY[model.status].label} · 暂无待办</p>}
-            {otherActions ? <div id="detail-other-actions" tabIndex={-1} className={styles.otherActions}><h3>维护与其他操作</h3>{otherActions.content}</div> : null}
+            {/* 终态工单可能一个维护操作都没有：动作行为空时整块隐藏，不留孤立标题。 */}
+            {otherActions ? <div id="detail-other-actions" tabIndex={-1} className={cn(styles.otherActions, 'has-[>div:empty]:hidden')}><h3>维护与其他操作</h3>{otherActions.content}</div> : null}
           </section>
           {hasProgress && !simpleProduction ? <section className={styles.asideSection} aria-label="生产进度"><h2 className={styles.eyebrow}>生产进度</h2><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></section> : null}
           <section className={styles.asideSection}><h2 className={styles.eyebrow}>版本与打印</h2>{printActions ? <div className="mb-3 flex flex-wrap gap-2">{printActions}</div> : null}
             {prints.length ? <ol className={styles.prints}>{prints.map((print) => <li key={print.id}><span>工单 v{print.version}<small>{print.at}</small></span><StatusBadge tone={print.version !== model.version || print.state === 'SUPERSEDED' ? 'danger' : print.state === 'PRINTED' ? 'success' : 'warning'}>
-              {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : <p className={styles.emptyHint}>尚未创建打印任务</p>}
+              {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : PRINT_HINT_STATUSES.has(model.status) ? <p className={styles.emptyHint}>尚未创建打印任务</p> : null}
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
             {!otherActions ? <a href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</a> : null}
@@ -230,16 +237,13 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
           {!itemDetails ? renderSections(['detail-design-files']) : null}
           <section id="order-detail-fees" tabIndex={-1} className={cn(styles.card, highlighted === 'order-detail-fees' && styles.highlight)} aria-label="工单费用">
             <div className={styles.sectionHeading}><h2>工单费用</h2></div>
-            <section className={styles.orderFees} aria-label="订单级费用">
+            <section className={styles.orderFees} aria-label="整单费用">
               <dl className={styles.feeLines}>{model.itemProcessingAmount !== undefined ? <div><dt>款式加工费合计</dt><dd>{amount(model.itemProcessingAmount, model.status, model.processingEstimated)}</dd></div> : null}{model.orderFees.map((fee) => <div key={fee.id}><dt>{fee.label}</dt><dd>{amount(fee.amount, model.status, fee.estimated)}</dd></div>)}</dl>
               {model.hasItemPlateFees ? <p className={styles.emptyHint}>制版费见各款式，未计入款式加工费合计。</p> : null}
-              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : `当前${model.feeStages.find((stage) => stage.current)?.title ?? '金额'}`}{model.isSfCollect ? <small className="block text-xs font-normal">不含快递费，含耗材费</small> : null}</span><strong data-slot="current-order-amount">{amount(model.total, model.status, model.totalEstimated ?? model.feeSource === 'QUOTED', model.pricingStatus, model.feeSource === 'INCOMPLETE')}</strong></div>
+              <div className={styles.total}><span>{model.feeSource === 'LEGACY' ? '历史金额' : '当前金额'}{model.isSfCollect ? <small className="block text-xs font-normal">不含快递费，含耗材费</small> : null}</span><strong data-slot="current-order-amount">{amount(model.total, model.status, model.totalEstimated ?? model.feeSource === 'QUOTED', model.pricingStatus, model.feeSource === 'INCOMPLETE')}</strong></div>
             </section>
-            <h3 className={styles.feeHistoryHeading}>费用记录</h3>
-            <div className={styles.feeStages}>{model.feeStages.map((stage) => <div key={stage.key} className={cn(styles.feeStage, stage.current && styles.currentFee)}>
-              <p>{stage.title}{stage.current ? <span>当前</span> : null}</p><strong>{stage.current ? amount(model.total, model.status, model.totalEstimated, model.pricingStatus, model.feeSource === 'INCOMPLETE') : stage.total === null ? '—' : formatMoney(stage.total)}</strong>
-              {!stage.current && stage.total === null ? <small>{stage.key === 'confirmed' ? '费用核定后显示' : stage.key === 'settled' ? '结算后显示' : '尚未形成报价'}</small> : null}
-            </div>)}</div>
+            {/* 业主 2026-10-01：去掉「费用记录」三阶段卡（提交报价 / 确认金额 / 结算金额），
+                金额变化见工单动态；合计统一叫「当前金额」，不再出现「当前确认金额 … 估」。 */}
           </section>
 
           {renderSections(['detail-pricing-tools', 'detail-costs'])}
@@ -249,7 +253,9 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
             <p>{model.shipments.length > 1 ? `第 ${shipment.sequence} 票 · ` : ''}{shipment.name} {shipment.phone}</p><strong>{shipment.address || '未填写收货地址'}</strong>
             {shipment.trackingNo ? <p>{shipment.carrier} · {shipment.trackingNo}</p> : null}<small>{shipment.items.join(' · ')}</small>
           </li>)}</ol> : <p className={styles.emptyHint}>未填写收货地址{canEdit ? <> · <Link href={`/orders/${model.id}/edit`}>去编辑页补充</Link></> : null}</p>}</section> : null}
-          <div id="order-production-records" tabIndex={-1} className={styles.sectionHeading}><h2>生产记录</h2></div>
+          {/* 原先这里单独有一个 h2「生产记录」，紧跟着同级标题「生产、用料与计件记录」（审查 D-12）。
+              锚点改由包住生产各区块的分组承担，页内导航「生产记录」仍定位到这里。 */}
+          <section id="order-production-records" tabIndex={-1} aria-label="生产记录" className={styles.historyGroup}>
           {renderSections(['detail-production-records', 'detail-business-records'])}
           {(!simpleProduction || model.works.length > 0) && <section className={styles.ledger} aria-label="报工流水">
             <div className={styles.sectionHeading}><h2>报工流水</h2>{model.works.length > 0 ? <span>当前版本 · 最近 {model.works.length} 条</span> : null}</div>
@@ -257,6 +263,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
               <time>{work.at}</time><span>{work.label}{work.cumulative !== null ? <small>累计 {work.cumulative} {work.unit}</small> : null}</span><b>{work.actor}</b><strong>{work.quantity === null ? '—' : `${work.quantity} ${work.unit}`}</strong>
             </li>)}</ol>}
           </section>}
+          </section>
 
           {renderSections(['detail-after-sales'])}
           <div id="order-history-records" tabIndex={-1} className={styles.historyGroup}>

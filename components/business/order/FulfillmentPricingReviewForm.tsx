@@ -16,6 +16,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type Props = {
@@ -23,6 +24,8 @@ type Props = {
   currentValue: boolean;
   isPricingPending: boolean;
   variant?: 'page' | 'drawer';
+  /** 详情页费用区默认收起（业主 2026-10-01：先下发生产，物流后处理；缩短详情页）。 */
+  collapsible?: boolean;
   onSuccess?: () => void;
   shipments: Array<{
     id: string;
@@ -58,7 +61,7 @@ function readCommand(form: HTMLFormElement, orderId: string, isSfCollect: boolea
   };
 }
 
-export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments, variant = 'page', onSuccess }: Props) {
+export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments, variant = 'page', collapsible = false, onSuccess }: Props) {
   const router = useRouter();
   const [target, setTarget] = useState(currentValue);
   const [edited, setEdited] = useState(false);
@@ -152,11 +155,10 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   }
 
   const quote = accepted?.preview;
-  return (
-    <section data-variant={variant} id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
-      {auxiliary.blocked ? <p className="text-xs text-muted-foreground">请先保存或还原正在编辑的工单资料或费用。</p> : null}
-      <h3 className="text-sm font-semibold">物流费用确认</h3>
-
+  const heading = <h3 className="text-sm font-semibold">物流费用确认</h3>;
+  const blockedNotice = auxiliary.blocked ? <p className="text-xs text-muted-foreground">请先保存或还原正在编辑的工单资料或费用。</p> : null;
+  const body = (
+    <>
       {confirmed ? (
         <p role="status" className="mt-3 text-sm">物流费用已确认，工单已刷新。</p>
       ) : (
@@ -233,6 +235,23 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
         </form>
       )}
       {auxiliary.managed && dirty ? <Button type="button" variant="outline" className="mt-3" disabled={pending || auxiliary.pending} onClick={resetDraft}>还原物流输入</Button> : null}
+    </>
+  );
+  // 收起时表单仍挂载在 <details> 内，未提交的输入不丢；#fulfillment-pricing 深链会展开祖先 details。
+  if (collapsible) {
+    return (
+      <Disclosure data-variant={variant} id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-1">
+        <DisclosureSummary className="gap-2">{heading}<DisclosureIndicator /></DisclosureSummary>
+        {blockedNotice}
+        {body}
+      </Disclosure>
+    );
+  }
+  return (
+    <section data-variant={variant} id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
+      {blockedNotice}
+      {heading}
+      {body}
     </section>
   );
 }
