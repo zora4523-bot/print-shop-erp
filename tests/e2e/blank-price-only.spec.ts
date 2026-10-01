@@ -92,13 +92,13 @@ async function createAndSubmitSalesOrder(browser: Browser, paperName: string, or
 
 async function openHistoricalPriceEditor(page: Page, orderId: string) {
   await page.goto(`/orders/${orderId}`);
-  const summary = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价$/ });
+  const summary = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价/ });
   await summary.click();
   return summary.locator('..');
 }
 
 async function confirmHistoricalPrice(page: Page, value: string, reason: string) {
-  const editor = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价$/ }).locator('..');
+  const editor = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价/ }).locator('..');
   await editor.getByRole('textbox').fill(value);
   await editor.getByRole('button', { name: '确认材料单价', exact: true }).click();
   const dialog = page.getByRole('alertdialog', { name: '确认材料单价', exact: true });

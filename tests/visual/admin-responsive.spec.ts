@@ -185,6 +185,11 @@ test.describe('administrator workspace', () => {
       { name: 'shipping-released-reason', path: `/orders/${orders.released}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
         const shipment = page.locator('#admin-main #shipment-registration');
         await expect(shipment).toContainText('生产完工后才可发货');
+        // 业主 2026-10-01：尚不能发货且未保存物流资料时，登记表单默认收起，原因留在折叠块外。
+        const fold = shipment.locator('details').filter({ hasText: '登记物流资料' }).first();
+        await expect(fold).not.toHaveAttribute('open', '');
+        await fold.locator(':scope > summary').click();
+        await expect(fold).toHaveAttribute('open', '');
         await expect(shipment.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
         await expect(shipment.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
         await shipment.scrollIntoViewIfNeeded();
@@ -227,6 +232,8 @@ test.describe('administrator workspace', () => {
             await expect(address.getByText('13800138000', { exact: true })).toBeVisible();
             await expect(address.getByText(/广东省佛山市南海区测试街道物流园收货区/)).toBeVisible();
             await expect(address.getByRole('list', { name: /的款式数量/ })).toContainText(`${100 / shipmentCount} 个`);
+            // 尚不能发货的地址登记默认收起（业主 2026-10-01），展开后再填。
+            await address.locator('summary').filter({ hasText: '登记物流资料' }).click();
             await address.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('OTHER');
             await address.getByRole('textbox', { name: '物流公司名称', exact: true }).fill('测试物流公司');
             const tracking = address.getByRole('textbox', { name: '运单号', exact: true });
@@ -1533,8 +1540,9 @@ async function prepareSalesOrderDetailState(page: Page) {
   await expect(
     detail.getByRole('link', { name: '下载 PDF', exact: true }),
   ).toHaveCount(0);
+  // 业主 2026-10-01：外部销售侧工单列表统一叫「我的工单」（面包屑按角色取名）。
   await expect(
-    page.getByRole('navigation', { name: '面包屑导航', exact: true }).getByRole('link', { name: '工单列表', exact: true }),
+    page.getByRole('navigation', { name: '面包屑导航', exact: true }).getByRole('link', { name: '我的工单', exact: true }),
   ).toHaveAttribute('href', '/orders');
 
   const formSection = page
