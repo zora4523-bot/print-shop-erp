@@ -192,11 +192,12 @@ function expectControlsWithinViewport(width: number) {
     let rect = element.getBoundingClientRect();
     if (!rect.width || !rect.height || !element.checkVisibility()) continue;
     const label = element.getAttribute('aria-label') ?? element.textContent ?? element.tagName;
-    const queue = element.closest<HTMLElement>('nav[aria-label="工单队列"]');
-    if (queue && ['auto', 'scroll'].includes(getComputedStyle(queue).overflowX) && queue.scrollWidth > queue.clientWidth) {
-      const queueRect = queue.getBoundingClientRect();
-      expect(queueRect.left, '可滚动队列容器').toBeGreaterThanOrEqual(0);
-      expect(queueRect.right, '可滚动队列容器').toBeLessThanOrEqual(width);
+    // 看板、队列与快捷筛选在窄容器是条内横向滚动（审查 L-8）：条本身在视口内，项滚进来后再量。
+    const strip = element.closest<HTMLElement>('[data-slot="admin-order-scroll-strip"]');
+    if (strip && ['auto', 'scroll'].includes(getComputedStyle(strip).overflowX) && strip.scrollWidth > strip.clientWidth) {
+      const stripRect = strip.getBoundingClientRect();
+      expect(stripRect.left, '可滚动条容器').toBeGreaterThanOrEqual(0);
+      expect(stripRect.right, '可滚动条容器').toBeLessThanOrEqual(width);
       element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
       rect = element.getBoundingClientRect();
     }
