@@ -73,7 +73,10 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   expect(csv).not.toContain('后来改过的名称');
   expect(csv).toContain(`${source.orderNo}-extra-32`);
   expect(csv).not.toContain(foreign.orderNo);
-  expect(csv.trim().split('\r\n')).toHaveLength(34);
+  // 表头 + 33 张工单 + 3 行账单合计（工单合计 / 抵扣 / 账单金额，取账单冻结值）。
+  const csvLines = csv.trim().split('\r\n');
+  expect(csvLines).toHaveLength(37);
+  expect(csvLines.filter((line) => line.startsWith('"合计"')).map((line) => line.split(',')[5])).toEqual(['"工单合计"', '"抵扣"', '"账单金额"']);
   expect(csv).toContain(`"${source.orderNo}"`);
   for (let n = 1; n <= 32; n += 1) expect(csv).toContain(`"${source.orderNo}-extra-${n}"`);
   await page.getByLabel('查找账单内工单', { exact: true }).fill('导出时的工单名称');
@@ -81,6 +84,9 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   const filteredCsv = await downloadCsv(page, '导出匹配明细 CSV');
   expect(filteredCsv).toContain('导出时的工单名称');
   expect(filteredCsv).not.toContain(`${source.orderNo}-extra-`);
+  // 筛选导出只标注「非全账单」，不输出整单合计。
+  expect(filteredCsv).toContain('筛选结果，非全账单');
+  expect(filteredCsv.split('\r\n').some((line) => line.startsWith('"合计"'))).toBe(false);
   // A non-file error must be shown in place and must not be downloaded as CSV.
   await page.route('**/api/sales/bills/*/export?*', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '导出暂时不可用，请重试' }) }));
   await page.getByText('导出匹配明细 CSV', { exact: true }).click();
