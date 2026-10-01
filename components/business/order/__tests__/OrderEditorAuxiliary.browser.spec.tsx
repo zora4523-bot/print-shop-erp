@@ -62,14 +62,14 @@ function fill(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
 describe('administrator independently saved fee drafts', () => {
   it('locks the main form and other fee rows until the edited fee is explicitly restored', async () => {
     flushSync(() => root.render(<Harness>{commercial}</Harness>));
-    fill(host.querySelector<HTMLInputElement>('[aria-label="订单级费用金额"]')!, '25');
+    fill(host.querySelector<HTMLInputElement>('[aria-label="整单费用金额"]')!, '25');
     await vi.waitFor(() => expect(main().disabled).toBe(true));
     expect(input('制版名称').matches(':disabled')).toBe(true);
     expect(button('添加制版明细').disabled).toBe(true);
     expect(host.querySelector('[data-testid="dirty"]')?.textContent).toBe('true');
     button('还原费用输入').click();
     await vi.waitFor(() => expect(main().disabled).toBe(false));
-    expect(host.querySelector<HTMLInputElement>('[aria-label="订单级费用金额"]')?.value).toBe('');
+    expect(host.querySelector<HTMLInputElement>('[aria-label="整单费用金额"]')?.value).toBe('');
     expect(input('制版名称').matches(':disabled')).toBe(false);
   });
 
@@ -77,7 +77,7 @@ describe('administrator independently saved fee drafts', () => {
     let resolve!: (result: { status: string; message: string }) => void;
     mocks.save.mockImplementation(() => new Promise((done) => { resolve = done; }));
     flushSync(() => root.render(<Harness>{commercial}</Harness>));
-    fill(host.querySelector<HTMLInputElement>('[aria-label="订单级费用金额"]')!, '25');
+    fill(host.querySelector<HTMLInputElement>('[aria-label="整单费用金额"]')!, '25');
     fill(input('收费说明'), '客户打样');
     fill(input('原因'), '按客户确认报价');
     button('添加费用').click();
@@ -99,7 +99,7 @@ describe('administrator independently saved fee drafts', () => {
     expect(input('制版名称').matches(':disabled')).toBe(true);
     flushSync(() => root.render(commercial));
     expect(input('制版名称').matches(':disabled')).toBe(false);
-    fill(host.querySelector<HTMLInputElement>('[aria-label="订单级费用金额"]')!, '25');
+    fill(host.querySelector<HTMLInputElement>('[aria-label="整单费用金额"]')!, '25');
     expect(input('制版名称').matches(':disabled')).toBe(false);
   });
 

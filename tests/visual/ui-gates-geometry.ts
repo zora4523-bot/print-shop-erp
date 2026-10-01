@@ -223,5 +223,48 @@ export function collectGeometryIssues(): string[] {
     }
   }
 
+  // ---- 6. numbers split across lines ---------------------------------------
+  // 2026-10-01 工单列表审查：看板卡「¥ 15,395.29」在 1280 下被 overflow-wrap:anywhere
+  // 折成「¥ / 15,395.2 / 9」，没有溢出，其余门禁都放过了。金额、计数只允许在
+  // 「¥」后的空格处换行，数字本身必须在同一行。只看像数量/金额的独立数字：
+  // 带千分位或小数点，或不超过 8 位；工单号、电话、长地址里的数字串不算，
+  // 代码 / 配置块里的数字（如 /owner/pigsty 的端口号）也不算。
+  // 边界只看 ASCII 字母数字与连字符编号：中文单位紧贴数字（「12,345件」）仍算数量，
+  // 负号属于数字（「¥ -1,999.00」）；「GD-260824-001」这类连字符编号整体排除。
+  const NUMBER_TOKEN = /(?<![A-Za-z0-9_]|[A-Za-z0-9_]-)-?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9_]|-[A-Za-z0-9])/g;
+  const numberWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      return /\d/.test(node.textContent ?? '') && parent && isVisible(parent) &&
+        !parent.closest('.sr-only, [aria-hidden=true], svg, script, style, textarea, code, pre, kbd, samp')
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT;
+    },
+  });
+  const reportedNumbers = new Set<Element>();
+  let numberNode: Node | null;
+  while ((numberNode = numberWalker.nextNode())) {
+    const text = numberNode.textContent ?? '';
+    for (const match of text.matchAll(NUMBER_TOKEN)) {
+      const token = match[0];
+      const digits = token.replace(/^-/, '');
+      const quantityLike = /[,.]/.test(digits) || digits.length <= 8;
+      if (digits.length < 2 || digits.length > 15 || !quantityLike) continue;
+      const range = document.createRange();
+      range.setStart(numberNode, match.index);
+      range.setEnd(numberNode, match.index + token.length);
+      const lines = new Set(
+        [...range.getClientRects()]
+          .filter((rect) => rect.width > 0 && rect.height > 0)
+          .map((rect) => Math.round(rect.top / 2)),
+      );
+      const owner = numberNode.parentElement!;
+      if (lines.size > 1 && !reportedNumbers.has(owner)) {
+        reportedNumbers.add(owner);
+        issues.push(`number-split:${describe(owner).replace(/「.*」$/, '')}「${token}」`);
+      }
+    }
+  }
+
   return issues;
 }

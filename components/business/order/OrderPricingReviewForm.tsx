@@ -848,7 +848,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
           {preview.orderCharges.length > 0 ? (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">订单级待核价费用</h3>
+                <h3 className="text-sm font-semibold">整单待核价费用</h3>
                 <Badge variant="secondary">
                   {preview.orderCharges.length} 项待人工核价
                 </Badge>

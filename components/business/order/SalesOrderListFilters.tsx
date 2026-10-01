@@ -59,8 +59,9 @@ export function SalesOrderListFilters({
     >
       <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
-          <h2 id="sales-order-list-filter-heading" className="font-semibold">
-            我的工单
+          {/* 页面 H1 已是「我的工单」，卡片标题只留给读屏（业主 2026-10-01）。 */}
+          <h2 id="sales-order-list-filter-heading" className="sr-only">
+            工单筛选
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {filtered ? `当前筛选：${summary.all} 单 · ${summary.todo} 单需关注` : `${summary.todo} 单需关注 · 本月已发 ${summary.shippedThisMonth} 单`}

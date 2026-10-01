@@ -70,7 +70,7 @@ afterEach(() => {
 function fixtureRows(): AdminOrderWorkspaceRow[] {
   const ready = batchOrder({
     id: 'ready', orderNo: 'GD-260908-001', status: OrderStatus.PENDING_FACTORY,
-    statusSummary: '费用已核定，待下发检查',
+    statusSummary: '费用已核定',
     capabilities: { ...batchOrder().capabilities, confirm: true, release: false },
   });
   return [
@@ -295,7 +295,7 @@ describe('admin order workspace restrained semantic colors', () => {
         expectTextToken(label, '--muted-foreground');
         expectNeutralCard(card);
       }
-      expectTextToken(rowText('ready', '费用已核定，待下发检查'), '--muted-foreground');
+      expectTextToken(rowText('ready', '费用已核定'), '--muted-foreground');
       expectTextToken(rowText('legacy', '待打印'), '--muted-foreground');
       expectTextToken(rowText('legacy', '急单'), '--warning-foreground');
       expectTextToken(rowText('legacy', '2026-09-10'), '--warning-foreground');

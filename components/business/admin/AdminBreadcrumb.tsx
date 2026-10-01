@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
 import { ADMIN_MODULES } from '@/lib/navigation/admin-modules';
+import type { Role } from '@/generated/prisma/enums';
 import { RULE_CENTER_SIDEBAR_ITEMS } from '@/lib/navigation/rule-center';
 import {
   Breadcrumb,
@@ -76,7 +77,7 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     ),
     '/owner/rules/customer-pricing/blank': '空白封单价',
     '/owner/rules/customer-pricing/blank/new': '新建纸张与规格价格',
-    '/orders': '工单列表',
+    // '/orders' 不在此固定：管理员「工单列表」与外部销售「我的工单」按角色从模块表取。
     '/orders/new': '新建工单',
     '/owner/agent-bills/unbilled': '未出账工单',
     '/owner/bills/archive': '历史账单归档',
@@ -128,12 +129,14 @@ const ID_SEGMENT =
   /^(c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 // 导出供单测直接调用：给定段名 + 详情页交上来的业务编号，算出显示什么。
-function labelFromModules(path: string): string | undefined {
-  const labels = new Set<string>();
-  for (const adminModule of ADMIN_MODULES) {
-    if (adminModule.routeBase === '#') continue;
-    if (adminModule.routeBase === path) labels.add(adminModule.breadcrumbLabel);
-  }
+// 同一路径被多个角色的模块登记时（/orders：管理员「工单列表」、外部销售「我的工单」），
+// 按当前角色取自己侧栏里的那个名字，保证侧栏、面包屑、H1、<title> 同源（§8.3）。
+function labelFromModules(path: string, role?: Role): string | undefined {
+  const matches = ADMIN_MODULES.filter(
+    (adminModule) => adminModule.routeBase !== '#' && adminModule.routeBase === path,
+  );
+  const own = role ? matches.filter((adminModule) => adminModule.menuRoles.includes(role)) : [];
+  const labels = new Set((own.length > 0 ? own : matches).map((adminModule) => adminModule.breadcrumbLabel));
   return labels.size === 1 ? [...labels][0] : undefined;
 }
 
@@ -146,11 +149,12 @@ export function resolveSegmentLabel(
   entityLabel: string | null,
   pageHeading?: string | null,
   path?: string,
+  role?: Role,
 ): string | null {
-  const fromModule = path ? BREADCRUMB_PATH_LABELS[path] ?? labelFromModules(path) : undefined;
+  const fromModule = path ? BREADCRUMB_PATH_LABELS[path] ?? labelFromModules(path, role) : undefined;
   if (fromModule) return fromModule;
   if (segment === 'new' && path) {
-    const parent = labelFromModules(path.slice(0, -4));
+    const parent = labelFromModules(path.slice(0, -4), role);
     if (parent) return `新建${parent}`;
   }
   const known = SEGMENT_LABELS[segment];
@@ -177,6 +181,7 @@ export function buildBreadcrumbCrumbs(
   pathname: string,
   entityLabel: string | null = null,
   pageHeading: string | null = null,
+  role?: Role,
 ): BreadcrumbCrumb[] {
   const segments = pathname.split('/').filter(Boolean);
   const crumbs: BreadcrumbCrumb[] = [];
@@ -190,7 +195,7 @@ export function buildBreadcrumbCrumbs(
       (isBillCredit && isLast ? '录入抵扣' : undefined) ??
       BREADCRUMB_PATH_LABELS[href] ??
       (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
-      resolveSegmentLabel(seg, entityLabel, isLast ? pageHeading : null, href);
+      resolveSegmentLabel(seg, entityLabel, isLast ? pageHeading : null, href, role);
     if (!label) return;
     crumbs.push({ href, label, linkable: !LAYOUT_ONLY_PATHS.has(href), isLast });
   });
@@ -213,7 +218,7 @@ function getPageHeadingServerSnapshot(): null {
   return null;
 }
 
-export function AdminBreadcrumb() {
+export function AdminBreadcrumb({ role }: { role?: Role } = {}) {
   const pathname = usePathname();
   // 详情页通过 <BreadcrumbEntity> 把已经查出来的业务编号交上来，
   // 这里不发任何请求。
@@ -223,7 +228,7 @@ export function AdminBreadcrumb() {
     getPageHeadingSnapshot,
     getPageHeadingServerSnapshot,
   );
-  const crumbs = buildBreadcrumbCrumbs(pathname, entityLabel, pageHeading);
+  const crumbs = buildBreadcrumbCrumbs(pathname, entityLabel, pageHeading, role);
 
   if (crumbs.length === 0) {
     return (

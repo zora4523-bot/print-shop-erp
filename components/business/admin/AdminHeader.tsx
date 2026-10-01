@@ -3,6 +3,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { AdminBreadcrumb } from './AdminBreadcrumb';
 import { UserMenu } from './UserMenu';
 import { ThemeToggle } from './ThemeToggle';
+import type { Role } from '@/generated/prisma/enums';
 
 // 顶栏只承载当前位置与全局操作；页面入口统一在侧边栏，避免重复导航。
 // 保持不透明与原有高度，滚动后文字对比度和页内 sticky 偏移不变。
@@ -11,12 +12,15 @@ export type AdminHeaderProps = {
   displayName: string;
   roleLabel: string;
   environmentLabel: string;
+  /** 面包屑按角色取同一路径的模块名（/orders：工单列表 / 我的工单）。 */
+  role?: Role;
 };
 
 export function AdminHeader({
   displayName,
   roleLabel,
   environmentLabel,
+  role,
 }: AdminHeaderProps) {
   const environment = environmentLabel.trim().toLowerCase();
   const environmentText =
@@ -35,7 +39,7 @@ export function AdminHeader({
     >
       <SidebarTrigger className="size-11 shrink-0" />
       <div className="min-w-0 flex-1">
-        <AdminBreadcrumb />
+        <AdminBreadcrumb role={role} />
       </div>
       {environmentText ? (
         <span

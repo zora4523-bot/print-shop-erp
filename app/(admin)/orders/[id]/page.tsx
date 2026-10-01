@@ -58,15 +58,19 @@ import {
   isOrderEditable,
 } from '@/lib/order/editable-fields';
 import { roleLabel } from '@/lib/auth/role-labels';
-import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import {
+  CUSTOMER_CHARGE_STATUS_REGISTRY,
+  customerChargeDisplayStatus,
+  PRODUCTION_TASK_STATUS_REGISTRY,
+} from '@/lib/ui/status-registry';
 import {
   actionLabel,
   formatOrderLogChanges,
 } from '@/lib/order/log-format';
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
+import { ActionNotice, StatusBadge, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
@@ -413,7 +417,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               <p className="mt-1 text-sm text-muted-foreground">
                 {isPricingPending
                   ? canReviewFulfillmentPricing
-                    ? '物流费用待管理员核对，确认前不能发货或结算；已审核款式价格不变。'
+                    ? '物流费用待核对，核对前不能发货或结算。'
                     : '价格待管理员确认，确认前不可排产。'
                   : '价格已确认。'}
               </p>
@@ -460,6 +464,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           {canReviewFulfillmentPricing && inlineOperations?.pricing !== 'fulfillment' ? (
             <FulfillmentPricingReviewForm
               key={`fulfillment-${order.id}-${order.revision}-${priceRevision}`}
+              collapsible
               orderId={order.id}
               currentValue={order.isSfCollect}
               isPricingPending={isPricingPending}
@@ -554,9 +559,12 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               <UrgentToggleForm orderId={order.id} currentValue={order.isUrgent} />
             ) : null}
             {canReviewFulfillmentPricing ? (
-              <Link href="#fulfillment-pricing" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-                {isPricingPending ? '确认物流费用' : '更正物流费用'}
-              </Link>
+              // 物流核对已在「当前待办」时不再重复入口；与当前待办同用「核对物流费用」。
+              inlineOperations?.pricing === 'fulfillment' ? null : (
+                <Link href="#fulfillment-pricing" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                  {isPricingPending ? '核对物流费用' : '更正物流费用'}
+                </Link>
+              )
             ) : canToggleSfCollect ? (
               <SfCollectToggleForm
                 key={`sf-${order.id}-${order.revision}-${priceRevision}`}
@@ -618,12 +626,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     </Fragment>),
     customerCharges: (<Fragment key="customerCharges">{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <div>
-            <h3 className="text-base font-semibold">对客收费明细</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              对客收费与工厂成本分开统计。
-            </p>
-          </div>
+          <h3 className="text-base font-semibold">对客收费明细</h3>
           <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
             {order.customerCharges.map((charge) => (
               <li
@@ -638,34 +641,21 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                         : ''}
                       {charge.category.name}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {charge.description}
-                    </p>
+                    {/* 说明与收费类别同名时（如「对客快递费」）不再重复一行。 */}
+                    {charge.description && charge.description.trim() !== charge.category.name ? (
+                      <p className="text-xs text-muted-foreground">
+                        {charge.description}
+                      </p>
+                    ) : null}
                   </div>
-                  <Badge
-                    variant={
-                      charge.status === 'FINAL' ||
-                      isTrustedAdminChargePricingSnapshot(
-                        charge.pricingSnapshot,
-                        charge,
-                      )
-                        ? 'secondary'
-                        : 'outline'
-                    }
-                  >
-                    {charge.status === 'FINAL'
-                      ? '已确认'
-                      : isTrustedAdminChargePricingSnapshot(
-                            charge.pricingSnapshot,
-                            charge,
-                          )
-                        ? '已人工核对（待结算）'
-                      : charge.status === 'WAIVED'
-                        ? '已免收'
-                        : charge.status === 'PENDING_AMOUNT'
-                          ? '金额待定'
-                        : '创建时估算'}
-                  </Badge>
+                  {/* 收费状态走注册表（ui-规范 §6「Badge 不承载状态」，审查 D-10）。 */}
+                  {(() => {
+                    const definition = CUSTOMER_CHARGE_STATUS_REGISTRY[customerChargeDisplayStatus(
+                      String(charge.status),
+                      isTrustedAdminChargePricingSnapshot(charge.pricingSnapshot, charge),
+                    )];
+                    return <StatusBadge tone={definition.tone}>{definition.label}</StatusBadge>;
+                  })()}
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                   <div>
@@ -1153,9 +1143,12 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
             <div className="min-w-0">
               <h3 className="text-base font-semibold">已生成计件工资</h3>
             </div>
-            <strong className="admin-wrap-anywhere font-sans tabular-nums text-primary">
-              合计 {formatMoney(pieceworkSummary.total)}
-            </strong>
+            {/* 工资合计不是风险或失败，不用红色（ui-规范 §8.2）；无明细时空态已说明，不再显示「合计 ¥ 0.00」。 */}
+            {pieceworkSummary.items.length > 0 ? (
+              <strong className="admin-wrap-anywhere font-sans tabular-nums text-foreground">
+                合计 {formatMoney(pieceworkSummary.total)}
+              </strong>
+            ) : null}
           </div>
           {pieceworkSummary.items.length === 0 ? (
             <TableEmptyState
@@ -1247,13 +1240,15 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               title="尚无人工补录成本"
             />
           )}
-          <div className="border-t pt-4">
+          {/* 业主 2026-10-01：缩短详情页。补录表单默认收起，仍挂载在 details 内。 */}
+          <Disclosure className="border-t pt-1">
+            <DisclosureSummary className="gap-2">添加成本明细<DisclosureIndicator /></DisclosureSummary>
             <OrderCostEntryForm
               orderId={order.id}
               initialIdempotencyKey={randomUUID()}
               isSfCollect={order.isSfCollect}
             />
-          </div>
+          </Disclosure>
         </section>
       )}</Fragment>),
     logs: (<Fragment key="logs"><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -1371,10 +1366,10 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         </section>
       ) : null}</Fragment>),
     reworkForm: (<Fragment key="reworkForm">{canCreateRework ? (
-        <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <div>
-          <h3 className="text-base font-semibold">发起重做工单</h3>
-          </div>
+        // 重做是少数情况才用的入口：默认收起（业主 2026-10-01 缩短详情页），仍挂载，展开不丢输入。
+        <Disclosure className="rounded-xl border bg-card px-4 shadow-sm sm:px-6">
+          <DisclosureSummary className="gap-2"><h3 className="text-base font-semibold">发起重做工单</h3><DisclosureIndicator /></DisclosureSummary>
+          <div className="pb-4 sm:pb-6">
           <ReworkOrderForm
             sourceOrderId={order.id}
             items={order.items.map((item) => ({
@@ -1396,7 +1391,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               ),
             }))}
           />
-        </section>
+          </div>
+        </Disclosure>
       ) : null}</Fragment>),
   };
 
@@ -1450,8 +1446,8 @@ function OrderBasicSummarySection({
   canViewCommercialAmounts,
 }: RenderOrderBasicSummaryOptions) {
   return (
-    <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-      <h3 className="text-base font-semibold">生产概况与业务资料</h3>
+    // 分区标题已是「生产与业务资料」，不再在卡内重复「生产概况与业务资料」（审查 D-12）。
+    <section aria-label="生产概况与业务资料" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
       <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <Row
           label="提交人"

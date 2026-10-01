@@ -1004,10 +1004,8 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
     await order.getByRole('heading', { level: 2 }).getByRole('link', { name: longOrderName, exact: true }).click();
     await expect(page).toHaveURL((url) => url.pathname === `/orders/${data.orderId}`);
     const fees = page.getByRole('region', { name: '工单费用', exact: true });
-    await expect(fees.getByRole('heading', { name: '费用记录', exact: true })).toBeVisible();
-    for (const title of ['提交报价', '确认金额', '结算金额']) {
-      await expect(fees.getByText(title, { exact: true })).toBeVisible();
-    }
+    // 业主 2026-10-01：费用记录三阶段卡已去掉。
+    await expect(fees.getByRole('heading', { name: '费用记录', exact: true })).toHaveCount(0);
     // This legacy fixture has only a historical total, no fabricated stage snapshots.
     const currentAmount = fees.locator('[data-slot="current-order-amount"]');
     await expect(currentAmount).toBeVisible();
@@ -1015,9 +1013,8 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
     await expect(currentAmount).toHaveText('¥ 646,172.57');
     await expect(currentAmount.locator('..').getByText('不含快递费，含耗材费', { exact: true })).toBeVisible();
     await expect(fees.getByText('当前', { exact: true })).toHaveCount(0);
-    await expect(fees.getByText('—', { exact: true })).toHaveCount(3);
     for (const hint of ['尚未形成报价', '费用核定后显示', '结算后显示']) {
-      await expect(fees.getByText(hint, { exact: true })).toBeVisible();
+      await expect(fees.getByText(hint, { exact: true })).toHaveCount(0);
     }
     await page.goBack();
     await expect(workspace).toBeVisible();
@@ -1060,7 +1057,7 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'sales-orders',
       path: `/orders?q=${encodeURIComponent(data.orderNo)}`,
-      readyHeading: '工单列表',
+      readyHeading: '我的工单',
       prepareGateState: (page) => prepareSalesOrderListState(page, data),
     },
     {
@@ -1604,7 +1601,8 @@ async function prepareOrderDetailDesignPreview(
   await expect(records.locator('#detail-pricing-tools').getByRole('heading', { name: '工单价格状态', exact: true })).toBeVisible();
   await expect(records.locator('#detail-delivery-records').getByRole('heading', { name: '发货地址（1）', exact: true })).toBeVisible();
   await expect(records.locator('#detail-production-records').getByRole('heading', { name: '物料用量估算', exact: true })).toBeVisible();
-  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '生产概况与业务资料', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-business-records').getByRole('region', { name: '生产概况与业务资料', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '生产概况与业务资料', exact: true })).toHaveCount(0);
   await expect(records.locator('#detail-audit-records').getByRole('region', { name: '操作事件', exact: true })).toBeVisible();
   await expect(records.getByRole('complementary', { name: '工单概览与操作' }).locator('#detail-other-actions')).toBeVisible();
   await expect(records.getByRole('complementary', { name: '工单概览与操作' }).getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);

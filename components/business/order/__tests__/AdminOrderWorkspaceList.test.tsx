@@ -160,7 +160,7 @@ describe('AdminOrderWorkspaceList', () => {
       />,
     );
 
-    expect(html).toContain('>查看处理</a>');
+    expect(html).toContain('>下发前检查</a>');
   });
 
   it('shows rejected incomplete fees as excluded without exposing pricing actions', () => {

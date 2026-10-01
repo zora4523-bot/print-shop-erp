@@ -120,7 +120,7 @@ describe('admin name-first order list', () => {
     expect(host.textContent).not.toContain('OTHER-ID');
     expect(router.push).not.toHaveBeenCalled();
     expect(second.querySelector('a[href="/orders/order-2"]')).not.toBeNull();
-    expect(page.getByRole('link', { name: '查看处理', exact: true }).nth(1).element().getAttribute('href')).toBe('/orders/order-2');
+    expect(page.getByRole('link', { name: '下发生产', exact: true }).nth(1).element().getAttribute('href')).toBe('/orders/order-2');
     second.click();
     expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders/order-2');
     expect(fetch).not.toHaveBeenCalled();

@@ -856,7 +856,7 @@ describe('order detail commercial visibility', () => {
     const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
     expect(html).toContain('fulfillment-pricing-review');
     expect(html).not.toContain('factory-pricing-review');
-    expect(html).toContain('物流费用待管理员核对');
+    expect(html).toContain('物流费用待核对，核对前不能发货或结算。');
     expect(html).toContain('href="#fulfillment-pricing"');
     expect(sfCollectTogglePropsMock).not.toHaveBeenCalled();
     expect(fulfillmentPricingPropsMock).toHaveBeenCalledWith(expect.objectContaining({ isPricingPending: true }));

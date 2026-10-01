@@ -40,6 +40,17 @@ it('permits draft entry but blocks early shipment', async () => {
   await expect.element(page.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
   await expect.element(page.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
 });
+it('folds an untouched address form until it can ship, keeping the reason visible (owner 2026-10-01)', async () => {
+  render({ ...props, trackingNo: null, carrierCode: null, canConfirm: false, disabledReason: '下发并完成生产后才可发货' });
+  const details = document.querySelector('details')!;
+  expect(details.open).toBe(false);
+  await expect.element(page.getByText('下发并完成生产后才可发货', { exact: true })).toBeVisible();
+  expect(details.querySelector('summary')?.textContent).toContain('登记物流资料');
+  await page.elementLocator(details.querySelector('summary')!).click();
+  expect(details.open).toBe(true);
+  await expect.element(page.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
+  await expect.element(page.getByLabelText('选择面单照片')).toBeInTheDocument();
+});
 it('explains free-order settlement without claiming a receivable will be created', async () => {
   render({ ...props, chargeable: false });
   await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();

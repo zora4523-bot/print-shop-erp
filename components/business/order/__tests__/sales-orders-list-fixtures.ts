@@ -56,7 +56,7 @@ export function row(): SalesOrderListRow {
         estimated: false,
       },
     ],
-    pricingAttentionReason: '价格待管理员确认',
+    pricingAttentionReason: '价格待工厂确认',
     pendingChangeRequest: {
       id: 'change-1',
       type: 'MODIFY',

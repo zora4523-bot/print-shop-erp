@@ -1100,7 +1100,7 @@ function statusSummary(
   }
   if (isAwaitingFactoryConfirmation(row.status)) {
     return confirmationPreflight.ok
-      ? '费用已核定，待下发检查'
+      ? '费用已核定'
       : `⚠ ${confirmationPreflight.issues.join('；')}`;
   }
   if (row.trackingNo) return `运单 ${row.trackingNo}`;
