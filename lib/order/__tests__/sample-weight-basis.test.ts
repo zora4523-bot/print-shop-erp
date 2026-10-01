@@ -8,72 +8,56 @@ import {
 } from '../sample-weight-basis';
 
 const marked = { source: 'SAMPLE_ORDER_QUOTE', ...sampleFirstWeightDefaultMarker('1.000') };
+const suspended = { source: 'SF', suspendedSampleDefaultWeightKg: '1' };
+const prepaid = (weightKg: Decimal.Value | null | undefined) => ({ weightKg, sfCollect: false });
+const sfCollect = (weightKg: Decimal.Value | null | undefined) => ({ weightKg, sfCollect: true });
+const markerFields = { weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1' };
 
 describe('sample first-weight default marker', () => {
   it('records the default weight it was written with', () => {
-    expect(sampleFirstWeightDefaultMarker(new Decimal('1.000'))).toEqual({
-      weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT,
-      defaultWeightKg: '1',
-    });
+    expect(sampleFirstWeightDefaultMarker(new Decimal('1.000'))).toEqual(markerFields);
     expect(sampleDefaultWeightKg(marked)?.toString()).toBe('1');
+    expect(sampleDefaultWeightKg(suspended)?.toString()).toBe('1');
   });
 
   it('reads no default from unmarked, malformed or non-object snapshots', () => {
     expect(sampleDefaultWeightKg({ source: 'X' })).toBeNull();
     expect(sampleDefaultWeightKg({ weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT })).toBeNull();
     expect(sampleDefaultWeightKg({ weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: 'abc' })).toBeNull();
+    expect(sampleDefaultWeightKg({ suspendedSampleDefaultWeightKg: 'abc' })).toBeNull();
     expect(sampleDefaultWeightKg(null)).toBeNull();
     expect(sampleDefaultWeightKg(['x'])).toBeNull();
   });
 
-  it('keeps the marker while the final weight still equals the default (the shipping form re-sends the stored 1 kg)', () => {
+  it('keeps the marker while a prepaid parcel is still billed at the default (the shipping form re-sends the stored 1 kg)', () => {
     for (const weight of ['1', '1.000', new Decimal(1)]) {
-      expect(reconcileSampleWeightBasis(marked, { source: 'FINAL' }, weight)).toEqual({
-        source: 'FINAL', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1',
-      });
+      expect(reconcileSampleWeightBasis(marked, { source: 'FINAL' }, prepaid(weight)))
+        .toEqual({ source: 'FINAL', ...markerFields });
     }
   });
 
-  it('drops the marker and the default once the weight was corrected', () => {
-    for (const weight of ['2', '0.5']) {
-      expect(reconcileSampleWeightBasis(marked, { source: 'FINAL', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1', suspendedSampleDefaultWeightKg: '1' }, weight))
-        .toEqual({ source: 'FINAL' });
+  it('revokes the default for good once a different weight is recorded, prepaid or SF collect', () => {
+    for (const recorded of [prepaid('2'), prepaid('0.5'), sfCollect('2')]) {
+      for (const previous of [marked, suspended]) {
+        expect(reconcileSampleWeightBasis(previous, { source: 'NEXT', ...markerFields, suspendedSampleDefaultWeightKg: '1' }, recorded))
+          .toEqual({ source: 'NEXT' });
+      }
     }
   });
 
-  it('suspends the default without the marker while there is no billable weight (SF collect), and restores it at the same weight', () => {
-    for (const weight of [null, undefined, '']) {
-      expect(reconcileSampleWeightBasis(marked, { source: 'SF', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1' }, weight))
+  it('parks the default without the marker while SF collect keeps the default or no weight, and restores it at the same weight', () => {
+    for (const weight of ['1', null, undefined, '']) {
+      expect(reconcileSampleWeightBasis(marked, { source: 'SF', ...markerFields }, sfCollect(weight)))
         .toEqual({ source: 'SF', suspendedSampleDefaultWeightKg: '1' });
     }
-    const suspended = { source: 'SF', suspendedSampleDefaultWeightKg: '1' };
-    expect(sampleDefaultWeightKg(suspended)?.toString()).toBe('1');
-    expect(reconcileSampleWeightBasis(suspended, { source: 'PREPAID' }, '1.000')).toEqual({
-      source: 'PREPAID', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1',
-    });
-    expect(reconcileSampleWeightBasis(suspended, { source: 'PREPAID' }, '2')).toEqual({ source: 'PREPAID' });
-    expect(sampleDefaultWeightKg({ suspendedSampleDefaultWeightKg: 'abc' })).toBeNull();
+    expect(reconcileSampleWeightBasis(suspended, { source: 'PREPAID' }, prepaid('1.000')))
+      .toEqual({ source: 'PREPAID', ...markerFields });
   });
 
-  it('falls back to the marker of the restored snapshot when the previous one carried none (prepaid → SF collect → prepaid)', () => {
-    const restored = { source: 'RESTORED', ...sampleFirstWeightDefaultMarker('1') };
-    expect(reconcileSampleWeightBasis({ source: 'SF' }, restored, '1')).toEqual(restored);
-    expect(reconcileSampleWeightBasis({ source: 'SF' }, restored, '2')).toEqual({ source: 'RESTORED' });
-    expect(reconcileSampleWeightBasis({ source: 'SF' }, restored, null)).toEqual({ source: 'RESTORED', suspendedSampleDefaultWeightKg: '1' });
-  });
-
-  it('reads the default from verified evidence before the next snapshot (manual fee after an SF round trip)', () => {
-    const evidence = { source: 'SAMPLE_ORDER_QUOTE', ...sampleFirstWeightDefaultMarker('1') };
-    expect(reconcileSampleWeightBasis({ source: 'SF' }, { source: 'MANUAL' }, '1', undefined, evidence)).toEqual({
-      source: 'MANUAL', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1',
-    });
-    expect(reconcileSampleWeightBasis({ source: 'SF' }, { source: 'MANUAL' }, '2', evidence)).toEqual({ source: 'MANUAL' });
-    expect(reconcileSampleWeightBasis({ source: 'SF' }, { source: 'MANUAL' }, null, evidence)).toEqual({ source: 'MANUAL', suspendedSampleDefaultWeightKg: '1' });
-  });
-
-  it('strips a marker that records no usable default weight', () => {
-    expect(reconcileSampleWeightBasis({ source: 'X' }, { source: 'Y', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT }, '1'))
-      .toEqual({ source: 'Y' });
+  it('never revives a default from the next snapshot: a restored original prepaid snapshot carries a stale marker', () => {
+    const restored = { source: 'RESTORED', ...markerFields };
+    expect(reconcileSampleWeightBasis({ source: 'SF' }, restored, prepaid('1'))).toEqual({ source: 'RESTORED' });
+    expect(reconcileSampleWeightBasis(suspended, restored, prepaid('1'))).toEqual(restored);
   });
 
   it('reads the default of an older marked snapshot from its own quote line only when billable equals first weight', () => {
@@ -83,9 +67,8 @@ describe('sample first-weight default marker', () => {
     });
     expect(sampleDefaultWeightKg(legacy('1.000'))?.toString()).toBe('1');
     expect(sampleDefaultWeightKg(legacy('2'))).toBeNull();
-    expect(reconcileSampleWeightBasis(legacy('1'), { source: 'FINAL' }, '1')).toEqual({
-      source: 'FINAL', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1',
-    });
-    expect(reconcileSampleWeightBasis(legacy('1'), { source: 'FINAL' }, '2')).toEqual({ source: 'FINAL' });
+    expect(reconcileSampleWeightBasis(legacy('1'), { source: 'FINAL' }, prepaid('1')))
+      .toEqual({ source: 'FINAL', ...markerFields });
+    expect(reconcileSampleWeightBasis(legacy('1'), { source: 'FINAL' }, prepaid('2'))).toEqual({ source: 'FINAL' });
   });
 });

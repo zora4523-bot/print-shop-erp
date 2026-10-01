@@ -1931,8 +1931,9 @@ function assertExternalLogisticsChargeIdentity(input: {
 }
 
 /**
- * 寄样首重默认（DECISIONS 2026-09-30）：重算物流也按本次计费重量（快递费行的 kg 数量，
- * 到付为 null）维护标记。只有寄样快递费快照带这些字段，其他快照原样通过。
+ * 寄样首重默认（DECISIONS 2026-09-30）：重算物流也按本次计费重量（快递费行的 kg 数量）
+ * 维护标记。到付不按重量计价；变更申请不改登记重量，按未登记处理（只暂存默认首重）。
+ * 只有寄样快递费快照带这些字段，其他快照原样通过。
  */
 function withSampleWeightBasis(
   charge: { categoryCode: string; unit: string | null; quantity: string | null },
@@ -1941,11 +1942,10 @@ function withSampleWeightBasis(
   snapshot: Prisma.InputJsonObject,
 ): Prisma.InputJsonObject {
   if (charge.categoryCode !== 'SHIPPING_FEE') return snapshot;
-  return reconcileSampleWeightBasis(
-    previous,
-    snapshot as Record<string, unknown>,
-    isSfCollect || charge.unit !== 'kg' ? null : charge.quantity,
-  ) as Prisma.InputJsonObject;
+  return reconcileSampleWeightBasis(previous, snapshot as Record<string, unknown>, {
+    weightKg: isSfCollect || charge.unit !== 'kg' ? null : charge.quantity,
+    sfCollect: isSfCollect,
+  }) as Prisma.InputJsonObject;
 }
 
 async function prepareExternalLogisticsChargeRefresh(input: {

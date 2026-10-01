@@ -519,9 +519,8 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
           actual: { amount, provisional: !confirmed, requiresAdminConfirmation: !confirmed, overrideReason: reason },
           correctedAt: now.toISOString(), actorId: actor.id,
         };
-    // 寄样首重默认（DECISIONS 2026-09-30）：手填运费时新快照沿用旧快照，会把默认标记
-    // 一并带过来；重量已更正就必须去掉，仍是默认首重才保留。到付往返后当前快照已无
-    // 标记，从 buildPlan 核过身份的原寄付证据认回默认首重。
+    // 寄样首重默认（DECISIONS 2026-09-30）：手填运费或恢复原寄付快照时，新快照会带着
+    // 旧标记；一律按上一版状态与本次保存的重量重算（到付期间改重量同样作废）。
     const snapshot = reconcileSampleWeightBasis(row.previous.pricingSnapshot, {
       ...pricingSnapshot,
       ...(row.prepaidEvidence ? { preservedPrepaidShipping: row.prepaidEvidence } : {}),
@@ -529,7 +528,7 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
         orderId: order.id, priceRevision: order.priceRevision + 1,
         destinationProvince: row.destinationProvince, billableWeightKg: row.weightKg,
       } } : {}),
-    } as Record<string, unknown>, input.isSfCollect ? null : row.weightKg, row.prepaidEvidence?.pricingSnapshot);
+    } as Record<string, unknown>, { weightKg: row.weightKg, sfCollect: input.isSfCollect });
     await tx.orderCustomerCharge.update({
       where: { id: row.previous.id },
       data: { status, amount, suggestedAmount: row.suggestedAmount, sourceRuleId: row.sourceRuleId,
@@ -684,7 +683,7 @@ export async function finalizeConfirmedFulfillmentChargesForShipmentInTx(
         : row.pricingSnapshot;
       // 定稿也按统一规则维护寄样首重默认标记（DECISIONS 2026-09-30）。
       const snapshot = order.purpose === 'SAMPLE_SHIPMENT' && row === charge && rebuilt !== null && typeof rebuilt === 'object' && !Array.isArray(rebuilt)
-        ? reconcileSampleWeightBasis(row.pricingSnapshot, rebuilt as Record<string, unknown>, order.isSfCollect ? null : shipmentRequest.weightKg)
+        ? reconcileSampleWeightBasis(row.pricingSnapshot, rebuilt as Record<string, unknown>, { weightKg: shipmentRequest.weightKg, sfCollect: order.isSfCollect })
         : rebuilt;
       updates.push({ id: row.id, status, snapshot });
     }

@@ -2222,14 +2222,12 @@ async function finalizeExternalShipmentChargesInTx(
   );
   // 寄样首重默认（DECISIONS 2026-09-30）：最终计费重量仍等于提交时写入的首重，
   // 定稿快照保留 SAMPLE_FIRST_WEIGHT_DEFAULT；重量已按实际更正则去掉。发货登记会把
-  // 已存重量原样回填，所以按重量值判断，不按请求里有没有重量判断。到付不按重量计费，
-  // 与上面的报价一致按 null。
+  // 已存重量原样回填，所以按重量值判断，不按请求里有没有重量判断。到付只暂存默认首重，
+  // 但登记了不同重量同样作废。
   const finalWeightByShippingKey = new Map(
     input.storedShipments.map((shipment) => [
       `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
-      chargeOrder.isSfCollect
-        ? null
-        : input.trustedWeightByShipmentId.get(shipment.id) ?? null,
+      input.trustedWeightByShipmentId.get(shipment.id) ?? null,
     ]),
   );
   for (const charge of finalizedCharges.charges) {
@@ -2254,7 +2252,10 @@ async function finalizeExternalShipmentChargesInTx(
         suggestedAmount: charge.suggestedAmount,
         amount: charge.amount,
         pricingSnapshot: chargeOrder.purpose === 'SAMPLE_SHIPMENT' && finalWeightByShippingKey.has(charge.businessKey)
-          ? reconcileSampleWeightBasis(existing.pricingSnapshot, charge.pricingSnapshot, finalWeightByShippingKey.get(charge.businessKey))
+          ? reconcileSampleWeightBasis(existing.pricingSnapshot, charge.pricingSnapshot, {
+              weightKg: finalWeightByShippingKey.get(charge.businessKey),
+              sfCollect: chargeOrder.isSfCollect,
+            })
           : charge.pricingSnapshot,
         overrideReason: charge.overrideReason,
         finalizedById: input.actorId,
@@ -3463,9 +3464,15 @@ export async function setOrderSfCollect(
         ]),
       );
       const finalized = order.status === OrderStatus.SHIPPED;
-      // 寄样首重默认（DECISIONS 2026-09-30）：按本次计费重量（快递费行的 kg 数量）维护
-      // 标记；到付期间暂存默认首重，恢复寄付且重量未改时恢复标记。
+      // 寄样首重默认（DECISIONS 2026-09-30）：寄付按本次计费重量（快递费行的 kg 数量），
+      // 到付按已存重量（切换本身不改重量）维护标记。
       const maintainsSampleWeightBasis = order.purpose === 'SAMPLE_SHIPMENT';
+      const storedWeightByShippingKey = new Map(
+        chargeContext.shipments.map((shipment) => [
+          `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
+          shipment.weightKg?.toString() ?? null,
+        ]),
+      );
       for (const charge of repriced.charges) {
         if (isSfCollect && charge.categoryCode !== 'SHIPPING_FEE') continue;
         const existing = existingByBusinessKey.get(charge.businessKey);
@@ -3494,7 +3501,14 @@ export async function setOrderSfCollect(
                 ? reconcileSampleWeightBasis(
                     existing.pricingSnapshot,
                     charge.pricingSnapshot,
-                    isSfCollect || charge.unit !== 'kg' ? null : charge.quantity,
+                    {
+                      weightKg: isSfCollect
+                        ? storedWeightByShippingKey.get(charge.businessKey)
+                        : charge.unit === 'kg'
+                          ? charge.quantity
+                          : null,
+                      sfCollect: isSfCollect,
+                    },
                   )
                 : charge.pricingSnapshot,
             overrideReason: charge.overrideReason,

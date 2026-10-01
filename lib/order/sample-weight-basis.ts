@@ -4,11 +4,13 @@ import Decimal from 'decimal.js';
  * 寄样首重默认（DECISIONS 2026-09-30）。提交时把收件省份的中通首重写成计费重量，
  * 收费快照记 `weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT` 与当时的 `defaultWeightKg`。
  *
- * 之后每个重写寄样快递费快照的入口（履约费用确认、销售切换到付、变更申请重算物流、
- * 发货定稿）都按同一条规则维护标记：最终计费重量仍等于提交时的默认首重才保留，否则
- * 说明重量已按实际更正，去掉标记。不能按「请求里有没有重量」判断——发货登记会把
- * 已存的默认重量原样回填。到付不按重量计费，期间不带标记，默认首重暂存在
- * `suspendedSampleDefaultWeightKg`，恢复寄付且重量未改时据此恢复标记。
+ * 之后每个重写寄样快递费快照的入口（履约费用确认、销售切换到付、变更申请 / 工厂确认
+ * 重算物流、发货定稿）都只按上一版快照的状态和本次登记的重量推进，状态只有三种：
+ * - 标记：寄付，登记重量等于默认首重；
+ * - 暂存（`suspendedSampleDefaultWeightKg`）：到付不按重量收快递费，登记重量仍是默认
+ *   首重或未登记；恢复寄付且重量未改时回到「标记」；
+ * - 无：登记过不同的重量即作废，之后不再恢复——不能从更早的快照把它认回来。
+ * 判断依据是登记重量的值，不是请求里有没有重量：发货登记会把已存的默认重量原样回填。
  */
 export const SAMPLE_FIRST_WEIGHT_DEFAULT = 'SAMPLE_FIRST_WEIGHT_DEFAULT';
 
@@ -31,8 +33,9 @@ function asDecimal(value: unknown): Decimal | null {
 }
 
 /**
- * 提交时写入的默认首重；快照不带默认标记时为 null。早于 `defaultWeightKg` 的
- * 标记快照（未上线的开发数据）只认同一快照里报价行的证据：计费重量等于首重。
+ * 快照仍有效的默认首重（标记或到付暂存）；已作废或从未有过时为 null。早于
+ * `defaultWeightKg` 的标记快照（未上线的开发数据）只认同一快照里报价行的证据：
+ * 计费重量等于首重。
  */
 export function sampleDefaultWeightKg(snapshot: unknown): Decimal | null {
   const object = asObject(snapshot);
@@ -56,30 +59,24 @@ export function sampleFirstWeightDefaultMarker(weightKg: Decimal.Value) {
 }
 
 /**
- * 重写 `next` 上的标记：最终重量等于默认首重则保留；最终没有计费重量（到付）则只
- * 暂存默认首重、不带标记；重量已改则全部去掉。默认首重依次取 `previous`、调用方已
- * 核对身份的 `evidence`（到付期间保存的原寄付快照）、`next` 自带的。
+ * 按上一版快照 `previous` 的状态与本次登记重量，重写 `next` 上的首重默认字段。
+ * `next` 自带的这些字段一律丢弃（例如恢复的原寄付快照），只由 `previous` 推进。
  */
 export function reconcileSampleWeightBasis<T extends SnapshotObject>(
   previous: unknown,
   next: T,
-  finalWeightKg: Decimal.Value | null | undefined,
-  ...evidence: unknown[]
+  recorded: { weightKg: Decimal.Value | null | undefined; sfCollect: boolean },
 ): T {
   const { weightBasis, defaultWeightKg, suspendedSampleDefaultWeightKg, ...rest } = next;
   void weightBasis;
   void defaultWeightKg;
   void suspendedSampleDefaultWeightKg;
-  const defaultWeight = [previous, ...evidence, next]
-    .map(sampleDefaultWeightKg)
-    .find((weight) => weight !== null) ?? null;
+  const defaultWeight = sampleDefaultWeightKg(previous);
   if (!defaultWeight) return rest as T;
-  const finalWeight = asDecimal(finalWeightKg);
-  if (finalWeight === null) {
+  const weight = asDecimal(recorded.weightKg);
+  if (weight !== null && !weight.equals(defaultWeight)) return rest as T;
+  if (recorded.sfCollect || weight === null) {
     return { ...rest, suspendedSampleDefaultWeightKg: defaultWeight.toString() } as unknown as T;
   }
-  if (finalWeight.equals(defaultWeight)) {
-    return { ...rest, ...sampleFirstWeightDefaultMarker(defaultWeight) } as unknown as T;
-  }
-  return rest as T;
+  return { ...rest, ...sampleFirstWeightDefaultMarker(defaultWeight) } as unknown as T;
 }
