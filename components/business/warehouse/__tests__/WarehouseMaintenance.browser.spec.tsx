@@ -2,6 +2,7 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page } from 'vitest/browser';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 
 vi.mock('@/actions/owner-warehouses', () => ({ maintainWarehouseAction: vi.fn() }));
@@ -25,7 +26,7 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
   await expect.element(restore).toHaveAccessibleDescription('请先启用所属仓库，再启用库位');
   for (const dark of [false, true]) {
     document.documentElement.classList.toggle('dark', dark);
-    await vi.waitFor(() => expect(document.getAnimations().filter((animation) => animation.playState === 'running' || animation.pending)).toHaveLength(0));
+    await waitForStableLayout();
     expect(await commands.checkShellAccessibility('main')).toEqual([]);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
     const rect = host.querySelector('button[disabled]')!.getBoundingClientRect();

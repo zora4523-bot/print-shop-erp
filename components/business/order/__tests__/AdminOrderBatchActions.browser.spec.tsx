@@ -6,6 +6,7 @@ import { commands, page, userEvent } from 'vitest/browser';
 import type { AdminOrderBatchActionResult } from '@/actions/admin-order-workflow';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { OrderStatus } from '@/generated/prisma/enums';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 
 const { batchAction, refresh, printAction, printFetch } = vi.hoisted(() => ({ batchAction: vi.fn(), refresh: vi.fn(), printAction: vi.fn(), printFetch: vi.fn() }));
@@ -82,9 +83,8 @@ async function review() {
 }
 
 async function settleAnimation(selector: string) {
-  await expect.poll(() => document.querySelector(selector)?.hasAttribute('data-starting-style')).toBe(false);
-  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-  await Promise.all(document.querySelector(selector)!.getAnimations().map((animation) => animation.finished));
+  expect(document.querySelector(selector), selector).not.toBeNull();
+  await waitForStableLayout();
 }
 
 describe('admin order batch review', () => {
@@ -129,6 +129,8 @@ describe('admin order batch review', () => {
 
     await userEvent.keyboard('{Enter}');
     await expect.element(page.getByRole('menu')).toBeVisible();
+    // Base UI moves focus into the menu on a later frame; keys sent before that reach the trigger and close it.
+    await waitForStableLayout();
     await userEvent.keyboard('{ArrowDown}{Enter}');
     await expect.element(dialog).toBeVisible();
     // A refreshed row must not silently replace the version already reviewed.

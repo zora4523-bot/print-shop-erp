@@ -7,6 +7,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useOrderEditorAuxiliary } from '@/components/business/order/use-order-editor-auxiliary';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
@@ -889,8 +890,7 @@ describe('administrator edit design', () => {
       await save.click();
       const dialog = page.getByRole('alertdialog', { name: '保存工单修改', exact: true });
       await expect.element(dialog).toBeVisible();
-      await expect.poll(() => dialog.element().hasAttribute('data-starting-style')).toBe(false);
-      await expect.poll(() => dialog.element().getAnimations().filter((animation) => animation.playState === 'running').length).toBe(0);
+      await waitForStableLayout();
       const rect = dialog.element().getBoundingClientRect();
       expect(rect.top).toBeGreaterThanOrEqual(0);
       expect(rect.bottom).toBeLessThanOrEqual(height);

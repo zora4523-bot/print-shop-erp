@@ -10,6 +10,7 @@ import {
   getAdminMenuItems,
 } from '@/lib/navigation/admin-menu';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 
 const route = vi.hoisted(() => ({ pathname: '/orders/new', search: '' }));
@@ -120,16 +121,11 @@ function assertBreadcrumbTextAlignment(header: HTMLElement) {
   expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(2);
 }
 
+// A translating 44px control can have a fractional bounding-box width even
+// though its layout width is 44px. Measure after the real transition finishes.
 async function settleMobileSidebar() {
-  const sidebar = document.querySelector<HTMLElement>('[data-mobile="true"]')!;
-  await expect.poll(() => sidebar.hasAttribute('data-starting-style')).toBe(false);
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  });
-  // A translating 44px control can have a fractional bounding-box width even
-  // though its layout width is 44px. Measure after the real transition finishes.
-  await expect.poll(() => sidebar.getAnimations({ subtree: true })
-    .some((animation) => animation.pending || animation.playState === 'running')).toBe(false);
+  expect(document.querySelector('[data-mobile="true"]')).not.toBeNull();
+  await waitForStableLayout();
 }
 
 function assertMenuLinks(role: Role) {
