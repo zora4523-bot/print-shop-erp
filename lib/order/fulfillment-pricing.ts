@@ -24,6 +24,7 @@ import {
 import { isFulfillmentPricingStatus } from './fulfillment-pricing-policy';
 import { orderCascadeLockKey } from './locks';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
+import { reconcileSampleWeightBasis } from './sample-weight-basis';
 
 export { isFulfillmentPricingStatus } from './fulfillment-pricing-policy';
 
@@ -518,14 +519,16 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
           actual: { amount, provisional: !confirmed, requiresAdminConfirmation: !confirmed, overrideReason: reason },
           correctedAt: now.toISOString(), actorId: actor.id,
         };
-    const snapshot = {
+    // 寄样首重默认（DECISIONS 2026-09-30）：手填运费或恢复原寄付快照时，新快照会带着
+    // 旧标记；一律按上一版状态与本次保存的重量重算（到付期间改重量同样作废）。
+    const snapshot = reconcileSampleWeightBasis(row.previous.pricingSnapshot, {
       ...pricingSnapshot,
       ...(row.prepaidEvidence ? { preservedPrepaidShipping: row.prepaidEvidence } : {}),
       ...(confirmed ? { fulfillmentPricingConfirmation: {
         orderId: order.id, priceRevision: order.priceRevision + 1,
         destinationProvince: row.destinationProvince, billableWeightKg: row.weightKg,
       } } : {}),
-    };
+    } as Record<string, unknown>, { weightKg: row.weightKg, sfCollect: input.isSfCollect });
     await tx.orderCustomerCharge.update({
       where: { id: row.previous.id },
       data: { status, amount, suggestedAmount: row.suggestedAmount, sourceRuleId: row.sourceRuleId,
@@ -674,10 +677,14 @@ export async function finalizeConfirmedFulfillmentChargesForShipmentInTx(
       if (row.status === OrderCustomerChargeStatus.PENDING_AMOUNT || row.amount === null) throw new FulfillmentPricingError('发货费用仍有待定项目');
       if (submitted != null && money(submitted, '发货费用') !== money(row.amount, '已审核费用')) throw new FulfillmentPricingError('发货金额与已审核履约费用不同，请先通过履约费用入口预览并确认');
       const status = row.status === OrderCustomerChargeStatus.WAIVED ? row.status : OrderCustomerChargeStatus.FINAL;
-      const snapshot = isTrustedAdminChargePricingSnapshot(row.pricingSnapshot, row)
+      const rebuilt = isTrustedAdminChargePricingSnapshot(row.pricingSnapshot, row)
         ? buildTrustedAdminChargePricingSnapshot({ previous: row.pricingSnapshot, actorId: input.actorId, now: input.now, previousPriceRevision: order.priceRevision,
             charge: { ...row, categoryCode: row.category.code, status, amount: row.amount } })
         : row.pricingSnapshot;
+      // 定稿也按统一规则维护寄样首重默认标记（DECISIONS 2026-09-30）。
+      const snapshot = order.purpose === 'SAMPLE_SHIPMENT' && row === charge && rebuilt !== null && typeof rebuilt === 'object' && !Array.isArray(rebuilt)
+        ? reconcileSampleWeightBasis(row.pricingSnapshot, rebuilt as Record<string, unknown>, { weightKg: shipmentRequest.weightKg, sfCollect: order.isSfCollect })
+        : rebuilt;
       updates.push({ id: row.id, status, snapshot });
     }
   }

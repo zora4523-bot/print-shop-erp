@@ -46,6 +46,15 @@ describe('shipment registration', () => {
     expect(mocks.settle.mock.calls[0][2]).toBe(mocks.tx);
     expect(mocks.tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(mocks.tx.order.findUnique.mock.invocationCallOrder[0]);
   });
+  // 寄样首重默认（DECISIONS 2026-09-30）：登记发货把已存的默认 1kg 原样交给 shipOrder；
+  // shipOrder 按重量值判断，等于默认首重就保留标记（见 lib/__tests__/order.test.ts）。
+  it('forwards the stored sample default weight unchanged to shipOrder', async () => {
+    const order = await mocks.tx.order.findUnique();
+    mocks.tx.order.findUnique.mockResolvedValue({ ...order, shipments: [{ ...row, weightKg: new Decimal('1') }] });
+    mocks.tx.orderShipment.update.mockImplementation(({ data }) => ({ ...row, weightKg: new Decimal('1'), ...data }));
+    await registerShipment(input, actor);
+    expect(mocks.ship.mock.calls[0][2].shipments).toEqual([{ shipmentId: 's1', trackingNo: 'ZTO123', weightKg: '1' }]);
+  });
   it('rejects stale and cross-order shipment ids', async () => {
     await expect(registerShipment({ ...input, expectedRevision: 2 }, actor)).rejects.toThrow('已被修改');
     await expect(registerShipment({ ...input, shipmentId: 'foreign' }, actor)).rejects.toThrow('找不到');

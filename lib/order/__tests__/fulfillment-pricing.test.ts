@@ -203,6 +203,31 @@ describe('fulfilment charge confirmation', () => {
     expect(mocks.tx.orderCustomerCharge.update).toHaveBeenCalledTimes(1);
   });
 
+  // DECISIONS 2026-09-30 寄样首重默认：手填运费时新快照沿用旧快照，会把默认标记带过来；
+  // 重量已更正必须去掉，只改运费、重量仍是默认首重才保留（Codex 审查 P2）。
+  it.each([
+    ['drops the sample first-weight default marker when the weight is corrected with a manual fee', '2', false],
+    ['keeps the marker when only the fee changes and the default weight stays', '1', true],
+  ] as const)('%s', async (_label, weightKg, keepsDefault) => {
+    const value = order();
+    value.shipments[0]!.weightKg = new Decimal('1');
+    value.customerCharges[0]!.pricingSnapshot = {
+      source: 'SAMPLE_ORDER_QUOTE',
+      ...{ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' },
+    };
+    setup(value);
+    const input = { orderId: 'order-1', isSfCollect: false, shipments: [{ shipmentId: 'shipment-1', destinationProvince: '广东', weightKg, shippingFee: '9.00', customerChargeOverrideReason: '承运商实际账单' }] };
+    await expect(confirm(input)).resolves.toMatchObject({ confirmedFee: '156.00' });
+    const snapshot = mocks.tx.orderCustomerCharge.update.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'shipping-1')!.data.pricingSnapshot;
+    if (keepsDefault) expect(snapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' });
+    else {
+      expect(snapshot).not.toHaveProperty('weightBasis');
+      expect(JSON.stringify(snapshot)).not.toMatch(/"weightBasis":"SAMPLE_FIRST_WEIGHT_DEFAULT","defaultWeightKg":"1"}$/);
+    }
+  });
+
   it.each([true, false])('restores the prior manual freight through an SF pending chain (current SF=%s), never the lower tariff', async (isSfCollect) => {
     const original = order();
     original.customerCharges[0]!.amount = new Decimal('19.50');
@@ -230,6 +255,93 @@ describe('fulfilment charge confirmation', () => {
     await expect(confirm(input)).resolves.toMatchObject({ confirmedFee: '166.50' });
     expect(mocks.resolveCharges).not.toHaveBeenCalled();
     expect(mocks.tx.orderCustomerCharge.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ amount: '19.50' }) }));
+  });
+
+  // Codex 审查 P2：寄付 → 到付 → 恢复寄付。到付那一版快照只暂存默认首重；恢复寄付时
+  // 不论恢复原运费还是手填运费，重量未改就恢复标记。到付期间登记过别的重量（如 2kg）
+  // 则默认首重已作废，之后改回 1kg、甚至恢复带旧标记的原寄付快照，也不能把它认回来。
+  it.each([
+    ['baseline', 'parked', '1', null, '155.00', true],
+    ['baseline', 'parked', '1', '9.00', '156.00', true],
+    ['baseline', 'parked', '2', '9.00', '156.00', false],
+    ['carried', 'parked', '1', null, '155.00', true],
+    ['carried', 'parked', '1', '9.00', '156.00', true],
+    ['carried', 'parked', '2', '9.00', '156.00', false],
+    ['carried', 'revoked', '1', null, '155.00', false],
+    ['carried', 'revoked', '1', '9.00', '156.00', false],
+    ['baseline', 'parked', '2', null, null, false],
+  ] as const)('prepaid → SF → prepaid via %s evidence, SF default %s, at %s kg, fee %s → confirmed %s, keeps default marker: %s', async (evidence, sfState, weightKg, shippingFee, confirmedFee, keepsDefault) => {
+    const markedSnapshot = {
+      source: 'SAMPLE_ORDER_QUOTE',
+      quote: { basis: { province: '广东', billableWeightKg: '1' } },
+      weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1',
+    };
+    const original = order();
+    original.shipments[0]!.weightKg = new Decimal('1');
+    original.customerCharges[0]!.pricingSnapshot = markedSnapshot;
+    const current = { ...order(), pricingStatus: 'PENDING_ADMIN_CONFIRMATION', confirmedFee: null, isSfCollect: true };
+    current.shipments[0]!.weightKg = new Decimal(sfState === 'parked' ? '1' : '2');
+    current.customerCharges[0]!.amount = new Decimal('0');
+    current.customerCharges[0]!.status = 'WAIVED';
+    current.customerCharges[0]!.pricingSnapshot = {
+      source: 'FULFILLMENT_SF_WAIVER',
+      ...(sfState === 'parked' ? { suspendedSampleDefaultWeightKg: '1' } : {}),
+      ...(evidence === 'carried' ? { preservedPrepaidShipping: {
+        id: 'shipping-1', orderId: 'order-1', shipmentId: 'shipment-1', businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+        priceBookId: 'original-logistics', sourceRuleId: 'old-rule', amount: '8.00', suggestedAmount: '8.00',
+        overrideReason: '已审核费用', pricingSnapshot: markedSnapshot, destinationProvince: '广东', billableWeightKg: '1',
+      } } : {}),
+    } as unknown as typeof markedSnapshot;
+    current.totalAmount = new Decimal('147');
+    mocks.tx.order.findUnique.mockResolvedValue(current);
+    mocks.tx.orderPricingRevision.findMany.mockResolvedValue([
+      revision(current, 5, 'PENDING_ADMIN_CONFIRMATION', 'SF_COLLECT_CHANGED_PENDING'), revision(original, 4),
+    ]);
+    mocks.tx.orderLog.findMany.mockResolvedValue([{ changedFields: {
+      isSfCollect: { before: false, after: true }, priceRevision: { before: 4, after: 5 },
+    } }]);
+    const input = { orderId: current.id, isSfCollect: false, shipments: [{
+      shipmentId: 'shipment-1', destinationProvince: '广东', weightKg,
+      shippingFee, customerChargeOverrideReason: shippingFee ? '承运商实际账单' : null,
+    }] };
+    if (confirmedFee === null) {
+      await expect(previewFulfillmentPricing(input, admin)).resolves.toMatchObject({ canConfirm: false });
+      return;
+    }
+    await expect(confirm(input)).resolves.toMatchObject({ confirmedFee });
+    const snapshot = mocks.tx.orderCustomerCharge.update.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'shipping-1')!.data.pricingSnapshot;
+    if (keepsDefault) expect(snapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' });
+    else {
+      expect(snapshot).not.toHaveProperty('weightBasis');
+      expect(snapshot).not.toHaveProperty('defaultWeightKg');
+      expect(snapshot).not.toHaveProperty('suspendedSampleDefaultWeightKg');
+    }
+  });
+
+  // Codex 审查 P2：切到付时登记了不同重量，默认首重当场作废，不能只暂存。
+  it.each([
+    [undefined, { suspendedSampleDefaultWeightKg: '1' }],
+    ['1', { suspendedSampleDefaultWeightKg: '1' }],
+    ['2', {}],
+  ] as const)('switching a marked sample to SF collect at weight %s parks or revokes the default', async (weightKg, expectedFields) => {
+    const value = order();
+    value.shipments[0]!.weightKg = new Decimal('1');
+    value.customerCharges[0]!.pricingSnapshot = {
+      source: 'SAMPLE_ORDER_QUOTE',
+      ...{ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' },
+    };
+    setup(value);
+    const input = weightKg === undefined
+      ? { orderId: 'order-1', isSfCollect: true }
+      : { orderId: 'order-1', isSfCollect: true, shipments: [{ shipmentId: 'shipment-1', destinationProvince: '广东', weightKg, shippingFee: null, customerChargeOverrideReason: null }] };
+    await expect(confirm(input)).resolves.toMatchObject({ confirmedFee: '147.00' });
+    const snapshot = mocks.tx.orderCustomerCharge.update.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'shipping-1')!.data.pricingSnapshot;
+    expect(Object.fromEntries(['weightBasis', 'defaultWeightKg', 'suspendedSampleDefaultWeightKg']
+      .filter((key) => key in snapshot).map((key) => [key, snapshot[key]]))).toEqual(expectedFields);
   });
 
   it('requires manual confirmation instead of guessing when old freight has no billing-fact evidence', async () => {

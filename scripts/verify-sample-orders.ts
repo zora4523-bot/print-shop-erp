@@ -212,10 +212,11 @@ async function main() {
       assert.equal(order.settlementType, 'EXTERNAL_SALES');
       if (purpose === 'PROOF')
         order = await verifyProofPricing(order, pricingServices);
-      if (purpose === 'SAMPLE_SHIPMENT' && !collect) {
-        assert.equal(quote.total, null);
-        await verifyPrepaidSample(order, pricingServices);
-      }
+      // 业主 2026-09-30：寄付样品按首重自动计费；管理员代建那张验证超重改价入口。
+      const prepaidSettled =
+        purpose === 'SAMPLE_SHIPMENT' && !collect
+          ? await verifyPrepaidSample(order, quote, adminCreated, pricingServices)
+          : null;
       order = await db.order.findUniqueOrThrow({
         where: { id: order.id },
         include: { shipments: true, customerCharges: true },
@@ -247,7 +248,8 @@ async function main() {
               { orderId: order.id, isSfCollect: false },
               admin,
             ),
-          /整单总价/,
+          // Proofs do not bill logistics, so the eligibility gate rejects first.
+          /整单总价|不允许履约费用更正/,
         );
         // Explicit completed-production fixture: does not claim to test worker reporting.
         await db.productionOperation.updateMany({
@@ -294,11 +296,7 @@ async function main() {
       );
       assert.equal(
         final.settledFee?.toFixed(2),
-        purpose === 'PROOF'
-          ? '88.00'
-          : collect
-            ? quote.total
-            : (5 + Number(quote.packagingAmount)).toFixed(2),
+        purpose === 'PROOF' ? '88.00' : (prepaidSettled ?? quote.total),
       );
       assert.equal(final.totalAmount.toFixed(2), final.settledFee?.toFixed(2));
       assert.equal(
@@ -410,51 +408,33 @@ async function verifyProofPricing(order: TestOrder, services: PricingServices) {
 }
 async function verifyPrepaidSample(
   order: TestOrder,
+  quote: { total: string | null; shippingAmount: string | null; packagingAmount: string | null },
+  correctWeight: boolean,
   services: PricingServices,
 ) {
-  const {
-    admin,
-    previewOrderPricingReview,
-    finalizeOrderPricing,
-    previewFulfillmentPricing,
-    finalizeFulfillmentPricing,
-  } = services;
-  assert.equal(order.pricingStatus, 'PENDING_ADMIN_CONFIRMATION');
-
-  const review = await previewOrderPricingReview(order.id, admin);
-  await finalizeOrderPricing(
-    {
-      orderId: order.id,
-      expectedOrderRevision: review.orderRevision,
-      expectedPriceRevision: review.priceRevision,
-      items: [],
-      packagingGroups: [],
-      orderCharges: [],
-      shipments: review.shipments.map((row) => ({
-        shipmentId: row.shipmentId,
-        expectedDestinationProvince: row.destinationProvince,
-        expectedBillableWeightKg: row.billableWeightKg,
-        shippingFee: '5.00',
-        packingMaterialFee: row.packaging.currentAmount!,
-        reason: '承运商实际报价',
-      })),
-      remark: null,
-    },
-    admin,
-  );
+  const { admin, previewFulfillmentPricing, finalizeFulfillmentPricing } = services;
+  assert.equal(quote.shippingAmount, '2.80');
+  assert.equal(order.pricingStatus, 'AUTO_CONFIRMED');
+  assert.equal(order.status, 'CONFIRMED');
+  assert.equal(order.confirmedFee?.toFixed(2), quote.total);
+  assert(order.shipments.every((row) => row.weightKg?.toString() === '1'));
+  if (!correctWeight) return quote.total;
+  // Overweight after all: the administrator records 2 kg and leaves the fee
+  // blank, so it is recomputed from the order's logistics price book.
   const shipping = {
     orderId: order.id,
     isSfCollect: false,
     shipments: order.shipments.map((row) => ({
       shipmentId: row.id,
       destinationProvince: row.destinationProvince,
-      weightKg: '1.00',
-      shippingFee: '5.00',
-      customerChargeOverrideReason: '承运商最终重量与运费',
+      weightKg: '2.00',
+      shippingFee: null,
+      customerChargeOverrideReason: null,
     })),
   };
   const preview = await previewFulfillmentPricing(shipping, admin);
   assert(preview.canConfirm, JSON.stringify(preview.issues));
+  assert.equal(preview.shipments[0]?.shippingFee, '5.60');
   await finalizeFulfillmentPricing(
     {
       ...shipping,
@@ -467,6 +447,7 @@ async function verifyPrepaidSample(
     },
     admin,
   );
+  return (5.6 + Number(quote.packagingAmount)).toFixed(2);
 }
 main().catch((error) => {
   console.error(error);

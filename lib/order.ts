@@ -113,6 +113,7 @@ import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
 import { dispatchProductionCompletionNotification, findRequiredOutsourceBlocker, type ProductionCompletionNotification, type ProductionCompletionTx } from './production-completion';
 import { completePlannedProductionBeforeShipInTx, PlannedCompletionError } from './production/planned-completion';
+import { reconcileSampleWeightBasis } from './order/sample-weight-basis';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -430,6 +431,19 @@ export type SfCollectChargeCorrection = {
   shippingFee: string | null;
   customerChargeOverrideReason: string | null;
 };
+
+/**
+ * 与取消到付时的计价一致：更正里留空的字段表示沿用已存值，不能把已存重量 / 省份清空，
+ * 否则收费快照（含寄样首重默认标记）与落库的计费重量对不上。
+ */
+function sfCollectShipmentCorrectionData(correction: SfCollectChargeCorrection) {
+  return {
+    ...(correction.destinationProvince !== null
+      ? { destinationProvince: correction.destinationProvince }
+      : {}),
+    ...(correction.weightKg !== null ? { weightKg: correction.weightKg } : {}),
+  };
+}
 
 async function assertCreateOrderProductsInTx(
   txClient: Prisma.TransactionClient,
@@ -2219,6 +2233,16 @@ async function finalizeExternalShipmentChargesInTx(
   const existingByBusinessKey = new Map(
     standardCustomerCharges.map((charge) => [String(charge.businessKey), charge]),
   );
+  // 寄样首重默认（DECISIONS 2026-09-30）：最终计费重量仍等于提交时写入的首重，
+  // 定稿快照保留 SAMPLE_FIRST_WEIGHT_DEFAULT；重量已按实际更正则去掉。发货登记会把
+  // 已存重量原样回填，所以按重量值判断，不按请求里有没有重量判断。到付只暂存默认首重，
+  // 但登记了不同重量同样作废。
+  const finalWeightByShippingKey = new Map(
+    input.storedShipments.map((shipment) => [
+      `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
+      input.trustedWeightByShipmentId.get(shipment.id) ?? null,
+    ]),
+  );
   for (const charge of finalizedCharges.charges) {
     const existing = existingByBusinessKey.get(charge.businessKey);
     if (!existing) {
@@ -2240,7 +2264,12 @@ async function finalizeExternalShipmentChargesInTx(
         unit: charge.unit,
         suggestedAmount: charge.suggestedAmount,
         amount: charge.amount,
-        pricingSnapshot: charge.pricingSnapshot,
+        pricingSnapshot: chargeOrder.purpose === 'SAMPLE_SHIPMENT' && finalWeightByShippingKey.has(charge.businessKey)
+          ? reconcileSampleWeightBasis(existing.pricingSnapshot, charge.pricingSnapshot, {
+              weightKg: finalWeightByShippingKey.get(charge.businessKey),
+              sfCollect: chargeOrder.isSfCollect,
+            })
+          : charge.pricingSnapshot,
         overrideReason: charge.overrideReason,
         finalizedById: input.actorId,
         finalizedAt: input.now,
@@ -3114,6 +3143,7 @@ async function readSfCollectChargeContextInTx(
           overrideReason: true,
           priceBookId: true,
           shipmentId: true,
+          pricingSnapshot: true,
           category: { select: { code: true } },
         },
       },
@@ -3447,6 +3477,15 @@ export async function setOrderSfCollect(
         ]),
       );
       const finalized = order.status === OrderStatus.SHIPPED;
+      // 寄样首重默认（DECISIONS 2026-09-30）：寄付按本次计费重量（快递费行的 kg 数量），
+      // 到付按已存重量（切换本身不改重量）维护标记。
+      const maintainsSampleWeightBasis = order.purpose === 'SAMPLE_SHIPMENT';
+      const storedWeightByShippingKey = new Map(
+        chargeContext.shipments.map((shipment) => [
+          `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
+          shipment.weightKg?.toString() ?? null,
+        ]),
+      );
       for (const charge of repriced.charges) {
         if (isSfCollect && charge.categoryCode !== 'SHIPPING_FEE') continue;
         const existing = existingByBusinessKey.get(charge.businessKey);
@@ -3470,7 +3509,21 @@ export async function setOrderSfCollect(
             unit: charge.unit,
             suggestedAmount: charge.suggestedAmount,
             amount: charge.amount,
-            pricingSnapshot: charge.pricingSnapshot,
+            pricingSnapshot:
+              maintainsSampleWeightBasis && charge.categoryCode === 'SHIPPING_FEE'
+                ? reconcileSampleWeightBasis(
+                    existing.pricingSnapshot,
+                    charge.pricingSnapshot,
+                    {
+                      weightKg: isSfCollect
+                        ? storedWeightByShippingKey.get(charge.businessKey)
+                        : charge.unit === 'kg'
+                          ? charge.quantity
+                          : null,
+                      sfCollect: isSfCollect,
+                    },
+                  )
+                : charge.pricingSnapshot,
             overrideReason: charge.overrideReason,
             finalizedById: isSfCollect || finalized ? actor.id : null,
             finalizedAt: isSfCollect || finalized ? chargeChangedAt : null,
@@ -3486,10 +3539,7 @@ export async function setOrderSfCollect(
         for (const correction of trustedCorrections) {
           await prismaTx.orderShipment.update({
             where: { id: correction.shipmentId },
-            data: {
-              destinationProvince: correction.destinationProvince,
-              weightKg: correction.weightKg,
-            },
+            data: sfCollectShipmentCorrectionData(correction),
             select: { id: true },
           });
         }

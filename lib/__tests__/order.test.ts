@@ -3013,6 +3013,29 @@ describe('shipOrder', () => {
     for (const [call] of dbMock.order.update.mock.calls) expect(call.data).not.toHaveProperty('totalAmount');
   });
 
+  // Codex 审查 P2：已确认履约的发货定稿提前返回，也要按统一规则维护寄样首重默认标记。
+  // 旧数据里按 2kg 人工确认、快照却残留默认 1kg 标记的，定稿必须去掉；仍等于默认则保留。
+  it.each([['1', false], ['2', true]] as const)('applies the sample first-weight rule when shipping a confirmed fulfilment (default %s kg, confirmed 2 kg)', async (defaultWeightKg, keepsDefault) => {
+    const { current, result } = await confirmFulfillmentForShipping(false);
+    Object.assign(current, { purpose: 'SAMPLE_SHIPMENT' });
+    const shipping = current.customerCharges[0]!;
+    // 旧数据：标记同时在当前收费行和不可变审计版本里，否则基线校验先拒绝。
+    const legacy = { ...shipping.pricingSnapshot, weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg };
+    shipping.pricingSnapshot = legacy;
+    const [head] = await (dbMock.orderPricingRevision.findMany as unknown as () => Promise<Array<{ snapshot: { customerCharges: Array<{ id: string; pricingSnapshot: unknown }> } }>>)();
+    head!.snapshot.customerCharges.find((row) => row.id === shipping.id)!.pricingSnapshot = legacy;
+    await expect(shipOrder(current.id, ownerActor, {
+      ...oneShipmentCommand, expectedRevision: result.revision, expectedPriceRevision: result.priceRevision,
+    })).resolves.toMatchObject({ status: OrderStatus.SHIPPED });
+    expect(shipping.status).toBe('FINAL');
+    if (keepsDefault) expect(shipping.pricingSnapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '2' });
+    else {
+      expect(shipping.pricingSnapshot).not.toHaveProperty('weightBasis');
+      expect(shipping.pricingSnapshot).not.toHaveProperty('defaultWeightKg');
+    }
+    expect(current.customerCharges[1]!.pricingSnapshot).not.toHaveProperty('weightBasis');
+  });
+
   it('retains manual freight across sales SF on/off pending changes and the real UI confirmation payload', async () => {
     const { current } = await confirmFulfillmentForShipping(false);
     for (const [index, isSfCollect] of [true, false].entries()) {
@@ -3560,6 +3583,82 @@ describe('shipOrder', () => {
       }),
     );
   });
+
+  // DECISIONS 2026-09-30：寄样默认首重。最终计费重量仍等于提交时的首重就保留默认标记；
+  // 发货登记会把已存的 1kg 原样回填，所以不能按「请求里有没有重量」判断（Codex 审查 P2）。
+  for (const [label, submittedWeight, keepsDefault, isSfCollect] of [
+    ['keeps the sample first-weight default marker when shipping reuses the stored weight', null, true, false],
+    ['keeps the marker when the shipping form re-sends the stored default weight', '1', true, false],
+    ['drops the sample first-weight default marker once a different weight is entered at shipping', '2', false, false],
+    // 到付不按重量计费：即使已存 1kg 原样回填，也不能把豁免的快递费标成默认首重。
+    ['drops the marker for an SF collect sample even when the stored weight is re-sent', '1', false, true],
+  ] as const) {
+    it(label, async () => {
+      dbMock.order.findUnique
+        .mockResolvedValueOnce({
+          id: 'o1',
+          status: OrderStatus.COMPLETED,
+          submitterId: 'sales-1',
+          settlementType: OrderSettlementType.EXTERNAL_SALES,
+          pricingStatus: 'AUTO_CONFIRMED',
+          ...shipOrderVersionSnapshot,
+        })
+        .mockResolvedValueOnce({
+          settlementType: OrderSettlementType.EXTERNAL_SALES,
+          purpose: 'SAMPLE_SHIPMENT',
+          samplePackagingRuleCode: null,
+          isSfCollect,
+          processingAmount: '0.00',
+          customerCharges: [
+            {
+              id: 'charge-shipping',
+              businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+              amount: isSfCollect ? '0.00' : '2.80',
+              priceBookId: 'logistics-book-test',
+              pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE', weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' },
+              category: { code: 'SHIPPING_FEE' },
+            },
+            {
+              id: 'charge-packing',
+              businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
+              amount: '1.00',
+              priceBookId: 'logistics-book-test',
+              pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE' },
+              category: { code: 'PACKING_MATERIAL' },
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ id: 'o1', orderNo: 'O-1' });
+      dbMock.orderShipment.findMany.mockResolvedValue([
+        { id: 'shipment-1', sequence: 1, destinationProvince: '浙江', weightKg: '1', lines: [{ quantity: 3 }] },
+      ]);
+      dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+
+      await shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
+        trackingNo: null,
+        shipments: [{
+          shipmentId: 'shipment-1', trackingNo: 'ZTO001', weightKg: submittedWeight, destinationProvince: '浙江',
+          shippingFee: isSfCollect ? '0.00' : '2.80', packingMaterialFee: '1.00', customerChargeOverrideReason: '寄样实际收费',
+        }],
+      }, new Date('2026-10-01T12:00:00Z'));
+
+      const shipping = dbMock.orderCustomerCharge.update.mock.calls
+        .map(([args]) => args)
+        .find((args) => args.where.id === 'charge-shipping');
+      expect(shipping?.data.status).toBe(isSfCollect ? 'WAIVED' : 'FINAL');
+      if (keepsDefault) {
+        expect(shipping?.data.pricingSnapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' });
+      } else {
+        expect(shipping?.data.pricingSnapshot).not.toHaveProperty('weightBasis');
+        expect(shipping?.data.pricingSnapshot).not.toHaveProperty('defaultWeightKg');
+      }
+      const packing = dbMock.orderCustomerCharge.update.mock.calls
+        .map(([args]) => args)
+        .find((args) => args.where.id === 'charge-packing');
+      expect(packing?.data.pricingSnapshot).not.toHaveProperty('weightBasis');
+    });
+  }
 
   it('preserves a previously recorded carrier weight when SF collect is restored before shipping', async () => {
     dbMock.order.findUnique
@@ -5582,6 +5681,65 @@ describe('setOrderSfCollect — 后期履约标识', () => {
       }),
     });
     expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
+  });
+
+  // Codex 审查 P2：待核价的寄样单（如另一地址无报价）由销售切换到付，走这条通用切换
+  // 分支而非履约费用。到付期间暂存默认首重、不带标记；恢复寄付且重量未改时恢复标记。
+  it.each([
+    ['prepaid → SF suspends the sample first-weight default', false, '1', { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' }, { suspendedSampleDefaultWeightKg: '1' }],
+    ['SF → prepaid at the unchanged weight restores the marker', true, '1', { suspendedSampleDefaultWeightKg: '1' }, { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' }],
+    ['SF → prepaid after the weight changed drops the default', true, '2', { suspendedSampleDefaultWeightKg: '1' }, {}],
+  ] as const)('%s on a pending sample order', async (_label, wasSfCollect, weightKg, previousMarker, expectedMarker) => {
+    dbMock.order.findFirst.mockResolvedValue({
+      ...sfSnapshot(OrderStatus.SUBMITTED, wasSfCollect, 'sales-1', OrderSettlementType.EXTERNAL_SALES),
+      purpose: 'SAMPLE_SHIPMENT', samplePackagingRuleCode: null, pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+    });
+    const context = externalChargeContext({ destinationProvince: '广东', weightKg });
+    context.shipments[0]!.status = 'PENDING';
+    Object.assign(context.customerCharges[0]!, {
+      pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE', ...previousMarker },
+    });
+    dbMock.order.findUnique.mockResolvedValue(context);
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.SUBMITTED });
+
+    await setOrderSfCollect('order-1', !wasSfCollect, salesActor);
+
+    const snapshot = dbMock.orderCustomerCharge.update.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'charge-shipping')!.data.pricingSnapshot;
+    const markerKeys = ['weightBasis', 'defaultWeightKg', 'suspendedSampleDefaultWeightKg'] as const;
+    expect(Object.fromEntries(markerKeys.filter((key) => key in snapshot).map((key) => [key, snapshot[key]])))
+      .toEqual(expectedMarker);
+  });
+
+  // Codex 审查 P2：管理员取消到付时带了留空重量的更正。计价沿用已存 1kg，落库也必须
+  // 沿用，不能把重量清空而快照却标着默认首重 1kg。
+  it('keeps the stored weight and restores the sample marker when an admin cancels SF collect with an empty weight correction', async () => {
+    dbMock.order.findFirst.mockResolvedValue({
+      ...sfSnapshot(OrderStatus.SUBMITTED, true, 'sales-1', OrderSettlementType.EXTERNAL_SALES),
+      purpose: 'SAMPLE_SHIPMENT', samplePackagingRuleCode: null, pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+    });
+    const context = externalChargeContext({ destinationProvince: '广东', weightKg: '1' });
+    context.shipments[0]!.status = 'PENDING';
+    Object.assign(context.customerCharges[0]!, {
+      pricingSnapshot: { version: 1, source: 'SF', suspendedSampleDefaultWeightKg: '1' },
+    });
+    dbMock.order.findUnique.mockResolvedValue(context);
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.SUBMITTED });
+
+    await setOrderSfCollect('order-1', false, ownerActor, [{
+      shipmentId: 'shipment-1', destinationProvince: null, weightKg: null,
+      shippingFee: null, customerChargeOverrideReason: null,
+    }]);
+
+    const snapshot = dbMock.orderCustomerCharge.update.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'charge-shipping')!.data.pricingSnapshot;
+    expect(snapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' });
+    for (const [args] of dbMock.orderShipment.update.mock.calls) {
+      expect(args.data).not.toHaveProperty('weightKg');
+      expect(args.data).not.toHaveProperty('destinationProvince');
+    }
   });
 
   it('取消顺丰到付时款式重量事实不完整则保持待终价', async () => {

@@ -64,6 +64,25 @@ describe('proof preview uses the published blank sale gate', () => {
     }]);
     await expect(quoteSampleOrder(input())).rejects.toThrow('缺货');
   });
+  it('prices prepaid sample freight at the destination first weight', async () => {
+    await expect(quoteSampleOrder(input('SAMPLE_SHIPMENT'))).resolves.toMatchObject({
+      shippingAmount: '2.80', packagingAmount: '1.00', total: '3.80', errors: [],
+    });
+  });
+  it('uses the remote first-weight fee rather than a flat default', async () => {
+    const remote = { ...input('SAMPLE_SHIPMENT'), destinationProvince: '新疆' };
+    await expect(quoteSampleOrder(remote)).resolves.toMatchObject({ shippingAmount: '12.00', total: '13.00' });
+  });
+  it('keeps freight pending, never free, when the province has no tariff', async () => {
+    mocks.snapshot.mockResolvedValue({ ...CREATE_ORDER_GOLDEN_SNAPSHOT,
+      orderCharges: { ...CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges,
+        rules: CREATE_ORDER_GOLDEN_SNAPSHOT.orderCharges.rules.filter((rule) => rule.code !== 'ZTO_STANDARD_2_8'),
+      },
+    });
+    await expect(quoteSampleOrder(input('SAMPLE_SHIPMENT'))).resolves.toMatchObject({
+      shippingAmount: null, total: null, knownTotal: '1.00',
+    });
+  });
   it('keeps sample shipment previews independent of blank sale availability', async () => {
     mocks.snapshot.mockResolvedValue({ ...CREATE_ORDER_GOLDEN_SNAPSHOT,
       partial: { ...CREATE_ORDER_GOLDEN_SNAPSHOT.partial, blankUnitPrices: [] },
