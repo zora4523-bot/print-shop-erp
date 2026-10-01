@@ -36,7 +36,7 @@ const REASONS: Record<PlannedCompletionRecordSource, string> = {
 type Client = Pick<Prisma.TransactionClient, 'productionJob' | 'productionOperation' | 'productionProgressStep'>;
 
 /** Current-version facts that decide whether the order can be completed at plan. */
-export async function loadPlannedCompletion(client: Client, orderId: string, workOrderVersion: number) {
+async function loadPlannedCompletion(client: Client, orderId: string, workOrderVersion: number) {
   const [jobs, operations, steps] = await Promise.all([
     client.productionJob.findMany({ where: { orderId, workOrderVersion, status: { not: 'CANCELLED' } },
       select: { id: true, revision: true, label: true, workerId: true, workerName: true, plannedQty: true, status: true, operationId: true, progressStepId: true },
@@ -63,7 +63,6 @@ export async function getPlannedCompletionPreview(orderId: string, workOrderVers
     unassignedUnits: plan.unassignedUnits,
   };
 }
-export type PlannedCompletionPreview = Awaited<ReturnType<typeof getPlannedCompletionPreview>>;
 
 /**
  * Completes every pending current-version job at its planned quantity inside the

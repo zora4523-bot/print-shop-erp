@@ -322,7 +322,7 @@ function QuickFilterLink({
 }
 
 /** 「金额合计」未计入的工单合成一句，不再逐类重复「（另 N 单…未计入）」。 */
-export function excludedFeeSummary(
+function excludedFeeSummary(
   summary: Pick<
     AdminOrderWorkspacePage['summary'],
     'manualPricingCount' | 'incompleteFeeExcludedCount' | 'legacyFeeExcludedCount'

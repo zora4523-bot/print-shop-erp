@@ -440,7 +440,7 @@ function rowActionVariant(order: AdminOrderWorkspaceRow): 'default' | 'outline' 
  * 行尾动作按真实待办命名（UI-SYSTEM「管理端工单列表」），与详情「当前待办」标题同词：
  * 不再用「查看处理」「处理」这类不说明要做什么的词。
  */
-export function rowActionLabel(order: AdminOrderWorkspaceRow): string {
+function rowActionLabel(order: AdminOrderWorkspaceRow): string {
   if (order.pendingChangeRequest) return '裁决变更';
   if (order.fee.source === 'PENDING') return '录价';
   if (order.printPending) return '处理打印';
