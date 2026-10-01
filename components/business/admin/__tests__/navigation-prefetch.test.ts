@@ -83,7 +83,7 @@ describe('admin navigation prefetch policy', () => {
     );
 
     expect(header).not.toContain('aria-label="快捷导航"');
-    expect(header).toContain('<AdminBreadcrumb />');
+    expect(header).toContain('<AdminBreadcrumb role={role} />');
     expect(breadcrumb).toContain('prefetch={false}');
     expect(breadcrumb).toContain('export const BREADCRUMB_PATH_LABELS');
     expect(breadcrumb).toContain('RULE_CENTER_SIDEBAR_ITEMS');

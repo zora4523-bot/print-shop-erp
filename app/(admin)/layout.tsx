@@ -67,6 +67,7 @@ export default async function AdminShellLayout({
             displayName={user.displayName}
             roleLabel={roleBadge}
             environmentLabel={environmentLabel}
+            role={user.role}
           />
           <div className="admin-safe-inline admin-safe-bottom min-w-0 flex-1 py-4 sm:py-6">
             {children}

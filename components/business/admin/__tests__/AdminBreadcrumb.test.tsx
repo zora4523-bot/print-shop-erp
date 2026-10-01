@@ -155,3 +155,13 @@ it('新建空白封纸张使用业务标题且不链接无页面的中间路径'
   expect(visibleText(html)).not.toContain('新建工单');
   expect(html).not.toContain('href="/owner/rules/customer-pricing/blank"');
 });
+
+// 业主 2026-10-01：外部销售的工单列表统一叫「我的工单」（侧栏、面包屑、H1、<title> 同源）。
+it('names /orders by the viewer’s own module: 管理员「工单列表」，外部销售「我的工单」', () => {
+  expect(buildBreadcrumbCrumbs('/orders', null, null, 'ADMIN').map((crumb) => crumb.label)).toEqual(['工单列表']);
+  expect(buildBreadcrumbCrumbs('/orders', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单']);
+  expect(buildBreadcrumbCrumbs('/orders/order-1', '工单 A', null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '工单详情']);
+  expect(buildBreadcrumbCrumbs('/orders/new', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '新建工单']);
+  usePathnameMock.mockReturnValue('/orders');
+  expect(visibleText(renderToStaticMarkup(<AdminBreadcrumb role="SALES" />))).toContain('我的工单');
+});
