@@ -13,12 +13,14 @@ export type PrintActor = { id: string; role: Role };
 export async function getOrderPrintScope(
   orderId: string,
   actor: PrintActor,
+  // 打印记录在持有工单锁的事务里读取，须用同一事务客户端，不另占连接（业主 2026-10-02 点打印即记已打印）。
+  client: Pick<Prisma.TransactionClient, 'user' | 'order'> = db,
 ): Promise<Prisma.OrderWhereInput | null> {
   if (actor.role !== Role.ADMIN && actor.role !== Role.WORKER) return null;
 
   // Background jobs carry an old actor snapshot. Recheck the account instead
   // of trusting a role that may have changed while the job was queued.
-  const account = await db.user.findUnique({
+  const account = await client.user.findUnique({
     where: { id: actor.id },
     select: {
       role: true,
@@ -30,7 +32,7 @@ export async function getOrderPrintScope(
   if (!account?.isActive || account.role !== actor.role) return null;
   if (actor.role === Role.ADMIN) return { id: orderId };
 
-  const current = await db.order.findFirst({
+  const current = await client.order.findFirst({
     where: { id: orderId, status: { not: OrderStatus.SUBMITTED } },
     select: { workOrderVersion: true, simpleProduction: true },
   });

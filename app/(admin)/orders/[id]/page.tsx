@@ -18,6 +18,7 @@ import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-fa
 import { LegacyProductionFactsRepairForm } from '@/components/business/order/LegacyProductionFactsRepairForm';
 import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
+import { PrintPageLink } from '@/components/business/order/PrintPageLink';
 import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -533,14 +534,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         />
       ) : null}</Fragment>),
     printActions: (<Fragment key="printActions"><div className="flex min-w-0 flex-wrap items-center gap-2">
-            <a
-              href={`/print/orders/${order.id}?autoprint=1`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
+            <PrintPageLink orderId={order.id} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               打印
-            </a>
+            </PrintPageLink>
             <a
               href={`/api/orders/${order.id}/pdf`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}

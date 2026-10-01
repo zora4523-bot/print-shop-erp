@@ -72,6 +72,7 @@ describe('recordOrderPrintedAction', () => {
 });
 
 describe('recordBatchPrintAction', () => {
+  const batch = { jobId: 'job_1', attemptId: '0f8fad5b-d9cb-469f-a165-70867728950e' };
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.requirePermission.mockResolvedValue(admin);
@@ -80,16 +81,17 @@ describe('recordBatchPrintAction', () => {
 
   it('checks permission first, records the whole file and revalidates the list', async () => {
     mocks.requirePermission.mockRejectedValueOnce(new Error('FORBIDDEN'));
-    await expect(recordBatchPrintAction('job_1')).rejects.toThrow('FORBIDDEN');
+    await expect(recordBatchPrintAction(batch)).rejects.toThrow('FORBIDDEN');
     expect(mocks.recordBatchPrint).not.toHaveBeenCalled();
-    await expect(recordBatchPrintAction('job_1')).resolves.toEqual({ status: 'success', marked: 2 });
+    await expect(recordBatchPrintAction(batch)).resolves.toEqual({ status: 'success', marked: 2 });
     expect(mocks.requirePermission).toHaveBeenLastCalledWith('order:change:review');
-    expect(mocks.recordBatchPrint).toHaveBeenCalledWith('admin-1', 'job_1');
+    expect(mocks.recordBatchPrint).toHaveBeenCalledWith('admin-1', 'job_1', batch.attemptId);
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/orders');
   });
 
-  it('rejects a malformed job id without touching the file', async () => {
-    await expect(recordBatchPrintAction('../x')).resolves.toEqual({ status: 'error', message: '打印任务无效' });
+  it('rejects a missing attempt or malformed job id without touching the file', async () => {
+    await expect(recordBatchPrintAction({ jobId: 'job_1' })).resolves.toEqual({ status: 'error', message: '打印任务无效' });
+    await expect(recordBatchPrintAction({ jobId: '../x', attemptId: batch.attemptId })).resolves.toEqual({ status: 'error', message: '打印任务无效' });
     expect(mocks.recordBatchPrint).not.toHaveBeenCalled();
   });
 
@@ -102,12 +104,12 @@ describe('recordBatchPrintAction', () => {
   ])('maps %s to a visible error', async (failure, message) => {
     if (failure === null) mocks.recordBatchPrint.mockResolvedValue(null);
     else mocks.recordBatchPrint.mockRejectedValue(failure);
-    await expect(recordBatchPrintAction('job_1')).resolves.toEqual({ status: 'error', message });
+    await expect(recordBatchPrintAction(batch)).resolves.toEqual({ status: 'error', message });
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   it('rethrows unexpected failures', async () => {
     mocks.recordBatchPrint.mockRejectedValue(new Error('database down'));
-    await expect(recordBatchPrintAction('job_1')).rejects.toThrow('database down');
+    await expect(recordBatchPrintAction(batch)).rejects.toThrow('database down');
   });
 });

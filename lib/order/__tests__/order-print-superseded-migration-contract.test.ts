@@ -18,8 +18,8 @@ describe('append-only superseded print resolution migration contract', () => {
     expect(schema).toMatch(
       /enum OrderPrintJobState\s*{[\s\S]*?PENDING[\s\S]*?PRINTED[\s\S]*?SUPERSEDED[\s\S]*?}/,
     );
-    expect(schema).toContain(
-      'resolution OrderPrintJob? @relation("OrderPrintJobResolution")',
+    expect(schema).toMatch(
+      /resolution\s+OrderPrintJob\?\s+@relation\("OrderPrintJobResolution"\)/,
     );
   });
 

@@ -1,6 +1,7 @@
 import type { Prisma } from '../../generated/prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  OrderPrintAttemptOutcome,
   OrderPrintJobState,
   OrderPrintKind,
   OrderStatus,
@@ -363,20 +364,20 @@ export async function supersedeOlderOrderPrintRequestsInTx(
 }
 
 /**
- * 一次打印尝试：打印页每次渲染、批量打印文件每张工单各有唯一的 `attemptKey`，记为已打印回执的
- * 幂等键。重试只重放这一次的回执，不会认领之后才新建的打印任务。
+ * 一次打印尝试：打印页每次渲染、批量打印文件每次打开 / 下载（每张工单）各有唯一的 `attemptKey`。
+ * 结果写入 OrderPrintAttempt 账本，同一尝试的重试只返回原结果。
  */
 type PrintAttempt = { orderId: string; workOrderVersion: number; attemptKey: string };
-export type RenderedPrintOutcome = 'MARKED' | 'ALREADY_PRINTED' | 'STALE' | 'NOT_PRINTABLE';
+export type RenderedPrintOutcome = OrderPrintAttemptOutcome;
 
 /**
  * 点「打印」即记已打印（业主 2026-10-02）：管理员在打印页关闭浏览器打印对话框、或打开 / 下载
  * 批量打印文件时调用，把纸上那份内容记为已打印。在工单级联锁内：
  *
- * - 同一 `attemptKey` 已有回执 → `ALREADY_PRINTED`（重放，不再找新任务）。
+ * - 账本里已有同一 `attemptKey` → 返回原结果（任何结果都重放，不再找新任务）。
  * - 版本已变、或 `contentIsCurrent` 判定纸上内容不是当前内容（如同版本换了生产师傅）→ `STALE`。
- *   调用方负责比较：打印页比生产指令摘要，批量文件比完整快照摘要；比较在锁内进行，
- *   持锁写入方（改单、排单等）无法在比较与记录之间插入。
+ *   调用方负责比较：打印页比「生产指令摘要」，批量文件比完整快照摘要；比较必须用同一事务
+ *   客户端在锁内读取，持锁写入方（改单、排单等）无法在比较与记录之间插入。
  * - 有当前版本待打印任务就记它；没有、且本版本从未打印过（例如下发时没建打印任务）就在
  *   同一事务里建任务并记已打印；本版本已打印过 → `ALREADY_PRINTED`。
  * - 浏览器取消打印对话框也会触发记录——纸在管理员手上，看得见，重打即可。
@@ -392,24 +393,46 @@ export async function recordRenderedPrintInTx(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
     attempt.orderId,
   )}))`;
-  const replay = await tx.orderPrintJob.findUnique({
-    where: { idempotencyKey: attemptKey },
-    select: { orderId: true, state: true },
+  const earlier = await tx.orderPrintAttempt.findUnique({
+    where: { attemptKey },
+    select: { orderId: true, outcome: true },
   });
-  if (replay) {
-    if (replay.orderId !== attempt.orderId || replay.state !== OrderPrintJobState.PRINTED) {
-      throw new OrderPrintJobError('IDEMPOTENCY_CONFLICT', '同一打印记录标识已用于其他操作');
+  if (earlier) {
+    if (earlier.orderId !== attempt.orderId) {
+      throw new OrderPrintJobError('IDEMPOTENCY_CONFLICT', '同一打印记录标识已用于其他工单');
     }
-    return 'ALREADY_PRINTED';
+    return earlier.outcome;
   }
+  const { outcome, receiptId } = await resolveRenderedPrintInTx(tx, attempt, attemptKey, actor, contentIsCurrent);
+  await tx.orderPrintAttempt.create({
+    data: {
+      attemptKey,
+      orderId: attempt.orderId,
+      workOrderVersion: attempt.workOrderVersion,
+      outcome,
+      receiptId,
+      actorId: actor.id,
+    },
+  });
+  return outcome;
+}
+
+async function resolveRenderedPrintInTx(
+  tx: PrintTx,
+  attempt: PrintAttempt,
+  attemptKey: string,
+  actor: OrderPrintActor,
+  contentIsCurrent: () => Promise<boolean>,
+): Promise<{ outcome: RenderedPrintOutcome; receiptId: string | null }> {
   const order = await tx.order.findUnique({
     where: { id: attempt.orderId },
     select: { status: true, workOrderVersion: true },
   });
   if (!order) throw new OrderPrintJobError('ORDER_NOT_FOUND', '工单不存在');
-  if (order.workOrderVersion !== attempt.workOrderVersion) return 'STALE';
-  if (!canConfirmOrderPrinted(order.status)) return 'NOT_PRINTABLE';
-  if (!(await contentIsCurrent())) return 'STALE';
+  const done = (outcome: RenderedPrintOutcome) => ({ outcome, receiptId: null });
+  if (order.workOrderVersion !== attempt.workOrderVersion) return done(OrderPrintAttemptOutcome.STALE);
+  if (!canConfirmOrderPrinted(order.status)) return done(OrderPrintAttemptOutcome.NOT_PRINTABLE);
+  if (!(await contentIsCurrent())) return done(OrderPrintAttemptOutcome.STALE);
   const pending = await tx.orderPrintJob.findFirst({
     where: {
       orderId: attempt.orderId,
@@ -426,9 +449,9 @@ export async function recordRenderedPrintInTx(
       where: { orderId: attempt.orderId, workOrderVersion: order.workOrderVersion, state: OrderPrintJobState.PRINTED },
       select: { id: true },
     });
-    if (printed) return 'ALREADY_PRINTED';
-    if (!PRINTABLE_STATUSES.has(order.status)) return 'NOT_PRINTABLE';
-    // 工单锁内已确认没有待打印任务，任务标识只需唯一，不承担重放语义（重放由 attemptKey 承担）。
+    if (printed) return done(OrderPrintAttemptOutcome.ALREADY_PRINTED);
+    if (!PRINTABLE_STATUSES.has(order.status)) return done(OrderPrintAttemptOutcome.NOT_PRINTABLE);
+    // 工单锁内已确认没有待打印任务，任务标识只需唯一（重放由尝试账本承担）。
     requestJobId = (await createOrderPrintRequestInTx(tx, {
       orderId: attempt.orderId,
       workOrderVersion: order.workOrderVersion,
@@ -437,8 +460,8 @@ export async function recordRenderedPrintInTx(
       idempotencyKey: `print-request:${randomUUID()}`,
     }, actor)).jobId;
   }
-  await markOrderPrintRequestPrintedInTx(tx, { requestJobId, idempotencyKey: attemptKey }, actor);
-  return 'MARKED';
+  const { receiptId } = await markOrderPrintRequestPrintedInTx(tx, { requestJobId, idempotencyKey: attemptKey }, actor);
+  return { outcome: OrderPrintAttemptOutcome.MARKED, receiptId };
 }
 
 /**

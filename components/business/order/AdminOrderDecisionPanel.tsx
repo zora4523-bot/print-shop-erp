@@ -35,7 +35,7 @@ import {
 import { OrderChangeReviewForm } from './OrderChangeReviewForm';
 import { cancellationReviewIssue } from './admin-order-cancellation-review';
 import { AdminOrderInlineOperations } from './AdminOrderInlineOperations';
-import { useRefreshAfterPrint } from './use-refresh-after-print';
+import { PrintPageLink } from './PrintPageLink';
 
 type FormMode =
   | 'reject'
@@ -157,7 +157,6 @@ function AdminDecisionActions({
   run: (task: DecisionTask) => void;
   runOneBatch: (command: 'CREATE_PRINT') => void;
 }) {
-  const armPrintRefresh = useRefreshAfterPrint(order.id);
   return (
     <div className="mt-3 flex flex-wrap gap-2">
       {order.capabilities.reject ? (
@@ -206,15 +205,12 @@ function AdminDecisionActions({
       ) : null}
       {order.capabilities.markPrinted ? (
         // 业主 2026-10-02：点「打印」即记已打印——打印页关闭打印对话框后自动记录，不再单独确认。
-        <a
-          href={`/print/orders/${encodeURIComponent(order.id)}?autoprint=1`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={armPrintRefresh}
+        <PrintPageLink
+          orderId={order.id}
           className={buttonVariants({ size: 'sm', variant: order.capabilities.release ? 'outline' : 'default' })}
         >
           打印
-        </a>
+        </PrintPageLink>
       ) : null}
       {order.capabilities.settle ? (
         <DecisionConfirmation

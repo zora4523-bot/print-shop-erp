@@ -34,9 +34,10 @@ export async function recordPrintPage(
   baseUrl: string,
 ): Promise<RenderedPrintOutcome> {
   return db.$transaction((tx) => recordRenderedPrintInTx(tx, attempt, actor, async () => {
-    const order = await getOrderForPrint(attempt.orderId, actor, baseUrl);
+    // 与加锁同一事务连接读取，不另占连接池。
+    const order = await getOrderForPrint(attempt.orderId, actor, baseUrl, tx);
     if (!order) return false;
-    const factoryName = (await getSetting('factory_name')).name;
+    const factoryName = (await getSetting('factory_name', tx)).name;
     return orderPrintInstructionKey(order, factoryName) === attempt.contentKey;
   }), { timeout: 15_000 });
 }

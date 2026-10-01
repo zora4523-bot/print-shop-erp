@@ -187,20 +187,22 @@ describe('recordBatchPrint', () => {
     m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: id === 'a' ? 3 : 1 }));
     m.recordInTx.mockImplementationOnce(async (_tx: unknown, _attempt: unknown, _actor: unknown, check: () => Promise<boolean>) => (await check()) ? 'MARKED' : 'STALE')
       .mockResolvedValueOnce('ALREADY_PRINTED');
-    expect(await recordBatchPrint('admin', 'j')).toEqual({ marked: 1 });
+    expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toEqual({ marked: 1 });
     expect(m.available).toHaveBeenCalledWith('j.pdf');
     expect(m.read).not.toHaveBeenCalled();
     expect(m.transaction).toHaveBeenCalledOnce();
     expect(m.recordInTx.mock.calls.map((call) => call.slice(0, 3))).toEqual([
-      ['tx', { orderId: 'a', workOrderVersion: 3, attemptKey: 'batch-print:j:a' }, { id: 'admin', role: 'ADMIN' }],
-      ['tx', { orderId: 'b', workOrderVersion: 1, attemptKey: 'batch-print:j:b' }, { id: 'admin', role: 'ADMIN' }],
+      ['tx', { orderId: 'a', workOrderVersion: 3, attemptKey: 'batch-print:attempt-1:a' }, { id: 'admin', role: 'ADMIN' }],
+      ['tx', { orderId: 'b', workOrderVersion: 1, attemptKey: 'batch-print:attempt-1:b' }, { id: 'admin', role: 'ADMIN' }],
     ]);
+    // 锁内重新读取用同一事务连接。
+    expect(m.order.mock.calls.filter((call) => call[3] === 'tx').map((call) => call[0])).toEqual(['a']);
   });
 
   it('does not record a file that has expired or cannot be read', async () => {
     ready();
     m.available.mockRejectedValue(new Error('PDF_ARTIFACT_EXPIRED'));
-    await expect(recordBatchPrint('admin', 'j')).rejects.toBeInstanceOf(BatchPrintArtifactUnavailableError);
+    await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintArtifactUnavailableError);
     expect(m.transaction).not.toHaveBeenCalled();
   });
 
@@ -209,24 +211,24 @@ describe('recordBatchPrint', () => {
     let reads = 0;
     // 第一轮核对（锁外）全部一致；锁内重新读取时第二张已变。
     m.order.mockImplementation(async (id: string) => ({ id, version: id === 'b' && ++reads > 1 ? 2 : 1, workOrderVersion: 1 }));
-    await expect(recordBatchPrint('admin', 'j')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单内容已变化，请重新选择并生成' }] });
+    await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单内容已变化，请重新选择并生成' }] });
     m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('NOT_PRINTABLE');
     m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: 1 }));
-    await expect(recordBatchPrint('admin', 'j')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单已不在生产中，请取消选择后重新生成' }] });
+    await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单已不在生产中，请取消选择后重新生成' }] });
     m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('STALE');
-    await expect(recordBatchPrint('admin', 'j')).rejects.toBeInstanceOf(BatchPrintSelectionError);
+    await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintSelectionError);
   });
 
   it('records nothing when the file is not ready or its orders changed since generation', async () => {
-    expect(await recordBatchPrint('admin', 'j')).toBeNull();
+    expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toBeNull();
     ready();
     m.order.mockResolvedValueOnce({ id: 'a', version: 2, workOrderVersion: 1 });
-    await expect(recordBatchPrint('admin', 'j')).rejects.toBeInstanceOf(BatchPrintSelectionError);
+    await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintSelectionError);
     expect(m.transaction).not.toHaveBeenCalled();
   });
 
   it('refuses another actor’s job before touching orders', async () => {
-    await expect(recordBatchPrint('other', 'j')).rejects.toBeInstanceOf(BatchPrintAccessError);
+    await expect(recordBatchPrint('other', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintAccessError);
     expect(m.transaction).not.toHaveBeenCalled();
   });
 });

@@ -4,8 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page } from 'vitest/browser';
 import { OrderStatus } from '@/generated/prisma/enums';
 import '@/app/globals.css';
-const m = vi.hoisted(() => ({ start: vi.fn(), fetch: vi.fn(), record: vi.fn(), refresh: vi.fn(), openTab: vi.fn(), navigate: vi.fn() }));
-vi.mock('@/components/business/order/print-file-navigation', () => ({ openBlankPrintTab: m.openTab, navigateToPrintFile: m.navigate }));
+const m = vi.hoisted(() => ({ start: vi.fn(), fetch: vi.fn(), record: vi.fn(), refresh: vi.fn(), openTab: vi.fn(), fetchFile: vi.fn(), deliverFile: vi.fn() }));
+vi.mock('@/components/business/order/print-file-navigation', () => ({ openBlankPrintTab: m.openTab, fetchPrintFile: m.fetchFile, deliverPrintFile: m.deliverFile }));
 vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: m.start }));
 vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: m.record }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: m.refresh }) }));
@@ -22,7 +22,10 @@ beforeEach(() => {
   m.start.mockResolvedValue({ status: 'queued', jobId: 'job-1' });
   m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'ready', completed: 2, total: 2, issues: [] }) });
   m.record.mockResolvedValue({ status: 'success', marked: 2 });
+  m.fetchFile.mockResolvedValue({ ok: true, blob: pdf });
+  m.deliverFile.mockReturnValue(null);
 });
+const pdf = new Blob(['%PDF-test'], { type: 'application/pdf' });
 // 打开 / 下载链接在测试里不真正导航，只验证点击时的记录。
 function stayOnPage(event: MouseEvent) { if ((event.target as Element | null)?.closest('a')) event.preventDefault(); }
 beforeEach(() => document.addEventListener('click', stayOnPage, true));
@@ -159,49 +162,66 @@ it('ends manual refresh loading when the status request times out', async () => 
   } finally { timeout.mockRestore(); }
 });
 
-// 业主 2026-10-02：打开或下载打印文件即记已打印。先记录（服务端核对文件可取、内容未变），成功后才
-// 导航到文件；失败留在本页、可重试，不会出现没拿到文件却已记录。
-it('records first, then downloads the file and refreshes the list', async () => {
+// 业主 2026-10-02：打开或下载打印文件即记已打印。先取得文件，再整批记录，记录成功才把已取得的文件
+// 交给管理员；任一步失败都留在本页、可重试，不会出现没拿到文件却已记录。
+it('fetches the file, records it, then hands the fetched file over and refreshes the list', async () => {
   let settle!: (value: unknown) => void;
   m.record.mockImplementationOnce(() => new Promise((done) => { settle = done; }));
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
   await page.getByRole('link', { name: '下载 PDF' }).click();
   await page.getByRole('link', { name: '打开 PDF' }).click();
-  await expect.element(page.getByText('正在记为已打印…', { exact: true })).toBeVisible();
-  expect(m.record).toHaveBeenCalledOnce();
-  expect(m.record).toHaveBeenCalledWith('job-1');
-  expect(m.openTab).not.toHaveBeenCalled();
-  expect(m.navigate).not.toHaveBeenCalled();
+  await expect.element(page.getByText('正在准备打印文件…', { exact: true })).toBeVisible();
+  expect(m.fetchFile).toHaveBeenCalledOnce();
+  expect(m.fetchFile).toHaveBeenCalledWith('/api/orders/batch-print/job-1?view=download');
+  await expect.poll(() => m.record.mock.calls.length).toBe(1);
+  expect(m.record).toHaveBeenCalledWith({ jobId: 'job-1', attemptId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  expect(m.fetchFile.mock.invocationCallOrder[0]).toBeLessThan(m.record.mock.invocationCallOrder[0]!);
+  expect(m.deliverFile).not.toHaveBeenCalled();
   settle({ status: 'success', marked: 2 });
   await expect.element(page.getByText('已记为已打印 2 单。', { exact: true })).toBeVisible();
-  expect(m.navigate).toHaveBeenCalledWith('/api/orders/batch-print/job-1?view=download', null);
+  expect(m.deliverFile).toHaveBeenCalledWith(pdf, 'download', null, 'orders-job-1.pdf');
   expect(m.refresh).toHaveBeenCalledOnce();
 });
-it('opens the preview tab during the click and points it at the file only after recording', async () => {
+it('opens the preview tab during the click and offers a link when the browser blocks it', async () => {
   const tab = { close: vi.fn() };
   m.openTab.mockReturnValue(tab);
+  m.deliverFile.mockReturnValueOnce(null).mockReturnValueOnce('blob:print-file');
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
   await page.getByRole('link', { name: '打开 PDF' }).click();
   expect(m.openTab).toHaveBeenCalledOnce();
-  await expect.poll(() => m.navigate.mock.calls.length).toBe(1);
-  expect(m.navigate).toHaveBeenCalledWith('/api/orders/batch-print/job-1?view=inline', tab);
+  await expect.poll(() => m.deliverFile.mock.calls.length).toBe(1);
+  expect(m.deliverFile).toHaveBeenCalledWith(pdf, 'inline', tab, 'orders-job-1.pdf');
   expect(tab.close).not.toHaveBeenCalled();
+  m.openTab.mockReturnValue(null);
+  await page.getByRole('link', { name: '打开 PDF' }).click();
+  await expect.element(page.getByRole('link', { name: '打开打印文件', exact: true })).toHaveAttribute('href', 'blob:print-file');
+  // 新的一次打开是新的打印尝试。
+  expect(m.record.mock.calls[1]?.[0].attemptId).not.toBe(m.record.mock.calls[0]?.[0].attemptId);
 });
-it('keeps the page, closes the blank tab and retries the same delivery when recording fails', async () => {
+it('keeps the page and does not record when the file cannot be fetched', async () => {
   const tab = { close: vi.fn() };
   m.openTab.mockReturnValue(tab);
-  m.record.mockResolvedValueOnce({ status: 'error', message: '打印文件已过期，请重新生成' }).mockRejectedValueOnce(new Error('offline'));
+  m.fetchFile.mockResolvedValueOnce({ ok: false, message: '打印文件暂不可用，请返回列表重新生成' });
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
   await page.getByRole('link', { name: '打开 PDF' }).click();
-  await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：打印文件已过期，请重新生成');
+  await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：打印文件暂不可用，请返回列表重新生成');
   expect(tab.close).toHaveBeenCalledOnce();
-  expect(m.navigate).not.toHaveBeenCalled();
+  expect(m.record).not.toHaveBeenCalled();
+  expect(m.deliverFile).not.toHaveBeenCalled();
   expect(m.refresh).not.toHaveBeenCalled();
-  await page.getByRole('button', { name: '重试打开', exact: true }).click();
+});
+it('retries a failed record with the same attempt, then delivers', async () => {
+  m.record.mockResolvedValueOnce({ status: 'error', message: '工单内容已变化，请重新选择并生成' }).mockRejectedValueOnce(new Error('offline'));
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await page.getByRole('link', { name: '下载 PDF' }).click();
+  await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：工单内容已变化，请重新选择并生成');
+  expect(m.deliverFile).not.toHaveBeenCalled();
+  await page.getByRole('button', { name: '重试下载', exact: true }).click();
   await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：网络异常');
-  await page.getByRole('button', { name: '重试打开', exact: true }).click();
-  await expect.poll(() => m.navigate.mock.calls.length).toBe(1);
-  expect(m.openTab).toHaveBeenCalledTimes(3);
+  await page.getByRole('button', { name: '重试下载', exact: true }).click();
+  await expect.poll(() => m.deliverFile.mock.calls.length).toBe(1);
+  const attempts = m.record.mock.calls.map((call) => call[0].attemptId);
+  expect(new Set(attempts).size).toBe(1);
   expect(m.record).toHaveBeenCalledTimes(3);
   expect(m.start).toHaveBeenCalledOnce();
   expect(m.refresh).toHaveBeenCalledOnce();

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { PDFDocument } from 'pdf-lib';
+import type { Prisma } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import { Role, BackgroundJobQueue, BackgroundJobStatus } from '@/generated/prisma/enums';
 import { getOrderForPrint } from '@/lib/order/print-view';
@@ -42,11 +43,11 @@ async function requireAdmin(actorId: string) {
   if (!account?.isActive || account.role !== Role.ADMIN) throw new BatchPrintAccessError();
 }
 
-async function loadCurrent(payload: Payload, index: number) {
+async function loadCurrent(payload: Payload, index: number, client: Prisma.TransactionClient = db) {
   const expected = payload.orders[index];
-  const order = await getOrderForPrint(expected.id, { id: payload.actorId, role: Role.ADMIN }, payload.baseUrl);
+  const order = await getOrderForPrint(expected.id, { id: payload.actorId, role: Role.ADMIN }, payload.baseUrl, client);
   if (!order) throw new BatchPrintSelectionError([{ position: index + 1, message: '工单不存在或已无权打印，请取消选择后重试' }]);
-  const factoryName = (await getSetting('factory_name')).name;
+  const factoryName = (await getSetting('factory_name', client)).name;
   if (orderPdfSnapshotKey(order, factoryName) !== expected.key) {
     throw new BatchPrintSelectionError([{ position: index + 1, message: '工单内容已变化，请重新选择并生成' }]);
   }
@@ -218,15 +219,17 @@ export async function downloadBatchPrint(actorId: string, jobId: string) {
 }
 
 /**
- * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；浏览器点「打开 PDF」
- * 「下载 PDF」时先由 Server Action 调这里，成功后再去取文件：
+ * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；浏览器先成功取得
+ * 文件，再由 Server Action 调这里记录，记录成功后才把文件交给管理员：
  *
- * 1. 文件仍在有效期内可读，否则不记（没拿到的文件不算打印）。
- * 2. 一个事务里按工单 id 顺序（与批量排单同一比较方式）加锁，锁内重新读取每张工单，完整快照
- *    摘要须与文件一致；任一工单不一致、已不在生产中都整批回滚，不留半截记录。
- * 3. 每张工单的回执幂等键为 `batch-print:<任务>:<工单>`，重试只重放本批次，不认领之后新建的任务。
+ * 1. 文件仍在有效期内可读，否则不记。
+ * 2. 一个事务里按工单 id 顺序（与批量排单同一比较方式）加锁，锁内用同一事务连接重新读取每张
+ *    工单，完整快照摘要须与文件一致；任一工单不一致、已不在生产中都整批回滚，不留半截记录。
+ * 3. 每次打开 / 下载一个尝试（`attemptId`，同一次的重试沿用），每张工单的尝试键为
+ *    `batch-print:<尝试>:<工单>`：重试只重放这一次的结果；同一打印文件之后再打开是新的尝试，
+ *    会记录期间新建的补打任务。
  */
-export async function recordBatchPrint(actorId: string, jobId: string): Promise<{ marked: number } | null> {
+export async function recordBatchPrint(actorId: string, jobId: string, attemptId: string): Promise<{ marked: number } | null> {
   const { job, payload } = await ownedJob(actorId, jobId);
   const result = resultSchema.safeParse(job.result);
   if (job.status !== 'SUCCEEDED' || !result.success || result.data.issues.length || !result.data.artifactName) return null;
@@ -237,8 +240,8 @@ export async function recordBatchPrint(actorId: string, jobId: string): Promise<
   const outcomes = await db.$transaction(async (tx) => {
     const recorded = [];
     for (const { index, orderId, workOrderVersion } of printed) {
-      const outcome = await recordRenderedPrintInTx(tx, { orderId, workOrderVersion, attemptKey: `batch-print:${jobId}:${orderId}` }, actor,
-        async () => { await loadCurrent(payload, index); return true; });
+      const outcome = await recordRenderedPrintInTx(tx, { orderId, workOrderVersion, attemptKey: `batch-print:${attemptId}:${orderId}` }, actor,
+        async () => { await loadCurrent(payload, index, tx); return true; });
       if (outcome === 'STALE' || outcome === 'NOT_PRINTABLE') {
         throw new BatchPrintSelectionError([{ position: index + 1, message: outcome === 'STALE' ? '工单内容已变化，请重新选择并生成' : '工单已不在生产中，请取消选择后重新生成' }]);
       }

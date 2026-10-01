@@ -16,7 +16,10 @@ const inputSchema = z.object({
   attemptKey: z.string().regex(/^print-page:[0-9a-f-]{36}$/),
 }).strict();
 
-const jobIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+const batchInputSchema = z.object({
+  jobId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  attemptId: z.string().uuid(),
+}).strict();
 
 /**
  * 点「打印」即记已打印（业主 2026-10-02）：打印页关闭浏览器打印对话框后调用，
@@ -40,15 +43,16 @@ export async function recordOrderPrintedAction(input: unknown): Promise<OrderPri
 }
 
 /**
- * 打开或下载批量打印文件前调用：确认文件仍可取、内容仍是当前内容后，文件里的工单整批记为
- * 已打印，任一工单不符整批不记；成功后浏览器再去打开 / 下载文件。
+ * 浏览器取得批量打印文件后调用：确认文件仍可取、内容仍是当前内容后，文件里的工单整批记为
+ * 已打印，任一工单不符整批不记；成功后浏览器才把文件交给管理员。`attemptId` 每次打开 / 下载
+ * 一个，同一次的重试沿用。
  */
-export async function recordBatchPrintAction(jobId: unknown): Promise<BatchPrintRecordResult> {
+export async function recordBatchPrintAction(input: unknown): Promise<BatchPrintRecordResult> {
   const actor = await requirePermission('order:change:review');
-  const parsed = jobIdSchema.safeParse(jobId);
+  const parsed = batchInputSchema.safeParse(input);
   if (!parsed.success) return { status: 'error', message: '打印任务无效' };
   try {
-    const result = await recordBatchPrint(actor.id, parsed.data);
+    const result = await recordBatchPrint(actor.id, parsed.data.jobId, parsed.data.attemptId);
     if (!result) return { status: 'error', message: '打印文件尚未就绪' };
     if (result.marked > 0) revalidatePath('/orders');
     return { status: 'success', marked: result.marked };

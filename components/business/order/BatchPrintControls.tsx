@@ -5,14 +5,17 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { requestBatchPrintAction } from '@/actions/order-batch-print';
 import { recordBatchPrintAction } from '@/actions/order-print-record';
-import { navigateToPrintFile, openBlankPrintTab } from './print-file-navigation';
-import { announcePrintRecorded } from './use-refresh-after-print';
+import { deliverPrintFile, fetchPrintFile, openBlankPrintTab } from './print-file-navigation';
+import { announcePrintRecorded, refreshPageAfterPrint } from './use-refresh-after-print';
 import { BATCH_PRINT_MAX, type BatchPrintIssue, type BatchPrintStatus } from '@/lib/order/batch-print-contract';
 import type { OrderListSelectionItem } from './OrderListBatchSelection';
 
 type Task = { id: string; labels: string[]; orderIds: string[] };
 type Delivery = 'download' | 'inline';
-type PrintRecord = { status: 'saving' } | { status: 'saved'; marked: number } | { status: 'failed'; message: string; delivery: Delivery };
+type PrintRecord =
+  | { status: 'saving' }
+  | { status: 'saved'; marked: number; fileUrl: string | null }
+  | { status: 'failed'; message: string; delivery: Delivery; attemptId: string };
 
 export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   selectedItems: readonly OrderListSelectionItem[];
@@ -34,29 +37,32 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   const [printRecord, setPrintRecord] = useState<PrintRecord | null>(null);
   const recordInFlight = useRef(false);
 
-  // 业主 2026-10-02：打开或下载打印文件即记已打印。先确认文件可取、内容未变并整批记录，成功后才
-  // 打开 / 下载（下载接口本身只读）；失败留在本页说明原因，可重试，不会出现没拿到文件却已记录。
-  function deliver(delivery: Delivery, printTask: Task) {
+  // 业主 2026-10-02：打开或下载打印文件即记已打印。先取得文件（下载接口只读、会核对内容），再
+  // 整批记录，记录成功才把已取得的文件交给管理员；任何一步失败都留在本页说明原因，可重试，
+  // 不会出现没拿到文件却已记录。每次点击一个打印尝试，重试沿用同一尝试。
+  function deliver(delivery: Delivery, printTask: Task, retryAttemptId?: string) {
     if (recordInFlight.current) return;
     recordInFlight.current = true;
-    // 新标签页须在点击当下打开，等记录完成再导航，避免被浏览器当作弹窗拦截。
+    const attemptId = retryAttemptId ?? crypto.randomUUID();
+    // 预览的新标签页须在点击当下打开，避免文件取得后再开被浏览器当作弹窗拦截。
     const tab = delivery === 'inline' ? openBlankPrintTab() : null;
+    const fail = (message: string) => {
+      tab?.close();
+      setPrintRecord({ status: 'failed', message, delivery, attemptId });
+    };
     setPrintRecord({ status: 'saving' });
     void (async () => {
       try {
-        const result = await recordBatchPrintAction(printTask.id);
-        if (result.status !== 'success') {
-          tab?.close();
-          setPrintRecord({ status: 'failed', message: result.message, delivery });
-          return;
-        }
-        setPrintRecord({ status: 'saved', marked: result.marked });
-        navigateToPrintFile(`/api/orders/batch-print/${printTask.id}?view=${delivery}`, tab);
+        const file = await fetchPrintFile(`/api/orders/batch-print/${printTask.id}?view=${delivery}`);
+        if (!file.ok) return fail(file.message);
+        const result = await recordBatchPrintAction({ jobId: printTask.id, attemptId });
+        if (result.status !== 'success') return fail(result.message);
+        const fileUrl = deliverPrintFile(file.blob, delivery, tab, `orders-${printTask.id}.pdf`);
+        setPrintRecord({ status: 'saved', marked: result.marked, fileUrl });
         announcePrintRecorded(printTask.orderIds);
-        router.refresh();
+        refreshPageAfterPrint(router);
       } catch {
-        tab?.close();
-        setPrintRecord({ status: 'failed', message: '网络异常', delivery });
+        fail('网络异常');
       } finally {
         recordInFlight.current = false;
       }
@@ -146,11 +152,15 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
         {status?.status === 'ready' ? <>
           <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=download`} onClick={(event) => { event.preventDefault(); deliver('download', task); }} />} nativeButton={false} variant="secondary" className="min-h-11">下载 PDF</Button>
           <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=inline`} target="_blank" rel="noopener noreferrer" onClick={(event) => { event.preventDefault(); deliver('inline', task); }} />} nativeButton={false} variant="secondary" className="min-h-11">打开 PDF</Button>
-          {printRecord?.status === 'saving' ? <span role="status" className="text-sm">正在记为已打印…</span> : null}
+          {printRecord?.status === 'saving' ? <span role="status" className="text-sm">正在准备打印文件…</span> : null}
           {printRecord?.status === 'saved' && printRecord.marked > 0 ? <span role="status" className="text-sm">已记为已打印 {printRecord.marked} 单。</span> : null}
+          {printRecord?.status === 'saved' && printRecord.fileUrl ? <>
+            <span className="text-sm">浏览器未能打开新标签页。</span>
+            <Button role="link" render={<a href={printRecord.fileUrl} target="_blank" rel="noopener noreferrer" />} nativeButton={false} variant="secondary" className="min-h-11">打开打印文件</Button>
+          </> : null}
           {printRecord?.status === 'failed' ? <>
             <span role="alert" className="text-sm text-destructive">未能取得打印文件：{printRecord.message}</span>
-            <Button type="button" variant="secondary" className="min-h-11" onClick={() => deliver(printRecord.delivery, task)}>{printRecord.delivery === 'inline' ? '重试打开' : '重试下载'}</Button>
+            <Button type="button" variant="secondary" className="min-h-11" onClick={() => deliver(printRecord.delivery, task, printRecord.attemptId)}>{printRecord.delivery === 'inline' ? '重试打开' : '重试下载'}</Button>
           </> : null}
         </> : status?.status !== 'failed' ? (
           <Button type="button" variant="secondary" className="min-h-11" disabled={refreshing} aria-busy={refreshing} onClick={() => {

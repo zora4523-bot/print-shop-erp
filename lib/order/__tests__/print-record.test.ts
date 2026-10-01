@@ -13,8 +13,8 @@ import { newPrintPageAttempt, recordPrintPage } from '../print-record';
 const admin = { id: 'admin-1', role: 'ADMIN' as const };
 function printed(worker: string, completedQty = 0): PrintOrder {
   return {
-    id: 'order-1', workOrderVersion: 3, status: 'RELEASED', hasPendingChange: false, orderQrSvg: '<svg/>',
-    items: [{ id: 'item-1', designs: [] }],
+    id: 'order-1', orderNo: 'GD-1', workOrderVersion: 3, status: 'RELEASED', hasPendingChange: false, orderQrSvg: '<svg/>',
+    items: [{ id: 'item-1', designs: [] }], packagingGroups: [], shipments: [],
     productionSteps: [{ id: 'step-1', source: 'OPERATION', craftName: '烫金', scopeLabel: `生产师傅：${worker}`, plannedQty: 1000, completedQty, defectQty: 0, completedAt: null }],
   } as unknown as PrintOrder;
 }
@@ -41,7 +41,9 @@ describe('print page recording', () => {
     const attempt = newPrintPageAttempt(printed('张师傅'), '工厂');
     m.order.mockResolvedValue(printed('张师傅', 600));
     await expect(recordPrintPage(attempt, admin, 'https://erp.example')).resolves.toBe('MARKED');
-    expect(m.order).toHaveBeenCalledWith('order-1', admin, 'https://erp.example');
+    // 与加锁同一事务连接读取。
+    expect(m.order).toHaveBeenCalledWith('order-1', admin, 'https://erp.example', 'tx');
+    expect(m.setting).toHaveBeenCalledWith('factory_name', 'tx');
     expect(m.record).toHaveBeenCalledWith('tx', attempt, admin, expect.any(Function));
   });
 

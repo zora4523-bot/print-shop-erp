@@ -55,7 +55,7 @@ describe('AutoPrint print recording', () => {
     const announced = new Promise<unknown>((done) => { channel.onmessage = (event) => done(event.data); });
     settle(marked);
     await expect.poll(() => close.mock.calls.length).toBe(1);
-    await expect(announced).resolves.toEqual({ orderIds: ['order-1'] });
+    await expect(announced).resolves.toMatchObject({ orderIds: ['order-1'] });
     channel.close();
     expect(document.querySelector('[role="alert"]')).toBeNull();
   });

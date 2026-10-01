@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { OrderDetailStickyScope } from './OrderDetailStickyScope';
 import type { AdminOrderDetailModel } from './admin-order-detail-model';
 import { revealOrderDetailTarget } from './order-detail-navigation';
+import { PrintPageLink } from './PrintPageLink';
 import { useRefreshAfterPrint } from './use-refresh-after-print';
 import styles from './AdminOrderDetailView.module.css';
 
@@ -82,7 +83,7 @@ function Progress({ label, done, total, unit = '个' }: {
 export function AdminOrderDetailView({ simpleProduction, productionOwners, model, canEdit, decision, prints, printHint, supplementary, packaging, itemDetails, printActions }: Props) {
   const { feedback: copyNotice, copy } = useCopyToClipboard();
   // 业主 2026-10-02：本页任何打印入口打印并记录后（打印页在新标签页），本页刷新打印记录与待办。
-  const armPrintRefresh = useRefreshAfterPrint(model.id);
+  useRefreshAfterPrint(model.id);
   const otherActions = supplementary.find(section => section.id === 'detail-other-actions');
   const [preview, setPreview] = useState<number | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
@@ -205,7 +206,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
               {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : PRINT_HINT_STATUSES.has(model.status) ? <p className={styles.emptyHint}>尚未创建打印任务</p> : null}
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
-            {!otherActions ? <a href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" onClick={armPrintRefresh} className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</a> : null}
+            {!otherActions ? <PrintPageLink orderId={model.id} className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</PrintPageLink> : null}
             {!otherActions ? <Link href={`/print/orders/${model.id}`} prefetch={false} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>网页预览</Link> : null}
           </section>
 

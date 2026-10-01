@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { buildQrSvg } from './qr';
+import type { Prisma } from '../../generated/prisma/client';
 import { db } from '../db';
 import {
   PieceworkOperationType,
@@ -186,11 +187,13 @@ export async function getOrderForPrint(
   // 码里存 URL 而不是裸 id：师傅用微信"扫一扫"直接打开报工页
   // （未登录先登录再回跳），不需要专用扫码器。
   baseUrl: string,
+  // 打印记录在持有工单锁的事务里重新读取打印内容，须传同一事务客户端，不另占连接。
+  client: Pick<Prisma.TransactionClient, 'user' | 'order' | 'craft'> = db,
 ): Promise<PrintOrder | null> {
-  const where = await getOrderPrintScope(id, user);
+  const where = await getOrderPrintScope(id, user, client);
   if (!where) return null;
 
-  const order = await db.order.findFirst({
+  const order = await client.order.findFirst({
     where,
     include: {
       submitter: ORDER_EXTERNAL_SALES_SELECT.submitter,
@@ -309,7 +312,7 @@ export async function getOrderForPrint(
   }
   const craftNameById = new Map<string, string>();
   if (craftIds.size > 0) {
-    const rows = await db.craft.findMany({
+    const rows = await client.craft.findMany({
       where: { id: { in: [...craftIds] } },
       select: { id: true, name: true },
     });
