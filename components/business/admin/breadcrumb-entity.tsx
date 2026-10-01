@@ -21,6 +21,10 @@ import {
 type BreadcrumbEntityContextValue = {
   label: string | null;
   setLabel: Dispatch<SetStateAction<string | null>>;
+  parentHref: string | null;
+  setParentHref: Dispatch<SetStateAction<string | null>>;
+  parentPending: boolean;
+  setParentPending: Dispatch<SetStateAction<boolean>>;
 };
 
 const BreadcrumbEntityContext =
@@ -32,7 +36,12 @@ export function BreadcrumbEntityProvider({
   children: React.ReactNode;
 }) {
   const [label, setLabel] = useState<string | null>(null);
-  const value = useMemo(() => ({ label, setLabel }), [label]);
+  const [parentHref, setParentHref] = useState<string | null>(null);
+  const [parentPending, setParentPending] = useState(false);
+  const value = useMemo(
+    () => ({ label, setLabel, parentHref, setParentHref, parentPending, setParentPending }),
+    [label, parentHref, parentPending],
+  );
   // Provider 本身不渲染任何 DOM，插进 SidebarInset 不影响 flex 布局。
   return (
     <BreadcrumbEntityContext.Provider value={value}>
@@ -43,6 +52,43 @@ export function BreadcrumbEntityProvider({
 
 export function useBreadcrumbEntityLabel(): string | null {
   return useContext(BreadcrumbEntityContext)?.label ?? null;
+}
+
+export function useBreadcrumbParent(): { href: string | null; pending: boolean } {
+  const context = useContext(BreadcrumbEntityContext);
+  return { href: context?.parentHref ?? null, pending: context?.parentPending ?? false };
+}
+
+/**
+ * 二级页的唯一返回入口是顶栏面包屑父级（ui-规范 §8.3，业主 2026-10-02「请保持一致性」）。
+ * 原先页头返回链接多带的行为由页面经它交给父级，自身不渲染任何内容：
+ * - `href`：回到同一父级页面时带上列表上下文（筛选、页码、returnTo）。路径必须与父级
+ *   一致，只允许多出查询串 / hash，否则面包屑忽略它（见 resolveBreadcrumbParentHref）。
+ * - `pending`：表单提交中锁住父级链接（语义同 PendingLink），避免中途离开丢失回执。
+ * 与 BreadcrumbEntity 一样只在 hydrate 后生效：无 JS 时父级回到不带上下文的列表。
+ */
+export function BreadcrumbParent({
+  href,
+  pending = false,
+}: {
+  href?: string | null;
+  pending?: boolean;
+}) {
+  const context = useContext(BreadcrumbEntityContext);
+  const setParentHref = context?.setParentHref;
+  const setParentPending = context?.setParentPending;
+  useEffect(() => {
+    if (!setParentHref || !href) return;
+    setParentHref(href);
+    // 同 BreadcrumbEntity：软导航时新页先 mount，只清自己写的值。
+    return () => setParentHref((cur) => (cur === href ? null : cur));
+  }, [href, setParentHref]);
+  useEffect(() => {
+    if (!setParentPending || !pending) return;
+    setParentPending(true);
+    return () => setParentPending(false);
+  }, [pending, setParentPending]);
+  return null;
 }
 
 /**

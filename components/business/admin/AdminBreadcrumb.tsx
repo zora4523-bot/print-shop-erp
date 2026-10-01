@@ -4,7 +4,8 @@ import { Fragment, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
+import { useBreadcrumbEntityLabel, useBreadcrumbParent } from './breadcrumb-entity';
+import { PendingLink } from '@/components/ui-business';
 import { ADMIN_MODULES } from '@/lib/navigation/admin-modules';
 import type { Role } from '@/generated/prisma/enums';
 import { RULE_CENTER_SIDEBAR_ITEMS } from '@/lib/navigation/rule-center';
@@ -204,6 +205,17 @@ export function buildBreadcrumbCrumbs(
   return crumbs;
 }
 
+/**
+ * 页面经 BreadcrumbParent 交上来的父级地址：只接受同一路径加查询串 / hash
+ * （列表筛选、页码、returnTo），换路径、外站或协议相对地址一律回落父级自身。
+ */
+export function resolveBreadcrumbParentHref(parentHref: string, override: string | null): string {
+  if (!override || !override.startsWith('/') || override.startsWith('//')) return parentHref;
+  const url = new URL(override, 'https://breadcrumb.invalid');
+  if (url.origin !== 'https://breadcrumb.invalid' || url.pathname !== parentHref) return parentHref;
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 function subscribePageHeading(listener: () => void) {
   const root = document.querySelector('#admin-main');
   if (!root) return () => undefined;
@@ -225,6 +237,7 @@ export function AdminBreadcrumb({ role }: { role?: Role } = {}) {
   // 详情页通过 <BreadcrumbEntity> 把已经查出来的业务编号交上来，
   // 这里不发任何请求。
   const entityLabel = useBreadcrumbEntityLabel();
+  const parentOverride = useBreadcrumbParent();
   const pageHeading = useSyncExternalStore(
     subscribePageHeading,
     getPageHeadingSnapshot,
@@ -280,10 +293,21 @@ export function AdminBreadcrumb({ role }: { role?: Role } = {}) {
                 ) : crumb.linkable ? (
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
                   // useRender，不接受 Radix 的 asChild —— 走 render
-                  // prop 把 <a> 替换成 next/link。
+                  // prop 把 <a> 替换成 next/link。父级是二级页唯一的返回
+                  // 入口：带上页面交来的列表上下文，表单提交中锁住。
                   <BreadcrumbLink
                     className="inline-flex min-h-11 min-w-0 max-w-full items-center"
-                    render={<Link href={href} prefetch={false} />}
+                    render={
+                      i === parentIndex ? (
+                        <PendingLink
+                          href={resolveBreadcrumbParentHref(href, parentOverride.href)}
+                          pending={parentOverride.pending}
+                          prefetch={false}
+                        />
+                      ) : (
+                        <Link href={href} prefetch={false} />
+                      )
+                    }
                   >
                     {/* The truncating element carries the full text (visual gate: hidden-clipping). */}
                     <span className="min-w-0 truncate" title={label}>{label}</span>

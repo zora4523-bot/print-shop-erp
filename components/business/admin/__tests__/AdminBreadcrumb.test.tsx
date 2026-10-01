@@ -13,6 +13,7 @@ import {
   AdminBreadcrumb,
   BREADCRUMB_PATH_LABELS,
   buildBreadcrumbCrumbs,
+  resolveBreadcrumbParentHref,
   resolveSegmentLabel,
 } from '../AdminBreadcrumb';
 
@@ -176,4 +177,18 @@ it('names /orders by the viewer’s own module: 管理员「工单列表」，�
   expect(buildBreadcrumbCrumbs('/orders/new', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '新建工单']);
   usePathnameMock.mockReturnValue('/orders');
   expect(visibleText(renderToStaticMarkup(<AdminBreadcrumb role="SALES" />))).toContain('我的工单');
+});
+
+// 页面交给父级的列表上下文只能加查询串 / hash，不能把父级改成别的页面或外站。
+it.each([
+  ['/owner/agent-bills', '/owner/agent-bills?status=OPEN&page=2', '/owner/agent-bills?status=OPEN&page=2'],
+  ['/owner/salary/piecework', '/owner/salary/piecework?date=2026-09-30', '/owner/salary/piecework?date=2026-09-30'],
+  ['/sales/bills', '/sales/bills?period=2026-08#list', '/sales/bills?period=2026-08#list'],
+  ['/owner/agent-bills', '/owner/purchases?page=2', '/owner/agent-bills'],
+  ['/owner/agent-bills', '/owner/agent-bills/x', '/owner/agent-bills'],
+  ['/owner/agent-bills', '//evil.example/owner/agent-bills', '/owner/agent-bills'],
+  ['/owner/agent-bills', 'https://evil.example/owner/agent-bills', '/owner/agent-bills'],
+  ['/owner/agent-bills', null, '/owner/agent-bills'],
+] as const)('resolveBreadcrumbParentHref(%s, %s) → %s', (parent, override, expected) => {
+  expect(resolveBreadcrumbParentHref(parent, override)).toBe(expected);
 });
