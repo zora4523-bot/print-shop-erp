@@ -13,7 +13,7 @@
 - **P1 2 项**：取消任何真实草稿都 500 并整页报错（数据库约束，管理员同样中招）；iPhone Safari 上滚动工单列表后点名称打不开预览。
 - **P2 24 项**，其中 19 项已在浏览器 / 数据库实测复现；**P3 约 40 项**；另有 6 项规则口径需业主拍板（与规则冲突或现有文档未明确，见 §三）。
 - 没有发现越权或数据泄露：所有 SALES 可调用的写入口都校验归属，销售投影不含成本、内部说明、客户资料或他人信息（逐入口核对表见 §五）。
-- 现有外部销售相关 E2E 全绿（61 项，见 §六），但**都没覆盖到上面的缺陷**——两个 P1 的共同原因是测试夹具与真实数据形状不同（夹具直接插入 `priceRevision = 1` 且带物流收费行的草稿；WebKit 兼容套件不覆盖销售列表滚动）。
+- 现有外部销售相关 E2E 全绿（两轮共执行 61 项，其中 `sales-functional-review` 前 7 项第二轮重跑，去重后 54 项，见 §六），但**都没覆盖到上面的缺陷**——两个 P1 的共同原因是测试夹具与真实数据形状不同（夹具直接插入 `priceRevision = 1` 且带物流收费行的草稿；WebKit 兼容套件不覆盖销售列表滚动）。
 
 ## 方法与环境
 
@@ -120,7 +120,7 @@
 ## 六、现有测试结果（同一隔离库，开发配置，chromium 单 worker）
 
 - 第一轮：`auth`、`bill-flow`、`order-create`、`order-delete-navigation`、`order-external-sales-association`、`order-multiple-addresses` 及 `sales-functional-review` 前 7 项，23 项全部通过；随后后台进程被中断（exit 144，非测试失败）。
-- 第二轮：`sales-functional-review`（全部）、`workbench`、`sample-orders`，38 项全部通过。
+- 第二轮：`sales-functional-review`（全部，含第一轮已跑的前 7 项）、`workbench`、`sample-orders`，38 项全部通过。两轮共执行 61 项，去重后 54 项。
 - 子代理另跑 `lib/workbench`（44 项）、`sales-list-query` 与销售接口路由测试（15 项）、账单查询两份（18 项），全部通过。
 
 ## 七、建议修复顺序
