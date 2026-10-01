@@ -58,7 +58,7 @@ function positiveMoney(value: string): Decimal {
   try {
     parsed = new Decimal(value);
   } catch {
-    throw new AgentMonthlyBillingError('负项金额不合法');
+    throw new AgentMonthlyBillingError('调整金额不合法');
   }
   if (
     !parsed.isFinite() ||
@@ -66,7 +66,7 @@ function positiveMoney(value: string): Decimal {
     parsed.decimalPlaces() > 2 ||
     parsed.gt(MONEY_MAX)
   ) {
-    throw new AgentMonthlyBillingError('负项金额必须是大于 0 且最多两位小数的金额');
+    throw new AgentMonthlyBillingError('调整金额必须是大于 0 且最多两位小数的金额');
   }
   return parsed;
 }
@@ -282,9 +282,14 @@ export async function markAgentMonthlyBillPaid(
   });
 }
 
+/** 抵扣（多收了，冲减应收，负数入账）或补收（少收了，追加应收，正数入账）；业主 2026-10-01 增加补收。 */
+type AgentMonthlyBillAdjustmentDirection = 'CREDIT' | 'SURCHARGE';
+
 export type CreateAgentMonthlyBillCreditInput = {
   expectedBillId: string;
   sourceItemId: string;
+  direction: AgentMonthlyBillAdjustmentDirection;
+  /** 正数金额；方向由 direction 决定。 */
   amount: string;
   reason: string;
   idempotencyKey: string;
@@ -342,9 +347,10 @@ export async function createAgentMonthlyBillCredit(
 }> {
   assertAdmin(actor);
   const amount = positiveMoney(input.amount);
+  const signed = input.direction === 'SURCHARGE' ? amount : amount.negated();
   const reason = input.reason.trim();
   if (reason.length < 1 || reason.length > 500) {
-    throw new AgentMonthlyBillingError('负项原因必须为 1-500 字');
+    throw new AgentMonthlyBillingError('调整原因必须为 1-500 字');
   }
   const requestKey = normalizeIdempotencyKey(input.idempotencyKey);
 
@@ -380,10 +386,10 @@ export async function createAgentMonthlyBillCredit(
     if (replay) {
       if (
         replay.sourceItemId !== input.sourceItemId ||
-        !new Decimal(replay.requestedAmount).eq(amount.negated()) ||
+        !new Decimal(replay.requestedAmount).eq(signed) ||
         replay.reason !== reason
       ) {
-        throw new AgentMonthlyBillingError('本次提交已失效，请刷新后重新录入抵扣');
+        throw new AgentMonthlyBillingError('本次提交已失效，请刷新后重新录入');
       }
       return {
         creditId: replay.id,
@@ -407,21 +413,22 @@ export async function createAgentMonthlyBillCredit(
         freshSource.bill.status !== AgentMonthlyBillStatus.PAID)
     ) {
       throw new InvalidAgentMonthlyBillTransitionError(
-        '只能对已确认账单中的工单录入抵扣',
+        '只能对已确认账单中的工单录入抵扣或补收',
       );
     }
-    const requestedBefore = freshSource.credits.reduce(
-      (sum, credit) => sum.plus(new Decimal(credit.requestedAmount).abs()),
-      new Decimal(0),
+    // 与触发器 validate_agent_monthly_bill_credit 同一规则：结算金额加全部抵扣 / 补收后不能为负。
+    const netAfter = freshSource.credits.reduce(
+      (sum, credit) => sum.plus(credit.requestedAmount),
+      new Decimal(freshSource.settledFeeSnapshot).plus(signed),
     );
-    if (requestedBefore.plus(amount).gt(freshSource.settledFeeSnapshot)) {
-      throw new AgentMonthlyBillingError('累计抵扣不能超过来源工单的结算金额');
+    if (netAfter.isNegative()) {
+      throw new AgentMonthlyBillingError('累计抵扣不能超过来源工单的结算金额（含已补收）');
     }
 
     const created = await tx.agentMonthlyBillCredit.create({
       data: {
         sourceItemId: input.sourceItemId,
-        requestedAmount: amount.negated().toFixed(2),
+        requestedAmount: signed.toFixed(2),
         reason,
         idempotencyKey: requestKey,
         createdById: actor.id,

@@ -50,7 +50,7 @@ vi.mock('../locks', () => ({
   lockAgentBillCredit: vi.fn(async () => events.push('credit')),
 }));
 
-import { generateAgentMonthlyBillsForPeriod, synchronizeDraftBillInTx } from '../generation';
+import { allocateOutstandingCreditsInTx, generateAgentMonthlyBillsForPeriod, synchronizeDraftBillInTx } from '../generation';
 
 const ORDER = {
   id: 'order-1',
@@ -218,4 +218,26 @@ it('rejects direct draft synchronization before removing existing members', asyn
   await expect(synchronizeDraftBillInTx(tx as never, { billId: 'bill-1', agentUserId: 'agent-1', period: '2026-05' })).rejects.toThrow(ORDER.orderNo);
   expect(tx.agentMonthlyBillItem.deleteMany).not.toHaveBeenCalled();
   expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
+});
+
+// 业主 2026-10-01：补收（正数）先全额计入草稿账单并提高可抵扣额度，抵扣（负数）再在额度内分摊。
+it('allocates surcharges in full before capping credits by the raised capacity', async () => {
+  tx.agentMonthlyBill.findUnique.mockReset().mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });
+  tx.agentMonthlyBillItem.aggregate.mockResolvedValue({ _sum: { settledFeeSnapshot: '50.00' } });
+  tx.agentMonthlyBillCredit.findMany.mockResolvedValue([
+    { id: 'credit-a', requestedAmount: '-100.00', createdAt: new Date('2026-05-02'), allocations: [] },
+    { id: 'surcharge-b', requestedAmount: '30.00', createdAt: new Date('2026-05-03'), allocations: [] },
+    { id: 'surcharge-done', requestedAmount: '10.00', createdAt: new Date('2026-05-01'), allocations: [{ billId: 'older-bill', amount: '10.00' }] },
+  ]);
+  tx.agentMonthlyBillAdjustment.aggregate.mockResolvedValue({ _sum: { amount: '-50.00' } });
+
+  await allocateOutstandingCreditsInTx(tx as never, { billId: 'bill-6', agentUserId: 'agent-1', period: '2026-06' });
+
+  expect(tx.agentMonthlyBillAdjustment.create.mock.calls.map(([args]) => args.data)).toEqual([
+    { billId: 'bill-6', creditId: 'surcharge-b', amount: '30.00' },
+    { billId: 'bill-6', creditId: 'credit-a', amount: '-80.00' },
+  ]);
+  expect(tx.agentMonthlyBill.update).toHaveBeenCalledWith(expect.objectContaining({
+    data: { memberSubtotal: '50.00', adjustmentAmount: '-50.00', totalAmount: '0.00' },
+  }));
 });

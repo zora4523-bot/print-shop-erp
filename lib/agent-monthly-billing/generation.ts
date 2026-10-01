@@ -231,17 +231,39 @@ export async function allocateOutstandingCreditsInTx(
     memberAggregate._sum.settledFeeSnapshot ?? '0',
   );
 
-  for (const credit of credits) {
-    if (remainingCapacity.lte(0)) break;
-    const allocatedElsewhere = credit.allocations
-      .filter((allocation) => allocation.billId !== input.billId)
-      .reduce(
-        (sum, allocation) => sum.plus(decimal(allocation.amount).abs()),
-        new Decimal(0),
-      );
-    const unallocated = decimal(credit.requestedAmount)
+  const unallocatedOf = (credit: (typeof credits)[number]) =>
+    decimal(credit.requestedAmount)
       .abs()
-      .minus(allocatedElsewhere);
+      .minus(
+        credit.allocations
+          .filter((allocation) => allocation.billId !== input.billId)
+          .reduce(
+            (sum, allocation) => sum.plus(decimal(allocation.amount).abs()),
+            new Decimal(0),
+          ),
+      );
+
+  // 补收（正数，业主 2026-10-01）全额计入最早的草稿账单，同时提高本月可抵扣的额度。
+  for (const credit of credits) {
+    if (!decimal(credit.requestedAmount).isPositive()) continue;
+    const unallocated = unallocatedOf(credit);
+    if (unallocated.lte(0)) continue;
+    await tx.agentMonthlyBillAdjustment.create({
+      data: {
+        billId: input.billId,
+        creditId: credit.id,
+        amount: unallocated.toFixed(2),
+      },
+      select: { id: true },
+    });
+    remainingCapacity = remainingCapacity.plus(unallocated);
+  }
+
+  // 抵扣（负数）按录入先后在剩余额度内分摊，账单合计不会被抵成负数。
+  for (const credit of credits) {
+    if (!decimal(credit.requestedAmount).isNegative()) continue;
+    if (remainingCapacity.lte(0)) break;
+    const unallocated = unallocatedOf(credit);
     if (unallocated.lte(0)) continue;
 
     const allocated = Decimal.min(unallocated, remainingCapacity);

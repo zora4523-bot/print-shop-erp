@@ -709,7 +709,7 @@ function buildWorkbookSheets(
   return [
     trackedSheet('月账单', billRows(membershipPath, context, client), rowCounts, [12, 20, 20, 12, 14, 14, 14, 16, 12, 18, 18]),
     trackedSheet('工单明细', itemRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 12, 14, 14, 18, 18, 28]),
-    trackedSheet('跨月抵扣', adjustmentRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 14, 40, 18, 18, 28]),
+    trackedSheet('跨月调整', adjustmentRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 14, 40, 18, 18, 28]),
     trackedSheet('收款回执', receiptRows(membershipPath, context, client), rowCounts, [12, 20, 14, 18, 18, 22, 18, 28]),
   ];
 }
@@ -738,7 +738,7 @@ async function* billRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '账期', '外部销售', '销售账号', '状态', '工单数', '工单合计', '跨月抵扣',
+    '账期', '外部销售', '销售账号', '状态', '工单数', '工单合计', '跨月调整',
     '应收总额', '确认时间', '结清时间', '创建时间',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
@@ -807,7 +807,7 @@ async function* adjustmentRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '目标账期', '目标外部销售', '来源账期', '来源工单', '抵扣金额', '原因', '记录人', '创建时间', '销售账号',
+    '目标账期', '目标外部销售', '来源账期', '来源工单', '调整金额（负数抵扣，正数补收）', '原因', '记录人', '创建时间', '销售账号',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({

@@ -3,7 +3,7 @@ import { readBillSettlementDetail } from '@/lib/agent-monthly-billing/settlement
 import Decimal from 'decimal.js';
 import { BillDetailDisclosure } from './BillDetailDisclosure';
 import { OrderStatusSnapshotBadge } from './OrderStatusSnapshotBadge';
-import { formatMoney } from '@/lib/dashboard/format';
+import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { buttonVariants } from '@/components/ui/button';
 import { billScopedHref, creditAllocationSummary } from '@/lib/agent-monthly-billing/presentation';
@@ -39,14 +39,14 @@ export function BillItemEvidence({ item, period, sales = false, returnTo }: {
       </dl> : <p className="text-muted-foreground">该账单未保留完整费用分项，请按结算总额核对。</p>}
     </section>
     {item.credits.length > 0 ? <section className="space-y-3">
-      <h3 className="font-semibold">该工单的抵扣记录</h3>
+      <h3 className="font-semibold">该工单的抵扣与补收记录</h3>
       <ul className="divide-y">{item.credits.map((credit) => {
         const summary = creditAllocationSummary(credit);
         return <li key={credit.id} className="space-y-2 py-3">
-          <p>录入 {formatMoney(summary.requested)} · {formatDateTimeShanghai(credit.createdAt)}</p>
-          <p className="text-muted-foreground">已抵扣 {formatMoney(summary.confirmed)}{new Decimal(summary.pending).gt(0) ? <> · 暂计抵扣（账单整理中） {formatMoney(summary.pending)}</> : null} · 待抵扣 {formatMoney(summary.remaining)}</p>
+          <p>录入{summary.kind} {formatMoney(summary.requested)} · {formatDateTimeShanghai(credit.createdAt)}</p>
+          <p className="text-muted-foreground">已{summary.kind} {formatMoney(summary.confirmed)}{new Decimal(summary.pending).gt(0) ? <> · 暂计{summary.kind}（账单整理中） {formatMoney(summary.pending)}</> : null} · 待{summary.kind} {formatMoney(summary.remaining)}</p>
           <ul className="space-y-1">{credit.allocations.map((row) => <li key={row.id}>
-            <Link href={billScopedHref(`${base}/${row.bill.id}`, returnTo, sales)} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{row.bill.period} {sales ? '货款账单' : '月账单'}{row.bill.status === 'DRAFT' ? '（整理中）' : ''} · {formatMoney(row.amount)}</Link>
+            <Link href={billScopedHref(`${base}/${row.bill.id}`, returnTo, sales)} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>{row.bill.period} {sales ? '货款账单' : '月账单'}{row.bill.status === 'DRAFT' ? '（整理中）' : ''} · {formatMoneyDelta(row.amount)}</Link>
           </li>)}</ul>
         </li>;
       })}</ul>

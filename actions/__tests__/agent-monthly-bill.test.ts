@@ -194,11 +194,32 @@ describe('agent monthly bill actions', () => {
         expectedBillId: 'bound-bill',
         idempotencyKey: 'credit-1',
         sourceItemId: 'item-1',
+        // 旧页面不带方向时按抵扣处理。
+        direction: 'CREDIT',
         amount: '10.00',
         reason: '质量调整',
       },
       { id: 'admin-1', role: Role.ADMIN },
     );
+  });
+
+  it('passes a surcharge direction through and names it in the receipt (owner 2026-10-01)', async () => {
+    const form = new FormData();
+    form.set('idempotencyKey', 'surcharge-1');
+    form.set('sourceItemId', 'item-1');
+    form.set('direction', 'SURCHARGE');
+    form.set('amount', '12.00');
+    form.set('reason', '少收快递费');
+    await expect(createAgentMonthlyBillCreditAction('bound-bill', null, form))
+      .resolves.toMatchObject({ status: 'success', message: expect.stringMatching(/^补收已记录/) });
+    expect(createCreditMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ direction: 'SURCHARGE', amount: '12.00' }),
+      { id: 'admin-1', role: Role.ADMIN },
+    );
+    form.set('direction', 'REFUND');
+    form.set('idempotencyKey', 'surcharge-2');
+    await expect(createAgentMonthlyBillCreditAction('bound-bill', null, form))
+      .resolves.toMatchObject({ status: 'invalid' });
   });
 });
 
