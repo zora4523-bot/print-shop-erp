@@ -111,6 +111,31 @@ it('locks the breadcrumb parent — the only return entry — while the scoped f
   host.remove();
 });
 
+// 两个作用域都在提交时，先结束的那个不能替另一个解锁。
+it('keeps the breadcrumb parent locked until every pending scope has finished', async () => {
+  route.pathname = '/owner/rules/crafts/new';
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const render = (first: boolean | null, second: boolean) => flushSync(() => root.render(
+    <BreadcrumbEntityProvider>
+      <AdminBreadcrumb role="ADMIN" />
+      {first === null ? null : <BreadcrumbParent pending={first} />}
+      <BreadcrumbParent pending={second} />
+    </BreadcrumbEntityProvider>,
+  ));
+  const parent = () => host.querySelector<HTMLAnchorElement>('[data-slot="breadcrumb-link"][href="/owner/rules/crafts"]')!;
+  render(true, true);
+  await vi.waitFor(() => expect(parent().getAttribute('aria-disabled')).toBe('true'));
+  render(null, true);
+  await new Promise((done) => requestAnimationFrame(done));
+  expect(parent().getAttribute('aria-disabled')).toBe('true');
+  render(null, false);
+  await vi.waitFor(() => expect(parent().getAttribute('aria-disabled')).toBeNull());
+  root.unmount();
+  host.remove();
+});
+
 it('carries list context onto the breadcrumb parent only for the same parent path', async () => {
   route.pathname = '/owner/agent-bills/cabcdefghijklmnopqrstuvwx';
   const host = document.createElement('div');

@@ -213,7 +213,8 @@ export function buildBreadcrumbCrumbs(
  */
 export function resolveBreadcrumbParentHref(parentHref: string, override: string | null): string {
   if (!override || !override.startsWith('/') || override.startsWith('//')) return parentHref;
-  const url = new URL(override, 'https://breadcrumb.invalid');
+  let url: URL;
+  try { url = new URL(override, 'https://breadcrumb.invalid'); } catch { return parentHref; }
   if (url.origin !== 'https://breadcrumb.invalid' || url.pathname !== parentHref) return parentHref;
   return `${url.pathname}${url.search}${url.hash}`;
 }

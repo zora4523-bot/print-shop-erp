@@ -189,6 +189,9 @@ it.each([
   ['/owner/agent-bills', '//evil.example/owner/agent-bills', '/owner/agent-bills'],
   ['/owner/agent-bills', 'https://evil.example/owner/agent-bills', '/owner/agent-bills'],
   ['/owner/agent-bills', null, '/owner/agent-bills'],
+  // 畸形地址解析失败时回落父级，不能打断面包屑渲染。
+  ['/owner/agent-bills', '/\\[bad', '/owner/agent-bills'],
+  ['/owner/agent-bills', '/\\evil.example/owner/agent-bills', '/owner/agent-bills'],
 ] as const)('resolveBreadcrumbParentHref(%s, %s) → %s', (parent, override, expected) => {
   expect(resolveBreadcrumbParentHref(parent, override)).toBe(expected);
 });

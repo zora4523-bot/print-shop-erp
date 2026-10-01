@@ -23,8 +23,9 @@ type BreadcrumbEntityContextValue = {
   setLabel: Dispatch<SetStateAction<string | null>>;
   parentHref: string | null;
   setParentHref: Dispatch<SetStateAction<string | null>>;
-  parentPending: boolean;
-  setParentPending: Dispatch<SetStateAction<boolean>>;
+  /** 正在提交、要求锁住父级的作用域个数；各作用域只增减自己那一份，互不解锁。 */
+  parentPendingCount: number;
+  setParentPendingCount: Dispatch<SetStateAction<number>>;
 };
 
 const BreadcrumbEntityContext =
@@ -37,10 +38,10 @@ export function BreadcrumbEntityProvider({
 }) {
   const [label, setLabel] = useState<string | null>(null);
   const [parentHref, setParentHref] = useState<string | null>(null);
-  const [parentPending, setParentPending] = useState(false);
+  const [parentPendingCount, setParentPendingCount] = useState(0);
   const value = useMemo(
-    () => ({ label, setLabel, parentHref, setParentHref, parentPending, setParentPending }),
-    [label, parentHref, parentPending],
+    () => ({ label, setLabel, parentHref, setParentHref, parentPendingCount, setParentPendingCount }),
+    [label, parentHref, parentPendingCount],
   );
   // Provider 本身不渲染任何 DOM，插进 SidebarInset 不影响 flex 布局。
   return (
@@ -56,7 +57,7 @@ export function useBreadcrumbEntityLabel(): string | null {
 
 export function useBreadcrumbParent(): { href: string | null; pending: boolean } {
   const context = useContext(BreadcrumbEntityContext);
-  return { href: context?.parentHref ?? null, pending: context?.parentPending ?? false };
+  return { href: context?.parentHref ?? null, pending: (context?.parentPendingCount ?? 0) > 0 };
 }
 
 /**
@@ -76,7 +77,7 @@ export function BreadcrumbParent({
 }) {
   const context = useContext(BreadcrumbEntityContext);
   const setParentHref = context?.setParentHref;
-  const setParentPending = context?.setParentPending;
+  const setParentPendingCount = context?.setParentPendingCount;
   useEffect(() => {
     if (!setParentHref || !href) return;
     setParentHref(href);
@@ -84,10 +85,11 @@ export function BreadcrumbParent({
     return () => setParentHref((cur) => (cur === href ? null : cur));
   }, [href, setParentHref]);
   useEffect(() => {
-    if (!setParentPending || !pending) return;
-    setParentPending(true);
-    return () => setParentPending(false);
-  }, [pending, setParentPending]);
+    if (!setParentPendingCount || !pending) return;
+    // 只撤回自己加的一份：另一个作用域仍在提交时，父级继续锁住。
+    setParentPendingCount((count) => count + 1);
+    return () => setParentPendingCount((count) => Math.max(0, count - 1));
+  }, [pending, setParentPendingCount]);
   return null;
 }
 
