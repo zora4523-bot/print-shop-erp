@@ -30,7 +30,7 @@ export default async function NewOrderPage({
   if (externalSalesAccounts && externalSalesAccounts.length === 0) {
     return (
       <div className="space-y-4">
-        <PageHeader back={{ href: "/orders", label: "返回工单列表" }} title="新建工单" />
+        <PageHeader title="新建工单" />
         <NoExternalSalesEmptyState />
       </div>
     );

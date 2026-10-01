@@ -81,6 +81,8 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     // '/orders' 不在此固定：管理员「工单列表」与外部销售「我的工单」按角色从模块表取。
     '/orders/new': '新建工单',
     '/owner/agent-bills/unbilled': '未出账工单',
+    // 兼容别名，redirect 到 /owner/agent-bills；历史账单归档的父级按落点命名。
+    '/owner/bills': '外部销售月账单',
     '/owner/bills/archive': '历史账单归档',
     '/owner/materials/count': '库存盘点',
     '/orders/production': '安排生产师傅',

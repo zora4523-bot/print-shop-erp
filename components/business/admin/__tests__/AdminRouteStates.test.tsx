@@ -57,16 +57,16 @@ describe('admin route states', () => {
     if (variant === 'form') expect(html).toContain('max-w-3xl');
   });
 
-  // 骨架形状与目标页一致（审查 #26）：工单详情页头没有返回入口（由顶栏面包屑承担），
-  // 骨架也不能先画一条返回占位再在内容到达时消失。
-  it('detail 骨架默认画返回占位，withBack={false} 时不画', () => {
+  // 骨架形状与目标页一致（审查 #26）：二级页返回由顶栏面包屑承担，页头默认没有返回入口，
+  // 骨架也不能先画一条返回占位再在内容到达时消失；只有保留页头返回的例外页传 withBack。
+  it.each(['detail', 'form'] as const)('%s 骨架默认不画返回占位，withBack 时才画', (variant) => {
     const backPlaceholder = /data-slot="skeleton" class="[^"]*\bh-5 w-24\b/g;
-    const withBack = renderToStaticMarkup(<AdminRouteLoading variant="detail" label="正在加载采购单" />);
-    const withoutBack = renderToStaticMarkup(
-      <AdminRouteLoading variant="detail" label="正在加载工单详情" withBack={false} />,
+    const withoutBack = renderToStaticMarkup(<AdminRouteLoading variant={variant} label="正在加载采购单" />);
+    const withBack = renderToStaticMarkup(
+      <AdminRouteLoading variant={variant} label="正在加载新建工单" withBack />,
     );
-    expect(withBack.match(backPlaceholder)).toHaveLength(1);
     expect(withoutBack.match(backPlaceholder)).toBeNull();
-    expect(withoutBack).toContain('data-variant="detail"');
+    expect(withBack.match(backPlaceholder)).toHaveLength(1);
+    expect(withoutBack).toContain(`data-variant="${variant}"`);
   });
 });

@@ -19,7 +19,7 @@ export default async function UnbilledOrdersPage({ searchParams }: { searchParam
   const result = await listUnbilledAgentOrders({ period, page });
   const currentPeriod = formatDateInputShanghai(new Date()).slice(0, 7);
   return <div className="min-w-0 space-y-6">
-    <PageHeader title="未出账工单" back={{ href: '/owner/agent-bills', label: '返回外部销售月账单' }} />
+    <PageHeader title="未出账工单" />
     <Form id="unbilled-filters" key={period ?? ''} action="/owner/agent-bills/unbilled" className="flex flex-wrap items-end gap-3">
       <label className="grid gap-1 text-sm">结算月份<Input name="period" type="month" defaultValue={period} className="w-auto" /></label>
       <Button type="submit">筛选</Button><FilterClearLink formId="unbilled-filters" href="/owner/agent-bills/unbilled" className={buttonVariants({ variant: 'ghost' })}>清除筛选</FilterClearLink>

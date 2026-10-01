@@ -7,9 +7,10 @@ type AdminRouteLoadingVariant = 'list' | 'detail' | 'form';
 /**
  * 管理端路由级 loading。骨架形状必须和目标页一致（审查 #26，CLS）：
  * - list：列表页，表格骨架；
- * - detail：详情页，页头（返回 + 标题 + 状态）+ 卡片区，不画表格；页头没有返回入口的
- *   详情（工单详情：返回由顶栏面包屑承担）传 `withBack={false}`，骨架同样不画返回占位；
+ * - detail：详情页，页头（标题 + 状态）+ 卡片区，不画表格；
  * - form：新建 / 编辑 / 盘点等表单页，页头 + FormPage 宽度（max-w-3xl）的字段卡片。
+ * 二级页的返回入口是顶栏面包屑父级（ui-规范 §8.3），骨架默认不画返回占位；只有页头
+ * 仍保留返回的例外页（离开保护、回到别的页面）传 `withBack`。
  *
  * 刻意没有 loading 的分组（登记）：`(billing)` 与 `(admin-forms)` 是零 JS
  * 原生表单组，streaming 边界会让无 JS 时页面停在骨架上；不要给它们补 loading.tsx。
@@ -17,11 +18,11 @@ type AdminRouteLoadingVariant = 'list' | 'detail' | 'form';
 export function AdminRouteLoading({
   label = '正在加载页面',
   variant = 'list',
-  withBack = true,
+  withBack = false,
 }: {
   label?: string;
   variant?: AdminRouteLoadingVariant;
-  /** 目标页页头是否有 `PageHeader` 返回入口；只影响 detail / form 骨架。 */
+  /** 目标页页头仍保留 `PageHeader` 返回入口（§8.3 例外）时传入；只影响 detail / form 骨架。 */
   withBack?: boolean;
 }) {
   if (variant === 'list') {

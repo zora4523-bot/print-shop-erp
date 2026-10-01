@@ -13,7 +13,6 @@ export default async function NewChannelPage() {
     <FormPage>
       <PageHeader
         title="新建通知目标"
-        back={{ href: '/owner/notifications', label: '返回推送配置' }}
       />
       <ChannelForm mode="create" action={createChannelAction} />
     </FormPage>

@@ -7,6 +7,7 @@ import { billScopedHref, remainingCreditAmount } from '@/lib/agent-monthly-billi
 import { createAgentMonthlyBillCreditAction } from '@/actions/agent-monthly-bill';
 import { CreateAgentMonthlyBillCreditForm } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
 import { PageHeader } from '@/components/ui-business';
+import { BreadcrumbEntity, BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
 import { formatMoney } from '@/lib/dashboard/format';
 
 export const metadata = { title: '录入抵扣' };
@@ -20,7 +21,10 @@ export default async function CreditPage({ params, searchParams }: { params: Pro
   if (!bill || !item) notFound();
   const remaining = remainingCreditAmount(item.settledFeeSnapshot, item.credits);
   return <div className="mx-auto w-full max-w-3xl space-y-6">
-    <PageHeader title="录入抵扣" subtitle={`${bill.period} · ${item.orderNoSnapshot}`} back={{ href: billScopedHref(`/owner/agent-bills/${id}`, returnTo), label: '返回月账单' }} />
+    {/* 返回月账单由面包屑父级承担，带上原列表的筛选（returnTo）；父级显示账单标题。 */}
+    <BreadcrumbEntity label={`${bill.period} · ${bill.agentDisplayNameSnapshot}`} />
+    <BreadcrumbParent href={billScopedHref(`/owner/agent-bills/${id}`, returnTo)} />
+    <PageHeader title="录入抵扣" subtitle={`${bill.period} · ${item.orderNoSnapshot}`} />
     <p className="break-words">{bill.agentDisplayNameSnapshot} · <span className="break-all">{bill.agentUsernameSnapshot}</span></p>
     <dl className="grid gap-4 sm:grid-cols-2">
       <div><dt className="text-sm text-muted-foreground">原结算金额</dt><dd>{formatMoney(item.settledFeeSnapshot)}</dd></div>

@@ -18,7 +18,6 @@ export default async function LegacyBillArchivePage() {
       <PageHeader
         title="历史账单归档"
         subtitle="不计入当前月账单"
-        back={{ href: '/owner/agent-bills', label: '返回外部销售月账单' }}
       />
       {rows.length === 0 ? (
         <EmptyState icon={Archive} title="暂无历史账单" />

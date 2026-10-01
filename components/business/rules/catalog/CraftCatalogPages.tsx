@@ -118,10 +118,8 @@ export async function NewCraftCatalogItem({
     <FormPendingScope>
     <FormPageContainer>
       <RuleCenterPageHeader
-        lockBackWhilePending
         title="新建工艺"
         effect="immediate"
-        back={{ href: routeBase, label: '返回工艺' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <CraftForm
@@ -153,10 +151,8 @@ export async function EditCraftCatalogItem({
     <div className="space-y-6">
       <ReceiptNotice receipt={receipt} noun="工艺" />
       <RuleCenterPageHeader
-        lockBackWhilePending
         title={`编辑工艺：${craft.name}`}
         effect="immediate"
-        back={{ href: routeBase, label: '返回工艺' }}
         status={
           <>
             <ActiveStatusBadge active={craft.isActive} />

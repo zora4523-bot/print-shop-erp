@@ -59,7 +59,6 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
         subtitle="历史日薪明细"
-        back={{ href: '/owner/salary/daily', label: '返回历史日薪档案' }}
         status={<PaymentStatusBadge isPaid={salary.isPaid} />}
         actions={
           <div className="flex gap-2">

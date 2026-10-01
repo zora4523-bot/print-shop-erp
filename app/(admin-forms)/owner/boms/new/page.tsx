@@ -36,7 +36,6 @@ export default async function NewBomPage({ searchParams }: { searchParams: Promi
       <ReceiptNotice receipt={receipt} noun={returned?.entityType === 'CATEGORY' ? '分类' : '物料'} />
       <ScopedPageHeader
         title="新建用料清单"
-        back={{ href: '/owner/boms', label: '返回用料清单' }}
         subtitle="同一用料对象只能有一个启用版本。"
       />
 

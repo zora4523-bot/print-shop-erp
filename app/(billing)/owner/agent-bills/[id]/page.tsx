@@ -23,6 +23,7 @@ import {
   MarkAgentMonthlyBillPaidForm,
 } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
 import { PageHeader, StatusBadge, EmptyState, FilterClearLink } from '@/components/ui-business';
+import { BreadcrumbEntity, BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { billListReturnHref, billScopedHref } from '@/lib/agent-monthly-billing/presentation';
@@ -41,10 +42,13 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
 
   return (
     <div className="space-y-6">
+      {/* 返回外部销售月账单由面包屑父级承担，带上原列表的筛选与页码（returnTo）；
+          末段显示账单标题，与「录入抵扣」页的父级同名。 */}
+      <BreadcrumbEntity label={`${bill.period} · ${bill.agentDisplayNameSnapshot}`} />
+      <BreadcrumbParent href={returnHref} />
       <PageHeader
         title={`${bill.period} · ${bill.agentDisplayNameSnapshot}`}
         subtitle={`账单账号 ${bill.agentUsernameSnapshot} · 工单 ${bill.items.length} 单`}
-        back={{ href: returnHref, label: '返回外部销售月账单' }}
         status={
           <StatusBadge
             tone={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}

@@ -79,7 +79,6 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
       <PageHeader
         title={externalPriceBusinessText(bom.name)}
         subtitle={`${await targetLabel(bom)} · 版本 ${bom.version} · 基准产量 ${bom.baseQuantity}`}
-        back={{ href: '/owner/boms', label: '返回用料清单' }}
         status={<ActiveStatusBadge active={bom.isActive} />}
       />
 
