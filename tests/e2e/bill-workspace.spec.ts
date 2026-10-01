@@ -44,7 +44,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await page.getByRole('button', { name: '标记已收', exact: true }).click();
   await expect(page.getByRole('heading', { name: '收款记录', exact: true })).toBeVisible();
   await page.getByRole('link', { name: '录入抵扣', exact: true }).click();
-  for (const width of [320, 375, 390, 393, 430, 768, 1024, 1280, 1920]) {
+  for (const width of [320, 375, 390, 393, 430, 768, 944, 1024, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     for (const theme of ['light', 'dark'] as const) {
       await selectBillTheme(page, theme);
@@ -101,12 +101,26 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await expect(sales.getByText('测试转账', { exact: true })).toBeVisible();
   await sales.keyboard.press('Enter');
   await expect(sales.getByText('测试转账', { exact: true })).toBeHidden();
-  for (const width of [320, 375, 390, 393, 430, 768, 1024, 1280, 1920]) {
+  for (const width of [320, 375, 390, 393, 430, 768, 944, 1024, 1280, 1920]) {
     await sales.setViewportSize({ width, height: 900 });
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`/owner/agent-bills?agentUserId=${source.agentUserId}`);
     for (const theme of ['light', 'dark'] as const) {
       await selectBillTheme(page, theme);
+      const viewportInfo = test.info();
+      await expectViewportGate(page, {
+        ...viewportInfo,
+        project: { ...viewportInfo.project, use: { ...viewportInfo.project.use, viewport: { width, height: 900 } } },
+      });
+      const billList = page.getByRole('region', { name: '外部销售月账单列表', exact: true });
+      for (const cell of await billList.locator('tbody td:nth-child(4), tbody td:nth-child(5), tbody td:nth-child(6)').all()) {
+        const lines = await cell.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return new Set([...range.getClientRects()].filter((r) => r.width && r.height).map((r) => Math.round(r.top))).size;
+        });
+        expect(lines, '金额与货币符号保持同一行').toBe(1);
+      }
       await page.getByText('账单概览', { exact: true }).click();
       await page.getByText('查看账期数据表', { exact: true }).click();
       const adminOverflow = await page.evaluate(() => ({

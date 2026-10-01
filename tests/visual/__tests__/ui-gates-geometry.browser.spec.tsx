@@ -20,6 +20,16 @@ function mount(html: string) {
 
 const control = 'style="height:44px;width:120px;box-sizing:border-box"';
 
+it('flags badge glyphs outside the pill even inside a horizontal table scroller', () => {
+  mount('<div style="width:30px;overflow-x:auto"><span data-slot="badge" style="display:inline-flex;width:32px;height:24px;font-size:12px;line-height:16px;align-items:center">已确认·待收</span></div>');
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('badge-text-overflow'))).toHaveLength(1);
+});
+
+it('accepts a complete badge that scrolls with its table', () => {
+  mount('<div style="width:30px;overflow-x:auto"><span data-slot="badge" style="display:inline-flex;white-space:nowrap;height:24px;font-size:12px;line-height:16px;align-items:center">已确认·待收</span></div>');
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('badge-text-overflow'))).toEqual([]);
+});
+
 it('flags equal-height controls whose bottoms are offset in one row', () => {
   mount(`<div style="display:flex;align-items:flex-start;gap:8px">
     <input ${control} aria-label="名称" />
