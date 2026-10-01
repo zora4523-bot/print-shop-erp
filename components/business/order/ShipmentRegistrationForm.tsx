@@ -117,10 +117,15 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
       {!props.shipped ? <ConfirmActionController level="L2" disabled={busy || !ready || !props.canConfirm}
         trigger={<Button type="button" disabled={busy || !ready || !props.canConfirm}>确认该地址已发货</Button>}
         onConfirm={() => submit(true)}>
-        <ConfirmActionDialog action="确认该地址已发货" changes={[{ label: '运单号', old: props.trackingNo || '未填', new: tracking }]}
+        {/* 只列确认前要核对的事实：结算金额（确认后锁定）、代登记提成（影响工资）、运单号。 */}
+        <ConfirmActionDialog action={props.lastPending ? '确认发货并结算' : '确认该地址已发货'}
+          changes={props.trackingNo && props.trackingNo !== tracking ? [{ label: '运单号', old: props.trackingNo, new: tracking }] : []}
           consequences={[
-            ...(props.autoCompletion?.length ? [`将按计划数量代师傅登记生产完成并计提成：${props.autoCompletion.join('、')}`] : []),
-            ...(props.lastPending ? props.chargeable === false ? ['全部地址将标记已发货，工单自动结算；结算后不可再编辑，本单免收费'] : [`全部地址将标记已发货，工单自动结算，应收 ${props.amount} 元进入账单；结算后不可再编辑，尚未收款`] : ['该地址标记已发货，其他地址继续待发货']),
+            props.lastPending
+              ? props.chargeable === false ? '本单免收费，确认后工单结算' : `应收 ${props.amount} 元，计入当月账单；月账单确认前仍可更正`
+              : '其余地址继续待发货',
+            ...(props.autoCompletion?.length ? [`生产未报完，将按计划数量代师傅登记并计提成：${props.autoCompletion.join('、')}`] : []),
+            ...(props.trackingNo && props.trackingNo !== tracking ? [] : [`运单号 ${tracking}`]),
           ]}
           confirmText="确认发货" />
       </ConfirmActionController> : null}
