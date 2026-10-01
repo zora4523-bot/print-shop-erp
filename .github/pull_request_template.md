@@ -24,6 +24,7 @@
 缺陷原触发条件的回归结果、跳过原因、未覆盖范围：
 
 - [ ] UI 改动符合 [文案与确认](https://github.com/zora4523-bot/print-shop-erp/blob/main/docs/ui-规范.md#文案与确认)，主题/键盘/触控按风险验证。
+- [ ] UI 改动按 [Quality Standard §11](https://github.com/zora4523-bot/print-shop-erp/blob/main/docs/ui-规范.md#11-ui--ux-quality-standard) 完成十项 Design QA，附实际视口/状态、功能回归与修复复验证据；未执行项及阻断项已说明，P0/P1 与明显影响可用性、一致性、视觉层级的问题已清零。
 - [ ] 未通过放宽断言、更新未确认的像素基线或降低门禁掩盖失败。
 
 ## 数据库与部署影响

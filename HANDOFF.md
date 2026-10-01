@@ -16,6 +16,8 @@
 
 ## 当前任务
 
+2026-10-01（UI 质量标准）：**完成 UI / UX Quality Standard 的规范审查与工程入口统一，应用功能未改**，基线 `e47f59e8`、独立干净工作树。`docs/ui-规范.md` §11 统一设计原则、功能前后对照、十项 Design QA、问题分级、验收与停止条件；AGENTS / CLAUDE / CONTRIBUTING / PR 模板共同引用，UI-SYSTEM 与设计覆盖文档的优先级对齐。现有自动门禁仍为六视口，320/390/430 为后续任务必须留证的补测；本次没有新增自动测试项目。审查与实际文档验证见 [记录](docs/audits/2026-10-01-ui-quality-standard-review.md)。**未做实屏 QA 或应用测试**（本工作树无 node_modules），不代表全站 UI 验收；后续 UI 任务按 §11 执行，不能沿用本次文档检查冒充页面通过。本次仅本地提交，未推送或部署。
+
 2026-10-01（分支整理）：**按业主要求把本地未开 PR 的分支 / worktree 整理成 3 个 PR，均经 Codex `gpt-6-astra` 对抗审查到 9 分以上**（未部署）。PR #37 文档（842a3f87 生产发布补记 + 外部销售前端复审历史记录，2 轮，9.5 分，合并 `0238d327`）；PR #36 弹层浏览器测试等 Base UI 进场动画结束再量触控尺寸（共享 `tests/browser/wait-for-layout.ts` 的 `waitForStableLayout`，5 秒预算，9 个 spec 改用；3 轮，9.5 分，合并 `79ffda6a`）；PR #35 寄样首重默认（见下方 09-30 条），代码 8 轮审查 9.2 分；本条随 #35 一起合并，所以在功能分支上读到时 #35 尚未合入 main。审查追加的改动：寄样快递费快照的首重默认由 `lib/order/sample-weight-basis.ts` 统一维护，只按上一版快照与本次登记重量推进三态——寄付且登记重量等于默认首重带 `weightBasis` 标记；到付期间只暂存 `suspendedSampleDefaultWeightKg`；登记过别的重量（含到付期间）即作废、不再恢复。接入提交、履约费用确认与已确认履约发货、销售切换到付、变更申请 / 工厂确认重算物流、发货定稿；到付寄样不再写默认重量；取消到付时留空的地址更正不再清空已存重量 / 省份（main 上原有的计价与落库不一致）。标记只由这套三态维护函数读取，不参与金额计算或界面展示，作审计依据；规则见 DECISIONS 2026-09-30 影响一行。外部销售审查 worktree 的未提交文档收入 main 后已清掉（原文即 `1e272aca`）；PDF 半成品在本地分支 `archive/pdf-wip-2026-09-30`、旧 stash 在 `archive/stash-checkbox-ui-2026-08-31`，均未推送，是否继续待业主决定。验证：全量 Vitest 748 文件 / 8,234 项通过；#36 改动的 9 个 Browser Mode spec 208 项通过；lint / typecheck / architecture / dead-code / backup 通过。
 
 2026-10-01（合入性能分支）：**`claude/combined-2026-10-01` 已合入 `claude/feature-toggle-performance-review-9c66a6`（fac2a6ee，含 main 038655d1 的 PR #31 与 #32 的 0c0145c5）**，合并提交 `19180a38` + 测试修正 `c719186f`，未推送。补齐今天未合入的 29 个提交，含 2 条加索引迁移（`20261001100000_switch_performance_indexes`、`20261001110000_list_ordering_indexes`，在新副本库上 `migrate deploy` 通过）。8 个冲突：制版与其他费用区采用 main 新层级后重放「整单」与默认收起；成本脚注采用 #32 更短版本；其余保留本线；DECISIONS / HANDOFF 两边都留。main 的两个新测试与制版交互测试按默认收起先展开。验证：lint / typecheck / architecture / backup 通过；单测全量 747 文件、8,193 项通过；Browser Mode 78 文件 / 1,064 项通过（一次全量里 `ReworkOrderForm` 1280 触控尺寸 41.8px 失败，为弹窗缩放动画中途测量，单独 3/3 通过、复跑全量通过）。**未跑** E2E 与六视口页面门禁。仍未收：PDF 审查 worktree 10 个未提交文件（之后存档到本地分支 `archive/pdf-wip-2026-09-30`，未推送，是否继续待业主决定）；外部销售审查 worktree 的未提交文档已在 2026-10-01 收入 main（见下方 2026-09-30 条目）。
@@ -580,6 +582,8 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 收费类目若要新增停用入口，必须先明确 `category.isActive` 是「全局紧急停收」还是「随冻结版本不漂移」。
 
 ## 历史（追加式时间线）
+
+- 2026-10-01：审查并完善 UI / UX Quality Standard，统一 Codex / Claude Code 入口、功能保护、Design QA、验收和停止条件；仅文档验证，未做全站实屏验收，详见 `docs/audits/2026-10-01-ui-quality-standard-review.md`。
 
 - 2026-09-27：完成建单整款删除、规格选择与历史名称修复；Claude Code Opus 5.5 三轮审查及负控补测完成，本地提交，3000 开发服务保留。详见 [验收记录](docs/audits/2026-09-27-design-removal.md)。
 

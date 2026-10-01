@@ -22,13 +22,9 @@ applies_to: repository UI implementation and design evidence at last_verified
 
 ## 设计证据与优先级
 
-设计资料入口是 [`docs/ux-redesign/README.md`](./docs/ux-redesign/README.md)，逐页面族的证据和验证边界记录在 [`docs/UI-DESIGN-COVERAGE.md`](./docs/UI-DESIGN-COVERAGE.md)。发生冲突时按以下顺序判断：
+设计资料入口是 [`docs/ux-redesign/README.md`](./docs/ux-redesign/README.md)，逐页面族的证据和验证边界记录在 [`docs/UI-DESIGN-COVERAGE.md`](./docs/UI-DESIGN-COVERAGE.md)。规则优先级以 [`docs/ui-规范.md` §1.1](./docs/ui-规范.md#11-真值顺序) 为准；本文记录组件契约、证据与采用情况，不另设优先级。高保真、交互稿、线框与推断页用于确定对照深度，不能覆盖现行 UI 规范、已确认产品决定或业务不变量。
 
-1. 已确认的业务不变量、权限、金额、状态机和打印契约；
-2. 同一页面最新、证据最完整的高保真或交互稿；
-3. 全站交互/状态规范；
-4. 线框和推断页；
-5. 现有页面样式，仅作为迁移起点。
+UI 任务的设计原则、十项 Design QA、验收条件与停止条件统一执行 [`UI / UX Quality Standard` §11](./docs/ui-规范.md#11-ui--ux-quality-standard)。下文历史验证不代表新增标准已在全站通过。
 
 早期 `收费项目工作台 重设计.dc.html` 的 Industry 皮肤已经被后续设计取代；定价以
 `批次五 价格与报价 交互稿.dc.html` 的现有 shadcn 皮肤版为准。不能把“包中有 85 页”理解为 85 个页面都有同等级高保真证据。
@@ -322,7 +318,7 @@ PageHeader
 
 ## 响应式与跨设备
 
-最低验证矩阵：375×667、393×852、768×1024、1024×768、1280×800、1920×1080。
+现有自动门禁矩阵：375×667、393×852、768×1024、1024×768、1280×800、1920×1080。后续 UI 任务执行 [`docs/ui-规范.md` §11.3](./docs/ui-规范.md#113-视口主题与状态矩阵) 的完整矩阵，额外实测 320×568、390×844、430×932；当前自动项目尚未覆盖这三项，不能将六视口通过写成完整验收。
 
 - 页面 body 不得横向溢出；表格内部滚动不等于页面溢出。
 - 移动端交互目标最低 44×44 CSS px；桌面紧凑尺寸不能污染手机。
@@ -415,16 +411,7 @@ PageHeader
 
 ## 新组件与页面交付清单
 
-- [ ] 选择了正确组件层，没有复制已有模式。
-- [ ] 浅色、暗色和语义 tone 正确；失败以外不滥用 destructive。
-- [ ] Loading / Empty / Error / Disabled / Pending 全部可到达并验证。
-- [ ] 涉及批量、冲突、长任务、终态时补对应状态。
-- [ ] 键盘、焦点、label、aria-live 和 reduced-motion 正确。
-- [ ] 六个目标视口无 body overflow、静默裁切或不可点击动作。
-- [ ] 设计证据等级、设计文件和人工审查范围已记录。
-- [ ] 目标测试、typecheck、lint、相关视觉门禁和打印保护已通过。
-- [ ] `/dev/showcase` 已覆盖新增共享组件及关键 variant。
-- [ ] 可见文案只陈述事实、限制和后果，没有概念解释、内部背景或重复值。
+统一清单与完成判断见 [`docs/ui-规范.md` §11.4–11.7](./docs/ui-规范.md#114-design-qa-检查清单按顺序执行)，不在本文维护第二套放行条件。交付记录须包含本文的设计证据等级与消费者范围；新增共享组件仍须在 `/dev/showcase` 覆盖关键 variant，并按 `CONTRIBUTING.md` 运行相应测试。
 
 ## 工单资料与包装语义
 

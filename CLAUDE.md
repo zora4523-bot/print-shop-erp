@@ -2,6 +2,8 @@
 
 > 本文档是 Claude Code / Codex 开发此项目时的**强制规范**。每次开始新任务前必读。
 
+所有用户可见 UI 任务遵循 [`docs/ui-规范.md` §11 UI / UX Quality Standard](./docs/ui-规范.md#11-ui--ux-quality-standard) 的设计原则、十项 Design QA、验收条件与停止条件。保持已确认功能、产品结构、业务流程与 Design System；实际检查与修复复验留证后再判定完成，不能把未执行的检查写成通过。
+
 ---
 
 ## 1. 项目身份

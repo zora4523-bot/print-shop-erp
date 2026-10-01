@@ -59,6 +59,7 @@ applies_to: repository source at last_verified
 ### UI
 
 - 遵守 [UI-SYSTEM.md](./UI-SYSTEM.md) 的组件分层、五态、语义颜色、响应式和可访问性规范。
+- UI 规则以 [`docs/ui-规范.md`](./docs/ui-规范.md) 为准；UI 任务执行其 [§11 质量标准](./docs/ui-规范.md#11-ui--ux-quality-standard)，按任务影响完成 Design QA、修复复验及证据记录。文档修改本身不等于页面验收。
 - 业务页面不新增 Tailwind 调色板字面量；ESLint 已在 `app/`、`components/business/` 和 `components/ui-business/` 建立门禁。
 - 不新增 `window.alert` / `window.confirm`，不为同一种状态再造局部 Badge、空态或 loading。
 - 交互只隐藏或禁用按钮不算授权；服务端约束仍必须存在。

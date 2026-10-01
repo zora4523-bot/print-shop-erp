@@ -16,7 +16,7 @@ applies_to: docs/ux-redesign and current worktree
 - **C · 系统收口**：设计包只有页面族模式或推断，当前只验证共享组件、响应式和可访问性。
 - **受保护**：已有生产视觉基线，未获单独授权不改。
 
-设计冲突以 [`UI-SYSTEM.md`](../UI-SYSTEM.md) 的证据优先级为准。收费工作台采用“批次五”的现有 shadcn 皮肤，不采用早期 Industry 皮肤。
+规则冲突以 [`docs/ui-规范.md` §1.1](ui-规范.md#11-真值顺序) 为准，任务质量与验收执行 [§11](ui-规范.md#11-ui--ux-quality-standard)；`UI-SYSTEM.md` 的证据等级用于说明对照深度，不提升原型的规则优先级。收费工作台采用“批次五”的现有 shadcn 皮肤，不采用早期 Industry 皮肤。
 
 ## 页面族覆盖
 
