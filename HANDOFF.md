@@ -16,6 +16,8 @@
 
 ## 当前任务
 
+2026-10-01（合入性能分支）：**`claude/combined-2026-10-01` 已合入 `claude/feature-toggle-performance-review-9c66a6`（fac2a6ee，含 main 038655d1 的 PR #31 与 #32 的 0c0145c5）**，合并提交 `19180a38` + 测试修正 `c719186f`，未推送。补齐今天未合入的 29 个提交，含 2 条加索引迁移（`20261001100000_switch_performance_indexes`、`20261001110000_list_ordering_indexes`，在新副本库上 `migrate deploy` 通过）。8 个冲突：制版与其他费用区采用 main 新层级后重放「整单」与默认收起；成本脚注采用 #32 更短版本；其余保留本线；DECISIONS / HANDOFF 两边都留。main 的两个新测试与制版交互测试按默认收起先展开。验证：lint / typecheck / architecture / backup 通过；单测全量 747 文件、8,193 项通过；Browser Mode 78 文件 / 1,064 项通过（一次全量里 `ReworkOrderForm` 1280 触控尺寸 41.8px 失败，为弹窗缩放动画中途测量，单独 3/3 通过、复跑全量通过）。**未跑** E2E 与六视口页面门禁。仍未收：PDF 审查 worktree 10 个未提交文件、外部销售审查 worktree 的未提交文档，待业主决定。
+
 2026-10-01（合并）：**今天三个分支已按业主要求合并为一个分支 `claude/combined-2026-10-01`**（`fd5e0084`，未推送，比 `origin/main` 多 79 个提交、落后 7 个）：`claude/ticket-list-ui-ux-review-4abcab`（工单审查两轮 + 收费状态注册表 + 「创建时估算」改 info）、`claude/dreamy-noyce-b08cd0`（师傅一键完成 / 批量完成 / 发货即完工 / 六视口修复）、`claude/loving-lehmann-6dfe03`（手机端列表看板压缩 L-8）。代码均自动合并，只有 HANDOFF / DECISIONS 冲突，两侧内容全部保留。lint / typecheck / architecture / backup、Vitest 全量（8079 通过）、Browser Mode 996 通过；**E2E 与六视口页面门禁未跑**，也尚未并入 `main` 最新 7 个提交（与 `OrderCommercialDetailsManager.tsx`、`PlateDetailEditor.browser.spec.tsx` 有代码冲突）。原三个分支保留未动，后续工作应在合并分支上继续，避免再次分叉。已知抖动：`ReworkOrderForm.browser.spec.tsx` 1920 dark 偶发触控高度 41.8（对话框缩放动画中测量），单独重跑通过。
 
 2026-10-01（L-8 第二部分）：**工单列表上方的看板 / 队列 / 快捷筛选在窄容器改为单行条内横向滚动**（分支 `claude/loving-lehmann-6dfe03`，先合入 `claude/ticket-list-ui-ux-review-4abcab` 再改，未推送）。新增 `AdminOrderScrollStrip`（选中项不在可见范围时只滚动条自身把它移入）；看板 <56rem、队列与筛选区 <960px 生效，宽容器不变。375 实屏首张工单 914 → 590px，1280 整页截图与改前逐字节相同。浏览器门禁：`AdminOrderListLayout` 新增窄屏单行 / 高度上限 / 选中项移入用例，`AdminOrderWorkspaceSizing` 的看板断言改为任何宽度单行，`AdminOrderWorkspaceColors` 的可滚动容器豁免从队列 nav 扩到滚动条。未跑：`tests/visual` 六视口页面门禁（需 E2E 隔离库），其 viewport-x 规则本已豁免横向滚动容器。截图用的一次性库 `erp_e2e_l8chrome_1001`（复制自 `erp_e2e_uxreview_1001`）确认无需复查后可 `DROP DATABASE`。
@@ -680,6 +682,7 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-10-01：六视口管理端门禁发现 ffc69b04（面包屑）与 ebe73633（销售列表）截断元素缺 title，47 条 hidden-clipping 失败，已修（c74a355b）；销售抽屉用例流式揭示期间严格模式误报在改动前基线同样复现，已改为只取可见列表（0f1c9822）。已知：`test:admin-ui` 4 worker 并发时「critical routes … dark tokens › orders」搜索回车后 URL 断言偶发超时，单 worker 重跑 4/4 通过。
 - 2026-10-01：审查 L-8 第二部分：工单列表看板、队列与快捷筛选在窄容器改为单行横向滚动，375 首张工单 914 → 590px，宽容器不变。
 - 2026-10-01：按业主要求把今天三个分支（工单审查、师傅一键完成、手机端列表）合并为 `claude/combined-2026-10-01`；「创建时估算」徽章改 info。
+- 2026-10-01：把性能审查分支（含 main PR #31、#32 最新提交与 2 条索引迁移）合入 `claude/combined-2026-10-01`，8 个冲突逐个处理，全量单测与 Browser Mode 通过（19180a38、c719186f）。
 - 2026-10-01：功能切换 / 按钮切换性能审查（4 子 agent + Codex gpt-6-astra，生产构建 + 3 万工单实测）；修复启停回执说反、26 处重复 refresh 回潮、CDR 固定轮询、侧栏悬停整页预取、两处缺索引、压测种子失效，6 个本地提交；同日按业主指示处理三项待拍板：手机端侧栏反馈已修，`/orders` 复测 ~150 ms 不改，报工闸口锁因触发器排他会死锁不改。
 - 2026-10-01（续）：剩余未量化项实测——详情页 / 表单按键不改；师傅端设计图预览图、外协单分页、两条列表索引已修复。
 - 2026-10-01（续）：客户计价实测不改；合并 #32 最新提交后开叠放 PR #33（目标 `codex/order-leave-recovery`）。
