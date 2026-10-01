@@ -1422,6 +1422,8 @@ model OutsourceOrder {
   @@index([createdById])
   @@index([status])
   @@index([expectedDate])
+  // 外协单列表按 (createdAt, id) 倒序分页（lib/outsource.ts listOutsourceOrders）。
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
 }
 
 // 外协单创建时的逐款式数量快照。orderItemIds 继续作为兼容的款式列表，
@@ -2933,6 +2935,8 @@ model BackgroundJob {
 
   @@index([queue, status, priority, availableAt])
   @@index([status, createdAt])
+  // 运维页「最近任务」按 createdAt 倒序取前 N 条（lib/background-jobs/repository.ts listBackgroundJobs）。
+  @@index([createdAt(sort: Desc)])
   @@index([lockedAt])
 }
 
