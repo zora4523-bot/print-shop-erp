@@ -194,15 +194,26 @@ export async function allocateOutstandingCreditsInTx(
     throw new AgentMonthlyBillFrozenError();
   }
 
-  const credits = await tx.agentMonthlyBillCredit.findMany({
-    where: {
-      sourceItem: {
-        bill: {
-          agentUserId: input.agentUserId,
-          period: { lt: input.period },
+  // 先锁后读：已分摊额度必须在持有每条来源锁之后读取。同一销售不同月份的草稿可以
+  // 并发重排（如工单结算更正只锁本月），锁前读到的分摊会过期，导致多分并被触发器拒绝。
+  const creditIds = (
+    await tx.agentMonthlyBillCredit.findMany({
+      where: {
+        sourceItem: {
+          bill: {
+            agentUserId: input.agentUserId,
+            period: { lt: input.period },
+          },
         },
       },
-    },
+      select: { id: true },
+    })
+  ).map((credit) => credit.id).sort((a, b) => a.localeCompare(b));
+  for (const creditId of creditIds) {
+    await lockAgentBillCredit(tx, creditId);
+  }
+  const credits = await tx.agentMonthlyBillCredit.findMany({
+    where: { id: { in: creditIds } },
     select: {
       id: true,
       requestedAmount: true,
@@ -210,12 +221,24 @@ export async function allocateOutstandingCreditsInTx(
       allocations: {
         select: { billId: true, amount: true },
       },
+      sourceItem: { select: { bill: { select: { period: true } } } },
     },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
-  for (const credit of [...credits].sort((a, b) => a.id.localeCompare(b.id))) {
-    await lockAgentBillCredit(tx, credit.id);
-  }
+  // 补收只计入来源之后最早的草稿账单：更早的草稿还在时留给它，避免较晚月份先确认
+  // 把补收冻结在错误的月份。
+  const earlierDraftPeriods = (
+    await tx.agentMonthlyBill.findMany({
+      where: {
+        agentUserId: input.agentUserId,
+        status: AgentMonthlyBillStatus.DRAFT,
+        period: { lt: input.period },
+      },
+      select: { period: true },
+    })
+  ).map((draft) => draft.period);
+  const earlierDraftWaiting = (sourcePeriod: string) =>
+    earlierDraftPeriods.some((period) => period > sourcePeriod);
 
   // DRAFT allocations are projections of immutable credits, so rebuilding is
   // safe and prevents repeated generation from double-consuming a credit.
@@ -246,6 +269,7 @@ export async function allocateOutstandingCreditsInTx(
   // 补收（正数，业主 2026-10-01）全额计入最早的草稿账单，同时提高本月可抵扣的额度。
   for (const credit of credits) {
     if (!decimal(credit.requestedAmount).isPositive()) continue;
+    if (earlierDraftWaiting(credit.sourceItem.bill.period)) continue;
     const unallocated = unallocatedOf(credit);
     if (unallocated.lte(0)) continue;
     await tx.agentMonthlyBillAdjustment.create({

@@ -424,6 +424,28 @@ export async function createAgentMonthlyBillCredit(
     if (netAfter.isNegative()) {
       throw new AgentMonthlyBillingError('累计抵扣不能超过来源工单的结算金额（含已补收）');
     }
+    if (input.direction === 'SURCHARGE') {
+      // 补收一经写入不可改：先确认它和最早的草稿账单合计都在金额字段的存储范围内，
+      // 否则根记录留下却永远分摊不出去。
+      const earliestDraft = await tx.agentMonthlyBill.findFirst({
+        where: {
+          agentUserId: source.bill.agentUserId,
+          status: AgentMonthlyBillStatus.DRAFT,
+          period: { gt: source.bill.period },
+        },
+        orderBy: [{ period: 'asc' }, { id: 'asc' }],
+        select: { totalAmount: true, adjustmentAmount: true },
+      });
+      const draftTotalAfter = earliestDraft
+        ? Decimal.max(
+            new Decimal(earliestDraft.totalAmount.toString()),
+            new Decimal(earliestDraft.adjustmentAmount.toString()),
+          ).plus(signed)
+        : signed;
+      if (netAfter.gt(MONEY_MAX) || draftTotalAfter.gt(MONEY_MAX)) {
+        throw new AgentMonthlyBillingError('补收金额过大，超出账单金额上限，请核对后重新录入');
+      }
+    }
 
     const created = await tx.agentMonthlyBillCredit.create({
       data: {

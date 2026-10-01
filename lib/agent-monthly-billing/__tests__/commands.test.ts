@@ -6,6 +6,7 @@ const { tx, dbMock, events, synchronizeMock, clockMock } = vi.hoisted(() => {
   const tx = {
     agentMonthlyBill: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
       findMany: vi.fn(),
     },
@@ -274,6 +275,7 @@ describe('agent monthly bill commands', () => {
       .mockResolvedValueOnce({ settledFeeSnapshot: '100.00', bill: { status: AgentMonthlyBillStatus.CONFIRMED }, credits });
     tx.agentMonthlyBillCredit.findUnique.mockResolvedValue(null);
     tx.agentMonthlyBill.findMany.mockResolvedValue([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue(null);
     tx.agentMonthlyBillCredit.create.mockImplementation(async ({ data }: { data: { requestedAmount: string } }) => ({ id: 'credit-new', requestedAmount: data.requestedAmount }));
   }
   const request = (direction: 'CREDIT' | 'SURCHARGE', amount: string) => createAgentMonthlyBillCredit(
@@ -297,6 +299,19 @@ describe('agent monthly bill commands', () => {
     const pending = request('CREDIT', amount);
     if (allowed) await expect(pending).resolves.toMatchObject({ requestedAmount: '-20.00' });
     else await expect(pending).rejects.toThrow('累计抵扣不能超过来源工单的结算金额（含已补收）');
+  });
+
+  // Codex 审查 P2：补收根记录不可改，写入前确认来源净额与最早草稿账单合计都在存储范围内。
+  it('refuses a surcharge that would overflow the earliest draft total or the source net', async () => {
+    frozenSource([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ totalAmount: '9999999999.00', adjustmentAmount: '0.00' });
+    await expect(request('SURCHARGE', '1.00')).rejects.toThrow('补收金额过大');
+    expect(tx.agentMonthlyBillCredit.create).not.toHaveBeenCalled();
+    frozenSource([{ requestedAmount: '9999999990.00' }]);
+    await expect(request('SURCHARGE', '10.00')).rejects.toThrow('补收金额过大');
+    frozenSource([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ totalAmount: '9999999998.99', adjustmentAmount: '0.00' });
+    await expect(request('SURCHARGE', '1.00')).resolves.toMatchObject({ requestedAmount: '1.00' });
   });
 
   it('refuses a replayed key whose direction changed', async () => {

@@ -66,10 +66,24 @@ it('shows only what to check: a replaced tracking number as old → new, the aut
   await page.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO2');
   await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
   const dialog = page.getByRole('alertdialog', { name: '确认该地址已发货' });
-  await expect.element(dialog.getByRole('definition')).toHaveTextContent('ZTO1 → ZTO2');
+  await expect.element(dialog).toHaveTextContent('运单号 ZTO1 → ZTO2');
   await expect.element(dialog).toHaveTextContent('其余地址继续待发货');
   await expect.element(dialog).toHaveTextContent('生产未报完，将按计划数量代师傅登记并计提成：测试1（局部烫金 1000 个）');
   await expect.element(dialog).not.toHaveTextContent('应收');
+});
+// Codex 审查 P3：改运单号时金额也必须排在第一行，代登记次之，运单号最后。
+it('keeps the receivable first, then the auto-completion, then the changed tracking number', async () => {
+  render({ ...props, autoCompletion: ['测试1（局部烫金 1000 个）'] });
+  await page.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO2');
+  await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+  await expect.element(page.getByRole('alertdialog', { name: '确认发货并结算' })).toBeVisible();
+  const lines = [...document.querySelectorAll('[role="alertdialog"] ul[aria-label="本次影响"] > li')].map((node) => node.textContent ?? '');
+  expect(lines).toEqual([
+    '应收 25.00 元，计入当月账单；月账单确认前仍可更正',
+    '生产未报完，将按计划数量代师傅登记并计提成：测试1（局部烫金 1000 个）',
+    '运单号 ZTO1 → ZTO2',
+  ]);
+  expect(document.querySelector('[role="alertdialog"] dl[aria-label="本次变更"]')).toBeNull();
 });
 it('lists a first tracking number as a fact instead of 未填 → value', async () => {
   render({ ...props, trackingNo: null });

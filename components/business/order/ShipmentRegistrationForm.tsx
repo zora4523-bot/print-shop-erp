@@ -117,15 +117,16 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
       {!props.shipped ? <ConfirmActionController level="L2" disabled={busy || !ready || !props.canConfirm}
         trigger={<Button type="button" disabled={busy || !ready || !props.canConfirm}>确认该地址已发货</Button>}
         onConfirm={() => submit(true)}>
-        {/* 只列确认前要核对的事实：结算金额（确认后锁定）、代登记提成（影响工资）、运单号。 */}
+        {/* 只列确认前要核对的事实，按重要性排序：结算金额（确认后锁定）、代登记提成（影响
+            工资）、运单号。运单号也放进同一列表，改号时不会被「变更」区排到金额前面。 */}
         <ConfirmActionDialog action={props.lastPending ? '确认发货并结算' : '确认该地址已发货'}
-          changes={props.trackingNo && props.trackingNo !== tracking ? [{ label: '运单号', old: props.trackingNo, new: tracking }] : []}
+          changes={[]}
           consequences={[
             props.lastPending
               ? props.chargeable === false ? '本单免收费，确认后工单结算' : `应收 ${props.amount} 元，计入当月账单；月账单确认前仍可更正`
               : '其余地址继续待发货',
             ...(props.autoCompletion?.length ? [`生产未报完，将按计划数量代师傅登记并计提成：${props.autoCompletion.join('、')}`] : []),
-            ...(props.trackingNo && props.trackingNo !== tracking ? [] : [`运单号 ${tracking}`]),
+            props.trackingNo && props.trackingNo !== tracking ? `运单号 ${props.trackingNo} → ${tracking}` : `运单号 ${tracking}`,
           ]}
           confirmText="确认发货" />
       </ConfirmActionController> : null}
