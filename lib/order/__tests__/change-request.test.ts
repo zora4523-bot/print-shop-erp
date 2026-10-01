@@ -2768,6 +2768,59 @@ describe('confirmOrderPricingAtCurrentPublishedVersionInTx', () => {
     );
   });
 
+  // Codex 审查 P2：重算物流（变更申请 / 工厂确认共用）也按最终计费重量维护寄样首重默认标记。
+  it.each([
+    ['1', { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' }],
+    ['2', {}],
+  ] as const)('logistics refresh keeps the sample first-weight marker only while the billable weight equals the default %s kg', async (defaultWeightKg, expectedMarker) => {
+    const order = request().order;
+    const trustedShipping = {
+      ...order.customerCharges[0]!,
+      amount: new Decimal('9.00'),
+      overrideReason: '物流商人工报价',
+      pricingSnapshot: {
+        ...adminConfirmedChargeSnapshot({
+          businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+          shipmentId: 'shipment-1',
+          categoryCode: 'SHIPPING_FEE',
+          priceBookId: 'old-logistics',
+          amount: '9.00',
+          overrideReason: '物流商人工报价',
+        }),
+        weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT',
+        defaultWeightKg,
+      },
+    };
+    mocks.db.orderItem.findMany.mockResolvedValueOnce([
+      { subtotal: new Decimal('1000.00') },
+    ]);
+    mocks.db.orderCustomerCharge.aggregate.mockResolvedValueOnce({
+      _sum: { amount: new Decimal('14.00') },
+    });
+    mocks.calculate.mockImplementationOnce(
+      async (_tx: unknown, args: ServiceArgs) => pendingShippingResult(args, '1'),
+    );
+    mocks.db.order.findUnique.mockResolvedValueOnce({
+      ...order,
+      customerCharges: [trustedShipping, order.customerCharges[1]!],
+    });
+
+    await confirmOrderPricingAtCurrentPublishedVersionInTx(mocks.db as never, {
+      orderId: 'order-1',
+      actorId: admin.id,
+      expectedQuoteToken: quoteToken,
+      now: new Date('2026-09-02T02:00:00.000Z'),
+    });
+
+    type ChargeUpdate = { where: { id: string }; data: { pricingSnapshot: Record<string, unknown> } };
+    const snapshot = (mocks.db.orderCustomerCharge.update.mock.calls as unknown as Array<[ChargeUpdate]>)
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'shipping-1')!.data.pricingSnapshot;
+    expect(Object.fromEntries(['weightBasis', 'defaultWeightKg', 'suspendedSampleDefaultWeightKg']
+      .filter((key) => key in snapshot).map((key) => [key, snapshot[key]]))).toEqual(expectedMarker);
+    expect(snapshot).toMatchObject({ source: 'ADMIN_SNAPSHOT_CONFIRMATION' });
+  });
+
   it('真实引擎整单超量时，工厂确认允许已有可信快递费和制版费覆盖待核行', async () => {
     const order = request().order;
     const shipping = {

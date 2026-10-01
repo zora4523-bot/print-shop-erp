@@ -3129,6 +3129,7 @@ async function readSfCollectChargeContextInTx(
           overrideReason: true,
           priceBookId: true,
           shipmentId: true,
+          pricingSnapshot: true,
           category: { select: { code: true } },
         },
       },
@@ -3462,6 +3463,9 @@ export async function setOrderSfCollect(
         ]),
       );
       const finalized = order.status === OrderStatus.SHIPPED;
+      // 寄样首重默认（DECISIONS 2026-09-30）：按本次计费重量（快递费行的 kg 数量）维护
+      // 标记；到付期间暂存默认首重，恢复寄付且重量未改时恢复标记。
+      const maintainsSampleWeightBasis = order.purpose === 'SAMPLE_SHIPMENT';
       for (const charge of repriced.charges) {
         if (isSfCollect && charge.categoryCode !== 'SHIPPING_FEE') continue;
         const existing = existingByBusinessKey.get(charge.businessKey);
@@ -3485,7 +3489,14 @@ export async function setOrderSfCollect(
             unit: charge.unit,
             suggestedAmount: charge.suggestedAmount,
             amount: charge.amount,
-            pricingSnapshot: charge.pricingSnapshot,
+            pricingSnapshot:
+              maintainsSampleWeightBasis && charge.categoryCode === 'SHIPPING_FEE'
+                ? reconcileSampleWeightBasis(
+                    existing.pricingSnapshot,
+                    charge.pricingSnapshot,
+                    isSfCollect || charge.unit !== 'kg' ? null : charge.quantity,
+                  )
+                : charge.pricingSnapshot,
             overrideReason: charge.overrideReason,
             finalizedById: isSfCollect || finalized ? actor.id : null,
             finalizedAt: isSfCollect || finalized ? chargeChangedAt : null,

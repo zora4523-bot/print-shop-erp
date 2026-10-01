@@ -4,9 +4,11 @@ import Decimal from 'decimal.js';
  * 寄样首重默认（DECISIONS 2026-09-30）。提交时把收件省份的中通首重写成计费重量，
  * 收费快照记 `weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT` 与当时的 `defaultWeightKg`。
  *
- * 之后每次重写快照（履约费用确认、发货定稿）都按同一条规则维护标记：最终计费重量
- * 仍等于提交时的默认首重才保留，否则说明重量已按实际更正，去掉标记。不能按
- * 「请求里有没有重量」判断——发货登记会把已存的默认重量原样回填。
+ * 之后每个重写寄样快递费快照的入口（履约费用确认、销售切换到付、变更申请重算物流、
+ * 发货定稿）都按同一条规则维护标记：最终计费重量仍等于提交时的默认首重才保留，否则
+ * 说明重量已按实际更正，去掉标记。不能按「请求里有没有重量」判断——发货登记会把
+ * 已存的默认重量原样回填。到付不按重量计费，期间不带标记，默认首重暂存在
+ * `suspendedSampleDefaultWeightKg`，恢复寄付且重量未改时据此恢复标记。
  */
 export const SAMPLE_FIRST_WEIGHT_DEFAULT = 'SAMPLE_FIRST_WEIGHT_DEFAULT';
 
@@ -34,6 +36,9 @@ function asDecimal(value: unknown): Decimal | null {
  */
 export function sampleDefaultWeightKg(snapshot: unknown): Decimal | null {
   const object = asObject(snapshot);
+  if (object?.suspendedSampleDefaultWeightKg !== undefined) {
+    return asDecimal(object.suspendedSampleDefaultWeightKg);
+  }
   if (object?.weightBasis !== SAMPLE_FIRST_WEIGHT_DEFAULT) return null;
   if (object.defaultWeightKg !== undefined) return asDecimal(object.defaultWeightKg);
   const basis = asObject(asObject(object.line)?.basis);
@@ -51,10 +56,9 @@ export function sampleFirstWeightDefaultMarker(weightKg: Decimal.Value) {
 }
 
 /**
- * 重写 `next` 上的标记：最终重量等于默认首重则保留，否则去掉。默认首重依次取
- * `previous`、调用方已核对身份的 `evidence`（到付期间保存的原寄付快照）、`next`
- * 自带的——寄付切到付再恢复寄付时，到付那一版已没有标记，不论恢复原运费还是手填
- * 运费，都要从原寄付证据认回默认首重。到付（最终重量 null）一律去掉。
+ * 重写 `next` 上的标记：最终重量等于默认首重则保留；最终没有计费重量（到付）则只
+ * 暂存默认首重、不带标记；重量已改则全部去掉。默认首重依次取 `previous`、调用方已
+ * 核对身份的 `evidence`（到付期间保存的原寄付快照）、`next` 自带的。
  */
 export function reconcileSampleWeightBasis<T extends SnapshotObject>(
   previous: unknown,
@@ -62,14 +66,19 @@ export function reconcileSampleWeightBasis<T extends SnapshotObject>(
   finalWeightKg: Decimal.Value | null | undefined,
   ...evidence: unknown[]
 ): T {
-  const { weightBasis, defaultWeightKg, ...rest } = next;
+  const { weightBasis, defaultWeightKg, suspendedSampleDefaultWeightKg, ...rest } = next;
   void weightBasis;
   void defaultWeightKg;
+  void suspendedSampleDefaultWeightKg;
   const defaultWeight = [previous, ...evidence, next]
     .map(sampleDefaultWeightKg)
     .find((weight) => weight !== null) ?? null;
+  if (!defaultWeight) return rest as T;
   const finalWeight = asDecimal(finalWeightKg);
-  if (defaultWeight && finalWeight?.equals(defaultWeight)) {
+  if (finalWeight === null) {
+    return { ...rest, suspendedSampleDefaultWeightKg: defaultWeight.toString() } as unknown as T;
+  }
+  if (finalWeight.equals(defaultWeight)) {
     return { ...rest, ...sampleFirstWeightDefaultMarker(defaultWeight) } as unknown as T;
   }
   return rest as T;

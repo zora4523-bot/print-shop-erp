@@ -115,6 +115,7 @@ import {
   type OrderChangeCatalogIdentity,
   type OrderChangeCatalogProduct,
 } from './change-request-catalog-identity';
+import { reconcileSampleWeightBasis } from './sample-weight-basis';
 
 const CHANGEABLE_ORDER_STATUSES = ORDER_MODIFIABLE_STATUSES;
 const CANCELLABLE_BY_REQUEST_STATUSES: OrderStatus[] = [
@@ -1929,6 +1930,24 @@ function assertExternalLogisticsChargeIdentity(input: {
   return standardCharges;
 }
 
+/**
+ * 寄样首重默认（DECISIONS 2026-09-30）：重算物流也按本次计费重量（快递费行的 kg 数量，
+ * 到付为 null）维护标记。只有寄样快递费快照带这些字段，其他快照原样通过。
+ */
+function withSampleWeightBasis(
+  charge: { categoryCode: string; unit: string | null; quantity: string | null },
+  isSfCollect: boolean,
+  previous: unknown,
+  snapshot: Prisma.InputJsonObject,
+): Prisma.InputJsonObject {
+  if (charge.categoryCode !== 'SHIPPING_FEE') return snapshot;
+  return reconcileSampleWeightBasis(
+    previous,
+    snapshot as Record<string, unknown>,
+    isSfCollect || charge.unit !== 'kg' ? null : charge.quantity,
+  ) as Prisma.InputJsonObject;
+}
+
 async function prepareExternalLogisticsChargeRefresh(input: {
   client: Prisma.TransactionClient;
   calculation: CatalogCreateOrderQuoteCalculation;
@@ -2174,47 +2193,52 @@ async function prepareExternalLogisticsChargeRefresh(input: {
         unit: charge.unit,
         suggestedAmount: charge.suggestedAmount,
         amount: charge.amount,
-        pricingSnapshot: administratorConfirmed
-          ? buildTrustedAdminChargePricingSnapshot({
-              previous: refreshedChargeSnapshot(
+        pricingSnapshot: withSampleWeightBasis(
+          charge,
+          input.calculation.input.isSfCollect,
+          existing.pricingSnapshot,
+          administratorConfirmed
+            ? buildTrustedAdminChargePricingSnapshot({
+                previous: refreshedChargeSnapshot(
+                  charge.pricingSnapshot,
+                  {
+                    requestId: input.requestId,
+                    reviewedAt: input.reviewedAt,
+                    amount: charge.amount,
+                    overrideReason: administratorReason,
+                  },
+                ),
+                now: input.reviewedAt,
+                actorId: input.actorId!,
+                previousPriceRevision: input.previousPriceRevision!,
+                charge: {
+                  orderId: existing.orderId,
+                  businessKey: existing.businessKey,
+                  shipmentId: existing.shipmentId,
+                  categoryCode: charge.categoryCode,
+                  status: charge.status,
+                  priceBookId: charge.priceBookId,
+                  sourceRuleId: charge.sourceRuleId,
+                  quantity: charge.quantity,
+                  unit: charge.unit,
+                  unitPrice: existing.unitPrice,
+                  suggestedAmount: charge.suggestedAmount,
+                  amount: charge.amount,
+                  isAdjustment: existing.isAdjustment,
+                  approvalReference: existing.approvalReference,
+                  overrideReason: administratorReason,
+                },
+              })
+            : refreshedChargeSnapshot(
                 charge.pricingSnapshot,
                 {
                   requestId: input.requestId,
                   reviewedAt: input.reviewedAt,
                   amount: charge.amount,
-                  overrideReason: administratorReason,
+                  overrideReason: null,
                 },
               ),
-              now: input.reviewedAt,
-              actorId: input.actorId!,
-              previousPriceRevision: input.previousPriceRevision!,
-              charge: {
-                orderId: existing.orderId,
-                businessKey: existing.businessKey,
-                shipmentId: existing.shipmentId,
-                categoryCode: charge.categoryCode,
-                status: charge.status,
-                priceBookId: charge.priceBookId,
-                sourceRuleId: charge.sourceRuleId,
-                quantity: charge.quantity,
-                unit: charge.unit,
-                unitPrice: existing.unitPrice,
-                suggestedAmount: charge.suggestedAmount,
-                amount: charge.amount,
-                isAdjustment: existing.isAdjustment,
-                approvalReference: existing.approvalReference,
-                overrideReason: administratorReason,
-              },
-            })
-          : refreshedChargeSnapshot(
-              charge.pricingSnapshot,
-              {
-                requestId: input.requestId,
-                reviewedAt: input.reviewedAt,
-                amount: charge.amount,
-                overrideReason: null,
-              },
-            ),
+        ),
         overrideReason: administratorReason,
         finalizedById: finalizesCharge ? input.actorId! : null,
         finalizedAt: finalizesCharge ? input.reviewedAt : null,

@@ -5683,6 +5683,35 @@ describe('setOrderSfCollect — 后期履约标识', () => {
     expect(dbMock.orderShipment.update).not.toHaveBeenCalled();
   });
 
+  // Codex 审查 P2：待核价的寄样单（如另一地址无报价）由销售切换到付，走这条通用切换
+  // 分支而非履约费用。到付期间暂存默认首重、不带标记；恢复寄付且重量未改时恢复标记。
+  it.each([
+    ['prepaid → SF suspends the sample first-weight default', false, '1', { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' }, { suspendedSampleDefaultWeightKg: '1' }],
+    ['SF → prepaid at the unchanged weight restores the marker', true, '1', { suspendedSampleDefaultWeightKg: '1' }, { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' }],
+    ['SF → prepaid after the weight changed drops the default', true, '2', { suspendedSampleDefaultWeightKg: '1' }, {}],
+  ] as const)('%s on a pending sample order', async (_label, wasSfCollect, weightKg, previousMarker, expectedMarker) => {
+    dbMock.order.findFirst.mockResolvedValue({
+      ...sfSnapshot(OrderStatus.SUBMITTED, wasSfCollect, 'sales-1', OrderSettlementType.EXTERNAL_SALES),
+      purpose: 'SAMPLE_SHIPMENT', samplePackagingRuleCode: null, pricingStatus: 'PENDING_ADMIN_CONFIRMATION',
+    });
+    const context = externalChargeContext({ destinationProvince: '广东', weightKg });
+    context.shipments[0]!.status = 'PENDING';
+    Object.assign(context.customerCharges[0]!, {
+      pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE', ...previousMarker },
+    });
+    dbMock.order.findUnique.mockResolvedValue(context);
+    dbMock.order.update.mockResolvedValue({ id: 'order-1', status: OrderStatus.SUBMITTED });
+
+    await setOrderSfCollect('order-1', !wasSfCollect, salesActor);
+
+    const snapshot = dbMock.orderCustomerCharge.update.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'charge-shipping')!.data.pricingSnapshot;
+    const markerKeys = ['weightBasis', 'defaultWeightKg', 'suspendedSampleDefaultWeightKg'] as const;
+    expect(Object.fromEntries(markerKeys.filter((key) => key in snapshot).map((key) => [key, snapshot[key]])))
+      .toEqual(expectedMarker);
+  });
+
   it('取消顺丰到付时款式重量事实不完整则保持待终价', async () => {
     dbMock.order.findFirst.mockResolvedValue(
       sfSnapshot(
