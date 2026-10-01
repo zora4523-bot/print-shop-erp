@@ -99,6 +99,8 @@ function renderDetail(model = detailModel(), canEdit = true, simpleProduction = 
 }
 
 async function settleLayout() {
+  // Base UI dialogs hold data-starting-style (scale-95) for a frame before their transition exists.
+  await expect.poll(() => document.querySelector('[data-starting-style]')).toBeNull();
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
 }
