@@ -432,6 +432,19 @@ export type SfCollectChargeCorrection = {
   customerChargeOverrideReason: string | null;
 };
 
+/**
+ * 与取消到付时的计价一致：更正里留空的字段表示沿用已存值，不能把已存重量 / 省份清空，
+ * 否则收费快照（含寄样首重默认标记）与落库的计费重量对不上。
+ */
+function sfCollectShipmentCorrectionData(correction: SfCollectChargeCorrection) {
+  return {
+    ...(correction.destinationProvince !== null
+      ? { destinationProvince: correction.destinationProvince }
+      : {}),
+    ...(correction.weightKg !== null ? { weightKg: correction.weightKg } : {}),
+  };
+}
+
 async function assertCreateOrderProductsInTx(
   txClient: Prisma.TransactionClient,
   items: readonly { productId?: string | null }[],
@@ -3526,10 +3539,7 @@ export async function setOrderSfCollect(
         for (const correction of trustedCorrections) {
           await prismaTx.orderShipment.update({
             where: { id: correction.shipmentId },
-            data: {
-              destinationProvince: correction.destinationProvince,
-              weightKg: correction.weightKg,
-            },
+            data: sfCollectShipmentCorrectionData(correction),
             select: { id: true },
           });
         }
