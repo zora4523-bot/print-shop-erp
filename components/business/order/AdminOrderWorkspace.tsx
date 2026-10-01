@@ -38,7 +38,7 @@ const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
 const SIGNALS: Array<{ key: AdminOrderSignal; label: string }> = [
   // 看板卡 9 列时内容宽约 70px，标签超过 5 个字会在词中折行。
   { key: 'pending-quantity', label: '产量待核对' },
-  { key: 'pending-confirmation', label: '待处理' },
+  { key: 'pending-confirmation', label: '待下发检查' },
   { key: 'pending-pricing', label: '待核价' },
   { key: 'pending-change', label: '变更申请' },
   { key: 'pending-release', label: '待下发生产' },
@@ -156,7 +156,8 @@ export function AdminOrderWorkspace({
               className="pl-9"
             />
           </div>
-          <Button type="submit">应用筛选</Button>
+          {/* 与其他列表一致（09-29 #36）：筛选是次要按钮，页头「新建工单」是本页主操作。 */}
+          <Button type="submit" variant="outline">应用筛选</Button>
           {/* 快捷筛选整组换行：1280 宽下不再把最后一个开关单独挤到第二行。
               开关文字不随状态改变（原「取消仅星标」等会改变按钮宽度、引起换行跳动），
               选中态由 selected 变体 + ✕ 表达，读屏由 aria-current 与「再次点击取消」表达。 */}
@@ -522,7 +523,7 @@ function OrderWorkspaceHeader({ exportControls }: { exportControls: ReactNode })
         actions={
           <>
             {exportControls}
-            <Link href="/orders/new" className={buttonVariants({ variant: 'outline' })}>
+            <Link href="/orders/new" className={buttonVariants()}>
               新建工单
             </Link>
           </>

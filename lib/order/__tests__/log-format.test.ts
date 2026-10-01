@@ -51,7 +51,7 @@ describe('formatLogValue', () => {
   });
 
   it.each([
-    ['PENDING_FACTORY', '待处理'], ['CONFIRMED', '待下发生产'], ['REJECTED', '已驳回'],
+    ['PENDING_FACTORY', '待下发检查'], ['CONFIRMED', '待下发生产'], ['REJECTED', '已驳回'],
     ['ON_HOLD', '已暂停'], ['RELEASED', '生产中'], ['FOILING', '生产中'], ['PACKING', '待打包发货'], ['SETTLED', '已结算'],
   ])('formats canonical workflow status %s consistently in logs', (status, label) => {
     expect(orderStatusZh(status)).toBe(label);

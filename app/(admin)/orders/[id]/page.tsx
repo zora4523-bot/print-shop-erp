@@ -58,7 +58,11 @@ import {
   isOrderEditable,
 } from '@/lib/order/editable-fields';
 import { roleLabel } from '@/lib/auth/role-labels';
-import { PRODUCTION_TASK_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import {
+  CUSTOMER_CHARGE_STATUS_REGISTRY,
+  customerChargeDisplayStatus,
+  PRODUCTION_TASK_STATUS_REGISTRY,
+} from '@/lib/ui/status-registry';
 import {
   actionLabel,
   formatOrderLogChanges,
@@ -66,7 +70,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
-import { ActionNotice, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { ActionNotice, StatusBadge, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { BreadcrumbEntity } from '@/components/business/admin/breadcrumb-entity';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
@@ -635,30 +639,14 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                       </p>
                     ) : null}
                   </div>
-                  <Badge
-                    variant={
-                      charge.status === 'FINAL' ||
-                      isTrustedAdminChargePricingSnapshot(
-                        charge.pricingSnapshot,
-                        charge,
-                      )
-                        ? 'secondary'
-                        : 'outline'
-                    }
-                  >
-                    {charge.status === 'FINAL'
-                      ? '已确认'
-                      : isTrustedAdminChargePricingSnapshot(
-                            charge.pricingSnapshot,
-                            charge,
-                          )
-                        ? '已人工核对（待结算）'
-                      : charge.status === 'WAIVED'
-                        ? '已免收'
-                        : charge.status === 'PENDING_AMOUNT'
-                          ? '金额待定'
-                        : '创建时估算'}
-                  </Badge>
+                  {/* 收费状态走注册表（ui-规范 §6「Badge 不承载状态」，审查 D-10）。 */}
+                  {(() => {
+                    const definition = CUSTOMER_CHARGE_STATUS_REGISTRY[customerChargeDisplayStatus(
+                      String(charge.status),
+                      isTrustedAdminChargePricingSnapshot(charge.pricingSnapshot, charge),
+                    )];
+                    return <StatusBadge tone={definition.tone}>{definition.label}</StatusBadge>;
+                  })()}
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                   <div>
