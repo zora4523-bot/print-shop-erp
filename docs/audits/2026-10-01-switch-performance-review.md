@@ -27,8 +27,9 @@
 | 师傅端（375 宽、4× CPU） | 7 页首载 | TTFB 11–57 ms | load 88–180 ms（`/worker/orders` 795 ms） | — |
 
 - **点击响应本身不卡**：INP 全部 ≤ 192 ms，侧边栏点击 76 ms 内就有反馈；首载 JS gzip 管理端中位 365 KB、销售 414 KB、师傅 228 KB。
-- **慢在服务端数据量**：离群点全部是随历史线性增长的查询——`/owner/agent-bills` 冷 12.8 s / 热 7.0 s（该分组刻意无骨架，整页像冻住）、
-  `/orders` 默认待办队列 9–11 s（骨架 70 ms 出现后长时间等待）。
+- **慢在服务端数据量**：离群点是随历史线性增长的查询——`/owner/agent-bills` 冷 12.8 s / 热 7.0 s（该分组刻意无骨架，整页像冻住；
+  根因是逐行 EXISTS 整表扫描，见下方修复）。`/orders` 待办队列当时测得 9–11 s，**同日在负载 3.4 下复测仅 ~150 ms**，属机器争用放大，
+  见「未修复」第 1 项。
 
 ## 已修复（6 个提交）
 
@@ -50,13 +51,14 @@
 业主 09-21 口径是「实测收益不明显就停下说明」。以下项目要么改动面大（队列语义、详情页结构），要么本机负载下无法给出干净数字，
 故只记录证据与建议，不在本批动手。
 
-1. **P1 `/orders` 默认待办队列的汇总随历史线性变慢**（`lib/order/admin-workspace.ts:528-583`）。待办队列 where 是含「待审改单」
-   相关 `EXISTS`（不带状态条件）的 OR，任何索引都用不上；`orderItem.aggregate` 的计划是扫全部 9 万款式再逐条回表过滤
-   （单独执行 9 s，本机负载放大），5 个 count + 3 个 sum 在 repeatable-read 事务内串行重复同一过滤。建议：像
-   `loadCurrentPrintOrderIds` 一样先解析小集合（待审改单 / 人工核价 / 待定金额的 orderId），把 where 变成纯列谓词 + 小 id 列表；
-   先在接近生产的机器上 `EXPLAIN ANALYZE` 定量。今天生产库 0 工单，按每天 30 单约 3 年到 3 万。
-2. **P2 管理员手机端点侧栏无任何反馈**：`AppSidebar` 点击即关 Sheet，唯一的 pending 指示在已关闭的 Sheet 里，触屏又没有悬停预取；
-   建议 Sheet 在 pathname 变化后再关，或在页头加细进度条（交互方案，需业主确认）。
+1. **（已复测，不改）`/orders` 默认待办队列汇总**。负载 45 时测得的 9–11 s 是机器争用：同日负载降到 3.4 后，直接调用
+   `loadAdminOrderWorkspace`（3 万工单库，4 次取后 3 次）待办 145–159 ms、生产 71–74 ms、已完结 124–126 ms、全部 131–134 ms；
+   原「9 s」的款式数量 SUM 单独 `EXPLAIN ANALYZE` 为 48–72 ms。计划仍随款式总量线性增长（约 0.5 ms / 千款式），但到十年量级
+   仍在百毫秒级；按业主 09-21「实测收益不明显就停」口径不改队列筛选结构，留作长期观察项。
+2. **（已修复）管理员手机端点侧栏无任何反馈**：原 `AppSidebar` 点击即关抽屉，唯一的 pending 指示随抽屉消失、触屏又无预取，旧页面
+   原样停到服务端返回。改为地址真正变化后再关抽屉（含浏览器前进 / 后退），被点项的加载指示全程可见；点当前页不会导航，立即收起。
+   Browser Mode 新测试旧实现失败；生产构建 375 宽 + 4× CPU + 人为放慢服务端 1.5 s：点「工单」后 0.9 s 仍在旧地址、抽屉打开且
+   被点项 `data-pending="true"`，2.3 s 新页提交后抽屉自动关闭；冒烟 3 项（含抽屉）通过。
 3. **P2 工单详情 `/orders/[id]` 约 110–125 条查询、约 10 段串行**，无 Suspense 分段（`app/(admin)/orders/[id]/page.tsx:183-380`，
    `getAdminOrderDetailPresentation` 重读整单）。建议把 191–193 行三处独立读取并入并行批、生产/工资面板包 Suspense、复用
    `getOrderDetail` 结果；先按 09-21 的埋点方式量化。
@@ -70,8 +72,12 @@
    `/owner/background-jobs` 按 `createdAt` 排序无索引且账本无保留期；客户计价每切一次 section 按 100 组分页在并行事务里重读整本规则。
 7. **P2 导出轮询在单次渲染 > 3 秒时会叠加**（`OrderExportControls.tsx:79-91` `setInterval(router.refresh, 3000)`）；导出结束即停，
    根因是第 1 项。可改为上一次刷新完成后再排下一次。
-8. **P2（中等把握）师傅「完成生产」按天全局排他 advisory lock**（`lib/production/completion-registration.ts:39`）：下班集中登记时
-   所有师傅串行；报工可改共享锁、结算批保留排他——涉及并发语义，需确认没有依赖「两个报工互斥」的地方。
+8. **（已核对，不改）师傅「完成生产」的报工日闸口锁**（`lib/production/completion-registration.ts:39`）。审查建议把报工方改为共享锁、
+   结算批保留排他；核对后**不可行**：`ProductionJob` / `ProductionWage` / `ProductionReport` / `PieceworkSettlement` 的数据库触发器
+   （`guard_production_fact_write`、`protect_production_wage`、`validate_foil_wage_report`、`protect_production_quantity_settlement`）
+   在每次写入时都以**排他**方式再取同一闸口。应用层改共享锁不仅拿不到并发收益，还会让两个同时登记的师傅各持共享锁、在触发器里
+   互等升级为排他——必然死锁。真要并行需同时重写这些工资守卫触发器，代价是改动工资事故防线，收益只是并发登记时多等一个短事务；
+   不做。
 9. **P3**：列表分页 / 排序 / 搜索提交无 pending 提示（`AdminDataTable`、各 `next/form` 筛选）；`owner/rules`、`owner/salary`、
    师傅详情等无 `loading.tsx`；`sidebar_state` cookie 写了不读（每次整页进入侧栏重置展开）；详情页 `generateMetadata` 与页面重复读取
    未用 `cache()`；React Compiler 未启用；`/worker/orders` 精确 count 覆盖全部历史工单。
