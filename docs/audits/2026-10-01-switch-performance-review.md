@@ -59,17 +59,19 @@
    原样停到服务端返回。改为地址真正变化后再关抽屉（含浏览器前进 / 后退），被点项的加载指示全程可见；点当前页不会导航，立即收起。
    Browser Mode 新测试旧实现失败；生产构建 375 宽 + 4× CPU + 人为放慢服务端 1.5 s：点「工单」后 0.9 s 仍在旧地址、抽屉打开且
    被点项 `data-pending="true"`，2.3 s 新页提交后抽屉自动关闭；冒烟 3 项（含抽屉）通过。
-3. **P2 工单详情 `/orders/[id]` 约 110–125 条查询、约 10 段串行**，无 Suspense 分段（`app/(admin)/orders/[id]/page.tsx:183-380`，
-   `getAdminOrderDetailPresentation` 重读整单）。建议把 191–193 行三处独立读取并入并行批、生产/工资面板包 Suspense、复用
-   `getOrderDetail` 结果；先按 09-21 的埋点方式量化。
-4. **P2 客户端输入卡顿（未实测）**：建单表单 `OrderForm.tsx:734` `useWatch({ control })` 订阅全部字段，每次按键重渲约 2,700 行组件
-   并做两次整表 `JSON.stringify`；改单/编辑器每次按键对每款遍历「产品 × 规格」并以抛异常过滤
-   （`change-request-catalog-identity.ts:193-230`）。需在低端安卓上量 INP 后再改。
-5. **P2 师傅端设计图用原图做缩略**：`DesignImageGallery.tsx:42-46` 无 `loading="lazy"`，签名未带已有的
-   `DESIGN_THUMBNAIL_PROCESS`；上传上限 10 MiB。本地无真实 OSS，未能量化。
-6. **P2 其他缺索引 / 无上限查询（本次代表数据里这些表为空，未量化）**：`/foreman/outsource` 全量外协单无分页、无 `createdAt` 索引；
-   计件结算页 `ProductionReport.reportedAt`、`ProductionWage(workDate, settlementId)`、`ProductionJob.status` 前导索引缺失；
-   `/owner/background-jobs` 按 `createdAt` 排序无索引且账本无保留期；客户计价每切一次 section 按 100 组分页在并行事务里重读整本规则。
+3. **（已实测，不改）工单详情 `/orders/[id]`**：生产构建 + 3 万工单库，4 张不同状态工单各 3 次：每次 117–131 条 SQL，但 SQL 合计仅
+   3–6 ms，TTFB 12–62 ms、HTML 完成 54–158 ms。查询条数多而单条极廉价；生产数据库在独立主机，内网往返按 0.2–0.5 ms 估算多出几十毫秒，
+   收益不明显，按 09-21 口径不重构。
+4. **（已实测，不改）建单表单按键**：销售账号 `/orders/new`、4× 降速 CPU、逐字输入：工单名称 / 设计款名称没有任何超过 16 ms 的按键事件；
+   数量框单款 40–64 ms、5 个设计款时 72 ms，远低于 200 ms 的「良好」INP 线。
+5. **（已修复 `82044882`）师傅端设计图用原图做缩略**：新增 OSS 缩放档 `w_480`，网格用预览图 + `loading="lazy" decoding="async"`，链接仍为原图。
+   同画面 A/B（375 宽、4× CPU）：页面 load 810 ms → 30 ms；单张 4.2 MB → 26 KB（一页 6 张约 25 MB → 157 KB）。
+6. **其他缺索引 / 无上限查询（补齐合成数据后实测）**：
+   - 外协单列表（已修复 `d6b16afa` + 索引 `394729df`）：3 千条时整页 37,011 个 DOM 节点、HTML 197 KB、约 400 ms；分页（每页 50）后 1,165 个节点、23 KB。
+   - 后台任务账本（已加索引 `394729df`）：30 万行取最近 100 条 53 ms → 0.03 ms。
+   - 计件结算日：未结算工资按日查询 0.4 ms（现有 `(workerId, workDate, settlementId)` 索引已覆盖，审查结论不成立）；待核义务 7.3 万任务 19 ms，不改。
+     `ProductionReport.reportedAt` 属旧报工路径，现行一键完成不再写入，未造数。
+   - 客户计价按 section 重读规则：未量化，留待后续。
 7. **P2 导出轮询在单次渲染 > 3 秒时会叠加**（`OrderExportControls.tsx:79-91` `setInterval(router.refresh, 3000)`）；导出结束即停，
    根因是第 1 项。可改为上一次刷新完成后再排下一次。
 8. **（已核对，不改）师傅「完成生产」的报工日闸口锁**（`lib/production/completion-registration.ts:39`）。审查建议把报工方改为共享锁、
