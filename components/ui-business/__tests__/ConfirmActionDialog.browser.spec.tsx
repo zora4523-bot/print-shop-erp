@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
 import { Button } from '@/components/ui/button';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import { ConfirmActionController, ConfirmActionDialog } from '../ConfirmActionDialog';
 import '@/app/globals.css';
 
@@ -53,6 +54,7 @@ for (const [width, height] of [[360, 800], [390, 844], [768, 1024], [1024, 768],
       expect(document.body.textContent).not.toContain('请确认影响范围');
       expect(document.body.textContent).toContain('¥193.30');
       expect(document.body.textContent).toContain('¥289.80');
+      await waitForStableLayout();
       const element = document.querySelector('[role="alertdialog"]')!;
       const box = element.getBoundingClientRect();
       expect(box.left).toBeGreaterThanOrEqual(0);
@@ -60,7 +62,6 @@ for (const [width, height] of [[360, 800], [390, 844], [768, 1024], [1024, 768],
       expect(box.top).toBeGreaterThanOrEqual(0);
       expect(box.bottom).toBeLessThanOrEqual(height);
       expect(element.scrollWidth).toBeLessThanOrEqual(element.clientWidth);
-      await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
       expect(await commands.checkShellAccessibility('[role="alertdialog"]')).toEqual([]);
       await userEvent.keyboard('{Escape}');
       await expect.element(dialog).not.toBeInTheDocument();

@@ -20,6 +20,7 @@ vi.mock('next/link', () => ({
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import { AdminOrderDetailView } from '../AdminOrderDetailView';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -98,9 +99,11 @@ function renderDetail(model = detailModel(), canEdit = true, simpleProduction = 
   />));
 }
 
+// Same wait as the confirmation-layer specs: Base UI enter/exit styles cleared, finite animations
+// finished, geometry stable across paints, within the shared 5 s budget. A local expect.poll only
+// had Vitest's default 1 s, which a loaded run can exceed (Codex review P2).
 async function settleLayout() {
-  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-  await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+  await waitForStableLayout();
 }
 
 function geometryFailures(scope: ParentNode, width: number, touch = width <= 768) {

@@ -5,6 +5,7 @@ import { page, commands, userEvent } from 'vitest/browser';
 import '@/app/globals.css';
 import { Button } from '@/components/ui/button';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import type { OrderChangePricingPreview } from '@/lib/order/change-request';
 vi.mock('next/link', () => ({default: ({children, ...props}: React.ComponentProps<'a'>) => <a {...props}>{children}</a>}));
 vi.mock('next/navigation', () => ({useRouter: () => ({refresh: vi.fn()})}));
@@ -88,7 +89,7 @@ for (const [width, height] of [[360,800],[390,844],[768,1024],[1024,768],[1440,9
       await page.getByRole('button',{name:'批准变更',exact:true}).click();
       await expect.element(page.getByRole('alertdialog')).toBeVisible();
       expect(document.body.textContent?.split(approval.consequences[0])).toHaveLength(2);
-      await Promise.all(document.getAnimations().map(a=>a.finished.catch(()=>undefined)));
+      await waitForStableLayout();
       expect(await commands.checkShellAccessibility('[role="alertdialog"]')).toEqual([]);
       const dialog=document.querySelector('[role="alertdialog"]')!;
       expect(dialog.scrollWidth).toBeLessThanOrEqual(dialog.clientWidth);

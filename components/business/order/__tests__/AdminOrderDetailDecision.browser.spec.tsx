@@ -7,6 +7,7 @@ import { OrderStatus } from '@/generated/prisma/enums';
 import type { AdminOrderBatchActionResult } from '@/actions/admin-order-workflow';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { batchOrder } from './admin-order-batch-fixture';
+import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 
 const { batchAction, refresh, sharedPanel } = vi.hoisted(() => ({
@@ -112,8 +113,7 @@ async function submitRecall() {
 }
 
 async function settleDialog() {
-  await expect.poll(() => document.querySelector('[data-slot="alert-dialog-content"]')?.hasAttribute('data-starting-style')).toBe(false);
-  await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
+  await waitForStableLayout();
 }
 
 // 确认层统一走 ConfirmActionController（ui 审查 #10）：勾选「已收回」后才能确认，
