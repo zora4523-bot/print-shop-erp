@@ -796,7 +796,7 @@ export async function cancelOutsourceOrder(
 // Reads
 // ─────────────────────────────────────────────────────────────────────
 
-export const OUTSOURCE_LIST_PAGE_SIZE = 50;
+const OUTSOURCE_LIST_PAGE_SIZE = 50;
 
 // 外协单随历史只增不减：分页读取，避免整页把全部历史渲染成上万个 DOM 节点
 // （3 千条实测 3.7 万节点、197 KB HTML）。(createdAt, id) 倒序保证翻页稳定。
