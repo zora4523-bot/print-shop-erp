@@ -72,9 +72,9 @@ afterEach(() => {
 function renderWorkspace(orders: AdminOrderWorkspaceRow[] = [{
   ...row(),
   customName: '春节企业定制红包 · 多款设计',
-}]) {
+}], search: Record<string, string> = {}) {
   flushSync(() => root.render(<AdminOrderWorkspace
-    query={parseAdminOrderWorkspaceQuery({}).query}
+    query={parseAdminOrderWorkspaceQuery(search).query}
     issues={[]}
     options={{ submitters: [{ id: 'sales-1', label: '业务员甲' }], workers: [], crafts: [{ id: 'craft-1', label: '局部烫金' }] }}
     billingStats={{ receivableAmount: '0', receivableBillCount: 0, unbilledOrderCount: 0, draftBillCount: 0 }}
@@ -98,9 +98,17 @@ describe('admin order list reference layout', () => {
         for (const element of host.querySelectorAll<HTMLElement>('a, button, select, input:not([aria-hidden="true"]):not([type="hidden"]), [role="checkbox"]')) {
           const rect = element.getBoundingClientRect();
           if (!rect.width || !rect.height) continue;
-          expect(rect.left).toBeGreaterThanOrEqual(0);
-          expect(rect.right).toBeLessThanOrEqual(width);
+          // 横向滚动条里的项可以滚出视口，滚动条本身必须在视口内（与 tests/visual 的 viewport-x 豁免同口径）。
+          const strip = element.closest<HTMLElement>('[data-slot="admin-order-scroll-strip"]');
+          const bounds = strip && strip.scrollWidth > strip.clientWidth ? strip.getBoundingClientRect() : rect;
+          expect(bounds.left).toBeGreaterThanOrEqual(0);
+          expect(bounds.right).toBeLessThanOrEqual(width);
           expect(rect.height).toBeGreaterThanOrEqual(minimumTargetSize(element));
+        }
+        for (const strip of scrollStrips()) {
+          expect(stripRowCount(strip), `${stripName(strip)} 单行`).toBe(1);
+          // 宽容器照旧铺开：看板 9 列、队列与快捷筛选都放得下，条内不滚动。
+          if (width >= 1280) expect(strip.scrollWidth, `${stripName(strip)} 宽屏不滚动`).toBeLessThanOrEqual(strip.clientWidth);
         }
         if (width <= 768) expectNarrowRowAlignment();
         expect(await commands.checkShellAccessibility('[data-testid="order-list-fixture"]')).toEqual([]);
@@ -180,7 +188,69 @@ describe('admin order list reference layout', () => {
     await expect.element(page.getByRole('link', { name: '下发生产', exact: true })).toHaveAttribute('href', '/orders/order-1');
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
   });
+  // 2026-10-01 审查 L-8：手机上首张工单前曾有约 900px（看板 3×3、队列 3 行、筛选 4 行）。
+  it('375×667: dashboard, queues and quick filters each scroll in one row above the first order', async () => {
+    await page.viewport(375, 667);
+    renderWorkspace(referenceRows());
+    await expect.element(page.getByRole('navigation', { name: '工单队列' })).toBeVisible();
+    const strips = scrollStrips();
+    expect(strips.map(stripName)).toEqual(['工单决定看板', '工单队列', '快捷筛选']);
+    for (const strip of strips) {
+      expect(stripRowCount(strip), `${stripName(strip)} 单行`).toBe(1);
+      expect(strip.scrollWidth, `${stripName(strip)} 在条内横向滚动`).toBeGreaterThan(strip.clientWidth);
+      strip.scrollLeft = strip.scrollWidth;
+      const last = (strip.lastElementChild as HTMLElement).getBoundingClientRect();
+      expect(last.right, `${stripName(strip)} 滚到底时最后一项完整可见`).toBeLessThanOrEqual(strip.getBoundingClientRect().right + 0.5);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(375);
+    const workspaceTop = element('[data-slot="admin-order-workspace"]').getBoundingClientRect().top;
+    const firstRowTop = element('li[data-order-id]').getBoundingClientRect().top;
+    expect(firstRowTop - workspaceTop, '首张工单之上的页头、看板、队列、筛选与合计').toBeLessThanOrEqual(NARROW_CHROME_BUDGET);
+  });
+  it('375×667: the selected signal, queue and quick filter scroll into view inside their strips', async () => {
+    await page.viewport(375, 667);
+    renderWorkspace(undefined, { signal: 'due-today' });
+    expectSelectedVisibleInStrip('[aria-label="工单决定看板"] [aria-current]', '今日待发');
+    // 同一棵树换查询：切换后（activeKey 变化）也要把新的选中项移进可见范围。
+    renderWorkspace(undefined, { queue: 'done', unbilled: 'yes' });
+    expectSelectedVisibleInStrip('[aria-label="工单队列"] [aria-current]', '已结算/取消');
+    expectSelectedVisibleInStrip('[aria-label="快捷筛选"] [aria-current]', '仅未出账');
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(375);
+  });
 });
+
+/** 375 夹具（无应用顶栏）里首张工单之上的高度上限：实测 482px，改为横向滚动前约 800px。 */
+const NARROW_CHROME_BUDGET = 500;
+
+function element(selector: string): HTMLElement {
+  const result = host.querySelector<HTMLElement>(selector);
+  if (!result) throw new Error(`Missing layout element: ${selector}`);
+  return result;
+}
+
+function scrollStrips(): HTMLElement[] {
+  return [...host.querySelectorAll<HTMLElement>('[data-slot="admin-order-scroll-strip"]')];
+}
+
+function stripName(strip: HTMLElement): string {
+  return strip.getAttribute('aria-label') ?? strip.parentElement?.getAttribute('aria-label') ?? '';
+}
+
+function stripRowCount(strip: HTMLElement): number {
+  return new Set([...strip.children].map((item) => Math.round(item.getBoundingClientRect().top))).size;
+}
+
+function expectSelectedVisibleInStrip(selector: string, label: string) {
+  const selected = element(selector);
+  expect(selected.textContent).toContain(label);
+  const strip = selected.closest<HTMLElement>('[data-slot="admin-order-scroll-strip"]');
+  if (!strip) throw new Error(`${label} 不在横向滚动条内`);
+  expect(strip.scrollLeft, `${label} 原本在可见范围外，条内已滚动`).toBeGreaterThan(0);
+  const box = selected.getBoundingClientRect();
+  const bounds = strip.getBoundingClientRect();
+  expect(box.left, `${label} 左缘可见`).toBeGreaterThanOrEqual(bounds.left - 0.5);
+  expect(box.right, `${label} 右缘可见`).toBeLessThanOrEqual(bounds.right + 0.5);
+}
 // 2026-10-01 审查 L-8：窄容器四列——左列字段与标题左对齐，数量（无进度条时）与行动作
 // 靠右、与标题右缘对齐；「交期 · 数量」「金额 · 按钮」各占一行，手机上卡片更矮。
 function expectNarrowRowAlignment() {

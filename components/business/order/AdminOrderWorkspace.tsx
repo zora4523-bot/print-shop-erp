@@ -20,6 +20,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { LinkPendingHint, PageHeader } from '@/components/ui-business';
+import { AdminOrderScrollStrip } from './AdminOrderScrollStrip';
 import { AdminOrderWorkspaceList } from './AdminOrderWorkspaceList';
 import styles from './AdminOrderWorkspace.module.css';
 import { OrderQueuePending } from './OrderQueuePending';
@@ -99,7 +100,7 @@ export function AdminOrderWorkspace({
         billingStats={billingStats}
       />
 
-      <section className="min-w-0 space-y-2">
+      <section className="@container min-w-0 space-y-2">
         {/* 队列标签条在表单外、不带 key：切换队列时只更新 aria-current，不重挂载
             （审查 #38）。表单 key 只跟已应用的可见筛选值走——切队列/看板时未点
             「应用筛选」的输入保留（仍不生效），清除/应用筛选后才按 URL 重置。
@@ -158,10 +159,16 @@ export function AdminOrderWorkspace({
           </div>
           {/* 与其他列表一致（09-29 #36）：筛选是次要按钮，页头「新建工单」是本页主操作。 */}
           <Button type="submit" variant="outline">应用筛选</Button>
-          {/* 快捷筛选整组换行：1280 宽下不再把最后一个开关单独挤到第二行。
+          {/* 快捷筛选整组换行：1280 宽下不再把最后一个开关单独挤到第二行；窄容器整组一行横向滚动，
+              与「清除筛选」同行（审查 L-8）。
               开关文字不随状态改变（原「取消仅星标」等会改变按钮宽度、引起换行跳动），
               选中态由 selected 变体 + ✕ 表达，读屏由 aria-current 与「再次点击取消」表达。 */}
-          <div role="group" aria-label="快捷筛选" className="flex min-w-0 flex-wrap items-center gap-2">
+          <AdminOrderScrollStrip
+            role="group"
+            aria-label="快捷筛选"
+            activeKey={[rejectedFilterActive, query.starred, query.pendingWages, query.unbilled].map((on) => (on ? 1 : 0)).join('')}
+            className={cn(NARROW_SCROLL_STRIP, 'flex-[1_1_12rem] items-center gap-2 @min-[60rem]:flex-initial')}
+          >
             <QuickFilterLink
               href={buildTableHref('/orders', {}, adminRejectedFilterParams(query))}
               active={rejectedFilterActive}
@@ -206,7 +213,7 @@ export function AdminOrderWorkspace({
               active={query.unbilled}
               label="仅未出账"
             />
-          </div>
+          </AdminOrderScrollStrip>
           {hasUserFilters ? (
             <OrderFilterClearLink href={clearFiltersHref} className={buttonVariants({ variant: 'ghost' })} />
           ) : null}
@@ -334,7 +341,11 @@ export function excludedFeeSummary(
 
 function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; data: AdminOrderWorkspacePage; }) {
   return (
-    <nav aria-label="工单队列" className="flex min-w-0 flex-wrap gap-2">
+    <nav aria-label="工单队列" className="min-w-0">
+      <AdminOrderScrollStrip
+        activeKey={query.signal ? '' : query.queue}
+        className={cn(NARROW_SCROLL_STRIP, 'gap-2')}
+      >
       {QUEUES.map((queue) => {
         const active = query.queue === queue.key && !query.signal;
         const target = updateAdminOrderWorkspaceQuery(query, {
@@ -365,6 +376,7 @@ function OrderQueuesSection({ query, data }: { query: AdminOrderWorkspaceQuery; 
           </Link>
         );
       })}
+      </AdminOrderScrollStrip>
     </nav>
   );
 }
@@ -378,14 +390,18 @@ function AdminOrderDecisionDashboard({
   counts: AdminOrderWorkspacePage['counts']['signals'];
   billingStats: BillingStats;
 }) {
-  // 9 张卡（8 个信号 + 待收款）按容器宽度取 3 列或 9 列：两档都整除，任何视口都不会出现孤行（§8）。
+  // 9 张卡（8 个信号 + 待收款）宽容器 9 列一行；窄容器（<56rem）不再排成 3×3（手机上占约 240px），
+  // 改为单行横向滚动，卡片按内容取宽、最窄 6rem，375 宽露出第 4 张的一角提示可滑（审查 L-8）。
   // 9 列时待收款卡占 1.5 份：金额比计数长，等宽列会把「¥ 15,395.29」从数字中间折开。
   return (
     <section
       aria-label="工单决定看板"
       className="@container"
     >
-      <div className="grid grid-cols-3 gap-2.5 @min-[56rem]:grid-cols-[repeat(8,minmax(0,1fr))_minmax(0,1.5fr)]">
+      <AdminOrderScrollStrip
+        activeKey={query.signal ?? ''}
+        className="-m-1 flex gap-2.5 overflow-x-auto overscroll-x-contain p-1 @min-[56rem]:m-0 @min-[56rem]:grid @min-[56rem]:grid-cols-[repeat(8,minmax(0,1fr))_minmax(0,1.5fr)] @min-[56rem]:overflow-visible @min-[56rem]:p-0"
+      >
       {SIGNALS.map((signal) => {
         const active = query.signal === signal.key;
         const count = counts[signal.key];
@@ -443,13 +459,20 @@ function AdminOrderDecisionDashboard({
           待收款 · {billingStats.receivableBillCount.toLocaleString('zh-CN')} 张
         </span>
       </Link>
-      </div>
+      </AdminOrderScrollStrip>
     </section>
   );
 }
 
 const DECISION_CARD_LAYOUT =
-  'relative flex h-auto min-w-0 flex-col items-start justify-start gap-0 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none';
+  'relative flex h-auto min-w-24 shrink-0 flex-col items-start justify-start gap-0 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none @min-[56rem]:min-w-0';
+
+/**
+ * 队列与快捷筛选在窄容器（<960px）排成一行、条内横向滚动，不再各自折成 2–3 行（审查 L-8）；
+ * -m-1 p-1 给焦点框留出不被滚动容器裁切的空间，外框位置不变。≥960px 恢复原来的换行排布。
+ */
+const NARROW_SCROLL_STRIP =
+  'flex min-w-0 -m-1 overflow-x-auto overscroll-x-contain p-1 @min-[60rem]:m-0 @min-[60rem]:flex-wrap @min-[60rem]:overflow-visible @min-[60rem]:p-0';
 
 /** 看板数字的语义色：逾期 = 失败，待核价 = 主强调（§4.3），其余待办 = 风险。 */
 function signalCountClassName(signal: AdminOrderSignal): string | undefined {
