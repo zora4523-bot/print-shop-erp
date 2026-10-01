@@ -31,8 +31,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount(props: Parameters<typeof AutoPrint>[0]) {
-  flushSync(() => root.render(<AutoPrint {...props} />));
+function mount(props: Omit<Parameters<typeof AutoPrint>[0], 'orderId'>) {
+  flushSync(() => root.render(<AutoPrint orderId="order-1" {...props} />));
 }
 
 const marked: OrderPrintRecordResult = { status: 'success', outcome: 'MARKED' };
@@ -50,8 +50,13 @@ describe('AutoPrint print recording', () => {
     expect(recordPrinted).toHaveBeenCalledOnce();
     await expect.poll(() => document.querySelector('[role="status"]')?.textContent).toBe('正在记为已打印…');
     expect(close).not.toHaveBeenCalled();
+    // 记录成功后通知同一浏览器里打开着的工单列表 / 详情刷新。
+    const channel = new BroadcastChannel('order-print-recorded');
+    const announced = new Promise<unknown>((done) => { channel.onmessage = (event) => done(event.data); });
     settle(marked);
     await expect.poll(() => close.mock.calls.length).toBe(1);
+    await expect(announced).resolves.toEqual({ orderIds: ['order-1'] });
+    channel.close();
     expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 

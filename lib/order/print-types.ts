@@ -108,8 +108,6 @@ export type PrintOrder = {
   id: string;
   orderNo: string;
   workOrderVersion: number;
-  /** 工单修订号：与打印内容同一次读取，用于「打印即记已打印」核对纸上是否为当前内容；不进 PDF 快照摘要。 */
-  revision: number;
   status: OrderStatus;
   hasPendingChange: boolean;
   customName?: string | null;

@@ -214,7 +214,7 @@ async function standaloneOrderFixture(): Promise<PrintOrder> {
       defectQty: 0,
     }));
   return {
-    id: 'standalone-order', orderNo, workOrderVersion: 3, revision: 1, customName: '新春平安封四款',
+    id: 'standalone-order', orderNo, workOrderVersion: 3, customName: '新春平安封四款',
     kind: 'NORMAL', status: 'RELEASED', hasPendingChange: false, isUrgent: true, isSfCollect: false,
     promisedDate: new Date('2026-09-10T00:00:00+08:00'),
     externalSalesName: '视觉回归销售',

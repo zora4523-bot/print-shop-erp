@@ -362,39 +362,57 @@ export async function supersedeOlderOrderPrintRequestsInTx(
   return { requestJobIds: unresolved.map((request) => request.id) };
 }
 
-/** 打印页 / 批量打印文件渲染时的工单身份：版本与修订号都对上，纸上内容才是当前内容。 */
-export type RenderedPrintInput = { orderId: string; workOrderVersion: number; revision: number };
+/**
+ * 一次打印尝试：打印页每次渲染、批量打印文件每张工单各有唯一的 `attemptKey`，记为已打印回执的
+ * 幂等键。重试只重放这一次的回执，不会认领之后才新建的打印任务。
+ */
+type PrintAttempt = { orderId: string; workOrderVersion: number; attemptKey: string };
 export type RenderedPrintOutcome = 'MARKED' | 'ALREADY_PRINTED' | 'STALE' | 'NOT_PRINTABLE';
 
 /**
- * 点「打印」即记已打印（业主 2026-10-02）：管理员在打印页关闭浏览器打印对话框、或打开 /
- * 下载批量打印文件时调用，把渲染时那份内容记为已打印。
+ * 点「打印」即记已打印（业主 2026-10-02）：管理员在打印页关闭浏览器打印对话框、或打开 / 下载
+ * 批量打印文件时调用，把纸上那份内容记为已打印。在工单级联锁内：
  *
- * - 工单版本或修订号已变（改单、重新安排生产师傅等都会改修订号）→ `STALE`，不记录：
- *   纸上不是当前内容，不能顶掉之后产生的补打任务。
- * - 有当前版本的待打印任务就记它；没有、且本版本从未打印过（例如下发时没建打印任务）
- *   就在同一事务里建任务并记已打印；本版本已打印过 → `ALREADY_PRINTED`。
+ * - 同一 `attemptKey` 已有回执 → `ALREADY_PRINTED`（重放，不再找新任务）。
+ * - 版本已变、或 `contentIsCurrent` 判定纸上内容不是当前内容（如同版本换了生产师傅）→ `STALE`。
+ *   调用方负责比较：打印页比生产指令摘要，批量文件比完整快照摘要；比较在锁内进行，
+ *   持锁写入方（改单、排单等）无法在比较与记录之间插入。
+ * - 有当前版本待打印任务就记它；没有、且本版本从未打印过（例如下发时没建打印任务）就在
+ *   同一事务里建任务并记已打印；本版本已打印过 → `ALREADY_PRINTED`。
  * - 浏览器取消打印对话框也会触发记录——纸在管理员手上，看得见，重打即可。
  */
 export async function recordRenderedPrintInTx(
   tx: PrintTx,
-  input: RenderedPrintInput,
+  attempt: PrintAttempt,
   actor: OrderPrintActor,
+  contentIsCurrent: () => Promise<boolean>,
 ): Promise<RenderedPrintOutcome> {
   assertAdmin(actor);
+  const attemptKey = checkedKey(attempt.attemptKey);
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
-    input.orderId,
+    attempt.orderId,
   )}))`;
+  const replay = await tx.orderPrintJob.findUnique({
+    where: { idempotencyKey: attemptKey },
+    select: { orderId: true, state: true },
+  });
+  if (replay) {
+    if (replay.orderId !== attempt.orderId || replay.state !== OrderPrintJobState.PRINTED) {
+      throw new OrderPrintJobError('IDEMPOTENCY_CONFLICT', '同一打印记录标识已用于其他操作');
+    }
+    return 'ALREADY_PRINTED';
+  }
   const order = await tx.order.findUnique({
-    where: { id: input.orderId },
-    select: { status: true, workOrderVersion: true, revision: true },
+    where: { id: attempt.orderId },
+    select: { status: true, workOrderVersion: true },
   });
   if (!order) throw new OrderPrintJobError('ORDER_NOT_FOUND', '工单不存在');
-  if (order.workOrderVersion !== input.workOrderVersion || order.revision !== input.revision) return 'STALE';
+  if (order.workOrderVersion !== attempt.workOrderVersion) return 'STALE';
   if (!canConfirmOrderPrinted(order.status)) return 'NOT_PRINTABLE';
+  if (!(await contentIsCurrent())) return 'STALE';
   const pending = await tx.orderPrintJob.findFirst({
     where: {
-      orderId: input.orderId,
+      orderId: attempt.orderId,
       workOrderVersion: order.workOrderVersion,
       state: OrderPrintJobState.PENDING,
       resolution: { is: null },
@@ -405,34 +423,22 @@ export async function recordRenderedPrintInTx(
   let requestJobId = pending?.id;
   if (!requestJobId) {
     const printed = await tx.orderPrintJob.findFirst({
-      where: { orderId: input.orderId, workOrderVersion: order.workOrderVersion, state: OrderPrintJobState.PRINTED },
+      where: { orderId: attempt.orderId, workOrderVersion: order.workOrderVersion, state: OrderPrintJobState.PRINTED },
       select: { id: true },
     });
     if (printed) return 'ALREADY_PRINTED';
     if (!PRINTABLE_STATUSES.has(order.status)) return 'NOT_PRINTABLE';
-    // 工单锁内已确认没有待打印任务，任务标识只需唯一，不承担重放语义。
+    // 工单锁内已确认没有待打印任务，任务标识只需唯一，不承担重放语义（重放由 attemptKey 承担）。
     requestJobId = (await createOrderPrintRequestInTx(tx, {
-      orderId: input.orderId,
+      orderId: attempt.orderId,
       workOrderVersion: order.workOrderVersion,
       printKind: OrderPrintKind.INITIAL,
       reason: '管理员直接打印',
-      idempotencyKey: `auto-print-request:${randomUUID()}`,
+      idempotencyKey: `print-request:${randomUUID()}`,
     }, actor)).jobId;
   }
-  await markOrderPrintRequestPrintedInTx(
-    tx,
-    { requestJobId, idempotencyKey: `auto-print:${requestJobId}` },
-    actor,
-  );
+  await markOrderPrintRequestPrintedInTx(tx, { requestJobId, idempotencyKey: attemptKey }, actor);
   return 'MARKED';
-}
-
-export async function recordRenderedPrint(
-  input: RenderedPrintInput,
-  actor: OrderPrintActor,
-): Promise<RenderedPrintOutcome> {
-  assertAdmin(actor);
-  return db.$transaction((tx) => recordRenderedPrintInTx(tx, input, actor));
 }
 
 /**

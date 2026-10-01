@@ -157,7 +157,7 @@ function AdminDecisionActions({
   run: (task: DecisionTask) => void;
   runOneBatch: (command: 'CREATE_PRINT') => void;
 }) {
-  const armPrintRefresh = useRefreshAfterPrint();
+  const armPrintRefresh = useRefreshAfterPrint(order.id);
   return (
     <div className="mt-3 flex flex-wrap gap-2">
       {order.capabilities.reject ? (
@@ -198,8 +198,8 @@ function AdminDecisionActions({
           }
         />
       ) : null}
-      {/* 待打印时「打印」本身就会记录，「加入待打印」只留给已打印过、需要补打进队列的工单。 */}
-      {order.capabilities.createPrint && !order.capabilities.markPrinted ? (
+      {/* 待打印时「打印」本身就会记录；「加入待打印」只留给已打印过、需要补打进队列的工单（见能力定义）。 */}
+      {order.capabilities.createPrint ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('CREATE_PRINT')}>
           加入待打印
         </Button>

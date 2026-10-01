@@ -15,7 +15,9 @@ import { registerProductionCompletion } from '../completion-registration';
 import { allocateProductionWages } from '@/lib/salary/production-wages';
 import { lockPieceworkSettlement } from '@/lib/salary/piecework-settlement';
 import { activateProductionOperationsInTx } from '../operation-materialization-service';
-import { recordRenderedPrint } from '@/lib/order/print-jobs';
+import { newPrintPageAttempt, recordPrintPage } from '@/lib/order/print-record';
+import { getOrderForPrint } from '@/lib/order/print-view';
+import { getSetting } from '@/lib/settings';
 import { registerShipment } from '@/lib/order/shipment-registration';
 import { assertShipOrderReadinessInTx } from '@/lib/order';
 import { reportProductionOperation } from '../operation-reporting';
@@ -267,25 +269,31 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
 
   it('creates a reprint task when a printed but unproduced order changes owner', async () => {
     const f = await assigned();
-    const print = await db.orderPrintJob.findFirstOrThrow({ where: { orderId: f.order.id, state: 'PENDING' } });
-    const printedPage = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
-    const rendered = { orderId: f.order.id, workOrderVersion: print.workOrderVersion, revision: printedPage.revision };
-    await expect(recordRenderedPrint(rendered, admin)).resolves.toBe('MARKED');
+    // 业主 2026-10-02 点打印即记已打印：走真实打印页的「渲染 → 记录」。
+    const baseUrl = 'http://localhost:3000';
+    const renderPage = async () => newPrintPageAttempt((await getOrderForPrint(f.order.id, admin, baseUrl))!, (await getSetting('factory_name')).name);
+    const firstPage = await renderPage();
+    await expect(recordPrintPage(firstPage, admin, baseUrl)).resolves.toBe('MARKED');
+    const stalePage = await renderPage();
     const current = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
     const newOwner = await newWorker();
+    // 纸上只印师傅姓名：换成不同姓名的师傅，纸面内容才真的不同。
+    await db.user.update({ where: { id: newOwner.id }, data: { displayName: '接手师傅' } });
     const request = { requestKey: randomUUID(), orders: [{ ...f.request.orders[0], revision: current.revision, assignments: Object.fromEntries(Object.keys(f.request.orders[0].assignments).map(key => [key, newOwner.id])) }] };
     await expect(publishProductionDispatch(request, admin)).rejects.toThrow('尚未生产');
     await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '原师傅确认尚未开工', notActuallyProduced: true }, admin);
     await publishProductionDispatch(request, admin); await publishProductionDispatch(request, admin);
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } })).workerId).toBe(newOwner.id);
     expect(await db.orderPrintJob.count({ where: { orderId: f.order.id, state: 'PENDING', printKind: 'REPRINT' } })).toBe(1);
-    // 业主 2026-10-02 点打印即记已打印：同版本换师傅只改修订号。仍开着的旧打印页（纸上是原师傅）
-    // 再关闭打印对话框，不能把新的补打任务记为已打印；按新内容打印的页面才能。
-    await expect(recordRenderedPrint(rendered, admin)).resolves.toBe('STALE');
+    // 同版本换师傅：仍开着的旧打印页（纸上是原师傅）关闭打印对话框，不能把新的补打任务记为已打印；
+    // 第一页记录响应丢失后的重试只重放原回执；按新内容打开的打印页才能记录。
+    await expect(recordPrintPage(stalePage, admin, baseUrl)).resolves.toBe('STALE');
+    await expect(recordPrintPage(firstPage, admin, baseUrl)).resolves.toBe('ALREADY_PRINTED');
     const reprint = await db.orderPrintJob.findFirstOrThrow({ where: { orderId: f.order.id, state: 'PENDING', printKind: 'REPRINT' } });
     expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.id } })).toBe(0);
-    const reassigned = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
-    await expect(recordRenderedPrint({ ...rendered, revision: reassigned.revision }, admin)).resolves.toBe('MARKED');
+    const freshPage = await renderPage();
+    expect(freshPage.contentKey).not.toBe(stalePage.contentKey);
+    await expect(recordPrintPage(freshPage, admin, baseUrl)).resolves.toBe('MARKED');
     expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.id, state: 'PRINTED' } })).toBe(1);
   });
 

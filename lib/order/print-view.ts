@@ -405,7 +405,6 @@ export async function getOrderForPrint(
     id: order.id,
     orderNo: order.orderNo,
     workOrderVersion: order.workOrderVersion,
-    revision: order.revision,
     status: order.status,
     simpleProduction: order.simpleProduction,
     hasPendingChange: order.changeRequests.length > 0,

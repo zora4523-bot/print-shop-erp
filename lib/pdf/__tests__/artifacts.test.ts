@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
-const oss = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn() }));
+const oss = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn(), head: vi.fn() }));
 vi.mock('../../oss/client', () => ({ createOssClient: () => oss }));
 vi.mock('../../oss/config', () => ({ readOssConfig: () => ({ configured: true, cfg: {} }) }));
-import { checkPdfArtifactStorage, cleanupOldPdfArtifacts, PDF_ARTIFACT_TTL_MS, readPdfArtifact, writePdfArtifact } from '../artifacts';
+import { assertPdfArtifactAvailable, checkPdfArtifactStorage, cleanupOldPdfArtifacts, PDF_ARTIFACT_TTL_MS, readPdfArtifact, writePdfArtifact } from '../artifacts';
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'erp-pdf-storage-test-'));
@@ -55,6 +55,23 @@ describe('PDF artifact persistence', () => {
     expect(await readPdfArtifact('job.pdf')).toEqual(content);
     oss.get.mockResolvedValue({ content, res: { headers: { 'last-modified': new Date(Date.now() - PDF_ARTIFACT_TTL_MS - 1000).toUTCString() } } });
     await expect(readPdfArtifact('job.pdf')).rejects.toThrow('PDF_ARTIFACT_EXPIRED');
+  });
+  // 批量打印记录前只核对文件仍可交付，不读内容（业主 2026-10-02 点打印即记已打印）。
+  it('checks availability without reading content, in both stores', async () => {
+    await writePdfArtifact('fresh.pdf', Buffer.from('pdf'));
+    await expect(assertPdfArtifactAvailable('fresh.pdf')).resolves.toBeUndefined();
+    await expect(assertPdfArtifactAvailable('missing.pdf')).rejects.toMatchObject({ code: 'ENOENT' });
+    const past = new Date(Date.now() - PDF_ARTIFACT_TTL_MS - 1000);
+    await utimes(join(dir, 'fresh.pdf'), past, past);
+    await expect(assertPdfArtifactAvailable('fresh.pdf')).rejects.toThrow('PDF_ARTIFACT_EXPIRED');
+    vi.stubEnv('PDF_ARTIFACT_STORAGE', 'oss');
+    oss.head.mockResolvedValueOnce({ res: { headers: { 'last-modified': new Date().toUTCString() } } });
+    await expect(assertPdfArtifactAvailable('job.pdf')).resolves.toBeUndefined();
+    expect(oss.head).toHaveBeenCalledWith('private/order-pdf/job.pdf');
+    expect(oss.get).not.toHaveBeenCalled();
+    oss.head.mockResolvedValueOnce({ res: { headers: { 'last-modified': past.toUTCString() } } });
+    await expect(assertPdfArtifactAvailable('job.pdf')).rejects.toThrow('PDF_ARTIFACT_EXPIRED');
+    await expect(assertPdfArtifactAvailable('../x.pdf')).rejects.toThrow('PDF_ARTIFACT_INVALID');
   });
 });
 

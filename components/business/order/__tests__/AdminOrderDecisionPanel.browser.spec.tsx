@@ -296,7 +296,7 @@ describe('admin order decisions require review before mutation', () => {
     const order = baseOrder();
     order.status = OrderStatus.RELEASED;
     order.printPending = true;
-    order.capabilities = { ...order.capabilities, createPrint: true, markPrinted: true };
+    order.capabilities = { ...order.capabilities, createPrint: false, markPrinted: true };
     renderOrder(order);
     const link = page.getByRole('link', { name: '打印', exact: true });
     await expect.element(link).toHaveAttribute('href', '/print/orders/order-1?autoprint=1');

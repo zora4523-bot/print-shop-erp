@@ -9,6 +9,7 @@ import { OrderPrintLayout } from '@/lib/order/print-layout';
 import { AutoPrint } from '@/components/business/order/AutoPrint';
 import { PERMISSIONS } from '@/lib/auth/permissions';
 import { recordOrderPrintedAction } from '@/actions/order-print-record';
+import { newPrintPageAttempt } from '@/lib/order/print-record';
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -52,17 +53,17 @@ export default async function OrderPrintViewPage({
     autoprintFlag.toLowerCase() !== 'false';
 
   // 业主 2026-10-02：点「打印」即记已打印。只有能处理工单的管理员、且是浏览器打印入口
-  // （autoprint）时，打印对话框关闭后记录本次渲染的内容（版本 + 修订号）；服务端 PDF 不带
-  // autoprint，不会记录。
+  // （autoprint）时，打印对话框关闭后记录本页内容（生产指令摘要 + 本次打印尝试标识）；
+  // 服务端 PDF 不带 autoprint，不会记录。
   const canRecordPrint = autoprint && PERMISSIONS['order:change:review'].some((role) => role === user.role);
   const recordPrinted = canRecordPrint
-    ? recordOrderPrintedAction.bind(null, { orderId: id, workOrderVersion: order.workOrderVersion, revision: order.revision })
+    ? recordOrderPrintedAction.bind(null, newPrintPageAttempt(order, factoryName))
     : undefined;
 
   return (
     <>
       <OrderPrintLayout key={`${id}:${order.workOrderVersion}`} order={order} factoryName={factoryName} />
-      <AutoPrint key={`prepare:${id}:${order.workOrderVersion}`} enabled={autoprint} recordPrinted={recordPrinted} />
+      <AutoPrint key={`prepare:${id}:${order.workOrderVersion}`} orderId={id} enabled={autoprint} recordPrinted={recordPrinted} />
     </>
   );
 }

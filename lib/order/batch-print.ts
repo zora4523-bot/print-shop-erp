@@ -8,14 +8,14 @@ import { buildPrintHtml } from '@/lib/order/print-html';
 import { getSetting } from '@/lib/settings';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
-import { readPdfArtifact, writePdfArtifact, cleanupOldPdfArtifacts, PdfArtifactStorageError } from '@/lib/pdf/artifacts';
+import { assertPdfArtifactAvailable, readPdfArtifact, writePdfArtifact, cleanupOldPdfArtifacts, PdfArtifactStorageError } from '@/lib/pdf/artifacts';
 import { isPdfInfrastructureFailure } from '@/lib/pdf/capability';
 import { databaseNow } from '@/lib/background-jobs/clock';
 import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from '@/lib/background-jobs/heartbeat-policy';
 import { enqueueBackgroundJob, BackgroundJobLeaseLostError } from '@/lib/background-jobs/repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 import { BATCH_PRINT_MAX, batchPrintRequestSchema, type BatchPrintIssue, type BatchPrintStatus } from './batch-print-contract';
-import { recordRenderedPrintInTx, type RenderedPrintInput } from './print-jobs';
+import { recordRenderedPrintInTx } from './print-jobs';
 
 const BATCH_PRINT_MAX_BYTES = 100 * 1024 * 1024;
 
@@ -34,6 +34,8 @@ export class BatchPrintAccessError extends Error {}
 export class BatchPrintSelectionError extends Error {
   constructor(public readonly issues: BatchPrintIssue[]) { super('Invalid batch print selection'); }
 }
+/** 打印文件已过期或读不到：不能把没拿到的文件记为已打印。 */
+export class BatchPrintArtifactUnavailableError extends Error {}
 
 async function requireAdmin(actorId: string) {
   const account = await db.user.findUnique({ where: { id: actorId }, select: { isActive: true, role: true } });
@@ -54,11 +56,11 @@ async function loadCurrent(payload: Payload, index: number) {
 async function validateAll(payload: Payload) {
   await requireAdmin(payload.actorId);
   const issues: BatchPrintIssue[] = [];
-  const printed: RenderedPrintInput[] = [];
+  const printed: { index: number; orderId: string; workOrderVersion: number }[] = [];
   for (let i = 0; i < payload.orders.length; i++) {
     try {
       const { order } = await loadCurrent(payload, i);
-      printed.push({ orderId: order.id, workOrderVersion: order.workOrderVersion, revision: order.revision });
+      printed.push({ index: i, orderId: order.id, workOrderVersion: order.workOrderVersion });
     } catch (error) {
       if (!(error instanceof BatchPrintSelectionError)) throw error;
       issues.push(...error.issues);
@@ -216,20 +218,32 @@ export async function downloadBatchPrint(actorId: string, jobId: string) {
 }
 
 /**
- * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；记录由点击时的
- * Server Action 调用这里完成。先按文件内容重新核对每张工单，再在一个事务里按工单 id 顺序
- * 加锁逐单记录——任一失败整批回滚，不会出现前几张已记、文件却没拿到的半截状态。核对后
- * 又被修改的工单（修订号变化）不记。
+ * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；浏览器点「打开 PDF」
+ * 「下载 PDF」时先由 Server Action 调这里，成功后再去取文件：
+ *
+ * 1. 文件仍在有效期内可读，否则不记（没拿到的文件不算打印）。
+ * 2. 一个事务里按工单 id 顺序（与批量排单同一比较方式）加锁，锁内重新读取每张工单，完整快照
+ *    摘要须与文件一致；任一工单不一致、已不在生产中都整批回滚，不留半截记录。
+ * 3. 每张工单的回执幂等键为 `batch-print:<任务>:<工单>`，重试只重放本批次，不认领之后新建的任务。
  */
 export async function recordBatchPrint(actorId: string, jobId: string): Promise<{ marked: number } | null> {
   const { job, payload } = await ownedJob(actorId, jobId);
   const result = resultSchema.safeParse(job.result);
   if (job.status !== 'SUCCEEDED' || !result.success || result.data.issues.length || !result.data.artifactName) return null;
-  const printed = (await validateAll(payload)).sort((a, b) => (a.orderId < b.orderId ? -1 : a.orderId > b.orderId ? 1 : 0));
+  try { await assertPdfArtifactAvailable(result.data.artifactName); }
+  catch { throw new BatchPrintArtifactUnavailableError(); }
+  const printed = (await validateAll(payload)).sort((a, b) => a.orderId.localeCompare(b.orderId));
   const actor = { id: actorId, role: Role.ADMIN };
   const outcomes = await db.$transaction(async (tx) => {
     const recorded = [];
-    for (const version of printed) recorded.push(await recordRenderedPrintInTx(tx, version, actor));
+    for (const { index, orderId, workOrderVersion } of printed) {
+      const outcome = await recordRenderedPrintInTx(tx, { orderId, workOrderVersion, attemptKey: `batch-print:${jobId}:${orderId}` }, actor,
+        async () => { await loadCurrent(payload, index); return true; });
+      if (outcome === 'STALE' || outcome === 'NOT_PRINTABLE') {
+        throw new BatchPrintSelectionError([{ position: index + 1, message: outcome === 'STALE' ? '工单内容已变化，请重新选择并生成' : '工单已不在生产中，请取消选择后重新生成' }]);
+      }
+      recorded.push(outcome);
+    }
     return recorded;
   }, { timeout: 30_000 });
   return { marked: outcomes.filter((outcome) => outcome === 'MARKED').length };

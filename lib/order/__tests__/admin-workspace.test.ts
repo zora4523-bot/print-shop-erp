@@ -427,7 +427,8 @@ describe('admin order workspace predicates', () => {
       hasIncompleteProduction: false,
     };
     const unqueued = resolveAdminPrintFacts({ status: OrderStatus.RELEASED, workOrderVersion: 2, requests: [] });
-    expect(resolveAdminOrderCapabilities({ ...base, printFacts: unqueued })).toMatchObject({ markPrinted: true, createPrint: true });
+    // 从未打印的当前版本已在待打印队列里，直接「打印」；「加入待打印」只用于已打印过的补打入队。
+    expect(resolveAdminOrderCapabilities({ ...base, printFacts: unqueued })).toMatchObject({ markPrinted: true, createPrint: false });
     const printed = resolveAdminPrintFacts({ status: OrderStatus.RELEASED, workOrderVersion: 2,
       requests: [{ id: 'v2', workOrderVersion: 2, resolution: { state: OrderPrintJobState.PRINTED } }] });
     expect(resolveAdminOrderCapabilities({ ...base, printFacts: printed })).toMatchObject({ markPrinted: false, createPrint: true });

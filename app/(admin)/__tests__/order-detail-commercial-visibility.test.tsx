@@ -208,6 +208,7 @@ vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {
     throw new Error('NEXT_NOT_FOUND');
   }),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 import OrderDetailPage from '@/app/(admin)/orders/[id]/page';

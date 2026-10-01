@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { OrderPrintRecordResult } from '@/actions/order-print-record.types';
 import { Button } from '@/components/ui/button';
+import { announcePrintRecorded } from './use-refresh-after-print';
 import { paginatePrintDocument } from '@/lib/order/print-pagination';
 import { requirePrintFonts } from '@/lib/order/print-fonts';
 
@@ -204,7 +205,8 @@ const NOT_RECORDED: Record<'STALE' | 'NOT_PRINTABLE', string> = {
 //      cleanly.
 //
 // Gating on the flag keeps the two callers from colliding.
-export function AutoPrint({ enabled, recordPrinted }: {
+export function AutoPrint({ orderId, enabled, recordPrinted }: {
+  orderId: string;
   enabled: boolean;
   /** 业主 2026-10-02：打印对话框关闭后把本页内容记为已打印（仅管理员的浏览器打印入口传入）。 */
   recordPrinted?: () => Promise<OrderPrintRecordResult>;
@@ -227,6 +229,7 @@ export function AutoPrint({ enabled, recordPrinted }: {
         setRecord({ kind: 'failed', message: NOT_RECORDED[result.outcome], retry: false });
       } else {
         setRecord({ kind: 'idle' });
+        announcePrintRecorded([orderId]);
         closeTab();
       }
     } catch {
@@ -234,7 +237,7 @@ export function AutoPrint({ enabled, recordPrinted }: {
     } finally {
       savingRef.current = false;
     }
-  }, [recordPrinted]);
+  }, [orderId, recordPrinted]);
 
   useEffect(() => {
     const stopPreparing = preparePrintDocument(document, window);

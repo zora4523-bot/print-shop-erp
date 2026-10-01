@@ -3,28 +3,31 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/permissions';
-import { BatchPrintAccessError, BatchPrintSelectionError, recordBatchPrint } from '@/lib/order/batch-print';
-import { OrderPrintJobError, recordRenderedPrint } from '@/lib/order/print-jobs';
+import { BatchPrintAccessError, BatchPrintArtifactUnavailableError, BatchPrintSelectionError, recordBatchPrint } from '@/lib/order/batch-print';
+import { OrderPrintJobError } from '@/lib/order/print-jobs';
+import { recordPrintPage } from '@/lib/order/print-record';
+import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import type { BatchPrintRecordResult, OrderPrintRecordResult } from './order-print-record.types';
 
 const inputSchema = z.object({
   orderId: z.string().trim().min(1).max(128),
   workOrderVersion: z.number().int().min(1),
-  revision: z.number().int().min(0),
+  contentKey: z.string().regex(/^[0-9a-f]{64}$/),
+  attemptKey: z.string().regex(/^print-page:[0-9a-f-]{36}$/),
 }).strict();
 
 const jobIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 
 /**
  * 点「打印」即记已打印（业主 2026-10-02）：打印页关闭浏览器打印对话框后调用，
- * 只记录打印页渲染时的那份内容（版本与修订号）。
+ * 只记录打印页渲染时的那份内容（生产指令摘要），重试只重放本次打印尝试。
  */
 export async function recordOrderPrintedAction(input: unknown): Promise<OrderPrintRecordResult> {
   const actor = await requirePermission('order:change:review');
   const parsed = inputSchema.safeParse(input);
   if (!parsed.success) return { status: 'error', message: '打印记录参数无效' };
   try {
-    const outcome = await recordRenderedPrint(parsed.data, actor);
+    const outcome = await recordPrintPage(parsed.data, actor, await derivePublicBaseUrl());
     if (outcome === 'MARKED') {
       revalidatePath('/orders');
       revalidatePath(`/orders/${parsed.data.orderId}`);
@@ -36,7 +39,10 @@ export async function recordOrderPrintedAction(input: unknown): Promise<OrderPri
   }
 }
 
-/** 打开或下载批量打印文件时调用：文件里的工单整批记为已打印，任一失败整批不记。 */
+/**
+ * 打开或下载批量打印文件前调用：确认文件仍可取、内容仍是当前内容后，文件里的工单整批记为
+ * 已打印，任一工单不符整批不记；成功后浏览器再去打开 / 下载文件。
+ */
 export async function recordBatchPrintAction(jobId: unknown): Promise<BatchPrintRecordResult> {
   const actor = await requirePermission('order:change:review');
   const parsed = jobIdSchema.safeParse(jobId);
@@ -49,6 +55,7 @@ export async function recordBatchPrintAction(jobId: unknown): Promise<BatchPrint
   } catch (error) {
     if (error instanceof BatchPrintAccessError) return { status: 'error', message: '打印任务不存在或无权访问' };
     if (error instanceof BatchPrintSelectionError) return { status: 'error', message: '工单内容已变化，请重新选择并生成' };
+    if (error instanceof BatchPrintArtifactUnavailableError) return { status: 'error', message: '打印文件已过期，请重新生成' };
     if (error instanceof OrderPrintJobError) return { status: 'error', message: error.message };
     throw error;
   }

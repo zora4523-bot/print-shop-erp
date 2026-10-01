@@ -4,7 +4,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page } from 'vitest/browser';
 import { OrderStatus } from '@/generated/prisma/enums';
 import '@/app/globals.css';
-const m = vi.hoisted(() => ({ start: vi.fn(), fetch: vi.fn(), record: vi.fn(), refresh: vi.fn() }));
+const m = vi.hoisted(() => ({ start: vi.fn(), fetch: vi.fn(), record: vi.fn(), refresh: vi.fn(), openTab: vi.fn(), navigate: vi.fn() }));
+vi.mock('@/components/business/order/print-file-navigation', () => ({ openBlankPrintTab: m.openTab, navigateToPrintFile: m.navigate }));
 vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: m.start }));
 vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: m.record }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: m.refresh }) }));
@@ -158,8 +159,9 @@ it('ends manual refresh loading when the status request times out', async () => 
   } finally { timeout.mockRestore(); }
 });
 
-// 业主 2026-10-02：打开或下载打印文件即记已打印；整批成功后刷新列表，失败可只重试记录。
-it('records the printed file once when it is opened or downloaded, then refreshes the list', async () => {
+// 业主 2026-10-02：打开或下载打印文件即记已打印。先记录（服务端核对文件可取、内容未变），成功后才
+// 导航到文件；失败留在本页、可重试，不会出现没拿到文件却已记录。
+it('records first, then downloads the file and refreshes the list', async () => {
   let settle!: (value: unknown) => void;
   m.record.mockImplementationOnce(() => new Promise((done) => { settle = done; }));
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
@@ -168,20 +170,38 @@ it('records the printed file once when it is opened or downloaded, then refreshe
   await expect.element(page.getByText('正在记为已打印…', { exact: true })).toBeVisible();
   expect(m.record).toHaveBeenCalledOnce();
   expect(m.record).toHaveBeenCalledWith('job-1');
+  expect(m.openTab).not.toHaveBeenCalled();
+  expect(m.navigate).not.toHaveBeenCalled();
   settle({ status: 'success', marked: 2 });
   await expect.element(page.getByText('已记为已打印 2 单。', { exact: true })).toBeVisible();
+  expect(m.navigate).toHaveBeenCalledWith('/api/orders/batch-print/job-1?view=download', null);
   expect(m.refresh).toHaveBeenCalledOnce();
 });
-it('shows a failed record and retries only the record', async () => {
-  m.record.mockResolvedValueOnce({ status: 'error', message: '工单内容已变化，请重新选择并生成' }).mockRejectedValueOnce(new Error('offline'));
+it('opens the preview tab during the click and points it at the file only after recording', async () => {
+  const tab = { close: vi.fn() };
+  m.openTab.mockReturnValue(tab);
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
-  await page.getByRole('link', { name: '下载 PDF' }).click();
-  await expect.element(page.getByRole('alert')).toHaveTextContent('打印记录未保存：工单内容已变化，请重新选择并生成');
+  await page.getByRole('link', { name: '打开 PDF' }).click();
+  expect(m.openTab).toHaveBeenCalledOnce();
+  await expect.poll(() => m.navigate.mock.calls.length).toBe(1);
+  expect(m.navigate).toHaveBeenCalledWith('/api/orders/batch-print/job-1?view=inline', tab);
+  expect(tab.close).not.toHaveBeenCalled();
+});
+it('keeps the page, closes the blank tab and retries the same delivery when recording fails', async () => {
+  const tab = { close: vi.fn() };
+  m.openTab.mockReturnValue(tab);
+  m.record.mockResolvedValueOnce({ status: 'error', message: '打印文件已过期，请重新生成' }).mockRejectedValueOnce(new Error('offline'));
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await page.getByRole('link', { name: '打开 PDF' }).click();
+  await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：打印文件已过期，请重新生成');
+  expect(tab.close).toHaveBeenCalledOnce();
+  expect(m.navigate).not.toHaveBeenCalled();
   expect(m.refresh).not.toHaveBeenCalled();
-  await page.getByRole('button', { name: '重试记录', exact: true }).click();
-  await expect.element(page.getByRole('alert')).toHaveTextContent('打印记录未保存：网络异常');
-  await page.getByRole('button', { name: '重试记录', exact: true }).click();
-  await expect.element(page.getByText('已记为已打印 2 单。', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '重试打开', exact: true }).click();
+  await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：网络异常');
+  await page.getByRole('button', { name: '重试打开', exact: true }).click();
+  await expect.poll(() => m.navigate.mock.calls.length).toBe(1);
+  expect(m.openTab).toHaveBeenCalledTimes(3);
   expect(m.record).toHaveBeenCalledTimes(3);
   expect(m.start).toHaveBeenCalledOnce();
   expect(m.refresh).toHaveBeenCalledOnce();

@@ -3,7 +3,7 @@ import { PDFDocument } from 'pdf-lib';
 import type { ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 const m = vi.hoisted(() => ({
   active: vi.fn(), user: vi.fn(), find: vi.fn(), update: vi.fn(), worker: vi.fn(), order: vi.fn(),
-  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(),
+  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), available: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({ db: { $transaction: m.transaction, user: { findUnique: m.user }, backgroundJob: { findFirst: m.active, findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
 vi.mock('@/lib/background-jobs/repository', () => ({ enqueueBackgroundJob: m.enqueue, BackgroundJobLeaseLostError: class extends Error {} }));
@@ -12,11 +12,11 @@ vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: m.order }));
 vi.mock('@/lib/order/print-html', () => ({ buildPrintHtml: m.html }));
 vi.mock('@/lib/settings', () => ({ getSetting: async () => ({ name: 'Factory' }) }));
 vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: m.render }));
-vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifact: m.write, cleanupOldPdfArtifacts: vi.fn(),
+vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifact: m.write, cleanupOldPdfArtifacts: vi.fn(), assertPdfArtifactAvailable: m.available,
   PdfArtifactStorageError: class extends Error { constructor() { super('PDF artifact storage unavailable'); this.name = 'PdfArtifactStorageError'; } } }));
 vi.mock('@/lib/pdf/order-snapshot', () => ({ orderPdfSnapshotKey: (order: { id: string; version: number }) => `${order.id}:${order.version}` }));
 vi.mock('@/lib/order/print-jobs', () => ({ recordRenderedPrintInTx: m.recordInTx }));
-import { BatchPrintAccessError, BatchPrintSelectionError, requestBatchPrint, handleBatchPrintJob, batchPrintStatus, downloadBatchPrint, recordBatchPrint } from '../batch-print';
+import { BatchPrintAccessError, BatchPrintArtifactUnavailableError, BatchPrintSelectionError, requestBatchPrint, handleBatchPrintJob, batchPrintStatus, downloadBatchPrint, recordBatchPrint } from '../batch-print';
 const payload = { actorId: 'admin', baseUrl: 'https://example.test', orders: [{ id: 'a', key: 'a:1' }, { id: 'b', key: 'b:1' }] };
 const job = { id: 'j', type: 'ORDER_BATCH_PDF', payload, workerId: 'worker', attempts: 1, assertLease: vi.fn() } as unknown as ClaimedBackgroundJob;
 
@@ -24,8 +24,10 @@ beforeEach(() => {
   vi.resetAllMocks();
   m.active.mockResolvedValue(null);
   m.user.mockResolvedValue({ isActive: true, role: 'ADMIN' });
-  m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: 1, revision: 4 }));
-  m.recordInTx.mockResolvedValue('MARKED');
+  m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: 1 }));
+  m.available.mockResolvedValue(undefined);
+  m.recordInTx.mockImplementation(async (_tx: unknown, _attempt: unknown, _actor: unknown, contentIsCurrent: () => Promise<boolean>) =>
+    (await contentIsCurrent()) ? 'MARKED' : 'STALE');
   m.transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => callback('tx'));
   m.enqueue.mockResolvedValue({ job: { id: 'j' } });
   m.update.mockResolvedValue({ count: 1 });
@@ -173,38 +175,54 @@ it('classifies a raw cache write failure (ENOSPC) as storage infrastructure and 
   await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name: 'PdfArtifactStorageError' });
 });
 
-// 业主 2026-10-02：打开或下载批量打印文件即记已打印——由点击时的 Server Action 调用，整批一个事务。
+// 业主 2026-10-02：打开或下载批量打印文件即记已打印——点击时先由 Server Action 调用，文件可取、
+// 内容未变才整批记录，任一工单不符整批回滚；成功后浏览器再取文件。
 describe('recordBatchPrint', () => {
-  const ready = () => m.find.mockResolvedValue({ ...job, status: 'SUCCEEDED', result: { completed: 2, issues: [], artifactName: 'j.pdf' } });
+  const ready = (orders = payload.orders) => m.find.mockResolvedValue({
+    ...job, payload: { ...payload, orders }, status: 'SUCCEEDED', result: { completed: orders.length, issues: [], artifactName: 'j.pdf' },
+  });
 
-  it('records every order at the validated version and revision, in id order, inside one transaction', async () => {
-    ready();
-    const reversed = { ...job, payload: { ...payload, orders: [{ id: 'b', key: 'b:1' }, { id: 'a', key: 'a:1' }] } };
-    m.find.mockResolvedValue({ ...reversed, status: 'SUCCEEDED', result: { completed: 2, issues: [], artifactName: 'j.pdf' } });
-    m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: id === 'a' ? 3 : 1, revision: id === 'a' ? 9 : 4 }));
-    m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('ALREADY_PRINTED');
+  it('checks the file, then records every order in id order inside one transaction with per-batch attempt keys', async () => {
+    ready([{ id: 'b', key: 'b:1' }, { id: 'a', key: 'a:1' }]);
+    m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: id === 'a' ? 3 : 1 }));
+    m.recordInTx.mockImplementationOnce(async (_tx: unknown, _attempt: unknown, _actor: unknown, check: () => Promise<boolean>) => (await check()) ? 'MARKED' : 'STALE')
+      .mockResolvedValueOnce('ALREADY_PRINTED');
     expect(await recordBatchPrint('admin', 'j')).toEqual({ marked: 1 });
-    expect(m.transaction).toHaveBeenCalledOnce();
-    expect(m.recordInTx.mock.calls).toEqual([
-      ['tx', { orderId: 'a', workOrderVersion: 3, revision: 9 }, { id: 'admin', role: 'ADMIN' }],
-      ['tx', { orderId: 'b', workOrderVersion: 1, revision: 4 }, { id: 'admin', role: 'ADMIN' }],
-    ]);
+    expect(m.available).toHaveBeenCalledWith('j.pdf');
     expect(m.read).not.toHaveBeenCalled();
+    expect(m.transaction).toHaveBeenCalledOnce();
+    expect(m.recordInTx.mock.calls.map((call) => call.slice(0, 3))).toEqual([
+      ['tx', { orderId: 'a', workOrderVersion: 3, attemptKey: 'batch-print:j:a' }, { id: 'admin', role: 'ADMIN' }],
+      ['tx', { orderId: 'b', workOrderVersion: 1, attemptKey: 'batch-print:j:b' }, { id: 'admin', role: 'ADMIN' }],
+    ]);
+  });
+
+  it('does not record a file that has expired or cannot be read', async () => {
+    ready();
+    m.available.mockRejectedValue(new Error('PDF_ARTIFACT_EXPIRED'));
+    await expect(recordBatchPrint('admin', 'j')).rejects.toBeInstanceOf(BatchPrintArtifactUnavailableError);
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  it('rolls the whole batch back when any order changed under the lock or left production', async () => {
+    ready();
+    let reads = 0;
+    // 第一轮核对（锁外）全部一致；锁内重新读取时第二张已变。
+    m.order.mockImplementation(async (id: string) => ({ id, version: id === 'b' && ++reads > 1 ? 2 : 1, workOrderVersion: 1 }));
+    await expect(recordBatchPrint('admin', 'j')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单内容已变化，请重新选择并生成' }] });
+    m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('NOT_PRINTABLE');
+    m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: 1 }));
+    await expect(recordBatchPrint('admin', 'j')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单已不在生产中，请取消选择后重新生成' }] });
+    m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('STALE');
+    await expect(recordBatchPrint('admin', 'j')).rejects.toBeInstanceOf(BatchPrintSelectionError);
   });
 
   it('records nothing when the file is not ready or its orders changed since generation', async () => {
     expect(await recordBatchPrint('admin', 'j')).toBeNull();
     ready();
-    m.order.mockResolvedValueOnce({ id: 'a', version: 2, workOrderVersion: 1, revision: 5 });
+    m.order.mockResolvedValueOnce({ id: 'a', version: 2, workOrderVersion: 1 });
     await expect(recordBatchPrint('admin', 'j')).rejects.toBeInstanceOf(BatchPrintSelectionError);
     expect(m.transaction).not.toHaveBeenCalled();
-  });
-
-  it('propagates a failure from any order so the whole batch rolls back', async () => {
-    ready();
-    m.recordInTx.mockResolvedValueOnce('MARKED').mockRejectedValueOnce(new Error('lock timeout'));
-    await expect(recordBatchPrint('admin', 'j')).rejects.toThrow('lock timeout');
-    expect(m.transaction).toHaveBeenCalledOnce();
   });
 
   it('refuses another actor’s job before touching orders', async () => {
