@@ -262,7 +262,8 @@ export const CUSTOMER_CHARGE_STATUS_REGISTRY: StatusRegistry<CustomerChargeDispl
   [CUSTOMER_CHARGE_DISPLAY_STATUS.ADMIN_REVIEWED]: { label: '已人工核对（待结算）', tone: 'info' },
   [CUSTOMER_CHARGE_DISPLAY_STATUS.WAIVED]: { label: '已免收', tone: 'neutral' },
   [CUSTOMER_CHARGE_DISPLAY_STATUS.PENDING_AMOUNT]: { label: '金额待定', tone: 'warning' },
-  [CUSTOMER_CHARGE_DISPLAY_STATUS.ESTIMATED]: { label: '创建时估算', tone: 'neutral' },
+  // 业主 2026-10-01：估算是「金额还会变」的提示态，用 info 与已定稿的 neutral 区分。
+  [CUSTOMER_CHARGE_DISPLAY_STATUS.ESTIMATED]: { label: '创建时估算', tone: 'info' },
 };
 
 export function customerChargeDisplayStatus(

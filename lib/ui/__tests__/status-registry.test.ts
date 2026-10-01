@@ -552,6 +552,10 @@ describe('customer charge display status (2026-10-01 D-10)', () => {
     expect(label('WAIVED', false)).toBe('已免收');
     expect(label('PENDING_AMOUNT', false)).toBe('金额待定');
     expect(label('ESTIMATED', false)).toBe('创建时估算');
+    // 业主 2026-10-01：估算用 info，不与已定稿的 neutral 混在一起。
+    expect(
+      CUSTOMER_CHARGE_STATUS_REGISTRY[customerChargeDisplayStatus('ESTIMATED', false)].tone,
+    ).toBe('info');
     // 正常的估算、免收与人工核对都不是失败，不用 danger。
     for (const definition of Object.values(CUSTOMER_CHARGE_STATUS_REGISTRY)) {
       expect(definition.tone).not.toBe('danger');
