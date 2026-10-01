@@ -4,7 +4,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { formatRate } from '@/lib/format/unit-price';
 
 export const REPORT_OPERATION_LABELS: Record<string, string> = { PARTIAL: '局部烫金', FULL: '专版烫金', PACKING: '打包入袋' };
-const units: Record<string, string> = { PER_PASS: '下', PER_PIECE: '个', PER_BAG: '袋', PER_BOX: '盒' };
+export const REPORT_UNIT_LABELS: Record<string, string> = { PER_PASS: '下', PER_PIECE: '个', PER_BAG: '袋', PER_BOX: '盒' };
 const decimal = z.string().refine((value) => {
   try { return new Decimal(value).isFinite(); } catch { return false; }
 });
@@ -42,5 +42,5 @@ export function reportWageLines(report: {
   if (hasFoilMetadata || !new Decimal(report.chargeableQty).times(report.rate).toDecimalPlaces(2).eq(report.amount)) {
     return ['按报工时保存的工资记录展示', `本次记录 ${formatMoney(report.amount)}`];
   }
-  return [`计薪 ${report.chargeableQty} ${units[report.unit] ?? '单位'} × ${formatRate(report.rate)} 元`, `本次记录 ${formatMoney(report.amount)}`];
+  return [`计薪 ${report.chargeableQty} ${REPORT_UNIT_LABELS[report.unit] ?? '单位'} × ${formatRate(report.rate)} 元`, `本次记录 ${formatMoney(report.amount)}`];
 }

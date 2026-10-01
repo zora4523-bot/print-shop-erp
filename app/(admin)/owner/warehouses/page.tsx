@@ -60,7 +60,6 @@ export default async function OwnerWarehousesPage() {
     <div className="space-y-6">
       <PageHeader
         title="仓库/库位"
-        subtitle="库存仅在收货过账后增加。"
         actions={
           <Link href="/owner/materials/count" className={buttonVariants()}>
             <ClipboardCheck aria-hidden />
@@ -147,7 +146,6 @@ async function WarehouseDashboardContent({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">采购待收货</h2>
-            <p className="text-sm text-muted-foreground">到货后在采购单中选择实际库位收货；支持分批收货。</p>
           </div>
           <Link href="/owner/purchases" className={buttonVariants({ variant: 'outline' })}>查看采购单</Link>
         </div>
@@ -176,7 +174,6 @@ async function WarehouseDashboardContent({
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <div className="mb-4">
           <h2 className="flex items-center gap-2 font-semibold"><ArrowRightLeft className="size-4" aria-hidden />库位调拨</h2>
-          <p className="text-sm text-muted-foreground">调拨会同时减少来源库存并增加目标库存；任一步失败则不生效。</p>
         </div>
         <StockTransferForm
           action={createStockTransferAction}

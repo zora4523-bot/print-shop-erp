@@ -34,7 +34,7 @@ const FAILURE_TEXT: Record<LocalDraftSaveFailure, string> = {
 const subject = (label: string) => (label === '本单' ? label : `${label} `);
 const belongsTo = (key: string, orderId: string) => key === orderId || key.startsWith(`${orderId}:`);
 
-export function planOrderCreationLeave(
+function planOrderCreationLeave(
   reports: Readonly<Record<string, OrderLeaveState>>,
   labelFor: (key: string) => string,
   removedFileCount = 0,
@@ -154,6 +154,9 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
   }, [failure, failedKeys.length]);
   const losses = [...plan.draftKeys.map((key) => `${subject(labelFor(key))}已填写的内容`), ...plan.fileLines.map((line) => line.replace(/将丢失。$/, ''))];
   const context: LeaveContextValue = { report, setPersist, guard, navigate, finishOrder, pending: plan.busy };
+  // Autosave may finish while this dialog is open. Keep its facts current and
+  // actionable instead of handing an empty confirmation to the shared guard.
+  const leaveAction = plan.losesFiles ? '放弃修改并离开' : plan.guarded ? '保存草稿并离开' : '离开页面';
   const dialog: ReactNode = <>
     {visibleFailure ? <ActionNotice tone="error" title="本机草稿未保存，仍在本页"
       description={<>
@@ -167,9 +170,9 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
       </div>} /> : null}
     <ConfirmActionController level="L2" open={target !== null} onOpenChange={(open) => { if (!open) setTarget(null); }}
       focusReturnRef={sourceRef} disabled={plan.busy} cancelLabel="继续编辑" onConfirm={() => { if (target && saveDrafts(undefined, target)) router.push(target); }}>
-      <ConfirmActionDialog action={plan.losesFiles ? '放弃修改并离开' : '保存草稿并离开'} changes={[]}
-        consequences={[...plan.fileLines, ...plan.draftLines]}
-        confirmText={plan.losesFiles ? '放弃修改并离开' : '保存草稿并离开'} danger={plan.losesFiles} />
+      <ConfirmActionDialog action={leaveAction} changes={[]}
+        consequences={plan.guarded ? [...plan.fileLines, ...plan.draftLines] : ['当前没有未保存的内容。']}
+        confirmText={leaveAction} danger={plan.losesFiles} />
     </ConfirmActionController>
   </>;
   return {

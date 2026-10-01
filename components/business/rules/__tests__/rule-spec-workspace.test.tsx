@@ -106,12 +106,12 @@ describe('RuleSpecWorkspace', () => {
     expect(html).not.toContain('空白封适用规格在纸张页管理');
   });
 
-  it('明确烫金颜色无独立主数据，不伪造色库或开关', () => {
+  it('不渲染没有实际记录的烫金色库区块，也不伪造开关', () => {
     const html = renderWorkspace();
 
-    expect(html).toContain('当前随工单事实维护');
-    expect(html).toContain('暂无独立主数据');
-    expect(html).toContain('此处不生成颜色列表或编辑开关');
+    expect(html).not.toContain('当前随工单事实维护');
+    expect(html).not.toContain('暂无独立主数据');
+    expect(html).not.toContain('此处不生成颜色列表或编辑开关');
     expect(html).not.toContain('亚金');
     expect(html).not.toContain('浅金');
     expect(html).not.toContain('type="checkbox"');

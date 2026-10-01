@@ -119,7 +119,6 @@ export function OutsourceActions({
               }}>
               <ConfirmActionDialog action="确认该外协单已回货" changes={[{ label: `${contextLabel} · 回货日期（计划 → 实际）`, old: expectedDateLabel, new: actualDate || '今天' }]} consequences={[
                 '外协单将进入已回货终态，不能直接回退。',
-                '内部任务和外协工艺全部完成后，关联工单可能自动完工并发送通知。',
                 '本操作不会自动确认外协应付金额，也不会记录付款。',
               ]} confirmText="确认已回货" />
             </ConfirmActionController>
@@ -155,7 +154,6 @@ export function OutsourceActions({
             }>
             <ConfirmActionDialog action="取消该外协单" changes={[]} consequences={[
               '外协单将进入已取消终态，不能再标记回货或记录付款。',
-              '系统会重新核对关联工单的生产完工条件。',
               '关联工单和这张外协单的历史记录不会被删除。',
             ]} confirmText="取消外协单" danger />
           </ConfirmActionController>
@@ -166,7 +164,6 @@ export function OutsourceActions({
         <ActionNotice
           tone="success"
           title="外协单已取消"
-          description="系统已重新核对关联工单的生产完工条件。"
         />
       ) : null}
       {visibleCancelState?.status === 'error' ? (

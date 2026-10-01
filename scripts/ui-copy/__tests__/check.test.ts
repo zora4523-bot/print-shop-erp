@@ -66,16 +66,17 @@ it('traces imported display helpers and labels to their defining file', () => {
     mkdirSync(path.join(root, 'components'));
     mkdirSync(path.join(root, 'lib'));
     writeFileSync(path.join(root, 'components', 'Example.tsx'), `
-      import { label, describe } from '../lib/labels';
-      export function View() { return <p>{label}{describe()}</p>; }
+      import { label, describe, rows } from '../lib/labels';
+      export function View() { return <><p>{label}{describe()}</p><Summary items={rows()} /></>; }
     `);
     writeFileSync(path.join(root, 'lib', 'labels.ts'), `
       export const label = 'DRAFT';
       export function describe() { return '服务端快照'; }
+      export function rows() { return [{ description: '费用快照不会改写', key:'worker', metadata: { description:'Prisma' } }]; }
       console.log('Prisma debug');
     `);
     const hits = scan(root, {...policy, exemptions: []});
-    expect(hits.map(row => row.text).sort()).toEqual(['DRAFT', '服务端快照']);
+    expect(hits.map(row => row.text).sort()).toEqual(['DRAFT', '服务端快照', '费用快照不会改写']);
     expect(hits.every(row => row.file === 'lib/labels.ts')).toBe(true);
   } finally {
     rmSync(root, {recursive: true, force: true});
@@ -180,4 +181,34 @@ describe('pattern rule precision', () => {
     expect(check('<script>{`localStorage.getItem("x")`}</script>')).toEqual([]);
     expect(check('<Script id="t">{`localStorage.getItem("x")`}</Script>')).toEqual([]);
   });
+});
+
+
+describe('structured display props', () => {
+  it.each([
+    'const items = [{ description: "费用快照不会改写" }]; const View = () => <Summary items={items} />;',
+    'function items(){return [{label: "BOM", description: "费用快照"}]} const View = () => <Summary items={items()} />;',
+    'const rows = [{children: [{description: "服务端计价"}]}]; const View = () => <Summary items={rows} />;',
+    'const rows = [{children: "服务端计价"}]; const View = () => <Summary items={rows} />;',
+  ])('checks display fields supplied through items: %s', (source) => {
+    expect(check(source).length).toBeGreaterThan(0);
+  });
+
+  it('does not inspect non-display fields inside items', () => {
+    expect(check(`const items = [{id:'DRAFT', href:'/worker/tasks', label:'草稿',
+      metadata:{description:'Prisma'}, command:'worker', value:'DRAFT'}];
+      const View = () => <Summary items={items} />;`)).toEqual([]);
+  });
+});
+
+
+it.each([
+  ['app/(admin)/sales/bills/page.tsx', '您应付给工厂的货款，按结算月份生成月账单。'],
+  ['components/business/order/OrderCreationWorkspace.tsx', '每张工单独立填写地址、设计款和费用'],
+  ['components/business/rules/pricing/CustomerPricingSectionViews.tsx', '当前参数试算：1,000 个双面'],
+])('blocks retired explanatory introductions in %s', (file, text) => {
+  expect(inspectUiCopy(`<p>${text}</p>`, file, policy).length).toBeGreaterThan(0);
+});
+it('preserves financial scope, provisional amounts and actionable recovery copy', () => {
+  expect(inspectUiCopy('<p>整单应付货款 · 当前筛选 3 张账单 · 金额未定稿 · 登录已过期，请重新登录。</p>', 'app/(admin)/sales/bills/page.tsx', policy)).toEqual([]);
 });

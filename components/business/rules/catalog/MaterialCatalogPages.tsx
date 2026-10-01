@@ -148,7 +148,6 @@ export async function MaterialCatalogList({
       {paperOnly ? (
         <RuleCenterPageHeader
           title="纸张"
-          subtitle="维护建单可选纸张与库存运营状态；历史工单引用保留。"
           actions={
             <div className="flex flex-wrap gap-3">
               {hasPermission('dict:product:manage', actor.role) ? <Link href="/owner/rules/specifications" className={buttonVariants({ variant: 'outline' })}>规格目录</Link> : null}
@@ -266,7 +265,6 @@ export async function NewMaterialCatalogItem({
       ) : (
         <PageHeader
           title="新建物料"
-          subtitle="默认启用；库存通过出入库维护。"
           back={{ href: backHref, label: supplement ? '返回原录入' : '返回物料' }}
         />
       )}
@@ -399,7 +397,6 @@ export async function EditMaterialCatalogItem({
                 <TableEmptyState
                   colSpan={3}
                   title="暂无库位库存记录"
-                  description="完成首次入库后，各库位库存会显示在这里。"
                 />
               ) : (
                 locationStocks.map((stock) => (
@@ -421,11 +418,6 @@ export async function EditMaterialCatalogItem({
         <h2 className="mb-2 text-base font-semibold">
           {material.isActive ? '停用物料' : '启用物料'}
         </h2>
-        <p className="mb-3 text-sm text-muted-foreground">
-          {material.isActive
-            ? '停用后该物料不再作为新业务默认选择；历史库存流水保留。'
-            : '启用后该物料会重新进入可维护物料清单。'}
-        </p>
         <ToggleMaterialActiveButton
           materialId={material.id}
           currentlyActive={material.isActive}

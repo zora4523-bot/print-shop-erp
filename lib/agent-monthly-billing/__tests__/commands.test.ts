@@ -283,7 +283,7 @@ describe('agent monthly bill commands', () => {
         },
         { id: 'admin-1', role: Role.ADMIN },
       ),
-    ).rejects.toThrow('负项来源成员不属于当前账单');
+    ).rejects.toThrow('来源工单不属于当前账单，请返回账单重新选择');
     expect(tx.agentMonthlyBillCredit.findUnique).not.toHaveBeenCalled();
     expect(tx.agentMonthlyBillCredit.create).not.toHaveBeenCalled();
   });

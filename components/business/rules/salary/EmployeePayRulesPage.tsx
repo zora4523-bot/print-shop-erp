@@ -23,7 +23,6 @@ export default async function EmployeePayRulesPage() {
       <PieceworkPriceBookForm cancellationEnabled={pieceworkScheduleCancellationEnabled()} books={books} now={new Date().toISOString()} />
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="font-semibold">其他薪酬规则</h2>
-        <p className="mt-1 text-sm text-muted-foreground">新版本不影响已结算工资。</p>
         <div className="mt-5"><SalaryRuleSettingsForm rules={rules} defaultEffectiveFrom={formatDateTimeLocalShanghai(new Date())} /></div>
       </section>
     </div>

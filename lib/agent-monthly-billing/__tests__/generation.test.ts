@@ -182,7 +182,7 @@ describe('generateAgentMonthlyBillsForPeriod', () => {
         { id: 'admin-1', role: Role.ADMIN },
         { now: new Date('2026-06-02T00:00:00.000Z') },
       ),
-    ).rejects.toThrow(/未入账.*GD-260501-001/);
+    ).rejects.toThrow(/GD-260501-001.*尚未入账/);
     expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
     expect(tx.agentMonthlyBill.update).not.toHaveBeenCalled();
   });

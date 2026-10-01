@@ -2,6 +2,7 @@
 
 import { useActionState, useContext, useState, useTransition } from 'react';
 import { formatMoneyPlain } from '@/lib/dashboard/format';
+import { cn } from '@/lib/utils';
 import {
   deleteOrderManualChargeAction,
   deleteOrderPlateDetailAction,
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { OrderEditorAuxiliaryContext, useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
+import { CommercialFeeRecoveryNotice, useCommercialFeeRecovery, type CommercialFeeRecovery } from './use-commercial-fee-recovery';
 
 type ManualChargeCode =
   | 'SAMPLE_FEE'
@@ -57,6 +59,8 @@ type ItemWithPlateDetails = {
 
 type Props = {
   headingLevel?: 2 | 3;
+  /** Reuse the enclosing disclosure's heading and surface on the edit page. */
+  embedded?: boolean;
   orderId: string;
   priceRevision: number;
   manualCharges: ManualCharge[];
@@ -87,10 +91,12 @@ function ManualChargeEditor({
   orderId,
   priceRevision,
   charge,
+  recovery,
 }: {
   orderId: string;
   priceRevision: number;
   charge: ManualCharge | null;
+  recovery: CommercialFeeRecovery;
 }) {
   const initialCategory = isManualChargeCode(charge?.category.code)
     ? charge.category.code
@@ -107,11 +113,11 @@ function ManualChargeEditor({
   const [saveState, saveAction] = useActionState<
     OrderCommercialDetailMutationResult | null,
     unknown
-  >(saveOrderManualChargeAction, null);
+  >((previous, input) => recovery.run(saveOrderManualChargeAction, previous, input), null);
   const [deleteState, deleteAction] = useActionState<
     OrderCommercialDetailMutationResult | null,
     unknown
-  >(deleteOrderManualChargeAction, null);
+  >((previous, input) => recovery.run(deleteOrderManualChargeAction, previous, input), null);
   const [savePending, startSave] = useTransition();
   const [deletePending, startDelete] = useTransition();
 
@@ -122,7 +128,7 @@ function ManualChargeEditor({
     approvalReference !== (charge?.approvalReference ?? '') || removeReason !== ''
   );
   const auxiliary = useOrderEditorAuxiliary({ dirty, pending: savePending || deletePending });
-  const disabled = auxiliary.blocked || savePending || deletePending;
+  const disabled = auxiliary.blocked || savePending || deletePending || recovery.isBlocked;
   function resetDraft() {
     setCategoryCode(initialCategory);
     setDescription(charge?.description ?? '');
@@ -139,7 +145,7 @@ function ManualChargeEditor({
       approvalReference.trim().length > 0);
 
   return (
-    <div className="space-y-3 rounded-lg border p-3">
+    <div className="@container/fee-row min-w-0 space-y-3 py-5 first:pt-0 last:pb-0">
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">
@@ -165,7 +171,7 @@ function ManualChargeEditor({
         </dl>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid min-w-0 gap-3 @min-[400px]/fee-row:grid-cols-2">
             <label className="space-y-1 text-xs">
               <span>费用类型</span>
               <NativeSelect
@@ -236,7 +242,7 @@ function ManualChargeEditor({
               {resultError(saveState)}
             </p>
           ) : null}
-          {saveState?.status === 'success' ? (
+          {!recovery.hasUnknownResult && saveState?.status === 'success' ? (
             <p role="status" className="text-xs text-success-foreground">
               已保存，工单总额更新为 {saveState.totalAmount} 元。
             </p>
@@ -263,7 +269,7 @@ function ManualChargeEditor({
             {savePending ? '正在保存…' : charge ? '保存修改' : '添加费用'}
           </Button>
           {charge ? (
-            <div className="space-y-2 border-t pt-3">
+            <div className="space-y-2 pt-2">
               <label className="block space-y-1 text-xs">
                 <span>移除原因</span>
                 <Input
@@ -309,7 +315,7 @@ function ManualChargeEditor({
         </>
       )}
       </fieldset>
-      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending} onClick={resetDraft}>还原费用输入</Button> : null}
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending || recovery.isBlocked} onClick={resetDraft}>还原费用输入</Button> : null}
     </div>
   );
 }
@@ -319,11 +325,13 @@ function PlateDetailEditor({
   orderItemId,
   priceRevision,
   detail,
+  recovery,
 }: {
   orderId: string;
   orderItemId: string;
   priceRevision: number;
   detail: PlateDetail | null;
+  recovery: CommercialFeeRecovery;
 }) {
   const [name, setName] = useState(detail?.name ?? '');
   // Existing rows retain their billing quantity and production metadata.
@@ -336,11 +344,11 @@ function PlateDetailEditor({
   const [saveState, saveAction] = useActionState<
     OrderCommercialDetailMutationResult | null,
     unknown
-  >(saveOrderPlateDetailAction, null);
+  >((previous, input) => recovery.run(saveOrderPlateDetailAction, previous, input), null);
   const [deleteState, deleteAction] = useActionState<
     OrderCommercialDetailMutationResult | null,
     unknown
-  >(deleteOrderPlateDetailAction, null);
+  >((previous, input) => recovery.run(deleteOrderPlateDetailAction, previous, input), null);
   const [savePending, startSave] = useTransition();
   const [deletePending, startDelete] = useTransition();
   const dirty = (!detail || detail.isActive) && (
@@ -348,7 +356,7 @@ function PlateDetailEditor({
     unitPrice !== (detail?.unitPrice ?? '') || remark !== (detail?.remark ?? '') || removeReason !== ''
   );
   const auxiliary = useOrderEditorAuxiliary({ dirty, pending: savePending || deletePending });
-  const disabled = auxiliary.blocked || savePending || deletePending;
+  const disabled = auxiliary.blocked || savePending || deletePending || recovery.isBlocked;
   function resetDraft() {
     setName(detail?.name ?? '');
     setUnitPrice(detail?.unitPrice ?? '');
@@ -358,14 +366,13 @@ function PlateDetailEditor({
 
   if (detail && !detail.isActive) {
     return (
-      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+      <div className="min-w-0 py-5 text-xs text-muted-foreground first:pt-0 last:pb-0">
         <div className="flex flex-wrap justify-between gap-2">
           <span>
             #{detail.sequence} · {detail.name} · 原金额 {detail.amount} 元
           </span>
           <Badge variant="outline">已移除（保留历史）</Badge>
         </div>
-        <p className="mt-1">移除操作人和原因已记录在工单价格修订与日志中。</p>
       </div>
     );
   }
@@ -378,7 +385,7 @@ function PlateDetailEditor({
     unitPrice.trim().length > 0;
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <div className="@container/fee-row min-w-0 space-y-3 py-5 first:pt-0 last:pb-0">
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium">
@@ -391,7 +398,7 @@ function PlateDetailEditor({
           </span>
         ) : null}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 gap-3 @min-[400px]/fee-row:grid-cols-2">
         <label className="space-y-1 text-xs">
           <span>制版名称</span>
           <Input
@@ -408,7 +415,7 @@ function PlateDetailEditor({
             onChange={(event) => setUnitPrice(event.target.value)}
           />
         </label>
-        <label className="space-y-1 text-xs sm:col-span-2">
+        <label className="space-y-1 text-xs @min-[400px]/fee-row:col-span-2">
           <span>备注</span>
           <Textarea
             value={remark}
@@ -422,7 +429,7 @@ function PlateDetailEditor({
           {resultError(saveState)}
         </p>
       ) : null}
-      {saveState?.status === 'success' ? (
+      {!recovery.hasUnknownResult && saveState?.status === 'success' ? (
         <p role="status" className="text-xs text-success-foreground">
           制版明细已保存，工单总额更新为 {saveState.totalAmount} 元。
         </p>
@@ -451,7 +458,7 @@ function PlateDetailEditor({
         {savePending ? '正在保存…' : detail ? '保存制版修改' : '添加制版明细'}
       </Button>
       {detail ? (
-        <div className="space-y-2 border-t pt-3">
+        <div className="space-y-2 pt-2">
           <label className="block space-y-1 text-xs">
             <span>移除原因</span>
             <Input
@@ -496,7 +503,7 @@ function PlateDetailEditor({
         </div>
       ) : null}
       </fieldset>
-      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending} onClick={resetDraft}>还原费用输入</Button> : null}
+      {auxiliary.managed && dirty ? <Button type="button" variant="outline" size="sm" disabled={savePending || deletePending || auxiliary.pending || recovery.isBlocked} onClick={resetDraft}>还原费用输入</Button> : null}
     </div>
   );
 }
@@ -510,77 +517,89 @@ export function OrderCommercialDetailsManager({
   priceRevision,
   manualCharges,
   items,
-  allowPlateDetailMaintenance, headingLevel = 2,
+  allowPlateDetailMaintenance,
+  headingLevel = 2,
+  embedded = false,
 }: Props) {
   const Heading = headingLevel === 3 ? 'h3' : 'h2';
   const Subheading = headingLevel === 3 ? 'h4' : 'h3';
+  const ItemHeading = headingLevel === 3 ? 'h5' : 'h4';
+  const recovery = useCommercialFeeRecovery();
+  useOrderEditorAuxiliary({ dirty: recovery.hasUnknownResult, pending: recovery.isPending });
   const scope = useContext(OrderEditorAuxiliaryContext);
+  const plateItems = items.filter((item) => item.independentPlateEligible || item.plateDetails.length > 0);
   const hasActiveEditor = scope?.mainBlocked || Object.values(scope?.entries ?? {}).some((entry) => entry.dirty || entry.pending);
   return (
-    <section id="commercial-fees" className="space-y-5 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-      <div>
-        <Heading className="text-base font-semibold">制版明细与其他费用</Heading>
-        {hasActiveEditor ? <p className="mt-1 text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
-      </div>
+    <section id="commercial-fees" aria-label="制版明细与其他费用" className={cn(
+      '@container/fees min-w-0 space-y-6 [overflow-wrap:anywhere]',
+      !embedded && 'rounded-xl border bg-card p-4 sm:p-6',
+    )}>
+      {!embedded ? <Heading className="text-base font-semibold">制版明细与其他费用</Heading> : null}
+      {recovery.hasUnknownResult ? <CommercialFeeRecoveryNotice orderId={orderId} /> : null}
+      {!recovery.hasUnknownResult && hasActiveEditor ? <p className="text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
 
-      <div className="space-y-3">
+      <div className="grid min-w-0 gap-4 @min-[640px]/fees:grid-cols-[136px_minmax(0,1fr)] @min-[640px]/fees:gap-6">
         <Subheading className="text-sm font-semibold">订单级其他费用</Subheading>
-        {manualCharges.map((charge) => (
+        <div className="min-w-0 divide-y">
+          {manualCharges.map((charge) => (
+            <ManualChargeEditor
+              key={charge.id}
+              recovery={recovery}
+              orderId={orderId}
+              priceRevision={priceRevision}
+              charge={charge}
+            />
+          ))}
           <ManualChargeEditor
-            key={charge.id}
+            key={`new-manual-${priceRevision}`}
+            recovery={recovery}
             orderId={orderId}
             priceRevision={priceRevision}
-            charge={charge}
+            charge={null}
           />
-        ))}
-        <ManualChargeEditor
-          key={`new-manual-${priceRevision}`}
-          orderId={orderId}
-          priceRevision={priceRevision}
-          charge={null}
-        />
+        </div>
       </div>
 
-      <div className="space-y-3 border-t pt-4">
+      {!allowPlateDetailMaintenance || plateItems.length > 0 ? <div className="grid min-w-0 gap-4 border-t pt-6 @min-[640px]/fees:grid-cols-[136px_minmax(0,1fr)] @min-[640px]/fees:gap-6">
         <Subheading className="text-sm font-semibold">按款式制版明细</Subheading>
         {allowPlateDetailMaintenance ? (
-          <ol className="space-y-4">
-            {items.map((item) => (
-              <li key={item.id} className="space-y-3 rounded-lg border p-3">
-                <p className="text-sm font-medium">
+          <ol className="min-w-0 divide-y">
+            {plateItems.map((item) => (
+              <li key={item.id} className="min-w-0 space-y-4 py-6 first:pt-0 last:pb-0">
+                <ItemHeading className="break-words text-sm font-medium [overflow-wrap:anywhere]">
                   #{item.sequence} · {item.name}
-                </p>
-                {item.plateDetails.map((detail) => (
-                  <PlateDetailEditor
-                    key={detail.id}
-                    orderId={orderId}
-                    orderItemId={item.id}
-                    priceRevision={priceRevision}
-                    detail={detail}
-                  />
-                ))}
-                {item.independentPlateEligible ? (
-                  <PlateDetailEditor
-                    key={`new-plate-${item.id}-${priceRevision}`}
-                    orderId={orderId}
-                    orderItemId={item.id}
-                    priceRevision={priceRevision}
-                    detail={null}
-                  />
-                ) : (
-                  <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-                    该款式没有独立制版费：无烫金款不能录入；彩印烫金已包含在整款价中。
-                  </p>
-                )}
+                </ItemHeading>
+                <div className="min-w-0 divide-y">
+                  {item.plateDetails.map((detail) => (
+                    <PlateDetailEditor
+                      key={detail.id}
+                      recovery={recovery}
+                      orderId={orderId}
+                      orderItemId={item.id}
+                      priceRevision={priceRevision}
+                      detail={detail}
+                    />
+                  ))}
+                  {item.independentPlateEligible ? (
+                    <PlateDetailEditor
+                      key={`new-plate-${item.id}-${priceRevision}`}
+                      recovery={recovery}
+                      orderId={orderId}
+                      orderItemId={item.id}
+                      priceRevision={priceRevision}
+                      detail={null}
+                    />
+                  ) : null}
+                </div>
               </li>
             ))}
           </ol>
         ) : (
-          <p className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             当前价格待管理员确认，请在上方“工厂核价确认”中直接填写制烫金版费；确认后才能维护逐款明细。
           </p>
         )}
-      </div>
+      </div> : null}
     </section>
   );
 }

@@ -41,13 +41,12 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
   return <div className="space-y-6">
     <PageHeader
       title={`${bill.period} 货款账单`}
-      subtitle="本账单用于核对您应付给工厂的货款。"
       back={{ href: returnTo, label: `返回${SALES_BILL_PAGE_TITLE}` }}
       status={<StatusBadge tone={SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}>{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}</StatusBadge>}
     />
-    {bill.status === 'DRAFT' ? <p className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">本月账单仍在整理中，金额未定稿；以工厂确认后的金额为准。</p> : null}
-    <dl className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
-      <div><dt>工单合计</dt><dd>{formatMoney(bill.memberSubtotal)}</dd></div><div><dt>抵扣金额</dt><dd>{formatMoney(bill.adjustmentAmount)}</dd></div><div><dt>{bill.status === 'DRAFT' ? '暂计货款' : '应付货款'}</dt><dd className="font-semibold">{formatMoney(bill.totalAmount)}</dd></div>
+    {bill.status === 'DRAFT' ? <p className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">金额未定稿</p> : null}
+    <dl aria-label="整单合计" className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
+      <div><dt>工单合计</dt><dd>{formatMoney(bill.memberSubtotal)}</dd></div><div><dt>抵扣金额</dt><dd>{formatMoney(bill.adjustmentAmount)}</dd></div><div><dt>{bill.status === 'DRAFT' ? '整单暂计货款' : '整单应付货款'}</dt><dd className="font-semibold">{formatMoney(bill.totalAmount)}</dd></div>
       {bill.confirmedAt ? <div><dt>确认时间</dt><dd>{formatDateTimeShanghai(bill.confirmedAt)}</dd></div> : null}
       {bill.paidAt ? <div><dt>结清时间</dt><dd>{formatDateTimeShanghai(bill.paidAt)}</dd></div> : null}
     </dl>
@@ -55,7 +54,7 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
       <DisclosureSummary className="justify-between gap-3 px-2">
         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-semibold">工厂收款记录</span>
-          <span className="text-xs font-normal text-muted-foreground">{bill.receipt ? `已收 ${formatMoney(bill.receipt.amount)}` : '暂无记录'}</span>
+          {bill.receipt ? <span className="text-xs font-normal text-muted-foreground">已收 {formatMoney(bill.receipt.amount)}</span> : null}
         </span>
         <ChevronDown aria-hidden className="size-4 shrink-0 transition-transform group-open:rotate-180" />
       </DisclosureSummary>
@@ -63,13 +62,13 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
       {bill.receipt ? <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div><dt>金额</dt><dd>{formatMoney(bill.receipt.amount)}</dd></div>
         <div><dt>收款时间</dt><dd>{formatDateTimeShanghai(bill.receipt.receivedAt)}</dd></div>
-        <div><dt>收款方式</dt><dd className="break-words">{bill.receipt.paymentMethod ?? '未记录'}</dd></div>
-        <div><dt>流水号</dt><dd className="break-all">{bill.receipt.referenceNo ?? '未记录'}</dd></div>
+        {bill.receipt.paymentMethod ? <div><dt>收款方式</dt><dd className="break-words">{bill.receipt.paymentMethod}</dd></div> : null}
+        {bill.receipt.referenceNo ? <div><dt>流水号</dt><dd className="break-all">{bill.receipt.referenceNo}</dd></div> : null}
       </dl> : <p className="text-sm text-muted-foreground">暂无工厂收款记录</p>}
       </div>
     </Disclosure>
     <section aria-labelledby="sales-bill-items-title" className="space-y-4">
-    <div><h2 id="sales-bill-items-title" className="font-semibold">账单明细</h2><p className="mt-1 text-sm text-muted-foreground">整张账单共 {bill.items.length} 单；当前匹配 {members.total} 单。上方金额为整张账单合计。</p></div>
+    <div><h2 id="sales-bill-items-title" className="font-semibold">账单明细</h2><p className="mt-1 text-sm text-muted-foreground">{members.q ? `匹配 ${members.total} / ${bill.items.length} 单` : `${bill.items.length} 单`}</p></div>
     <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
     <Form action={basePath} id="bill-item-search" key={members.q} className="flex min-w-0 flex-wrap items-end gap-3">
       <input type="hidden" name="returnTo" value={returnTo} />

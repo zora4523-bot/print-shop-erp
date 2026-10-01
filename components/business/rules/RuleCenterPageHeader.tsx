@@ -44,8 +44,8 @@ export function RuleCenterEffectBadge({
 }
 
 /**
- * 规则中心页头：PageHeader 的薄封装，只把「作用域」胶囊与生效方式
- * 徽标放进 eyebrow 槽（ui-规范 §8.3：所有页面标题经 PageHeader）。
+ * 规则中心页头：PageHeader 的薄封装，只把「作用域」胶囊
+ * 放进 eyebrow 槽（ui-规范 §8.3：所有页面标题经 PageHeader）。
  */
 export function RuleCenterPageHeader({
   title,
@@ -53,7 +53,6 @@ export function RuleCenterPageHeader({
   subtitle,
   scope,
   scopeEmphasis = false,
-  effect,
   back,
   status,
   actions,
@@ -71,7 +70,7 @@ export function RuleCenterPageHeader({
       actions={actions}
       className={className}
       eyebrow={
-        scope || effect ? (
+        scope ? (
           <>
             {scope ? (
               <span
@@ -84,7 +83,6 @@ export function RuleCenterPageHeader({
                 {scope}
               </span>
             ) : null}
-            {effect ? <RuleCenterEffectBadge effect={effect} /> : null}
           </>
         ) : undefined
       }

@@ -6,6 +6,9 @@ import { E2E_USERS, E2E_PASSWORD, login, getUserIdByUsername, seedPrintableOrder
 import { withSupplyChainDb } from '../e2e/_supply-chain-fixtures';
 import { assertDurableEnvironment, startHeavyWorker, expectJobSucceeded } from './_helpers';
 
+// Exercise the recovery links with real touch input as well as keyboard focus.
+test.use({ hasTouch: true });
+
 // Failed runs can leave a delayed job for this deterministic print fixture.
 // Retain its attempts/history; cancel only pending fixture PDFs in the isolated DB.
 async function cancelPendingFixturePdfs(orderId: string) {
@@ -41,6 +44,7 @@ test('offline recovery, in-place progress, isolated worker rendering and authori
         await retry.focus(); await expect(retry).toBeFocused();
       }
     }
+    await page.setViewportSize({ width: 375, height: 667 });
     await page.getByRole('link', { name: '网页打印', exact: true }).tap();
     await expect(page.locator('html')).toHaveAttribute('data-print-ready', 'true');
     await expect(page.locator('.work-order-document')).toBeVisible();
@@ -52,7 +56,15 @@ test('offline recovery, in-place progress, isolated worker rendering and authori
       return rows.rows[0].id;
     });
     worker = await startHeavyWorker(testInfo);
-    await page.getByRole('link', { name: '立即重试', exact: true }).tap();
+    const resume = page.getByRole('link', { name: '立即重试', exact: true });
+    const resumeHref = await resume.getAttribute('href');
+    if (!resumeHref) throw new Error('PDF 重试入口缺少地址');
+    const resumeUrl = new URL(resumeHref, page.url()).href;
+    // The route deliberately waits for its job before returning 202. A tap
+    // alone does not wait for that navigation, so observe the actual response.
+    const queuedResponse = page.waitForResponse((response) => response.url() === resumeUrl && response.request().isNavigationRequest());
+    await resume.tap();
+    expect((await queuedResponse).status()).toBe(202);
     await expect(page.getByRole('heading', { name: 'PDF 正在排队' })).toBeVisible();
     expect(await page.locator('meta[http-equiv="refresh"]').count()).toBe(0);
     await page.evaluate(() => { document.body.dataset.recoveryMarker = 'same-document'; });
@@ -61,8 +73,9 @@ test('offline recovery, in-place progress, isolated worker rendering and authori
     await page.waitForResponse((response) => response.url().includes('status=1') && response.status() === 202);
     await expect(retry).toBeFocused();
     expect(await page.locator('body').getAttribute('data-recovery-marker')).toBe('same-document');
+    const download = page.waitForEvent('download', { timeout: 45_000 });
     await withSupplyChainDb((db) => db.query('UPDATE "BackgroundJob" SET "availableAt"=NOW() WHERE id=$1', [job]));
-    const downloaded = await page.waitForEvent('download', { timeout: 45_000 });
+    const downloaded = await download;
     const file = testInfo.outputPath('recovered-work-order.pdf');
     await downloaded.saveAs(file);
     const bytes = await readFile(file);

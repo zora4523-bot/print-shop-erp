@@ -34,7 +34,6 @@ export default async function OutsourceListPage({
     <div className="space-y-6">
       <PageHeader
         title="外协单"
-        subtitle="发往 UV / 啤 / 彩印 等外协厂的工艺清单。回货后点“已回货”。"
         actions={
           <Link href="/orders" className={buttonVariants()}>
             从工单创建外协

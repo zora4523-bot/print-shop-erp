@@ -15,6 +15,8 @@ applies_to: repository source at last_verified
 
 新登记的专版计件按颜色身份去重，两面出现同色的不同名称仍只计一种颜色；已冻结的登记计价依据和已入账工资继续使用原快照，不因目录修复自动重算。
 
+同日历史编辑兼容补修没有 schema、迁移或 seed 变更。未改颜色且未影响计价的 UPDATE 保留原始正反面、聚合数组和单双面/单双色标志；旧待审申请回显颜色经过锁内原值及版本核对后，也不回写这些字段。名称、版本与审计按正常改单流程写入，历史申请 JSON、`beforeSnapshot`、价格及工资记录不做数据清洗。实际计价变化仍执行原有整单报价与确认，不能用历史兼容路径跳过校验；无需复制开发数据库到生产。实施证据见[历史兼容修复任务](docs/audits/2026-09-29-foil-color-compatibility-plan.md)。
+
 ## 2026-09-28 生产事实核对与历史恢复
 
 本轮新增 `20260928130000_production_fact_review`、`20260928131000_production_fact_guard_hardening`、`20260928132000_production_recovery_resolution`、`20260928133000_production_inclusion_evidence`，完整迁移链为 179 项。守卫及同日同人后续事实关联各自使用前向迁移；不改已应用 SQL。

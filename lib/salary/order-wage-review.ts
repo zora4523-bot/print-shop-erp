@@ -39,9 +39,15 @@ function summarize(operation: WageOperation) {
     group.amount = group.amount.plus(report.amount.toString()); group.quantity = group.quantity.plus(report.reportedCompletedQty.toString());
     group.settled ||= Boolean(report.settlementItem); groups.set(key, group);
   }
+  // 与确认时的抵消记录同源；跨日冲正仍保留原报工日和冲正日各自的金额。
+  const voidedAdjustmentDeltas = new Map<string, Decimal>();
+  for (const { anchor, residual } of voidedAdjustmentResiduals(operation)) {
+    const key = `${anchor.reporterId}:${formatDateInputShanghai(anchor.reportedAt)}:void`;
+    voidedAdjustmentDeltas.set(key, (voidedAdjustmentDeltas.get(key) ?? new Decimal(0)).minus(residual));
+  }
   return { id: operation.id, orderId: operation.orderId, type: operation.operationType, reviewRequired: operation.payrollReviewRequired,
     revision: createHash('sha256').update(JSON.stringify({ updatedAt: operation.updatedAt?.toISOString(), reports: operation.reports.map((r) => [r.id, r.amount.toString()]) })).digest('hex'),
-    groups: [...groups.values()].map((g) => ({ ...g, editable: !g.voided && !g.settled && operation.reports.some((r) => r.id === g.anchorId && r.entryType === 'REPORT'), amount: g.amount.toFixed(2), quantity: g.quantity.toString() })),
+    groups: [...groups.entries()].map(([key, g]) => ({ ...g, editable: !g.voided && !g.settled && operation.reports.some((r) => r.id === g.anchorId && r.entryType === 'REPORT'), amount: g.amount.toFixed(2), quantity: g.quantity.toString(), voidedAdjustmentDelta: (voidedAdjustmentDeltas.get(key) ?? new Decimal(0)).toFixed(2) })),
   };
 }
 /** 已作废报工上残留的人工核定差额：冲正只否定原报工金额，不含后来的 ADJUSTMENT。 */

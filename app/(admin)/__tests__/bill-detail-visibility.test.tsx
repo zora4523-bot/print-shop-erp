@@ -315,8 +315,9 @@ it('paginates and searches administrator bill items without changing whole-bill 
     })),
   });
   const html = renderToStaticMarkup(await AgentMonthlyBillDetailPage({ params: Promise.resolve({ id: 'agent-bill-1' }), searchParams: Promise.resolve({ q: 'SEARCH-', page: '3', returnTo: '/owner/agent-bills?status=DRAFT' }) }));
-  expect(html).toContain('当前匹配 61 / 61 单');
+  expect(html).toContain('匹配 61 / 61 单');
   expect(html).toContain('800.00');
+  expect(html).toContain('整单金额');
   const table = html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? '';
   expect(table.match(/<tr class="grid /g)).toHaveLength(1);
   expect(table).toContain('SEARCH-060');

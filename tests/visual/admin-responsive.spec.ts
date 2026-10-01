@@ -50,7 +50,7 @@ test.describe('administrator workspace', () => {
       { name: 'discovery-purchase-new', path: '/owner/purchases/new', readyHeading: '新建采购单' },
       { name: 'discovery-parties', path: '/owner/parties?type=suppliers', readyHeading: '客户/供应商' },
       { name: 'discovery-boms', path: '/owner/boms', readyHeading: '用料清单' },
-      { name: 'discovery-categories', path: '/owner/rules/product-categories', readyHeading: '产品结构分类 / BOM 分类' },
+      { name: 'discovery-categories', path: '/owner/rules/product-categories', readyHeading: '产品结构分类 / 用料清单分类' },
       { name: 'discovery-rules', path: '/owner/rules', readyHeading: '规则配置中心' },
       { name: 'discovery-outsource', path: '/foreman/outsource', readyHeading: '外协单' },
     ];
@@ -879,12 +879,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'rule-center-specs',
       path: `${RULE_CENTER_HREFS.productReferences}?section=specs`,
-      readyHeading: '规格 · 烫金颜色',
+      readyHeading: '规格目录',
     },
     {
       name: 'rule-center-product-categories',
       path: RULE_CENTER_HREFS.productCategories,
-      readyHeading: '产品结构分类 / BOM 分类',
+      readyHeading: '产品结构分类 / 用料清单分类',
     },
     {
       name: 'rule-center-crafts',
@@ -1444,6 +1444,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   ).toBeVisible();
 
   const list = page.locator('[data-slot="sales-orders-list"]');
+  await expect(list).toHaveCount(1);
   await expect(list).toBeVisible();
   const card = list.locator(`[data-order-id="${data.orderId}"]:visible`);
   await expect(card).toHaveCount(1);

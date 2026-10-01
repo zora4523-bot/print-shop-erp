@@ -116,39 +116,11 @@ export function ChannelForm(props: Props) {
         <FieldError fieldId="transport" messages={fieldErrors?.transport} />
       </div>
 
-      <div className="space-y-2 rounded-xl border bg-muted/20 p-4 text-sm">
-        <p className="font-medium">群聊绑定</p>
-        {isCreate ? (
-          <p className="text-muted-foreground">
-            先保存通知目标，再生成绑定码并发送到目标企业微信群。
-          </p>
-        ) : smartBotBound && !smartBotBotMatchesConfigured ? (
-          <div className="space-y-1 text-destructive">
-            <p>
-              机器人账号已变更，当前群暂停推送。
-            </p>
-            <p>
-              请联系管理员恢复原机器人账号，或新建通知目标绑定当前机器人。
-            </p>
-          </div>
-        ) : smartBotBound ? (
-          <div className="space-y-1 text-muted-foreground">
-            <p>
-              已绑定{initial?.smartBotChatType === 'GROUP' ? '群聊' : '会话'}：
-              <span className="ml-1 font-mono text-foreground">
-                {initial?.smartBotTargetMasked ?? '已隐藏'}
-              </span>
-            </p>
-            <p>
-              如需换群，请新建通知目标。
-            </p>
-          </div>
-        ) : (
-          <p className="text-muted-foreground">
-            尚未绑定企业微信群。请先保存名称，再在下方生成一次性绑定码。
-          </p>
-        )}
-      </div>
+      {smartBotBound && !smartBotBotMatchesConfigured ? (
+        <p className="text-sm text-destructive">
+          机器人账号已变更，当前群暂停推送。请联系管理员恢复原机器人账号，或新建通知目标绑定当前机器人。
+        </p>
+      ) : null}
 
       <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
         <Checkbox

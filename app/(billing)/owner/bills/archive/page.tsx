@@ -17,11 +17,11 @@ export default async function LegacyBillArchivePage() {
     <div className="space-y-6">
       <PageHeader
         title="历史账单归档"
-        subtitle="保留旧账单的完成时间、补充账单与部分收款记录，仅供查阅，不计入代理商月度账单。"
-        back={{ href: '/owner/agent-bills', label: '返回代理商月度账单' }}
+        subtitle="不计入当前月账单"
+        back={{ href: '/owner/agent-bills', label: '返回外部销售月账单' }}
       />
       {rows.length === 0 ? (
-        <EmptyState icon={Archive} title="暂无历史账单" description="归档表中尚无历史记录。" />
+        <EmptyState icon={Archive} title="暂无历史账单" />
       ) : (
         <TableScrollArea label="历史账单归档" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">

@@ -16,7 +16,7 @@ export function orderCancelImpact(input: {
       value: `${input.inProgressProductionCount} 个`,
     },
     {
-      label: '已报工记录保留金额快照',
+      label: '已报工工资保留',
       value: `${input.completedProductionCount} 个`,
     },
     {

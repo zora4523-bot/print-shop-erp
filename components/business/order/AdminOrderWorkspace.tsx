@@ -446,7 +446,7 @@ function signalCountClassName(signal: AdminOrderSignal): string | undefined {
 }
 
 /** 表单只在「已应用的可见筛选值」变化时重挂载，见上方 #38 注释。 */
-export function appliedFilterFormKey(query: AdminOrderWorkspaceQuery): string {
+function appliedFilterFormKey(query: AdminOrderWorkspaceQuery): string {
   const f = query.list.filters;
   return JSON.stringify([f.q ?? '', f.submitterId ?? '', f.craftIds[0] ?? '']);
 }
@@ -476,7 +476,7 @@ export function adminSubmitterFilterParams(
   };
 }
 
-export function adminPendingWagesFilterParams(query: AdminOrderWorkspaceQuery) {
+function adminPendingWagesFilterParams(query: AdminOrderWorkspaceQuery) {
   return serializeAdminOrderWorkspaceQuery({
     ...query,
     queue: 'all',

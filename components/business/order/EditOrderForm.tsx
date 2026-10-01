@@ -190,7 +190,7 @@ export function EditOrderForm({
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
           {designLayout
-            ? '已确认资料中的工单名称与外部销售归属保持锁定；款式与交期变更将更新工单版本。'
+            ? '工单名称和外部销售不可修改。'
             : '工单已确认，仅可修改配送信息、包装补充说明与工单备注。'}
         </div>
       )}

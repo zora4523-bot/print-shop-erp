@@ -122,13 +122,8 @@ export async function ProductCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title={specWorkspace ? '规格 · 烫金颜色' : '产品资料'}
+        title={specWorkspace ? '规格目录' : '产品资料'}
         effect="immediate"
-        subtitle={
-          specWorkspace
-            ? '规格和纸张来自产品资料；烫金颜色当前随工单事实维护。'
-            : '维护专版和彩印等路线的产品资料；空白封在单价表直接配置。'
-        }
         actions={
           <Link
             href={`${routeBase}/new`}
@@ -256,7 +251,6 @@ export async function NewProductCatalogItem({
       <RuleCenterPageHeader
         title="新建产品资料"
         effect="immediate"
-        subtitle="本页维护专版和彩印等路线的产品资料。价格及数量档在客户计价规则中维护。"
         back={{ href: routeBase, label: '返回产品资料' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
@@ -362,11 +356,6 @@ export async function EditProductCatalogItem({
           <h2 className="mb-2 text-base font-semibold">
             {product.isActive ? '停用产品资料' : '启用产品资料'}
           </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            {product.isActive
-              ? '停用后不再参与新建工单的隐式匹配；已有工单、BOM 和已发布价格不会被改写。'
-              : '启用后会重新参与新建工单的产品结构、纸张与规格匹配。'}
-          </p>
           <ToggleActiveButton
             key={`${product.id}-${product.isActive}`}
             productId={product.id}

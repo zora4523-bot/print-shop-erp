@@ -388,7 +388,7 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
 
       completion.resolve({ status: 'success', result: {}, orderId: 'order-1' });
       await vi.waitFor(() => {
-        expect(host.textContent).toContain('物流费用已确认，工单已刷新。');
+        expect(host.textContent).toContain('物流费用已确认。');
       });
       // The finalize action revalidates; no extra router.refresh() (DECISIONS 2026-08-27).
       expect(refreshMock).not.toHaveBeenCalled();
@@ -421,7 +421,7 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
 
       await vi.waitFor(() => {
         expect(finalizeActionMock).toHaveBeenCalledTimes(2);
-        expect(host.textContent).toContain('物流费用已确认，工单已刷新。');
+        expect(host.textContent).toContain('物流费用已确认。');
       });
       expect(refreshMock).not.toHaveBeenCalled();
       expect(finalizeActionMock.mock.calls[1]![1]).toEqual(firstPayload);

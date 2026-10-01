@@ -66,7 +66,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
             <a
               href={`/api/salary/piecework/export?date=${salaryDateKey}&workerId=${salary.workerId}`}
               className={buttonVariants({ variant: 'outline' })}
-            
+
               download
             >
               导出 Excel
@@ -92,12 +92,8 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
         </div>
       </section>
 
-      <section className="rounded-xl border bg-card p-5 shadow-sm">
+      {salary.adjustments.length > 0 ? <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="font-semibold">历史人工调整</h2>
-        <p className="mb-4 text-xs text-muted-foreground">
-          仅展示旧账本已保存的奖金、扣款或差错修正；不再提供添加或改写入口。
-        </p>
-        {salary.adjustments.length > 0 ? (
           <ul className="divide-y border-t text-sm">
             {salary.adjustments.map((entry) => (
               <li key={entry.id} className="grid gap-2 py-3 sm:grid-cols-[100px_100px_1fr_220px]">
@@ -112,17 +108,11 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">无历史人工调整。</p>
-        )}
-      </section>
+      </section> : null}
 
       <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
         <div className="p-5">
           <h2 className="font-semibold">计件任务明细（{salary.items.length}）</h2>
-          <p className="text-xs text-muted-foreground">
-            金额来自任务完工时锁定的规则，后续改价不会篡改历史。
-          </p>
         </div>
         {salary.items.length === 0 ? (
           <p className="px-5 pb-5 text-sm text-muted-foreground">

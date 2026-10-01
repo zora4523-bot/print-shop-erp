@@ -6,7 +6,6 @@ import Form from 'next/form';
 import Link from 'next/link';
 import {
   Banknote,
-  FileClock,
   Inbox,
   ReceiptText,
   TriangleAlert,
@@ -57,7 +56,6 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
     <div className="min-w-0 space-y-6">
       <PageHeader
         title="外部销售月账单"
-        subtitle="按结算月份归集外部销售工单。"
         actions={
           <Link
             href="/owner/bills/archive"
@@ -68,7 +66,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         }
       />
 
-      <p className="text-sm text-muted-foreground">全部账期与外部销售的当前待收款、未出账工单。</p>
+      <p className="text-sm text-muted-foreground">全部账期 · 全部外部销售 · 不含历史账单</p>
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard
           label="待收款"
@@ -156,7 +154,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       </Form>
 
       <section aria-label="筛选结果汇总" className="space-y-3">
-        <p className="text-sm text-muted-foreground">当前筛选结果 · {result.total} 张账单，汇总包含所有分页。</p>
+        <p className="text-sm text-muted-foreground">当前筛选 · {result.total} 张账单</p>
         <div className="grid gap-4 sm:grid-cols-3">
           <StatCard label="草稿金额" value={formatMoney(result.summary.DRAFT.amount)} hint="未计入待收款" />
           <StatCard label="待收款" value={formatMoney(result.summary.CONFIRMED.amount)} tone="warning" />
@@ -184,7 +182,6 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         <EmptyState
           icon={Inbox}
           title="当前筛选下暂无账单"
-          description="请选择已结束的月份生成账单。"
         />
       ) : (
         <TableScrollArea
@@ -201,7 +198,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                 <th className="px-4 py-2 text-right">抵扣</th>
                 <th className="px-4 py-2 text-right">账单金额</th>
                 <th className="px-4 py-2 text-center">状态</th>
-                <th className="px-4 py-2 text-left">锁定 / 结清</th>
+                <th className="px-4 py-2 text-left">确认 / 结清</th>
                 <th className="px-4 py-2 text-right">操作</th>
               </tr>
             </thead>
@@ -229,8 +226,8 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                     {bill.paidAt
                       ? `结清 ${formatDateTimeShanghai(bill.paidAt)}`
                       : bill.confirmedAt
-                        ? `锁定 ${formatDateTimeShanghai(bill.confirmedAt)}`
-                        : '尚未锁定'}
+                        ? `确认 ${formatDateTimeShanghai(bill.confirmedAt)}`
+                        : '尚未确认'}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link
@@ -255,10 +252,6 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
         pageSize={result.pageSize}
         queryParams={{ period, status, agentUserId }}
       />
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <FileClock className="size-4" />
-        历史账单归档保留原完成时间与部分收款记录，不与本页数字混算。
-      </p>
     </div>
   );
 }

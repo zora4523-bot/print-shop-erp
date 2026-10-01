@@ -116,6 +116,35 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     if (ts.isJsxAttribute(node)) return;
     ts.forEachChild(node, value);
   };
+  // List props contain both visible labels and internal keys. Follow only declared
+  // display fields; metadata, query values and commands are not UI copy.
+  const collectionVisited = new Set();
+  const collection = (node) => {
+    if (!node || collectionVisited.has(node)) return;
+    collectionVisited.add(node);
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) return value(node);
+    if (ts.isIdentifier(node)) return collection(resolve(node));
+    if (ts.isJsxExpression(node) || ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node)) return collection(node.expression);
+    if (ts.isArrayLiteralExpression(node)) { for (const item of node.elements) collection(item); return; }
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (ts.isSpreadAssignment(property)) collection(property.expression);
+        else if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
+          const name = property.name.getText().replace(/["']/g, '');
+          const initializer = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+          if (name === 'items' || name === 'children') collection(initializer);
+          else if (visibleProps.has(name)) value(initializer);
+        }
+      }
+      return;
+    }
+    if (ts.isCallExpression(node)) return collection(node.expression);
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return collection(node.body);
+    if (ts.isConditionalExpression(node)) { collection(node.whenTrue); collection(node.whenFalse); return; }
+    if (ts.isReturnStatement(node)) return collection(node.expression);
+    if (ts.isBlock(node)) { for (const statement of node.statements) collection(statement); return; }
+    if (ts.isIfStatement(node)) { collection(node.thenStatement); collection(node.elseStatement); }
+  };
   const visit = (n) => {
     // <script> / next <Script> / <style> 的内联源码不是可见文案。
     if (ts.isJsxElement(n) && /^(?:script|Script|style)$/.test(n.openingElement.tagName.getText(sf))) return;
@@ -126,6 +155,7 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
       const tag = n.parent.parent;
       const textInput = /^(?:input|Input|ReadOnlyInput|textarea|Textarea)$/.test(tag.tagName?.getText(sf) ?? '');
       const hidden = n.parent.properties.some(p => ts.isJsxAttribute(p) && p.name.getText(sf) === 'type' && p.initializer && ts.isStringLiteral(p.initializer) && ['hidden', 'checkbox', 'radio'].includes(p.initializer.text));
+      if (name === 'items') collection(n.initializer);
       if (visibleProps.has(name) || (textInput && !hidden && ['value', 'defaultValue'].includes(name))) value(n.initializer);
     }
     if (ts.isCallExpression(n)) {

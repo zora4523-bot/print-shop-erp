@@ -9,7 +9,7 @@ async function createStyleOutsource(page: Page, orderId: string, sequence: numbe
   await page.getByRole('checkbox', { name: new RegExp(`^#${sequence} · 外协回归款${sequence}`) }).check();
   await page.getByLabel('外协厂名 *', { exact: true }).fill(`回归外协厂${sequence}`);
   await page.getByLabel('工艺 / 内容', { exact: true }).fill('纯彩印外协');
-  await page.getByRole('button', { name: '创建外协单', exact: true }).click();
+  await page.getByRole('button', { name: '创建并标记已发出', exact: true }).click();
   await page.waitForURL(/\/foreman\/outsource\/[a-z0-9_-]+$/i);
   return new URL(page.url()).pathname.split('/').at(-1)!;
 }
@@ -126,6 +126,6 @@ test('销售角色不能通过已知工单进入外协创建页面', async ({ pa
   await login(page, { username: E2E_USERS.sales!.username, password: E2E_PASSWORD });
   await page.goto(`/foreman/outsource/new?orderId=${fixture.orderId}`);
   await expect(page).not.toHaveURL(/\/foreman\/outsource/);
-  await expect(page.getByRole('button', { name: '创建外协单', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '创建并标记已发出', exact: true })).toHaveCount(0);
   expect((await readOutsourceState(fixture.orderId)).rows).toHaveLength(0);
 });

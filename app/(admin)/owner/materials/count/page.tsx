@@ -19,7 +19,6 @@ export default async function OwnerMaterialInventoryCountPage() {
       <PageHeader
         title="库存盘点"
         back={{ href: '/owner/warehouses', label: '返回仓库/库位' }}
-        subtitle="按仓库库位录入实盘数，提交后生成盘点单和差异库存流水。"
       />
 
       <InventoryCountClient

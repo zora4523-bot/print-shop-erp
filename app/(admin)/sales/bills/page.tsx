@@ -6,7 +6,7 @@ import { SalesBillsList } from '@/components/business/agent-monthly-billing/Sale
 import { buildTableHref } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listSalesMonthlyBills } from '@/lib/agent-monthly-billing/sales-query';
-import { SALES_BILL_DESCRIPTION, SALES_BILL_PAGE_TITLE } from '@/lib/agent-monthly-billing/labels';
+import { SALES_BILL_PAGE_TITLE } from '@/lib/agent-monthly-billing/labels';
 import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY as statusRegistry } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -28,15 +28,15 @@ export default async function SalesBillsPage({ searchParams }: { searchParams: P
 
   return (
     <div className="min-w-0 space-y-6">
-      <PageHeader title={SALES_BILL_PAGE_TITLE} subtitle={SALES_BILL_DESCRIPTION} />
+      <PageHeader title={SALES_BILL_PAGE_TITLE} />
       <section id="sales-bill-results" aria-labelledby="sales-bill-results-title" className="scroll-mt-24 space-y-4">
         <div>
           <h2 id="sales-bill-results-title" className="font-semibold">月账单列表</h2>
-          <p className="mt-1 text-sm text-muted-foreground">统计范围：当前筛选结果，共 {result.total} 张账单，包含所有分页。</p>
+          <p className="mt-1 text-sm text-muted-foreground">当前筛选 · {result.total} 张账单</p>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatCard label={statusRegistry.DRAFT.label} value={formatMoney(summary.DRAFT.amount)} tone="neutral" hint="以工厂确认后的金额为准" className="col-span-2 sm:col-span-1" />
-          <StatCard label={statusRegistry.CONFIRMED.label} value={formatMoney(summary.CONFIRMED.amount)} tone="warning" hint="工厂已确认，待付款" />
+          <StatCard label={statusRegistry.DRAFT.label} value={formatMoney(summary.DRAFT.amount)} tone="neutral" hint="金额未定稿" className="col-span-2 sm:col-span-1" />
+          <StatCard label={statusRegistry.CONFIRMED.label} value={formatMoney(summary.CONFIRMED.amount)} tone="warning" />
           <StatCard label={statusRegistry.PAID.label} value={formatMoney(summary.PAID.amount)} tone="success" />
         </div>
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">

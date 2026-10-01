@@ -26,12 +26,11 @@ export function BillItemEvidence({ item, period, sales = false, returnTo }: {
   const base = sales ? '/sales/bills' : '/owner/agent-bills';
   return <BillDetailDisclosure label={`查看 ${item.orderNoSnapshot} 明细`} triggerText={item.orderNoSnapshot} title={item.orderNoSnapshot} description={`${period} 账单中的结算记录`}>
     <dl className="grid grid-cols-2 gap-4">
-      <div><dt className="text-muted-foreground">{sales ? '工单金额' : '结算金额'}</dt><dd className="font-semibold tabular-nums">{formatMoney(item.settledFeeSnapshot)}</dd></div>
+      <div><dt className="text-muted-foreground">结算工单金额</dt><dd className="font-semibold tabular-nums">{formatMoney(item.settledFeeSnapshot)}</dd></div>
       <div><dt className="text-muted-foreground">结算时间</dt><dd>{formatDateTimeShanghai(item.settledAtSnapshot)}</dd></div>
       <div><dt className="text-muted-foreground">结算时状态</dt><dd><OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /></dd></div>
       <div><dt className="text-muted-foreground">结算时纸单版本</dt><dd>v{item.workOrderVersionSnapshot}</dd></div>
     </dl>
-    {sales ? <p className="text-muted-foreground">工单金额为结算时金额；账单抵扣单独列示。</p> : null}
     <section className="space-y-3">
       <h3 className="font-semibold">结算费用明细</h3>
       {detail ? <dl className="space-y-2">
@@ -52,7 +51,6 @@ export function BillItemEvidence({ item, period, sales = false, returnTo }: {
         </li>;
       })}</ul>
     </section> : null}
-    <p className="text-muted-foreground">当前工单资料可能已变更；本账单按结算记录核对。</p>
     <Link href={`/orders/${item.orderId}`} className={buttonVariants({ variant: 'outline' })}>查看当前工单</Link>
   </BillDetailDisclosure>;
 }

@@ -34,10 +34,10 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await login(page, { from: `/owner/agent-bills/${billId}`, username: E2E_USERS.owner.username, password: E2E_PASSWORD });
-  await page.getByRole('button', { name: '确认并冻结账单', exact: true }).click();
+  await page.getByRole('button', { name: '确认账单', exact: true }).click();
   await expect(page.getByRole('button', { name: '标记已收', exact: true })).toBeVisible();
   await page.goto(`/owner/agent-bills/${foreignBillId}`);
-  await page.getByRole('button', { name: '确认并冻结账单', exact: true }).click();
+  await page.getByRole('button', { name: '确认账单', exact: true }).click();
   await expect(page.getByRole('button', { name: '标记已收', exact: true })).toBeVisible();
   await withDb(async (db) => {
     await db.query('UPDATE "Order" SET "customName"=$2 WHERE id=$1', [source.orderId, '后来改过的名称']);
@@ -61,7 +61,7 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   expect(summary).not.toContain('"999.99"');
   expect(summary.trim().split('\r\n')).toHaveLength(2);
   await page.getByRole('link', { name: `查看 ${source.period} 账单详情`, exact: true }).click();
-  await expect(page.getByText('整张账单共 33 单', { exact: false })).toBeVisible();
+  await expect(page.getByRole('region', { name: '账单明细', exact: true }).getByText('33 单', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
   const memberTable = page.getByRole('table');
   await expect(memberTable.getByRole('row')).toHaveCount(31);

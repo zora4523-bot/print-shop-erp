@@ -67,8 +67,8 @@ type OrderItemChangePayload =
       targetProductId?: string;
       targetBlankIdentity?: { paperType: string; paperWeightGsm: number; specification: string };
       specification?: string;
-      frontFoilColors: string[];
-      backFoilColors: string[];
+      frontFoilColors?: string[];
+      backFoilColors?: string[];
     }
   | {
       operation: 'ADD';
@@ -316,6 +316,12 @@ export function buildSelectedOrderItemChanges(
       current.targetProductId !== item.productId ||
       current.specification !== (item.specification ?? '');
     const targetProductId = current.targetProductId;
+    const sourceFoil = resolveOrderItemFoilSides(item);
+    const frontFoilColors = splitColors(current.frontFoilColors);
+    const backFoilColors = splitColors(current.backFoilColors);
+    const foilChanged =
+      !hasSameColorSet(frontFoilColors, sourceFoil.frontFoilColors) ||
+      !hasSameColorSet(backFoilColors, sourceFoil.backFoilColors);
     if (
       specificationChanged &&
       ((!targetProductId && item.pricingRoute !== 'STOCK_BLANK') || !current.specification.trim())
@@ -337,8 +343,7 @@ export function buildSelectedOrderItemChanges(
               specification: current.specification,
             }
           : {}),
-        frontFoilColors: splitColors(current.frontFoilColors),
-        backFoilColors: splitColors(current.backFoilColors),
+        ...(foilChanged ? { frontFoilColors, backFoilColors } : {}),
       },
     ];
   });
@@ -483,7 +488,7 @@ function ExistingOrderItemChanges({
                       <option value="">
                         {current.specificationSelectionKey
                           ? '选择目录规格'
-                          : current.displaySpecification || '原规格（未匹配活动目录）'}
+                          : current.displaySpecification || '原规格'}
                       </option>
                     ) : null}
                     {specificationOptions.map((option) => (
@@ -495,9 +500,6 @@ function ExistingOrderItemChanges({
                       </option>
                     ))}
                   </NativeSelect>
-                  <span className="block text-xs text-muted-foreground">
-                    仅显示与当前计价路线、纸张和克重一致的活动目录规格。
-                  </span>
                 </label>
                 <label className="min-w-0 space-y-1 text-sm">
                   <span>正面烫金颜色（多个用顿号分隔）</span>
@@ -730,7 +732,7 @@ function OrderChangeRequestDraftForm({
         role="status"
         className="rounded-lg border border-success/40 bg-success/10 p-3 text-sm"
       >
-        修改申请已提交，管理员批准前工单内容不会变化。
+        修改申请已提交，待管理员审批。
       </div>
     );
   }
@@ -742,12 +744,7 @@ function OrderChangeRequestDraftForm({
       className="min-w-0 space-y-4"
     >
       <p className="text-xs text-muted-foreground">
-        {hasItems ? <>
-          勾选要修改的款式；可改款式名、数量、目录规格和正反面烫金颜色。
-          {items.some((item) => item.packagingEditable) ? '未进入生产且包装明细明确的款式，可申请调整每袋数量。' : null}
-          规格只显示与当前计价路线、纸张和克重一致的活动目录选项。
-          已产数量将在改版后承接，历史报工和工资保留。
-        </> : dueDateOnly ? '工单已有地址发货，本次只能申请调整交期。' : '未记录款式，本次可申请调整交期。'}
+        {hasItems ? '选择要修改的款式' : dueDateOnly ? '工单已有地址发货，本次只能申请调整交期。' : '未记录款式，本次可申请调整交期。'}
       </p>
       {hasItems ? <ExistingOrderItemChanges
         catalogProducts={catalogProducts}
@@ -790,7 +787,7 @@ function OrderChangeRequestDraftForm({
         {addEnabled ? (
           <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-3 lg:grid-cols-2">
             <label className="min-w-0 space-y-1 text-sm">
-              <span>参考现有款式（继承纸张、工艺和计价路线）</span>
+              <span>参考现有款式（沿用纸张和工艺）</span>
               <NativeSelect
                 value={templateItemId}
                 disabled={pending}

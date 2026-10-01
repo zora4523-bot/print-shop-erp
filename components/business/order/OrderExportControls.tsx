@@ -82,7 +82,7 @@ export function OrderExportControls({
     const timeout = window.setTimeout(() => {
       window.clearInterval(interval);
       setPausedSignature(pendingSignature);
-      setLiveMessage('导出仍在后台生成，自动刷新已暂停。');
+      setLiveMessage('尚未确认导出结果，请刷新进度。无需重新提交。');
     }, ORDER_EXPORT_POLLING_TIMEOUT_MS);
     return () => {
       window.clearInterval(interval);
@@ -177,7 +177,7 @@ export function OrderExportControls({
               className="space-y-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground"
             >
               <p>
-                导出仍可能在后台生成，但自动刷新已在 2 分钟后暂停。可稍后手动刷新，不需要重复提交导出。
+                尚未确认导出结果，请刷新进度。无需重新提交。
               </p>
               <Button
                 type="button"
@@ -186,7 +186,7 @@ export function OrderExportControls({
                 className="min-h-11"
                 onClick={refreshPendingExports}
               >
-                刷新并继续自动检查
+                刷新进度
               </Button>
             </div>
           ) : null}

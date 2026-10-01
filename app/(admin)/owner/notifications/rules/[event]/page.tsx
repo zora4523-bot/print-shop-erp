@@ -13,7 +13,6 @@ import {
   NOTIFICATION_PAYLOAD_FIELDS,
   RETIRED_NOTIFICATION_PAYLOAD_FIELDS,
 } from '@/lib/notification/payload-fields';
-import { managementNotificationRoleForEvent } from '@/lib/notification/events';
 
 export const metadata = { title: '编辑事件规则 · 推送配置' };
 
@@ -48,17 +47,11 @@ export default async function EditRulePage({
   ).filter((field) => !RETIRED_NOTIFICATION_PAYLOAD_FIELDS.has(field));
 
   const action = updateRuleAction.bind(null, event);
-  const managementRole = managementNotificationRoleForEvent(event);
 
   return (
     <FormPage>
       <PageHeader
         title="编辑事件规则"
-        subtitle={
-          managementRole
-            ? '模板和事件开关在此配置；接收群由系统设置中的固定角色路由决定。'
-            : '模板支持 Markdown 和列出的占位符；至少选择一个群并启用后才会推送。'
-        }
         back={{ href: '/owner/notifications', label: '返回推送配置' }}
       />
       <RuleForm

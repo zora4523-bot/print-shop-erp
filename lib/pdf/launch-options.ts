@@ -12,7 +12,7 @@ export const PDF_WORKER_RENDER_BUDGET_MS = 60_000;
  * printToPDF measured on real large orders
  * (docs/audits/2026-09-30-pdf-browser-lifecycle.md).
  */
-export const PDF_PROTOCOL_TIMEOUT_MS = PDF_WORKER_RENDER_BUDGET_MS;
+export const PDF_PROTOCOL_TIMEOUT_MS = Math.max(PDF_DIRECT_BUDGET_MS, PDF_WORKER_RENDER_BUDGET_MS);
 
 /**
  * Every Chromium launch for PDF work uses these options. Puppeteer's own

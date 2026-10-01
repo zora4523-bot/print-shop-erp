@@ -2,7 +2,7 @@ import { ContentSkeleton, FORM_PAGE_WIDTH_CLASS, SectionLoading } from '@/compon
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
-export type AdminRouteLoadingVariant = 'list' | 'detail' | 'form';
+type AdminRouteLoadingVariant = 'list' | 'detail' | 'form';
 
 /**
  * 管理端路由级 loading。骨架形状必须和目标页一致（审查 #26，CLS）：

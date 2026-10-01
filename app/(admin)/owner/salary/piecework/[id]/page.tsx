@@ -73,10 +73,10 @@ export default async function PieceworkSettlementDetailPage({
             <a
               href={`/api/salary/piecework-settlements/export?from=${workDate}&to=${workDate}&workerId=${settlement.reporterId}`}
               className={buttonVariants({ variant: 'outline' })}
-            
+
               download
             >
-              导出新账本
+              导出计件结算
             </a>
           </div>
         }
@@ -170,7 +170,7 @@ export default async function PieceworkSettlementDetailPage({
                     {formatMoney(report.amount)}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    v{report.priceBookVersion} · {report.ruleSetSha256.slice(0, 10)}…
+                    v{report.priceBookVersion}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {formatDateTimeShanghai(report.reportedAt)}

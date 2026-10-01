@@ -63,9 +63,6 @@ function SalesOrderChangeRequestSection({
     >
       <div>
         <h2 className="text-base font-semibold">申请修改工单</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          管理员批准后才会更新工单内容。
-        </p>
         {options.shipped ? (
           <p className="mt-1 text-xs text-muted-foreground">
             工单已有地址发货，按正常收费，不能取消或修改款式数量，只能申请修改交期。
@@ -305,16 +302,14 @@ export function SalesOrderDetailView({
             </ol>
           </section>
 
-          <section
+          {order.packagingGroups.length > 0 || order.packageRequirement ? <section
             aria-label="包装明细"
             className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6"
           >
             <h2 className="text-base font-semibold">
               包装明细（{order.packagingGroups.length}）
             </h2>
-            {order.packagingGroups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">未记录分袋明细。</p>
-            ) : (
+            {order.packagingGroups.length > 0 ? (
               <ol className="space-y-3">
                 {order.packagingGroups.map((group) => (
                   <li
@@ -330,24 +325,24 @@ export function SalesOrderDetailView({
                     <p className="mt-1">
                       {group.mode === 'UNPACKED' ? '不收取包装费' : `共 ${group.actualBagCount.toLocaleString('zh-CN')} ${packagingUnit(group.mode)}`}
                     </p>
-                    <p className="mt-1 text-muted-foreground">
+                    {group.lines.length > 0 ? <p className="mt-1 text-muted-foreground">
                       {group.lines
                         .map(
                           (line) =>
                             `#${line.itemSequence} ${line.itemName}${group.mode === 'UNPACKED' ? '' : ` · 每${packagingUnit(group.mode)} ${line.unitsPerBag} 个`}`,
                         )
-                        .join('；') || '未记录包装组成'}
-                    </p>
+                        .join('；')}
+                    </p> : null}
                   </li>
                 ))}
               </ol>
-            )}
+            ) : null}
             {order.packageRequirement ? (
               <p className="admin-wrap-anywhere whitespace-pre-wrap text-sm">
                 包装补充说明：{order.packageRequirement}
               </p>
             ) : null}
-          </section>
+          </section> : null}
 
           {changeOptions.canRequestModify ? (
             <SalesOrderChangeRequestSection

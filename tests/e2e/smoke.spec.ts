@@ -341,7 +341,7 @@ test.describe('automation smoke', () => {
 
     await page.goto('/owner/product-categories');
     await expect(
-      page.getByRole('heading', { name: '产品结构分类 / BOM 分类' }),
+      page.getByRole('heading', { name: '产品结构分类 / 用料清单分类' }),
     ).toBeVisible();
     await expect(page.getByRole('cell', { name: '空白现货' }).first()).toBeVisible();
     await expectNoNextErrorOverlay(page);

@@ -41,7 +41,7 @@ export default async function LegacyBillArchiveDetailPage({ params, searchParams
               <th className="px-4 py-2 text-left">工单</th>
               <th className="px-4 py-2 text-left">工单名称</th>
               <th className="px-4 py-2 text-left">完成时间</th>
-              <th className="px-4 py-2 text-right">历史成员金额</th>
+              <th className="px-4 py-2 text-right">工单金额</th>
             </tr>
           </thead>
           <tbody className="divide-y">

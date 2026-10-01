@@ -49,7 +49,7 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
           timer = setTimeout(poll, 10_000);
         } else if (next.status === 'failed') {
           setMessage('未生成打印文件，请检查以下工单或减少所选数量后重试。');
-        } else setMessage('打印文件已生成。打开 PDF 后可使用阅读器的打印功能，也可下载后打印。');
+        } else setMessage('打印文件已生成。');
       } catch {
         if (!controller.signal.aborted) {
           setMessage('暂时无法获取进度，将自动重试，也可点击刷新进度。');

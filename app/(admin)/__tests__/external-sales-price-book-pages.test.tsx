@@ -811,13 +811,13 @@ describe('external sales price book pages', () => {
 
     expect(html).toContain('缺口清单与版本历史');
     expect(html).toContain('待处理工作队列');
-    expect(html).toContain('加工费独立版本流');
-    expect(html).toContain('物流费独立版本流');
-    expect(html).toContain('版本号互不绑定');
+    expect(html).toContain('加工费');
+    expect(html).toContain('物流费');
+    expect(html).not.toContain('版本号互不绑定');
     expect(html).toContain('1 份草稿待审阅');
     expect(html).toContain('2 个收费项 · 2 条规则');
     expect(html).toContain('1 / 1 条');
-    expect(html).toContain('真实规则校验已通过');
+    expect(html).toContain('校验通过');
     expect(html).toContain('计划第 3 版已经排期');
     expect(html).toContain(
       htmlHref(

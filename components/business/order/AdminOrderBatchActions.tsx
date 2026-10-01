@@ -234,5 +234,5 @@ function exportResultMessage(result: OrderExportActionResult): string {
 export function resultMessage(result: AdminOrderBatchActionResult, excludedCount = 0): string {
   if (result.status === 'invalid') return '批量请求不合法，请刷新后重试';
   if (result.status === 'error') return batchFailureReason(result.code);
-  return `成功 ${result.result.successCount} 张，业务跳过 ${result.result.skippedCount} 张，结果未知 ${result.result.failedCount} 张，未执行 ${result.result.notAttemptedCount} 张${excludedCount > 0 ? `，未纳入处理 ${excludedCount} 张` : ''}`;
+  return `成功 ${result.result.successCount} 张，跳过 ${result.result.skippedCount} 张，结果未知 ${result.result.failedCount} 张，未执行 ${result.result.notAttemptedCount} 张${excludedCount > 0 ? `，未纳入处理 ${excludedCount} 张` : ''}`;
 }

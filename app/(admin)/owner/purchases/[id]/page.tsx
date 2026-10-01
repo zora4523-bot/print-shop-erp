@@ -150,7 +150,6 @@ export default async function OwnerPurchaseDetailPage({ params, searchParams }: 
           <TableEmptyState
             variant="compact"
             title="暂无收货记录"
-            description="采购收货过账后，收货单会显示在这里。"
           />
         ) : (
           <div className="space-y-4">
@@ -199,9 +198,6 @@ export default async function OwnerPurchaseDetailPage({ params, searchParams }: 
       {order.status === PurchaseOrderStatus.ORDERED ? (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-2 text-base font-semibold">取消采购单</h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            只有尚未收货的采购单可以直接取消；已有收货记录时请先取消对应收货单。
-          </p>
           <CancelPurchaseOrderButton
             purchaseOrderId={order.id}
             purchaseNo={order.purchaseNo}

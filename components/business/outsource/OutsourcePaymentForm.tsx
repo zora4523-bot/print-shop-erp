@@ -56,8 +56,6 @@ export function outsourcePaymentImpactItems(
     `付款方式：${preview.method || '未填写'}`,
     `付款流水号：${preview.reference || '未填写'}`,
     settlement,
-    '这笔流水只记入外协加工付款，不进入销售账单或员工工资。',
-    '系统使用本次请求标识防止重复记账；结果未确认前请勿再次录入。',
   ];
 }
 

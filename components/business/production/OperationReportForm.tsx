@@ -92,7 +92,7 @@ export function ProgressReportForm({
       nextBatchHref={nextBatchHref(progressStepId, idempotencyKey)}
       remainingQty={remainingQty}
       workOrderProgressRemainingQty={null}
-      explanation="合格数用于推进工序；不良数与返工数只做记录，此步骤不计薪。"
+      explanation="不良数与返工数不计入合格完成数。"
       successMessage={
         state?.status === 'success'
           ? state.idempotentReplay

@@ -1,6 +1,6 @@
 import Form from 'next/form';
 import Link from 'next/link';
-import { Palette, Pencil, Ruler, Search } from 'lucide-react';
+import { Pencil, Ruler, Search } from 'lucide-react';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -89,25 +89,6 @@ export function RuleSpecWorkspace({
           </span>
         </div>
 
-        <div className="mt-4 flex min-w-0 flex-col gap-3 rounded-xl border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <span
-              aria-hidden="true"
-              className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground"
-            >
-              <Palette className="size-5" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold">烫金颜色</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                当前随工单事实维护；暂无独立主数据。此处不生成颜色列表或编辑开关。
-              </p>
-            </div>
-          </div>
-          <StatusBadge tone="neutral" className="shrink-0">
-            暂无独立主数据
-          </StatusBadge>
-        </div>
 
         {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
         <Form

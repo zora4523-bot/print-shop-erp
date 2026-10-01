@@ -227,7 +227,7 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 新增 `tests/e2e/shipment-registration.spec.ts` 必须配置与日常数据库不同的 `E2E_DATABASE_URL`，由现有隔离门禁控制。测试保留带随机前缀的测试记录供审查，不重置数据库。执行 `pnpm exec playwright test tests/e2e/shipment-registration.spec.ts --project=chromium --workers=1`。同一工作区运行 Next 开发服务与隔离 E2E 时需依次启动，避免 `.next/dev` 锁冲突。
 
-Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，保持之前已采用的 `catchError/retry` API 可复现；新增直接依赖 sharp 0.35.4，用于服务端解码、限像素、移除图片元数据并转 JPEG。
+Next、`@next/env`、`eslint-config-next` 锁定到已验证的安全补丁版 16.3.6，保持之前已采用的 `catchError/retry` API 可复现；新增直接依赖 sharp 0.35.4，用于服务端解码、限像素、移除图片元数据并转 JPEG。
 
 ## 旧导入纸张资料修复
 

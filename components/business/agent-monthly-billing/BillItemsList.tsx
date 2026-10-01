@@ -20,7 +20,7 @@ type Props = { items: Item[]; period: string; sales?: boolean; billId: string; b
 export function BillItemsList({ items, period, sales = false, billId, billStatus, returnTo }: Props) {
   return <TableScrollArea label="月账单工单明细" className="md:rounded-xl md:border md:bg-card">
     <table className="block w-full text-sm md:table md:min-w-[40rem]">
-      <thead className="sr-only border-b bg-muted/40 text-muted-foreground md:not-sr-only md:table-header-group"><tr>
+      <thead className="hidden border-b bg-muted/40 text-muted-foreground md:table-header-group"><tr>
         <th className="p-3 text-left">工单号</th><th className="p-3 text-left">工单名称</th><th className="p-3 text-left">结算日期</th><th className="p-3 text-right">{sales ? '工单金额' : '结算金额'}</th><th className="p-3 text-left">状态</th>
       </tr></thead>
       <tbody className="grid gap-3 md:table-row-group md:divide-y">
@@ -32,7 +32,7 @@ export function BillItemsList({ items, period, sales = false, billId, billStatus
           </td>
           <td className="admin-wrap-anywhere col-start-1 row-start-1 min-w-0 font-medium md:p-3 md:font-normal"><BillItemName item={item} /></td>
           <td className="col-start-1 row-start-3 text-xs text-muted-foreground md:whitespace-nowrap md:p-3 md:text-sm md:text-foreground"><span className="mr-1 md:hidden">结算</span>{formatDateShanghai(item.settledAtSnapshot)}</td>
-          <td className="col-start-2 row-start-1 text-right font-semibold tabular-nums md:whitespace-nowrap md:p-3 md:font-medium">{formatMoney(item.settledFeeSnapshot)}</td>
+          <td className="col-start-2 row-start-1 text-right font-semibold tabular-nums md:whitespace-nowrap md:p-3 md:font-medium"><span className="sr-only md:hidden">{sales ? '工单金额' : '结算金额'}</span>{formatMoney(item.settledFeeSnapshot)}</td>
           <td className="col-start-2 row-start-3 min-w-0 text-right md:p-3 md:text-left"><OrderStatusSnapshotBadge snapshot={item.orderStatusSnapshot} /></td>
         </tr>)}
       </tbody>

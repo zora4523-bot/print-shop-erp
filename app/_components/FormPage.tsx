@@ -3,6 +3,5 @@
  * `components/ui-business/FormPageContainer.tsx`；app 侧沿用 `FormPage` 名称。
  */
 export {
-  FORM_PAGE_WIDTH_CLASS,
   FormPageContainer as FormPage,
 } from '@/components/ui-business';

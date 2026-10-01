@@ -64,9 +64,8 @@ export async function ProductCategoryCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title="产品结构分类 / BOM 分类"
+        title="产品结构分类 / 用料清单分类"
         effect="immediate"
-        subtitle="分类用于产品资料与用料；历史引用不会因停用而删除。"
         actions={
           <>
           {hasPermission('bom:manage', user.role) ? (
@@ -185,11 +184,6 @@ export async function EditProductCategoryCatalogItem({
           <h2 className="mb-2 text-base font-semibold">
             {node.isActive ? '停用分类' : '启用分类'}
           </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            {node.isActive
-              ? '停用后，不能再用于新建产品资料或 BOM；已有引用保留。'
-              : '启用后会重新进入产品资料与 BOM 的分类选项。'}
-          </p>
           <ToggleProductCategoryActiveButton
             nodeId={node.id}
             currentlyActive={node.isActive}
