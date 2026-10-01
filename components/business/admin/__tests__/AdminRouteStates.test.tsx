@@ -2,6 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminRouteError } from '../AdminRouteError';
 import { AdminRouteLoading } from '../AdminRouteLoading';
+import OrderDetailLoading from '@/app/(admin)/orders/[id]/loading';
+import OrderEditLoading from '@/app/(admin)/orders/[id]/edit/loading';
+import OrderNewLoading from '@/app/(admin)/orders/new/loading';
 
 describe('admin route states', () => {
   it('uses the shared page error fallback inside real error.tsx boundaries', () => {
@@ -68,5 +71,15 @@ describe('admin route states', () => {
     expect(withoutBack.match(backPlaceholder)).toBeNull();
     expect(withBack.match(backPlaceholder)).toHaveLength(1);
     expect(withoutBack).toContain(`data-variant="${variant}"`);
+  });
+
+  // 实际路由的骨架与页头一致：保留页头返回的例外页（新建、编辑工单）画返回占位，详情页不画。
+  it.each([
+    ['工单详情', OrderDetailLoading, 0],
+    ['编辑工单', OrderEditLoading, 1],
+    ['新建工单', OrderNewLoading, 1],
+  ] as const)('%s 路由骨架的返回占位与页头一致', (_label, Loading, expected) => {
+    const html = renderToStaticMarkup(<Loading />);
+    expect(html.match(/data-slot="skeleton" class="[^"]*\bh-5 w-24\b/g)?.length ?? 0).toBe(expected);
   });
 });
