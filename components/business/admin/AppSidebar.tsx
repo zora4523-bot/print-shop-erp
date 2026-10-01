@@ -9,7 +9,7 @@ import {
 } from 'react';
 import Link, { useLinkStatus } from 'next/link';
 import { COMPANY_NAME } from '@/lib/app-brand';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams, type ReadonlyURLSearchParams } from 'next/navigation';
 import {
   Bell,
   BookOpen,
@@ -149,6 +149,18 @@ type AppSidebarProps = {
   roleBadge: string;
 };
 
+function isCurrentLocation(
+  href: string,
+  pathname: string,
+  searchParams: URLSearchParams | ReadonlyURLSearchParams,
+): boolean {
+  const target = new URL(href, 'http://local');
+  return (
+    target.pathname === pathname &&
+    target.searchParams.toString() === new URLSearchParams(searchParams.toString()).toString()
+  );
+}
+
 export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -194,6 +206,21 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
   useEffect(() => {
     return () => intentSchedulerRef.current?.dispose();
   }, [pathname]);
+
+  // 手机端抽屉在地址真正变化后再关：点下去之后抽屉保持打开，被点项的加载
+  // 指示（SidebarLinkPendingIndicator）一直可见，直到新页面接管。原来点击即
+  // 关，抽屉连同唯一的 pending 指示一起消失，旧页面原样停到服务端返回。
+  // 浏览器前进 / 后退同样会走到这里。
+  const locationKey = `${pathname}?${searchParams.toString()}`;
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [locationKey, setOpenMobile]);
+
+  function handleNavigate(href: string) {
+    cancelIntentPrefetch(href);
+    // 点当前页不会产生导航，也就等不到地址变化——立即收起。
+    if (isCurrentLocation(href, pathname, searchParams)) setOpenMobile(false);
+  }
 
   function toggleGroup(label: string) {
     const next = { ...collapsedGroups, [label]: !collapsedGroups[label] };
@@ -251,10 +278,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                     intentHref={intentHref}
                     onEnter={scheduleIntentPrefetch}
                     onLeave={cancelIntentPrefetch}
-                    onNavigate={(href) => {
-                      cancelIntentPrefetch(href);
-                      setOpenMobile(false);
-                    }}
+                    onNavigate={handleNavigate}
                   />
                 ))}
               </SidebarMenu>
@@ -333,10 +357,7 @@ export function AppSidebar({ menuGroups, roleBadge }: AppSidebarProps) {
                         intentHref={intentHref}
                         onEnter={scheduleIntentPrefetch}
                         onLeave={cancelIntentPrefetch}
-                        onNavigate={(href) => {
-                          cancelIntentPrefetch(href);
-                          setOpenMobile(false);
-                        }}
+                        onNavigate={handleNavigate}
                         disclosure={singleParent ? {
                           collapsed,
                           contentId: `${contentId}-submenu`,
