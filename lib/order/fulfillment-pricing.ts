@@ -24,6 +24,7 @@ import {
 import { isFulfillmentPricingStatus } from './fulfillment-pricing-policy';
 import { orderCascadeLockKey } from './locks';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
+import { reconcileSampleWeightBasis } from './sample-weight-basis';
 
 export { isFulfillmentPricingStatus } from './fulfillment-pricing-policy';
 
@@ -518,14 +519,16 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
           actual: { amount, provisional: !confirmed, requiresAdminConfirmation: !confirmed, overrideReason: reason },
           correctedAt: now.toISOString(), actorId: actor.id,
         };
-    const snapshot = {
+    // 寄样首重默认（DECISIONS 2026-09-30）：手填运费时新快照沿用旧快照，会把默认标记
+    // 一并带过来；重量已更正就必须去掉，仍是默认首重才保留。
+    const snapshot = reconcileSampleWeightBasis(row.previous.pricingSnapshot, {
       ...pricingSnapshot,
       ...(row.prepaidEvidence ? { preservedPrepaidShipping: row.prepaidEvidence } : {}),
       ...(confirmed ? { fulfillmentPricingConfirmation: {
         orderId: order.id, priceRevision: order.priceRevision + 1,
         destinationProvince: row.destinationProvince, billableWeightKg: row.weightKg,
       } } : {}),
-    };
+    } as Record<string, unknown>, input.isSfCollect ? null : row.weightKg);
     await tx.orderCustomerCharge.update({
       where: { id: row.previous.id },
       data: { status, amount, suggestedAmount: row.suggestedAmount, sourceRuleId: row.sourceRuleId,

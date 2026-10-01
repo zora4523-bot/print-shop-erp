@@ -12,6 +12,7 @@ import { buildCreateOrderQuoteInputFromCatalog } from './create-order-quote-fact
 import { isNewOrderPricingRoute } from './pricing-route';
 import { isSampleOrder } from './purpose';
 import { hasRetiredPaperItem, RETIRED_PAPER_MESSAGE } from '../rules/paper-availability';
+import { sampleFirstWeightDefaultMarker } from './sample-weight-basis';
 
 export class SampleOrderError extends Error {
   constructor(message: string) {
@@ -262,11 +263,11 @@ export async function finalizeSampleOrderInTx(
   // Every address is synced to the freshly derived weight, including clearing
   // it: a rejected sample moved to a province without a tariff must not keep
   // the earlier default as if it were a billable weight (Codex review P2).
-  const firstWeightDefaults = new Set<string>();
+  const firstWeightDefaults = new Map<string, NonNullable<typeof priced.shipments[number]['weightKg']>>();
   for (const shipment of order.shipments) {
     const key = String(shipment.sequence);
     const weightKg = priced.shipments.find((row) => row.shipmentKey === key)?.weightKg ?? null;
-    if (weightKg) firstWeightDefaults.add(key);
+    if (weightKg) firstWeightDefaults.set(key, weightKg);
     const unchanged = weightKg
       ? shipment.weightKg?.equals(weightKg) === true
       : shipment.weightKg === null;
@@ -317,7 +318,7 @@ export async function finalizeSampleOrderInTx(
             shipmentId: null,
             ruleCode: null,
             evidence: { purpose: 'PROOF' },
-            firstWeightDefault: false,
+            firstWeightDefault: null,
           },
         ]
       : (logistics?.snapshot.components ?? []).map((line) => ({
@@ -334,8 +335,9 @@ export async function finalizeSampleOrderInTx(
           ruleCode: line.ruleCode,
           evidence: line,
           firstWeightDefault:
-            line.categoryCode === 'SHIPPING' &&
-            firstWeightDefaults.has(line.shipmentKey),
+            line.categoryCode === 'SHIPPING'
+              ? firstWeightDefaults.get(line.shipmentKey) ?? null
+              : null,
         }));
   for (const line of lines) {
     const category = await tx.customerChargeCategory.findUnique({
@@ -373,7 +375,7 @@ export async function finalizeSampleOrderInTx(
           priceVersion: snapshot.priceVersion,
           line: line.evidence,
           ...(line.firstWeightDefault
-            ? { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' }
+            ? sampleFirstWeightDefaultMarker(line.firstWeightDefault)
             : {}),
         }),
       ) as Prisma.InputJsonObject,

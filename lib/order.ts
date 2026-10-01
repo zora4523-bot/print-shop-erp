@@ -113,6 +113,7 @@ import { prepareOrderForProductionInTx } from './order/production-readiness';
 import { getSetting } from './settings';
 import { dispatchProductionCompletionNotification, findRequiredOutsourceBlocker, type ProductionCompletionNotification, type ProductionCompletionTx } from './production-completion';
 import { completePlannedProductionBeforeShipInTx, PlannedCompletionError } from './production/planned-completion';
+import { reconcileSampleWeightBasis } from './order/sample-weight-basis';
 
 export class OrderInvariantError extends Error {
   constructor(message: string) {
@@ -2079,15 +2080,6 @@ export async function assertShipOrderReadinessInTx(
   return storedShipments;
 }
 
-function hasSampleFirstWeightDefault(snapshot: unknown): boolean {
-  return typeof snapshot === 'object' && snapshot !== null && !Array.isArray(snapshot)
-    && (snapshot as Record<string, unknown>).weightBasis === 'SAMPLE_FIRST_WEIGHT_DEFAULT';
-}
-
-function withSampleFirstWeightDefault(snapshot: Prisma.InputJsonObject): Prisma.InputJsonObject {
-  return { ...snapshot, weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' };
-}
-
 async function finalizeExternalShipmentChargesInTx(
   tx: Prisma.TransactionClient,
   input: {
@@ -2228,20 +2220,14 @@ async function finalizeExternalShipmentChargesInTx(
   const existingByBusinessKey = new Map(
     standardCustomerCharges.map((charge) => [String(charge.businessKey), charge]),
   );
-  // 寄样首重默认（DECISIONS 2026-09-30）：发货时没有另填重量，就是沿用提交时写入的
-  // 首重，定稿快照保留 SAMPLE_FIRST_WEIGHT_DEFAULT，不把默认值记成实际履约重量。
-  // 管理员在履约费用里改过重量时原快照已被替换、不带此标记，发货时填写的重量同样
-  // 视为实际登记。
-  const sampleDefaultWeightKeys = new Set(
-    chargeOrder.purpose === 'SAMPLE_SHIPMENT'
-      ? input.storedShipments.flatMap((shipment) => {
-          const key = `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`;
-          const submittedWeight = input.requestByShipmentId.get(shipment.id)?.weightKg;
-          return hasSampleFirstWeightDefault(existingByBusinessKey.get(key)?.pricingSnapshot) && !submittedWeight
-            ? [key]
-            : [];
-        })
-      : [],
+  // 寄样首重默认（DECISIONS 2026-09-30）：最终计费重量仍等于提交时写入的首重，
+  // 定稿快照保留 SAMPLE_FIRST_WEIGHT_DEFAULT；重量已按实际更正则去掉。发货登记会把
+  // 已存重量原样回填，所以按重量值判断，不按请求里有没有重量判断。
+  const finalWeightByShippingKey = new Map(
+    input.storedShipments.map((shipment) => [
+      `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
+      input.trustedWeightByShipmentId.get(shipment.id) ?? null,
+    ]),
   );
   for (const charge of finalizedCharges.charges) {
     const existing = existingByBusinessKey.get(charge.businessKey);
@@ -2264,8 +2250,8 @@ async function finalizeExternalShipmentChargesInTx(
         unit: charge.unit,
         suggestedAmount: charge.suggestedAmount,
         amount: charge.amount,
-        pricingSnapshot: sampleDefaultWeightKeys.has(charge.businessKey)
-          ? withSampleFirstWeightDefault(charge.pricingSnapshot)
+        pricingSnapshot: chargeOrder.purpose === 'SAMPLE_SHIPMENT' && finalWeightByShippingKey.has(charge.businessKey)
+          ? reconcileSampleWeightBasis(existing.pricingSnapshot, charge.pricingSnapshot, finalWeightByShippingKey.get(charge.businessKey))
           : charge.pricingSnapshot,
         overrideReason: charge.overrideReason,
         finalizedById: input.actorId,

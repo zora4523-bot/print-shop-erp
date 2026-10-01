@@ -3561,11 +3561,12 @@ describe('shipOrder', () => {
     );
   });
 
-  // DECISIONS 2026-09-30：寄样默认首重。发货时没另填重量，定稿快照保留默认标记；
-  // 发货时填写了重量，就是实际登记，不再带默认标记（Codex 审查 P2）。
+  // DECISIONS 2026-09-30：寄样默认首重。最终计费重量仍等于提交时的首重就保留默认标记；
+  // 发货登记会把已存的 1kg 原样回填，所以不能按「请求里有没有重量」判断（Codex 审查 P2）。
   for (const [label, submittedWeight, keepsDefault] of [
-    ['keeps the sample first-weight default marker when shipping reuses it', null, true],
-    ['drops the sample first-weight default marker once a weight is entered at shipping', '2', false],
+    ['keeps the sample first-weight default marker when shipping reuses the stored weight', null, true],
+    ['keeps the marker when the shipping form re-sends the stored default weight', '1', true],
+    ['drops the sample first-weight default marker once a different weight is entered at shipping', '2', false],
   ] as const) {
     it(label, async () => {
       dbMock.order.findUnique
@@ -3589,7 +3590,7 @@ describe('shipOrder', () => {
               businessKey: 'SHIPMENT:1:SHIPPING_FEE',
               amount: '2.80',
               priceBookId: 'logistics-book-test',
-              pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE', weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' },
+              pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE', weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' },
               category: { code: 'SHIPPING_FEE' },
             },
             {
@@ -3622,9 +3623,10 @@ describe('shipOrder', () => {
         .find((args) => args.where.id === 'charge-shipping');
       expect(shipping?.data.status).toBe('FINAL');
       if (keepsDefault) {
-        expect(shipping?.data.pricingSnapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' });
+        expect(shipping?.data.pricingSnapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' });
       } else {
         expect(shipping?.data.pricingSnapshot).not.toHaveProperty('weightBasis');
+        expect(shipping?.data.pricingSnapshot).not.toHaveProperty('defaultWeightKg');
       }
       const packing = dbMock.orderCustomerCharge.update.mock.calls
         .map(([args]) => args)

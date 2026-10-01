@@ -70,7 +70,7 @@ it('auto-confirms a prepaid sample at the first weight and records it as the bil
   const shipping = mocks.chargeUpsert.mock.calls.map(([args]) => args.create)
     .find((row) => row.businessKey === 'SHIPMENT:1:SHIPPING_FEE');
   expect(shipping).toMatchObject({ amount: '2.80', status: 'ESTIMATED',
-    pricingSnapshot: { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' } });
+    pricingSnapshot: { weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' } });
   expect(mocks.revision).toHaveBeenCalledWith(tx, expect.objectContaining({ status: 'AUTO_CONFIRMED' }));
 });
 
