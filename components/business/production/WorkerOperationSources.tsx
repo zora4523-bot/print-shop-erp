@@ -39,6 +39,7 @@ export function WorkerOperationSources({ sources }: { sources: ReporterOperation
                   images={source.item.designs.map((design) => ({
                     ...design,
                     fileUrl: signDesignReadUrl(design.fileUrl),
+                    previewUrl: signDesignReadUrl(design.fileUrl, process.env, { gallery: true }),
                   }))}
                 />
               </article>

@@ -180,6 +180,7 @@ export default async function WorkerOrderDetailPage({ params, searchParams }: Pa
               images={item.designs.map((design) => ({
                 ...design,
                 fileUrl: signDesignReadUrl(design.fileUrl),
+                previewUrl: signDesignReadUrl(design.fileUrl, process.env, { gallery: true }),
               }))}
             />
           </section>

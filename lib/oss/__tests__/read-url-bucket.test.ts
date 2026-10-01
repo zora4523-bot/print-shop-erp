@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DESIGN_GALLERY_PROCESS,
   DESIGN_THUMBNAIL_PROCESS,
   READ_URL_BUCKET_SECONDS,
   READ_URL_MIN_REMAINING_SECONDS,
@@ -21,7 +22,7 @@ const fileUrl = 'https://my-bucket.oss-cn-shenzhen.aliyuncs.com/design/o1/i1/ima
 // 选一个桶边界作为基准时刻
 const BASE = 1_900_000_000 - (1_900_000_000 % READ_URL_BUCKET_SECONDS);
 
-function signAt(seconds: number, opts?: { thumbnail?: boolean }) {
+function signAt(seconds: number, opts?: { thumbnail?: boolean; gallery?: boolean }) {
   vi.setSystemTime(seconds * 1000);
   return signDesignReadUrl(fileUrl, env, opts);
 }
@@ -75,5 +76,12 @@ describe('signDesignReadUrl 时间桶', () => {
     const u = new URL(thumb);
     expect(u.searchParams.get('x-oss-process')).toBe(DESIGN_THUMBNAIL_PROCESS);
     expect(u.searchParams.get('Signature')).not.toBe(new URL(full).searchParams.get('Signature'));
+  });
+  it('师傅端网格预览带 480 px 缩放处理，原图签名不受影响', () => {
+    vi.useFakeTimers();
+    const full = signAt(BASE + 1);
+    const gallery = signAt(BASE + 1, { gallery: true });
+    expect(new URL(gallery).searchParams.get('x-oss-process')).toBe(DESIGN_GALLERY_PROCESS);
+    expect(new URL(full).searchParams.get('x-oss-process')).toBeNull();
   });
 });

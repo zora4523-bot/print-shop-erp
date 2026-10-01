@@ -284,6 +284,7 @@ export default async function WorkerTaskDetailPage({ params, searchParams }: Pag
             images={progress.item.designs.map((design) => ({
               ...design,
               fileUrl: signDesignReadUrl(design.fileUrl),
+              previewUrl: signDesignReadUrl(design.fileUrl, process.env, { gallery: true }),
             }))}
           />
         </article>
@@ -382,6 +383,7 @@ function LegacyTaskDetail({
         images={task.orderItem.designs.map((design) => ({
           ...design,
           fileUrl: signDesignReadUrl(design.fileUrl),
+          previewUrl: signDesignReadUrl(design.fileUrl, process.env, { gallery: true }),
         }))}
       />
     </div>
