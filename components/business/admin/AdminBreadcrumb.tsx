@@ -194,7 +194,9 @@ export function buildBreadcrumbCrumbs(
     const label =
       (isBillCredit && isLast ? '录入抵扣' : undefined) ??
       BREADCRUMB_PATH_LABELS[href] ??
-      (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
+      // 工单 id 段显示工单名称（业主 2026-10-02：员工靠名称认单，工单号不重要），
+      // 名称为空或首帧未交上来时回落「工单详情」，不显示工单号。
+      (segments[0] === 'orders' && i === 1 && seg !== 'new' ? entityLabel ?? '工单详情' : undefined) ??
       resolveSegmentLabel(seg, entityLabel, isLast ? pageHeading : null, href, role);
     if (!label) return;
     crumbs.push({ href, label, linkable: !LAYOUT_ONLY_PATHS.has(href), isLast });

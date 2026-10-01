@@ -142,7 +142,7 @@ export function SalesOrderDetailView({
 
   return (
     <div data-slot="sales-order-detail" className="space-y-4">
-      <BreadcrumbEntity label={order.orderNo} />
+      <BreadcrumbEntity label={order.customName} />
 
       <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

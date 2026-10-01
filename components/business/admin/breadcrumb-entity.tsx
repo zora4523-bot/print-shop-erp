@@ -10,7 +10,7 @@ import {
   type SetStateAction,
 } from 'react';
 
-// 面包屑要显示业务编号，但 AdminBreadcrumb 在 layout 里、详情页在
+// 面包屑要显示业务名称 / 编号，但 AdminBreadcrumb 在 layout 里、详情页在
 // children 里 —— RSC 里数据只能往下流，页面没法把编号交给祖先。
 // 这里用一条 client context 通道：值来自页面已经查过的实体，
 // 不产生任何额外请求。
@@ -46,13 +46,15 @@ export function useBreadcrumbEntityLabel(): string | null {
 }
 
 /**
- * 详情页渲染它，把业务编号交给顶栏面包屑。自身不渲染任何内容。
- * SSR 首帧面包屑显示占位「详情」，hydrate 后换成真编号。
+ * 详情页渲染它，把业务名称 / 编号交给顶栏面包屑。自身不渲染任何内容。
+ * SSR 首帧面包屑显示占位（「详情」/「工单详情」），hydrate 后换成真名称。
+ * 空名称（未命名工单）不交，面包屑保持占位。
  */
-export function BreadcrumbEntity({ label }: { label: string }) {
+export function BreadcrumbEntity({ label: rawLabel }: { label: string | null | undefined }) {
   const setLabel = useContext(BreadcrumbEntityContext)?.setLabel;
+  const label = rawLabel?.trim() || null;
   useEffect(() => {
-    if (!setLabel) return;
+    if (!setLabel || !label) return;
     setLabel(label);
     // 软导航 A→B 时 B 先 mount、A 后 unmount；无条件清空会把 B 的值
     // 抹掉，所以只在「当前值还是我写的」时才清。

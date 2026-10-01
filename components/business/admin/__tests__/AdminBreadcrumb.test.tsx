@@ -140,6 +140,17 @@ describe('order navigation hierarchy', () => {
     const crumbs = buildBreadcrumbCrumbs(path);
     expect(crumbs.at(-2)?.label).toBe(path.endsWith('/edit') ? '工单详情' : '工单列表');
   });
+  // 业主 2026-10-02：员工靠工单名称认单。名称交给面包屑 id 段（详情页末段、编辑页父级），
+  // 吸顶顶栏在 H1 滚走后仍能看到是哪张单；名称为空时回落「工单详情」，任何时候都不显示工单号。
+  it.each([
+    ['/orders/order-1', '新年快乐', ['工单列表', '新年快乐']],
+    ['/orders/order-1/edit', '新年快乐', ['工单列表', '新年快乐', '编辑']],
+    ['/orders/order-1', null, ['工单列表', '工单详情']],
+  ] as const)('shows the order name from the page at %s (%s)', (path, name, labels) => {
+    const crumbs = buildBreadcrumbCrumbs(path, name, null, 'ADMIN');
+    expect(crumbs.map((crumb) => crumb.label)).toEqual(labels);
+    expect(crumbs[1]).toMatchObject({ href: '/orders/order-1', linkable: true, isLast: !path.endsWith('/edit') });
+  });
   it('keeps creation distinct from detail', () => {
     usePathnameMock.mockReturnValue('/orders/new');
     const html = renderToStaticMarkup(<AdminBreadcrumb />);
@@ -160,7 +171,8 @@ it('新建空白封纸张使用业务标题且不链接无页面的中间路径'
 it('names /orders by the viewer’s own module: 管理员「工单列表」，外部销售「我的工单」', () => {
   expect(buildBreadcrumbCrumbs('/orders', null, null, 'ADMIN').map((crumb) => crumb.label)).toEqual(['工单列表']);
   expect(buildBreadcrumbCrumbs('/orders', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单']);
-  expect(buildBreadcrumbCrumbs('/orders/order-1', '工单 A', null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '工单详情']);
+  expect(buildBreadcrumbCrumbs('/orders/order-1', '工单 A', null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '工单 A']);
+  expect(buildBreadcrumbCrumbs('/orders/order-1', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '工单详情']);
   expect(buildBreadcrumbCrumbs('/orders/new', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '新建工单']);
   usePathnameMock.mockReturnValue('/orders');
   expect(visibleText(renderToStaticMarkup(<AdminBreadcrumb role="SALES" />))).toContain('我的工单');

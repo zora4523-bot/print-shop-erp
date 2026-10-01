@@ -331,6 +331,14 @@ describe('breadcrumb text alignment in the real admin shell', () => {
     { path: '/orders/new', parentHref: '/orders', current: '新建工单' },
     // 工单详情页头不再放「返回工单列表」：面包屑父级是唯一的返回入口，六视口都必须可见可聚焦。
     { path: '/orders/cabcdefghijklmnopqrstuvwx', parentHref: '/orders', current: '工单详情' },
+    // 末段显示工单名称（业主 2026-10-02），长名称在末段内省略，完整名称放在 title。
+    {
+      path: '/orders/cabcdefghijklmnopqrstuvwx',
+      parentHref: '/orders',
+      current: '新年快乐·烫金大号红包礼盒装（第二批加急补单，客户指定金色）',
+      entityLabel: '新年快乐·烫金大号红包礼盒装（第二批加急补单，客户指定金色）',
+      entityOnCurrent: true,
+    },
     { path: '/sales/bills', parentHref: null, current: '我的货款账单' },
     { path: '/orders', parentHref: null, current: '工单列表' },
     {
@@ -351,6 +359,12 @@ describe('breadcrumb text alignment in the real admin shell', () => {
           assertBreadcrumbTextAlignment(header);
           const current = header.querySelector<HTMLElement>('[aria-current="page"]')!;
           expect(current.textContent).toBe(scenario.current);
+          if (scenario.entityOnCurrent) {
+            expect(current.title).toBe(scenario.current);
+            expect(getComputedStyle(current).textOverflow).toBe('ellipsis');
+            expect(current.getBoundingClientRect().right).toBeLessThanOrEqual(header.getBoundingClientRect().right);
+            if (width <= 768) expect(current.scrollWidth).toBeGreaterThan(current.clientWidth);
+          }
           expect(current.getAttribute('aria-disabled')).toBe('true');
           expect(header.getBoundingClientRect().height).toBe(56);
           expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
@@ -361,7 +375,7 @@ describe('breadcrumb text alignment in the real admin shell', () => {
             expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
             link.focus();
             expect(document.activeElement).toBe(link);
-            if (scenario.entityLabel) {
+            if (scenario.entityLabel && !scenario.entityOnCurrent) {
               const text = link.querySelector<HTMLElement>('span')!;
               expect(text).not.toBeNull();
               // The truncating element itself carries the full label (visual gate: hidden-clipping).
