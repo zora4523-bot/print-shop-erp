@@ -6,7 +6,7 @@ import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { CreateOrderOutsourceLink } from '../CreateOrderOutsourceLink';
 
 const { requirePermission, listOutsourceOrders } = vi.hoisted(() => ({
-  requirePermission: vi.fn(), listOutsourceOrders: vi.fn().mockResolvedValue([]),
+  requirePermission: vi.fn(), listOutsourceOrders: vi.fn().mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 50, pageCount: 1 }),
 }));
 vi.mock('@/lib/auth/permissions', () => ({ requirePermission }));
 vi.mock('@/lib/outsource', () => ({ listOutsourceOrders }));
@@ -46,5 +46,18 @@ describe('外协创建入口', () => {
     requirePermission.mockRejectedValueOnce(new Error('无权限'));
     await expect(OutsourceListPage()).rejects.toThrow('无权限');
     expect(listOutsourceOrders).not.toHaveBeenCalled();
+  });
+  it('按页读取外协单并在多页时给出翻页', async () => {
+    listOutsourceOrders.mockResolvedValueOnce({
+      rows: [{ id: 'os-1', status: 'SENT', supplierName: '外协厂 A', craftDescription: '烫金', totalQty: 1000,
+        expectedDate: null, actualDate: null, amount: null, createdAt: new Date('2026-10-01T00:00:00Z'),
+        order: { id: 'o-1', orderNo: 'GD-1', isUrgent: false } }],
+      total: 120, page: 2, pageSize: 50, pageCount: 3,
+    });
+    const html = renderToStaticMarkup(await OutsourceListPage({ searchParams: Promise.resolve({ page: '2' }) }));
+    expect(listOutsourceOrders).toHaveBeenLastCalledWith({ page: 2 });
+    expect(html).toContain('共 120 条 · 每页 50 条 · 第 2 / 3 页');
+    expect(html).toContain('href="/foreman/outsource?page=1"');
+    expect(html).toContain('href="/foreman/outsource?page=3"');
   });
 });

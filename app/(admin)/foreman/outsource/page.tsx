@@ -11,14 +11,24 @@ import {
 } from '@/components/ui-business';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { parsePositiveInt } from '@/lib/admin/table';
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 
 export const metadata = { title: '外协单' };
 
-export default async function OutsourceListPage() {
+export default async function OutsourceListPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('outsource:manage');
-  const rows = await listOutsourceOrders();
+  const sp = (await searchParams) ?? {};
+  const result = await listOutsourceOrders({
+    page: parsePositiveInt(sp.page, { defaultValue: 1 }),
+  });
+  const rows = result.rows;
 
   return (
     <div className="space-y-6">
@@ -89,6 +99,16 @@ export default async function OutsourceListPage() {
           </table>
         </TableScrollArea>
       )}
+      {result.pageCount > 1 ? (
+        <AdminPagination
+          basePath="/foreman/outsource"
+          page={result.page}
+          pageCount={result.pageCount}
+          total={result.total}
+          pageSize={result.pageSize}
+          queryParams={{}}
+        />
+      ) : null}
     </div>
   );
 }

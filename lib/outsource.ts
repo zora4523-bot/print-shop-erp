@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { OrderStatus, OutsourceStatus, Role } from '../generated/prisma/enums';
 import { db } from './db';
+import { paginatedResult, paginationWindow } from './admin/table';
 import {
   transitionOutsource,
   InvalidOutsourceTransitionError,
@@ -795,12 +796,21 @@ export async function cancelOutsourceOrder(
 // Reads
 // ─────────────────────────────────────────────────────────────────────
 
+export const OUTSOURCE_LIST_PAGE_SIZE = 50;
+
+// 外协单随历史只增不减：分页读取，避免整页把全部历史渲染成上万个 DOM 节点
+// （3 千条实测 3.7 万节点、197 KB HTML）。(createdAt, id) 倒序保证翻页稳定。
 export async function listOutsourceOrders(
-  filter: { status?: OutsourceStatus } = {},
+  filter: { status?: OutsourceStatus; page?: number; pageSize?: number } = {},
 ) {
-  return db.outsourceOrder.findMany({
-    where: filter.status ? { status: filter.status } : undefined,
-    orderBy: [{ createdAt: 'desc' }],
+  const where = filter.status ? { status: filter.status } : undefined;
+  const total = await db.outsourceOrder.count({ where });
+  const window = paginationWindow(total, filter.page ?? 1, filter.pageSize ?? OUTSOURCE_LIST_PAGE_SIZE);
+  const rows = await db.outsourceOrder.findMany({
+    where,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    skip: window.skip,
+    take: window.take,
     select: {
       id: true,
       status: true,
@@ -814,6 +824,7 @@ export async function listOutsourceOrders(
       order: { select: { id: true, orderNo: true, isUrgent: true } },
     },
   });
+  return paginatedResult(rows, total, window);
 }
 
 // Order + items for the "创建外协单" form (checkbox list of items).
