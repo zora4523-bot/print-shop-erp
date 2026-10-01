@@ -7,20 +7,39 @@ export type OrderShippingAvailabilityInput = {
   status: OrderStatus;
   incompleteProductionCount: number;
   hasLiveOutsource: boolean;
+  /** Required outsourcing has no live order or does not cover every item (same facts as the ship gate). */
+  hasOutsourceGap?: boolean;
+  /**
+   * Single-owner production facts of the current version. When present, confirming
+   * shipment registers the pending jobs at plan (DECISIONS 2026-10-01), so an order
+   * still in RELEASED/FOILING is shippable unless a job needs approval or is unassigned.
+   */
+  plannedCompletion?: { pendingJobs: number; requestedJobs: number; unassignedUnits: number } | null;
   isPricingPending: boolean;
   hasShipment: boolean;
   hasPendingChange: boolean;
 };
 
-type OrderShippingBlocker = 'STATUS' | 'CHANGE' | 'PRICING' | 'OUTSOURCE' | 'PRODUCTION' | 'ADDRESS';
+type OrderShippingBlocker = 'STATUS' | 'CHANGE' | 'PRICING' | 'OUTSOURCE' | 'OUTSOURCE_GAP' | 'PRODUCTION' | 'PRODUCTION_REQUESTED' | 'PRODUCTION_UNASSIGNED' | 'ADDRESS';
 
 /** Shared presentation facts. Actual writes still enforce their transactional guards. */
+/** Pending single-owner jobs that confirming shipment will register at plan. */
+export function shipmentCompletesPlannedProduction(input: Pick<OrderShippingAvailabilityInput, 'status' | 'plannedCompletion'>): boolean {
+  return !!input.plannedCompletion && input.plannedCompletion.pendingJobs > 0
+    && (input.status === OrderStatus.RELEASED || input.status === OrderStatus.FOILING);
+}
+
 export function orderShippingBlocker(input: OrderShippingAvailabilityInput): OrderShippingBlocker | null {
-  if (input.status !== OrderStatus.PACKING && input.status !== OrderStatus.COMPLETED) return 'STATUS';
+  const planned = input.plannedCompletion && (input.status === OrderStatus.RELEASED || input.status === OrderStatus.FOILING)
+    ? input.plannedCompletion : null;
+  if (input.status !== OrderStatus.PACKING && input.status !== OrderStatus.COMPLETED && !planned) return 'STATUS';
   if (input.hasPendingChange) return 'CHANGE';
   if (input.isPricingPending) return 'PRICING';
   if (input.hasLiveOutsource) return 'OUTSOURCE';
-  if (input.incompleteProductionCount > 0) return 'PRODUCTION';
+  if (input.hasOutsourceGap) return 'OUTSOURCE_GAP';
+  if (planned?.requestedJobs) return 'PRODUCTION_REQUESTED';
+  if (planned?.unassignedUnits) return 'PRODUCTION_UNASSIGNED';
+  if (planned ? planned.pendingJobs === 0 : input.incompleteProductionCount > 0) return 'PRODUCTION';
   if (!input.hasShipment) return 'ADDRESS';
   return null;
 }
@@ -29,7 +48,10 @@ const SHIPPING_BLOCKER_LABELS: Record<Exclude<OrderShippingBlocker, 'STATUS'>, s
   CHANGE: '存在待审的工单变更',
   PRICING: '价格待管理员确认',
   OUTSOURCE: '外协尚未收回，请先核对外协进度',
+  OUTSOURCE_GAP: '外协单缺失或数量未覆盖工单，请先补齐外协',
   PRODUCTION: '生产工序尚未完成，请先核对报工',
+  PRODUCTION_REQUESTED: '有生产数量待审批，请先在生产安排中审批',
+  PRODUCTION_UNASSIGNED: '仍有未安排师傅的生产，请先排单',
   ADDRESS: '缺少发货地址，无法发货',
 };
 
@@ -68,8 +90,8 @@ export function orderShippingRecoveryHref(input: OrderShippingAvailabilityInput)
   switch (blocker) {
     case 'CHANGE': case 'STATUS': return '#order-detail-actions';
     case 'PRICING': return '#pricing-review';
-    case 'OUTSOURCE': return '/foreman/outsource';
-    case 'PRODUCTION': return '#detail-business-records';
+    case 'OUTSOURCE': case 'OUTSOURCE_GAP': return '/foreman/outsource';
+    case 'PRODUCTION': case 'PRODUCTION_REQUESTED': case 'PRODUCTION_UNASSIGNED': return '#detail-business-records';
     case 'ADDRESS': return isOrderEditable(input.status) ? '#shipment-registration' : null;
     case null: return '#shipment-registration';
   }

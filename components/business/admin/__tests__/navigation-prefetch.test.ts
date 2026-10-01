@@ -60,8 +60,9 @@ describe('admin navigation prefetch policy', () => {
 
     expect(sidebar).toContain('useLinkStatus');
     expect(sidebar).toContain(
-      'prefetch={intentHref === item.href ? true : false}',
+      'prefetch={intentHref === item.href ? null : false}',
     );
+    expect(sidebar).not.toContain('? true : false}');
     expect(sidebar).toContain('IntentPrefetchScheduler');
     expect(sidebar).toContain('onEnter={scheduleIntentPrefetch}');
     expect(sidebar).toContain('onLeave={cancelIntentPrefetch}');
@@ -83,7 +84,7 @@ describe('admin navigation prefetch policy', () => {
     );
 
     expect(header).not.toContain('aria-label="快捷导航"');
-    expect(header).toContain('<AdminBreadcrumb />');
+    expect(header).toContain('<AdminBreadcrumb role={role} />');
     expect(breadcrumb).toContain('prefetch={false}');
     expect(breadcrumb).toContain('export const BREADCRUMB_PATH_LABELS');
     expect(breadcrumb).toContain('RULE_CENTER_SIDEBAR_ITEMS');

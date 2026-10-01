@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Inbox, SearchX, ShieldOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { PAGE_TITLE_CLASS } from './PageHeader';
 import {
   EMPTY_NO_ACCESS_ACTION,
   EMPTY_NO_ACCESS_DESCRIPTION,
@@ -149,7 +150,8 @@ function EmptyFrame({
         </div>
       ) : null}
       {kind === 'no-access' ? (
-        <h1 className="text-sm font-medium text-foreground">{title}</h1>
+        // 无权限空态是整页唯一标题：与 PageHeader 的 H1 同档（ui-规范 §8.3）。
+        <h1 className={cn(PAGE_TITLE_CLASS, 'text-2xl text-foreground')}>{title}</h1>
       ) : (
         <h2 className="text-sm font-medium text-foreground">{title}</h2>
       )}

@@ -5,7 +5,7 @@ import { updatePayrollPassAction } from '@/actions/production-payroll-pass';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { FormMessage } from '@/components/ui-business';
+import { DisabledReason, FormMessage } from '@/components/ui-business';
 
 export function PayrollPassForm({ operationId, revision, passCount, sequences }: {
   operationId: string; revision: number; passCount: number; sequences: number[];
@@ -25,8 +25,14 @@ export function PayrollPassForm({ operationId, revision, passCount, sequences }:
         <h3 className="font-medium">调整计薪次数</h3>
         <p>{passCount} 次 → {count} 次</p>
         <p>适用于本工序所有款式的后续报工，已报工资保持原金额。</p>
-        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>{pending ? '保存中…' : '保存计薪次数'}</Button><Button type="button" variant="outline" onClick={() => setReview(false)}>取消</Button></div>
-      </div> : <Button type="button" variant="outline" disabled={count === String(passCount) || !Number.isInteger(Number(count)) || Number(count) < 1 || Number(count) > 999 || reason.trim().length < 2} onClick={() => setReview(true)}>核对调整</Button>}
+        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>{pending ? '正在保存…' : '保存计薪次数'}</Button><Button type="button" variant="outline" onClick={() => setReview(false)}>取消</Button></div>
+      </div> : (() => {
+        const blocked = count === String(passCount) ? '次数未改变，无需调整。'
+          : !Number.isInteger(Number(count)) || Number(count) < 1 || Number(count) > 999 ? '计薪过版次数须为 1 至 999 的整数。'
+            : reason.trim().length < 2 ? '调整原因至少 2 个字。' : null;
+        return blocked ? <DisabledReason cause="prerequisite" reason={blocked}><Button type="button" variant="outline" disabled>核对调整</Button></DisabledReason>
+          : <Button type="button" variant="outline" onClick={() => setReview(true)}>核对调整</Button>;
+      })()}
     </fieldset>
     {state && <div role={state.status === 'error' ? 'alert' : 'status'}><FormMessage fieldId={`result-${operationId}`} tone={state.status}>{state.message}</FormMessage></div>}
   </form>;

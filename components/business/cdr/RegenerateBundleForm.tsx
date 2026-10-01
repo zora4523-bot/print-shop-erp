@@ -1,7 +1,6 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { createBundleAction } from '@/actions/foreman-cdr';
 import type { CreateBundleResult } from '@/actions/foreman-cdr.types';
 import { PendingButton } from '@/components/ui-business';
@@ -23,16 +22,14 @@ export function RegenerateBundleForm({
   to,
   orderIds,
 }: RegenerateBundleFormProps) {
-  const router = useRouter();
   const [state, formAction, pending] = useActionState<
     CreateBundleResult | null,
     FormData
   >(createBundleAction, null);
 
-  useEffect(() => {
-    if (state?.status !== 'success' && state?.status !== 'queued') return;
-    router.refresh();
-  }, [router, state]);
+  // createBundleAction revalidates /foreman/cdr on both success and queued;
+  // the action response already carries the new bundle row, and the queued
+  // row's status polling is owned by the CDR page (DECISIONS 2026-08-27).
 
   const error =
     state?.status === 'error'
@@ -50,7 +47,7 @@ export function RegenerateBundleForm({
       ))}
       <PendingButton
         pending={pending}
-        pendingLabel="重新生成中…"
+        pendingLabel="正在重新生成…"
         variant="outline"
         size="sm"
         className="min-h-9"

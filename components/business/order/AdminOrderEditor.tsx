@@ -17,7 +17,7 @@ import {
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft,
+  ChevronLeft,
   FileImage,
   FileType,
   Plus,
@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import styles from './AdminOrderEditor.module.css';
 import { useAdminOrderLeaveGuard } from './use-admin-order-leave-guard';
 import {
@@ -47,6 +48,7 @@ import {
   ActionNotice,
   ConfirmActionController,
   ConfirmActionDialog,
+  PageHeader,
 } from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { EditOrderForm } from './EditOrderForm';
@@ -112,7 +114,7 @@ type DraftItem = {
   front: string;
   back: string;
 };
-type Difference = { label: string; before: string; after: string };
+type Difference = { field?: string; label: string; before: string; after: string };
 type Props = {
   orderId: string;
   orderNo: string;
@@ -300,8 +302,8 @@ export function AdminOrderEditor(props: Props) {
         }
         if (result.status === 'saved') {
           allowNavigation();
+          // The save action revalidated /orders/[id]; push alone renders it fresh.
           router.push(`/orders/${props.orderId}`);
-          router.refresh();
         }
       } catch {
         setError('保存结果未确认，请刷新核对工单后再操作。');
@@ -449,7 +451,7 @@ export function AdminOrderEditor(props: Props) {
         <DialogContent finalFocus={detailsButtonRef}>
           <DialogHeader>
             <DialogTitle>第 {detailItem?.sequence} 款生产信息</DialogTitle>
-            <DialogDescription>已保存的工艺与生产事实</DialogDescription>
+            <DialogDescription>工艺与生产资料</DialogDescription>
           </DialogHeader>
           {detailItem?.details}
         </DialogContent>
@@ -475,7 +477,7 @@ export function AdminOrderEditor(props: Props) {
             ...(auxiliary.dirty ? ['未保存的费用输入将丢失。'] : []),
             '已保存的工单资料保持不变。',
           ]}
-          confirmText="放弃并离开"
+          confirmText="放弃修改并离开"
           danger
         />
       </ConfirmActionController>
@@ -535,13 +537,16 @@ function EditorConfirmationSection({
               ]
             : []),
         ]}
-        consequences={
-          review?.changesRevision
+        consequences={[
+          ...(differences.some((diff) => diff.field === 'externalSalesUserId')
+            ? ['工单及后续对账归属新账号，原账号将无法查看此工单。']
+            : []),
+          ...(review?.changesRevision
             ? ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(props.status)
               ? [`工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}。`]
               : ['保留当前纸质工单版本。']
-            : ['仅修改资料，保留当前工单版本与费用。']
-        }
+            : ['仅修改资料，保留当前工单版本与费用。']),
+        ]}
         confirmText="保存修改"
       />
     </ConfirmActionController>
@@ -682,6 +687,7 @@ function updateEditorMetadata({
             [...(select?.options ?? [])].find((option) => option.value === id)?.text ?? '未关联';
           return [
             {
+              field: key,
               label: fieldNames[key],
               before: account(before),
               after: account(value),
@@ -738,7 +744,7 @@ function buildEditorChanges(
         ...editorCatalogChange(source, draft),
       });
       differences.push({
-        label: '新增款式',
+        label: '添加款式',
         before: '—',
         after: `${draft.name || '未命名'} · ${externalPriceBusinessText(draft.specification)} · ${draft.quantity || '0'} 个 · 正面 ${draft.front || '无'} / 反面 ${draft.back || '无'}`,
       });
@@ -894,46 +900,52 @@ function EditorActionsSection({
   formId,
 }: RenderEditorActionsOptions) {
   return (
-    <header
+    <div
+      role="group"
       aria-label="编辑工单操作"
       className={`-mx-1 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-1 py-3`}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-11 shrink-0"
-          aria-label="返回工单"
-          disabled={pending || fileBusy || auxiliary.pending}
-          onClick={(event) => {
-            destinationRef.current = `/orders/${props.orderId}`;
-            pendingNavigationRef.current = () => router.push(destinationRef.current);
-            if (dirty || auxiliary.dirty) {
-              leaveSourceRef.current = event.currentTarget;
-              setLeaving(true);
-            } else router.push(destinationRef.current);
-          }}
-        >
-          <ArrowLeft className="size-4" />
-        </Button>
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold">编辑工单</h1>
-          <p className="break-all font-mono text-xs text-muted-foreground">
-            {props.form.initial.customName?.trim() || '未命名工单'}
-          </p>
-          <Disclosure>
-            <DisclosureSummary>工单信息</DisclosureSummary>
-            <p className="break-all pb-3 text-xs">
-              {props.orderNo} · v{props.workOrderVersion}
-            </p>
-          </Disclosure>
-        </div>
-        <OrderStatusBadge status={props.status} />
-      </div>
+      <PageHeader
+        className="min-w-0 flex-1"
+        breadcrumb={
+          // 与 PageHeader 的 back 同一外观；编辑页要在保存/上传期间禁用返回并走离开确认，
+          // 所以不用 back 的纯 Link，而是受控按钮。
+          <Button
+            variant="ghost"
+            data-slot="page-header-back"
+            className="-ml-1 min-h-11 gap-1 px-1 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
+            disabled={pending || fileBusy || auxiliary.pending}
+            onClick={(event) => {
+              destinationRef.current = `/orders/${props.orderId}`;
+              pendingNavigationRef.current = () => router.push(destinationRef.current);
+              if (dirty || auxiliary.dirty) {
+                leaveSourceRef.current = event.currentTarget;
+                setLeaving(true);
+              } else router.push(destinationRef.current);
+            }}
+          >
+            <ChevronLeft aria-hidden="true" className="size-4" />
+            返回工单详情
+          </Button>
+        }
+        title="编辑工单"
+        status={<OrderStatusBadge status={props.status} />}
+        subtitle={
+          <>
+            <p className="break-all">{props.form.initial.customName?.trim() || '未命名工单'}</p>
+            <Disclosure>
+              <DisclosureSummary>工单信息</DisclosureSummary>
+              <p className="break-all pb-3 text-xs">
+                {props.orderNo} · 第 {props.workOrderVersion} 版
+              </p>
+            </Disclosure>
+          </>
+        }
+      />
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground" aria-live="polite">
           {auxiliary.pending
-            ? '费用处理中…'
+            ? '正在处理费用…'
             : auxiliary.dirty
               ? '费用有未保存修改'
               : dirty
@@ -954,10 +966,10 @@ function EditorActionsSection({
         </Button>
         <Button ref={saveButtonRef} type="submit" form={formId} disabled={!dirty || locked}>
           <Save className="size-4" />
-          {pending ? '处理中…' : '保存修改…'}
+          {pending ? '正在处理…' : '保存修改…'}
         </Button>
       </div>
-    </header>
+    </div>
   );
 }
 
@@ -1053,7 +1065,7 @@ function DraftItemsSection({
             }}
           >
             <Plus className="size-4" />
-            新增款式（沿用第 {addTemplate.sequence} 款工艺和纸张）
+            添加款式（沿用第 {addTemplate.sequence} 款工艺和纸张）
           </Button>
         ) : null}
         {props.status !== 'DRAFT' && props.canModify ? (
@@ -1067,7 +1079,7 @@ function DraftItemsSection({
         ) : null}
         {props.items.length > 0 && !props.productionLocked ? (
           <p className="text-xs text-muted-foreground">
-            工艺、纸张和已有款式的删除会改变生产基础，当前通过新建工单处理；规格、数量、烫金及已有分袋数量可在此修改。
+            修改工艺、纸张或删除已有款式，请新建工单。
           </p>
         ) : null}
       </CardContent>
@@ -1144,7 +1156,7 @@ function DraftItemSection({
               : undefined
           }
         >
-          <select
+          <NativeSelect
             id={`spec-${draft.key}`}
             value={
               options.find(
@@ -1162,7 +1174,7 @@ function DraftItemSection({
                   specification: option.specification,
                 });
             }}
-            className="min-h-11 w-full min-w-0 rounded-md border bg-background px-3 text-sm"
+            className="w-full min-w-0"
           >
             {!options.some(
               (option) =>
@@ -1176,7 +1188,7 @@ function DraftItemSection({
                 {externalPriceBusinessText(option.specification)}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </EditorField>
         <EditorField
           label="数量（个）"
@@ -1243,7 +1255,7 @@ function DraftItemSection({
       {!source.packagingEditable || draft.added ? (
         <p className="mt-2 text-xs text-muted-foreground">
           {draft.added
-            ? '新增款式的分袋安排待补充，请核对包装明细。'
+            ? '添加的款式分袋安排待补充，请核对包装明细。'
             : '分袋记录缺失或存在多组分货，当前不能直接修改每包数量。'}
         </p>
       ) : null}
@@ -1280,7 +1292,7 @@ function DraftItemSection({
           </Button>
         </div>
       ) : (
-        <p className="mt-2 text-xs text-muted-foreground">保存新增款式后上传该款设计文件。</p>
+        <p className="mt-2 text-xs text-muted-foreground">保存添加的款式后上传该款设计文件。</p>
       )}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 border-t border-dashed pt-1 text-xs">
         {!draft.added && source.details ? (
@@ -1361,7 +1373,7 @@ function DraftItemHeaderSection({
           size="icon"
           className="size-11 shrink-0"
           disabled={locked}
-          aria-label={draft.added ? '移除新增款式' : `还原第 ${index + 1} 款`}
+          aria-label={draft.added ? '移除添加的款式' : `还原第 ${index + 1} 款`}
           onClick={() =>
             setDrafts((items) =>
               draft.added

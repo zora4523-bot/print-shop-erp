@@ -6,6 +6,7 @@ import { OutsourceStatus } from '@/generated/prisma/enums';
 import { getOutsourceOrderDetail } from '@/lib/outsource';
 import { isTerminalOutsourceStatus } from '@/lib/outsource/status-machine';
 import {
+  PageHeader,
   StatusBadge as UiStatusBadge,
   TableEmptyState,
 } from '@/components/ui-business';
@@ -72,12 +73,11 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
       {/* 顶栏面包屑显示业务编号。值来自上面已经查出来的数据，
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={row.supplierName} />
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="admin-wrap-anywhere text-xl font-semibold">
-            外协单 · {row.supplierName}
-          </h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        back={{ href: '/foreman/outsource', label: '返回外协单' }}
+        title={`外协单 · ${row.supplierName}`}
+        subtitle={
+          <>
             工单号：
             {row.order ? (
               <Link
@@ -89,15 +89,17 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
             ) : (
               '—'
             )}
-          </p>
-        </div>
-        <UiStatusBadge
-          tone={statusDefinition.tone}
-          dot={statusDefinition.dot}
-        >
-          {statusDefinition.label}
-        </UiStatusBadge>
-      </div>
+          </>
+        }
+        status={
+          <UiStatusBadge
+            tone={statusDefinition.tone}
+            dot={statusDefinition.dot}
+          >
+            {statusDefinition.label}
+          </UiStatusBadge>
+        }
+      />
 
       <section className="rounded-xl border bg-card p-6 text-sm shadow-sm space-y-3">
         <h2 className="text-base font-semibold">基本信息</h2>
@@ -135,9 +137,6 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
         <section className="rounded-xl border bg-card p-6 shadow-sm space-y-3">
           <div>
             <h2 className="text-base font-semibold">外协金额确认</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              可在回货后补录最终金额；后续更正会保留原金额、新金额、原因和操作人。
-            </p>
           </div>
           <OutsourceAmountForm
             id={row.id}
@@ -178,9 +177,6 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
       <section className="rounded-xl border bg-card shadow-sm">
         <div className="border-b px-4 py-3 sm:px-6">
           <h2 className="text-base font-semibold">外协付款</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            仅记录工厂向外协厂支付的加工费，不进入销售账单或员工工资。
-          </p>
         </div>
 
         <dl className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">

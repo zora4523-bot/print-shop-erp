@@ -86,7 +86,7 @@ test.describe('ProductionOperation 扫码报工 — 主流程', () => {
         .getByRole('spinbutton', { name: '本次工单件数进度', exact: true })
         .fill('0');
       await reportSection
-        .getByRole('spinbutton', { name: '缺陷数', exact: true })
+        .getByRole('spinbutton', { name: '不良数', exact: true })
         .fill('0');
       await reportSection
         .getByRole('spinbutton', { name: '返工数', exact: true })
@@ -242,7 +242,7 @@ test('报工刷新重提不重复入账，显式再报一批允许相同数量',
       const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
       await section.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill(String(E2E_PRODUCTION_REPORT_INCREMENT));
       await section.getByRole('spinbutton', { name: '本次工单件数进度', exact: true }).fill('0');
-      await section.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
+      await section.getByRole('spinbutton', { name: '不良数', exact: true }).fill('0');
       await section.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
       await section.getByRole('button', { name: '提交扫码报工', exact: true }).click();
       await section.getByRole('button', { name: '确认报工', exact: true }).click();
@@ -296,7 +296,7 @@ test('不计薪报工刷新去重与再报一批经过真实页面和数据库',
   const submit = async (expected = '已记录本次生产进度') => {
     const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报进度', exact: true }) });
     await section.getByRole('spinbutton', { name: '本次合格完成数', exact: true }).fill('10');
-    await section.getByRole('spinbutton', { name: '缺陷数', exact: true }).fill('0');
+    await section.getByRole('spinbutton', { name: '不良数', exact: true }).fill('0');
     await section.getByRole('spinbutton', { name: '返工数', exact: true }).fill('0');
     await section.getByRole('button', { name: '提交扫码报工', exact: true }).click();
     await section.getByRole('button', { name: '确认报工', exact: true }).click();

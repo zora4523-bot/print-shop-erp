@@ -49,8 +49,8 @@ test.describe('administrator workspace', () => {
     const routes: AdminRoute[] = [
       { name: 'discovery-purchase-new', path: '/owner/purchases/new', readyHeading: '新建采购单' },
       { name: 'discovery-parties', path: '/owner/parties?type=suppliers', readyHeading: '客户/供应商' },
-      { name: 'discovery-boms', path: '/owner/boms', readyHeading: 'BOM/用料' },
-      { name: 'discovery-categories', path: '/owner/rules/product-categories', readyHeading: '产品结构分类 / BOM 分类' },
+      { name: 'discovery-boms', path: '/owner/boms', readyHeading: '用料清单' },
+      { name: 'discovery-categories', path: '/owner/rules/product-categories', readyHeading: '产品结构分类 / 用料清单分类' },
       { name: 'discovery-rules', path: '/owner/rules', readyHeading: '规则配置中心' },
       { name: 'discovery-outsource', path: '/foreman/outsource', readyHeading: '外协单' },
     ];
@@ -63,7 +63,7 @@ test.describe('administrator workspace', () => {
       { name: 'return-empty-dispatch', path: '/orders/production', readyHeading: '安排生产师傅', prepareGateState: async page => {
         await expect(page.getByRole('link', { name: '返回工单列表', exact: true })).toHaveAttribute('href', '/orders');
       } },
-      { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '创建外协单', prepareGateState: async page => {
+      { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '新建外协单', prepareGateState: async page => {
         await expect(page.getByRole('link', { name: '返回工单详情', exact: true })).toHaveAttribute('href', `/orders/${fixture.orderId}`);
       } },
       { name: 'return-specifications', path: '/owner/rules/specifications', readyHeading: '规格目录', prepareGateState: async page => {
@@ -80,7 +80,7 @@ test.describe('administrator workspace', () => {
   });
 
   test('warehouse maintenance controls pass focused light and dark gates', async ({ page }, testInfo) => {
-    const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库作业台', prepareGateState: async (page) => {
+    const routes: AdminRoute[] = [{ name: 'warehouse-maintenance', path: '/owner/warehouses', readyHeading: '仓库/库位', prepareGateState: async (page) => {
       const disclosure = page.locator('#admin-main').getByText('仓库与库位设置', { exact: true });
       await disclosure.click();
       const settings = disclosure.locator('..');
@@ -104,13 +104,13 @@ test.describe('administrator workspace', () => {
         await page.reload();
         await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
       } },
-      { name: 'recovery-bom', path: '/owner/boms/new', readyHeading: '新建 BOM', prepareGateState: async (page) => {
+      { name: 'recovery-bom', path: '/owner/boms/new', readyHeading: '新建用料清单', prepareGateState: async (page) => {
         const resume = page.getByRole('button', { name: '继续上次录入', exact: true });
         if (draftsPrepared) {
           await resume.click();
-          await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue('待补物料的用料清单');
+          await expect(page.getByLabel('用料清单名称', { exact: true })).toHaveValue('待补物料的用料清单');
         }
-        await page.getByLabel('BOM 名称', { exact: true }).fill('待补物料的用料清单');
+        await page.getByLabel('用料清单名称', { exact: true }).fill('待补物料的用料清单');
         await page.reload();
         await expect(page.getByRole('button', { name: '继续上次录入', exact: true })).toBeEnabled();
       } },
@@ -185,6 +185,11 @@ test.describe('administrator workspace', () => {
       { name: 'shipping-released-reason', path: `/orders/${orders.released}`, readyHeading: '发货恢复验证', prepareGateState: async (page) => {
         const shipment = page.locator('#admin-main #shipment-registration');
         await expect(shipment).toContainText('生产完工后才可发货');
+        // 业主 2026-10-01：尚不能发货且未保存物流资料时，登记表单默认收起，原因留在折叠块外。
+        const fold = shipment.locator('details').filter({ hasText: '登记物流资料' }).first();
+        await expect(fold).not.toHaveAttribute('open', '');
+        await fold.locator(':scope > summary').click();
+        await expect(fold).toHaveAttribute('open', '');
         await expect(shipment.getByRole('button', { name: '确认该地址已发货', exact: true })).toBeDisabled();
         await expect(shipment.getByRole('button', { name: '保存物流资料', exact: true })).toBeEnabled();
         await shipment.scrollIntoViewIfNeeded();
@@ -227,6 +232,8 @@ test.describe('administrator workspace', () => {
             await expect(address.getByText('13800138000', { exact: true })).toBeVisible();
             await expect(address.getByText(/广东省佛山市南海区测试街道物流园收货区/)).toBeVisible();
             await expect(address.getByRole('list', { name: /的款式数量/ })).toContainText(`${100 / shipmentCount} 个`);
+            // 尚不能发货的地址登记默认收起（业主 2026-10-01），展开后再填。
+            await address.locator('summary').filter({ hasText: '登记物流资料' }).click();
             await address.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('OTHER');
             await address.getByRole('textbox', { name: '物流公司名称', exact: true }).fill('测试物流公司');
             const tracking = address.getByRole('textbox', { name: '运单号', exact: true });
@@ -252,9 +259,9 @@ test.describe('administrator workspace', () => {
         const tabs = page.getByRole('navigation', { name: '待建工单' });
         await expect(tabs.getByRole('button').first()).toBeVisible();
         while (await tabs.getByRole('button').count() < 10) {
-          await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+          await page.getByRole('button', { name: '＋ 添加工单', exact: true }).click();
         }
-        await expect(page.getByRole('button', { name: '＋ 增加工单', exact: true })).toBeDisabled();
+        await expect(page.getByRole('button', { name: '＋ 添加工单', exact: true })).toBeDisabled();
         await expect(page.getByText('本批已达 10 张，全部保存后可开始新一批。')).toBeVisible();
         const first = tabs.getByRole('button', { name: '工单 1', exact: true });
         if (testInfo.project.use.hasTouch) await first.tap();
@@ -637,8 +644,19 @@ test.describe('sales workspace', () => {
       await content.focus();
       await expect(content).toBeFocused();
       if (await content.evaluate((element) => element.scrollHeight > element.clientHeight)) {
+        // Chromium 的 End/Home 键盘滚动自带约 150ms 动画（不受 reduced-motion 影响）；
+        // 在 End 动画收尾的窗口内按 Home 会被吞掉、停在底部（2026-09-30 实测
+        // 145–180ms 区间必现）。先等 End 的 scrollend 并确认到底，再按 Home。
+        await content.evaluate((element) => {
+          (element as HTMLElement & { __e2eScrollEnd?: Promise<void> }).__e2eScrollEnd =
+            new Promise((resolve) => element.addEventListener('scrollend', () => resolve(), { once: true }));
+        });
         await page.keyboard.press('End');
+        await content.evaluate((element) => (element as HTMLElement & { __e2eScrollEnd?: Promise<void> }).__e2eScrollEnd);
         await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        await expect
+          .poll(() => content.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
+          .toBeLessThanOrEqual(1);
         await page.keyboard.press('Home');
         await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBe(0);
       }
@@ -773,7 +791,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'orders',
       path: '/orders',
-      readyHeading: '工单管理',
+      readyHeading: '工单列表',
       prepareGateState: (page) => prepareAdminOrderWorkspaceState(page, data),
     },
     {
@@ -786,7 +804,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
         encodeURIComponent('广东省深圳市南山区科技园长地址压力测试大厦A座12345678901234567890') +
         '&foilColor=' +
         encodeURIComponent('哑金,透明金,客户特殊调色长名称'),
-      readyHeading: '工单管理',
+      readyHeading: '工单列表',
       prepareGateState: (page) => prepareAdminOrderWorkspaceState(page, data),
     },
     {
@@ -804,10 +822,10 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'attendance',
       path: '/foreman/attendance',
-      readyHeading: '员工考勤',
+      readyHeading: '工时录入',
       prepareGateState: prepareAttendanceState,
     },
-    { name: 'inventory', path: '/foreman/materials', readyHeading: '物料库存' },
+    { name: 'inventory', path: '/foreman/materials', readyHeading: '车间用料' },
     { name: 'outsource', path: '/foreman/outsource', readyHeading: '外协单' },
     // 以下四条此前从未被任何门禁访问过。UI 审查在它们上面实测到 axe
     // label / select-name 违规（筛选栏 <label> 没有 htmlFor），修完补进
@@ -825,11 +843,11 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'salary-daily',
       path: '/owner/salary/daily',
-      readyHeading: '历史开机师傅日薪档案',
+      readyHeading: '历史日薪档案',
     },
     { name: 'cdr', path: '/foreman/cdr', readyHeading: 'CDR 汇总下载' },
-    { name: 'accounts', path: '/owner/accounts', readyHeading: '账号管理' },
-    { name: 'materials', path: '/owner/materials', readyHeading: '物料字典' },
+    { name: 'accounts', path: '/owner/accounts', readyHeading: '用户管理' },
+    { name: 'materials', path: '/owner/materials', readyHeading: '物料' },
     {
       name: 'product-references',
       path: RULE_CENTER_HREFS.productReferences,
@@ -868,12 +886,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'rule-center-specs',
       path: `${RULE_CENTER_HREFS.productReferences}?section=specs`,
-      readyHeading: '规格 · 烫金颜色',
+      readyHeading: '规格目录',
     },
     {
       name: 'rule-center-product-categories',
       path: RULE_CENTER_HREFS.productCategories,
-      readyHeading: '产品结构分类 / BOM 分类',
+      readyHeading: '产品结构分类 / 用料清单分类',
     },
     {
       name: 'rule-center-crafts',
@@ -903,12 +921,12 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'agent-monthly-bills-alias',
       path: '/owner/bills',
-      readyHeading: '代理商月度账单',
+      readyHeading: '外部销售月账单',
     },
     {
       name: 'legacy-bills-archive',
       path: '/owner/bills/archive',
-      readyHeading: '历史账单',
+      readyHeading: '历史账单归档',
     },
     {
       name: 'order-changes',
@@ -916,7 +934,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '工单修改申请',
     },
     { name: 'salary', path: '/owner/salary', readyHeading: '薪资总览' },
-    { name: 'warehouses', path: '/owner/warehouses', readyHeading: '仓库作业台' },
+    { name: 'warehouses', path: '/owner/warehouses', readyHeading: '仓库/库位' },
     { name: 'pigsty', path: '/owner/pigsty', readyHeading: 'Pigsty 运维' },
     { name: 'settings', path: '/owner/settings', readyHeading: '系统设置' },
     {
@@ -993,10 +1011,8 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
     await order.getByRole('heading', { level: 2 }).getByRole('link', { name: longOrderName, exact: true }).click();
     await expect(page).toHaveURL((url) => url.pathname === `/orders/${data.orderId}`);
     const fees = page.getByRole('region', { name: '工单费用', exact: true });
-    await expect(fees.getByRole('heading', { name: '费用记录', exact: true })).toBeVisible();
-    for (const title of ['提交报价', '确认金额', '结算金额']) {
-      await expect(fees.getByText(title, { exact: true })).toBeVisible();
-    }
+    // 业主 2026-10-01：费用记录三阶段卡已去掉。
+    await expect(fees.getByRole('heading', { name: '费用记录', exact: true })).toHaveCount(0);
     // This legacy fixture has only a historical total, no fabricated stage snapshots.
     const currentAmount = fees.locator('[data-slot="current-order-amount"]');
     await expect(currentAmount).toBeVisible();
@@ -1004,9 +1020,8 @@ async function prepareAdminOrderWorkspaceState(page: Page, data: WorkerUiFixture
     await expect(currentAmount).toHaveText('¥ 646,172.57');
     await expect(currentAmount.locator('..').getByText('不含快递费，含耗材费', { exact: true })).toBeVisible();
     await expect(fees.getByText('当前', { exact: true })).toHaveCount(0);
-    await expect(fees.getByText('—', { exact: true })).toHaveCount(3);
     for (const hint of ['尚未形成报价', '费用核定后显示', '结算后显示']) {
-      await expect(fees.getByText(hint, { exact: true })).toBeVisible();
+      await expect(fees.getByText(hint, { exact: true })).toHaveCount(0);
     }
     await page.goBack();
     await expect(workspace).toBeVisible();
@@ -1049,7 +1064,7 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'sales-orders',
       path: `/orders?q=${encodeURIComponent(data.orderNo)}`,
-      readyHeading: '工单',
+      readyHeading: '我的工单',
       prepareGateState: (page) => prepareSalesOrderListState(page, data),
     },
     {
@@ -1067,7 +1082,7 @@ function salesRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'sales-bills',
       path: '/sales/bills',
-      readyHeading: '我的对客应付账单',
+      readyHeading: '我的货款账单',
     },
   ];
 }
@@ -1238,7 +1253,7 @@ async function expectSelectedPriceWorkspace(
       name: /^创建(?:加工费|快递与耗材)调价草稿$/,
     });
     await expect(createDraftForm).toBeVisible();
-    await expect(createDraftForm.getByLabel('调价原因（必填）')).toBeVisible();
+    await expect(createDraftForm.getByLabel('调价原因')).toBeVisible();
     await expect(
       createDraftForm.getByRole('button', {
         name: '复制当前价目并开始调价',
@@ -1423,7 +1438,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   );
   await expect(filters).toBeVisible();
   const views = filters.getByRole('navigation', { name: '销售工单视图' });
-  for (const label of ['全部', '需关注', '进行中', '已发货', '已完成', '已取消', '草稿']) {
+  for (const label of ['全部', '需关注', '进行中', '已发货', '已结算', '已取消', '草稿']) {
     await expect(views.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
   }
   await expect(
@@ -1432,9 +1447,11 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
     }),
   ).toBeVisible();
 
-  const list = page.getByRole('list', { name: '销售工单列表' });
+  // React 19 throttles Suspense reveals: right after load the streamed segment can still sit
+  // in its hidden <div id="S:n"> next to the revealed list. Only the visible list counts.
+  const list = page.locator('[data-slot="sales-orders-list"]:visible');
   await expect(list).toBeVisible();
-  const card = list.locator(`[data-sales-order-card][data-order-id="${data.orderId}"]`);
+  const card = list.locator(`[data-order-id="${data.orderId}"]:visible`);
   await expect(card).toHaveCount(1);
   await expect(card).toContainText(longOrderName);
   await expect(card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ })).toHaveAttribute('href', `/orders/${data.orderId}`);
@@ -1523,8 +1540,9 @@ async function prepareSalesOrderDetailState(page: Page) {
   await expect(
     detail.getByRole('link', { name: '下载 PDF', exact: true }),
   ).toHaveCount(0);
+  // 业主 2026-10-01：外部销售侧工单列表统一叫「我的工单」（面包屑按角色取名）。
   await expect(
-    page.getByRole('navigation', { name: '面包屑导航', exact: true }).getByRole('link', { name: '工单', exact: true }),
+    page.getByRole('navigation', { name: '面包屑导航', exact: true }).getByRole('link', { name: '我的工单', exact: true }),
   ).toHaveAttribute('href', '/orders');
 
   const formSection = page
@@ -1591,7 +1609,8 @@ async function prepareOrderDetailDesignPreview(
   await expect(records.locator('#detail-pricing-tools').getByRole('heading', { name: '工单价格状态', exact: true })).toBeVisible();
   await expect(records.locator('#detail-delivery-records').getByRole('heading', { name: '发货地址（1）', exact: true })).toBeVisible();
   await expect(records.locator('#detail-production-records').getByRole('heading', { name: '物料用量估算', exact: true })).toBeVisible();
-  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '生产概况与业务资料', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-business-records').getByRole('region', { name: '生产概况与业务资料', exact: true })).toBeVisible();
+  await expect(records.locator('#detail-business-records').getByRole('heading', { name: '生产概况与业务资料', exact: true })).toHaveCount(0);
   await expect(records.locator('#detail-audit-records').getByRole('region', { name: '操作事件', exact: true })).toBeVisible();
   await expect(records.getByRole('complementary', { name: '工单概览与操作' }).locator('#detail-other-actions')).toBeVisible();
   await expect(records.getByRole('complementary', { name: '工单概览与操作' }).getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
@@ -1759,7 +1778,7 @@ async function prepareAdminOrderCreationState(page: Page) {
     .fill('超长款式名称珠光艳闪大号封局部烫金高级定制版');
   // DECISIONS 2026-09-24：管理员建单必须挂外部销售，内部建单的「需人工核价的要求」字段随之删除。
   await form
-    .getByRole('combobox', { name: '关联外部销售（必填）', exact: true })
+    .getByRole('combobox', { name: '关联外部销售', exact: true })
     .selectOption({ label: 'E2E 销售 · e2e-sales' });
 
   await form
@@ -1834,8 +1853,8 @@ for (const role of ['owner', 'sales'] as const) {
     const form = page.locator('[data-slot="order-form-b"]');
     await expect(form).toBeVisible();
     for (let index = 0; index < 3; index++) {
-      await form.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
-      if (index < 2) await form.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+      await form.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
+      if (index < 2) await form.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
     }
     const designs = form.getByRole('tablist', { name: '设计款', exact: true });
     const specs = form.getByRole('tablist', { name: '规格明细', exact: true });

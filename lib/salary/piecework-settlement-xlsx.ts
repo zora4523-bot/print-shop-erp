@@ -1,4 +1,5 @@
 import { ZipArchive } from 'archiver';
+import { REPORT_OPERATION_LABELS, REPORT_UNIT_LABELS } from './report-display';
 import { PassThrough } from 'node:stream';
 import type { Prisma } from '../../generated/prisma/client';
 import { parseStrictYmd } from '../auth/schemas';
@@ -143,7 +144,7 @@ export async function buildPieceworkSettlementWorkbook(
   settlements: Awaited<ReturnType<typeof loadPieceworkSettlementExportData>>,
 ): Promise<Buffer> {
   const summaryRows: CellValue[][] = [[
-    '账本代次',
+    '记录来源',
     '日期',
     '报工人',
     '账号',
@@ -154,10 +155,10 @@ export async function buildPieceworkSettlementWorkbook(
     '状态',
     '锁定时间',
     '发放时间',
-    '结算ID',
+    '结算记录编号',
   ]];
   const detailRows: CellValue[][] = [[
-    '账本代次',
+    '记录来源',
     '日期',
     '报工人',
     '工单号',
@@ -165,23 +166,23 @@ export async function buildPieceworkSettlementWorkbook(
     '工序类型',
     '条目类型',
     '合格完成数',
-    '缺陷数',
+    '不良数',
     '返工数',
     '计薪数',
     '单位',
     '工价',
     '金额',
     '工价版本',
-    '规则集Hash',
     '报工时间',
-    '报工ID',
+    '记录编号',
     '工价来源',
     '账号工价版本',
   ]];
 
+  const verificationRows: CellValue[][] = [['结算记录编号', '报工记录编号', '工价版本', '规则校验码']];
   for (const settlement of settlements) {
     summaryRows.push([
-      'PRODUCTION_REPORT',
+      '计件工资',
       ymd(settlement.workDate),
       settlement.reporter.displayName,
       settlement.reporter.username,
@@ -195,29 +196,29 @@ export async function buildPieceworkSettlementWorkbook(
       settlement.id,
     ]);
     for (const wage of settlement.productionWages) detailRows.push([
-      'PRODUCTION_WAGE', ymd(settlement.workDate), settlement.reporter.displayName,
+      '完工提成', ymd(settlement.workDate), settlement.reporter.displayName,
       wage.job.order.orderNo, wage.job.order.customName ?? '', wage.job.label, '完工提成',
-      Number(wage.job.completedQty ?? 0), '', '', '', '', '', Number(wage.amount), '', '',
+      Number(wage.job.completedQty ?? 0), '', '', '', '', '', Number(wage.amount), '',
       shanghaiDateTime(wage.job.completedAt), wage.id, '完工提成记录', '',
     ]);
     for (const { report } of settlement.items) {
+      verificationRows.push([settlement.id, report.id, report.priceBookVersion, report.ruleSetSha256]);
       detailRows.push([
-        'PRODUCTION_REPORT',
+        '计件工资',
         ymd(settlement.workDate),
         settlement.reporter.displayName,
         report.operation.order.orderNo,
         report.operation.order.customName ?? '',
-        report.operation.operationType,
+        REPORT_OPERATION_LABELS[report.operation.operationType] ?? '工序资料缺失',
         report.entryType === 'ADJUSTMENT' ? '人工调整' : report.entryType === 'REVERSAL' ? '冲正' : '报工',
         Number(report.reportedCompletedQty),
         Number(report.defectQty),
         Number(report.reworkQty),
         Number(report.chargeableQty),
-        report.unit,
+        REPORT_UNIT_LABELS[report.unit] ?? '单位资料缺失',
         Number(report.rate),
         Number(report.amount),
         report.priceBookVersion,
-        report.ruleSetSha256,
         shanghaiDateTime(report.reportedAt),
         report.id,
         payrollSource(report.snapshot).source,
@@ -237,7 +238,7 @@ export async function buildPieceworkSettlementWorkbook(
   archive.on('error', (error: Error) => output.destroy(error));
   archive.pipe(output);
   archive.append(
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
     { name: '[Content_Types].xml' },
   );
   archive.append(
@@ -245,11 +246,11 @@ export async function buildPieceworkSettlementWorkbook(
     { name: '_rels/.rels' },
   );
   archive.append(
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="新账本结算" sheetId="1" r:id="rId1"/><sheet name="新账本报工明细" sheetId="2" r:id="rId2"/></sheets></workbook>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="计件结算" sheetId="1" r:id="rId1"/><sheet name="报工明细" sheetId="2" r:id="rId2"/><sheet name="核验记录" sheetId="3" r:id="rId4"/></sheets></workbook>`,
     { name: 'xl/workbook.xml' },
   );
   archive.append(
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/></Relationships>`,
     { name: 'xl/_rels/workbook.xml.rels' },
   );
   archive.append(
@@ -262,6 +263,7 @@ export async function buildPieceworkSettlementWorkbook(
   archive.append(sheetXml(detailRows), {
     name: 'xl/worksheets/sheet2.xml',
   });
+  archive.append(sheetXml(verificationRows), { name: 'xl/worksheets/sheet3.xml' });
   await archive.finalize();
   return finished;
 }

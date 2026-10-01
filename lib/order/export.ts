@@ -1207,7 +1207,7 @@ async function* pricingRevisionRows(
 async function* taskRows(membershipPath: string, tx: Prisma.TransactionClient): AsyncGenerator<XlsxRow> {
   yield [
     '工单号', '款式序号', '款式名称', '工艺', '师傅', '师傅工种', '机型', '任务状态',
-    '计划数量', '板数', '下数', '完成数量', '次品数', '重做数', '计件金额', '开始时间',
+    '计划数量', '板数', '下数', '完成数量', '不良数', '重做数', '计件金额', '开始时间',
     '完成时间', '任务备注',
   ];
   for await (const keys of membershipBatches(membershipPath)) {

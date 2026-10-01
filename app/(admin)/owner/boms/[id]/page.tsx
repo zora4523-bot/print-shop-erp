@@ -1,7 +1,7 @@
 import { VerifiedDraftReceipt } from '@/components/business/form-drafts/VerifiedDraftReceipt';
 import { cache } from 'react';
 import { notFound } from 'next/navigation';
-import { Badge } from '@/components/ui/badge';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { ToggleBomActiveButton } from '@/components/business/bom/ToggleBomActiveButton';
@@ -54,13 +54,13 @@ export async function generateMetadata({ params }: PageProps) {
   // 不能依赖后续 Page/owner layout 的 redirect。
   const session = await getSession();
   if (!session || !hasPermission('bom:manage', session.user.role)) {
-    return { title: 'BOM/用料' };
+    return { title: '用料清单' };
   }
   const bom = await loadBom(id);
   return {
     title: bom
-      ? `${externalPriceBusinessText(bom.name)} · BOM/用料`
-      : 'BOM 不存在',
+      ? `${externalPriceBusinessText(bom.name)} · 用料清单`
+      : '用料清单不存在',
   };
 }
 
@@ -75,20 +75,17 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
   return (
     <div className="space-y-6">
       <VerifiedDraftReceipt actorId={actor.id} kind="bom-new" entityId={id} receipt={receipt} />
-      <ReceiptNotice receipt={receipt} noun="BOM" />
+      <ReceiptNotice receipt={receipt} noun="用料清单" />
       <PageHeader
         title={externalPriceBusinessText(bom.name)}
-        subtitle={`${await targetLabel(bom)} · v${bom.version} · 基准产量 ${bom.baseQuantity}`}
-        actions={
-          <Badge variant={bom.isActive ? 'outline' : 'secondary'}>
-            {bom.isActive ? '启用' : '停用'}
-          </Badge>
-        }
+        subtitle={`${await targetLabel(bom)} · 版本 ${bom.version} · 基准产量 ${bom.baseQuantity}`}
+        back={{ href: '/owner/boms', label: '返回用料清单' }}
+        status={<ActiveStatusBadge active={bom.isActive} />}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">物料清单</h2>
-        <TableScrollArea label="BOM 物料明细">
+        <TableScrollArea label="用料清单物料明细">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
@@ -102,7 +99,6 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
                 <TableEmptyState
                   colSpan={3}
                   title="暂无物料行"
-                  description="这个 BOM 尚未配置用料。"
                 />
               ) : (
                 bom.items.map((item) => (
@@ -132,11 +128,8 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
 
       {bom.product?.category === 'BLANK_STOCK' ? <p className="text-sm text-muted-foreground">此清单用于历史工单，不能再修改。</p> : <section className="rounded-xl border bg-card p-6 shadow-sm">
         <h2 className="mb-2 text-base font-semibold">
-          {bom.isActive ? '停用 BOM' : '启用 BOM'}
+          {bom.isActive ? '停用用料清单' : '启用用料清单'}
         </h2>
-        <p className="mb-3 text-sm text-muted-foreground">
-          启用时会检查同一用料对象是否已有启用 BOM；停用后不会用于新估算。
-        </p>
         <ToggleBomActiveButton bomId={bom.id} currentlyActive={bom.isActive} />
       </section>}
     </div>

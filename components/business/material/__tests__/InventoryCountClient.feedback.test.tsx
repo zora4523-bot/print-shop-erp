@@ -48,7 +48,7 @@ describe('InventoryCountClient structured feedback contract', () => {
     expect(html).toMatch(
       /id="inventory-count-items"[^>]*aria-busy="true"/,
     );
-    expect(html).toContain('读取中…');
+    expect(html).toContain('正在读取…');
     expect(html).toContain('正在读取库存...');
   });
 

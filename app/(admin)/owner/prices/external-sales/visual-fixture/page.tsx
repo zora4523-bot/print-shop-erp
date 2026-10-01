@@ -15,6 +15,7 @@ import {
   VISUAL_PER_PIECE_PRICE_TIERS,
 } from './price-tier-data';
 import { VisualFixturePriceTierPanel } from './VisualFixturePriceTierPanel';
+import { Textarea } from '@/components/ui/textarea';
 
 type PageProps = {
   searchParams: Promise<{
@@ -151,10 +152,10 @@ export default async function ExternalSalesPriceVisualFixturePage({
           !hasDraft ? (
             <form aria-label="创建加工费调价草稿" className="space-y-3">
               <label htmlFor="visual-change-reason">调价原因（必填）</label>
-              <textarea
+              <Textarea
                 id="visual-change-reason"
                 required
-                className="min-h-24 w-full min-w-0 rounded-lg border px-3 py-2"
+                className="min-h-24 w-full min-w-0"
               />
               <Button type="button" className="min-h-11">
                 复制当前价目并开始调价

@@ -55,6 +55,7 @@ import { generateAgentMonthlyBillsForPeriod, synchronizeDraftBillInTx } from '..
 const ORDER = {
   id: 'order-1',
   orderNo: 'GD-260501-001',
+  customName: '节日礼盒',
   submitterId: 'agent-1',
   status: OrderStatus.SETTLED,
   customerRef: '客户甲',
@@ -62,7 +63,7 @@ const ORDER = {
   settledFee: '25.00',
   processingAmount: '20.00',
   totalAmount: '25.00',
-  customerCharges: [{ amount: '5.00' }],
+  customerCharges: [{ amount: '5.00', description: '运费' }],
   settledAt: new Date('2026-05-01T00:00:00.000Z'),
 };
 
@@ -152,6 +153,10 @@ describe('generateAgentMonthlyBillsForPeriod', () => {
     // 客户名称/简称已不展示，但确认触发器仍要求快照与 Order.customerRef 一致
     // （IS DISTINCT FROM 比对），生成必须照旧逐字写入，不能省略或改写。
     const member = tx.agentMonthlyBillItem.upsert.mock.calls[0]?.[0];
+    for (const row of [member.create, member.update]) expect(row.settlementDetailSnapshot).toEqual({
+      schemaVersion: 1, orderName: '节日礼盒', processingAmount: '20.00',
+      charges: [{ description: '运费', amount: '5.00' }],
+    });
     expect(member.create.customerRefSnapshot).toBe(ORDER.customerRef);
     expect(member.update.customerRefSnapshot).toBe(ORDER.customerRef);
   });
@@ -177,7 +182,7 @@ describe('generateAgentMonthlyBillsForPeriod', () => {
         { id: 'admin-1', role: Role.ADMIN },
         { now: new Date('2026-06-02T00:00:00.000Z') },
       ),
-    ).rejects.toThrow(/未入账.*GD-260501-001/);
+    ).rejects.toThrow(/GD-260501-001.*尚未入账/);
     expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
     expect(tx.agentMonthlyBill.update).not.toHaveBeenCalled();
   });

@@ -1,10 +1,10 @@
+import { FormPendingScope, ScopedPageHeader } from '@/components/business/form/FormPendingScope';
 import { readSupplementContext } from '@/lib/form-drafts/return-context';
 import { newFormDraftContext } from '@/lib/form-drafts/server-context';
-import Link from 'next/link';
 import { createPurchaseOrderAction } from '@/actions/owner-purchases';
 import { PurchaseOrderForm } from '@/components/business/purchase/PurchaseOrderForm';
-import { buttonVariants } from '@/components/ui/button';
-import { PageHeader, ReceiptNotice } from '@/components/ui-business';
+import { FormPage } from '@/app/_components/FormPage';
+import { ReceiptNotice } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { firstSearchParam } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -40,19 +40,12 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
     : '';
 
   return (
-    <div className="space-y-6">
+    <FormPendingScope>
+    <FormPage>
       <ReceiptNotice receipt={receipt} noun={receiptNoun} />
-      <PageHeader
+      <ScopedPageHeader
         title="新建采购单"
-        subtitle="创建采购单不会增加库存；到货后可分批收货。"
-        actions={
-          <Link
-            href="/owner/purchases"
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            返回列表
-          </Link>
-        }
+        back={{ href: '/owner/purchases', label: '返回采购单' }}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -72,6 +65,7 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
             }))}
         />
       </section>
-    </div>
+    </FormPage>
+    </FormPendingScope>
   );
 }

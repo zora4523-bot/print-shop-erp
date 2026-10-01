@@ -14,8 +14,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { OrderListQuery } from '@/lib/order/list-query';
-import type { SalesOrderListRow } from '@/lib/order/sales-list-query';
+import type { SalesOrderListQuery, SalesOrderListRow } from '@/lib/order/sales-list-query';
+import { formatDateShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
 import {
   formatSalesOrderUpdatedAt,
@@ -25,6 +25,7 @@ import {
 import { cn } from '@/lib/utils';
 import { OrderPurposeBadge } from './OrderPurposeBadge';
 import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
   Dialog,
@@ -41,7 +42,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { EmptyState, useCopyToClipboard } from '@/components/ui-business';
+import { EmptyState, StatusBadge, useCopyToClipboard } from '@/components/ui-business';
+import { promisedDateAlertDefinition, SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { SalesOrderStatusBadge } from './SalesOrderStatusBadge';
 import { SalesOrderProgress } from './SalesOrderProgress';
 import { UrgentBadge } from './UrgentBadge';
@@ -53,11 +55,12 @@ export function SalesOrdersList({
   footer,
 }: {
   orders: SalesOrderListRow[];
-  query: OrderListQuery;
+  query: SalesOrderListQuery;
   nowIso: string;
   footer?: ReactNode;
 }) {
   const [openOrderNo, setOpenOrderNo] = useState<string | null>(null);
+  const [previewSection, setPreviewSection] = useState<'overview' | 'shipments'>('overview');
   const [remoteResult, setRemoteResult] = useState<{
     orderNo: string;
     order?: SalesOrderListRow;
@@ -80,6 +83,7 @@ export function SalesOrdersList({
   useEffect(() => {
     const syncFromLocation = () => {
       setOpenOrderNo(orderNoFromHash(window.location.hash));
+      setPreviewSection('overview');
     };
     syncFromLocation();
     window.addEventListener('hashchange', syncFromLocation);
@@ -103,13 +107,20 @@ export function SalesOrdersList({
       },
     )
       .then(async (response) => {
+        if (!response.ok) {
+          setRemoteResult({
+            orderNo: openOrderNo,
+            error: response.status === 401 ? '登录已过期，请重新登录。'
+              : response.status === 403 || response.status === 404 ? '工单不存在或无权查看，请返回工单列表。'
+              : '工单明细加载失败，请返回列表后重新打开。',
+          });
+          return;
+        }
         const payload = (await response.json()) as {
           order?: SalesOrderListRow;
           error?: string;
         };
-        if (!response.ok || !payload.order) {
-          throw new Error(payload.error || '工单明细加载失败');
-        }
+        if (!payload.order) throw new Error('Missing sales order detail');
         if (payload.order.orderNo !== openOrderNo) {
           throw new Error('工单明细响应与请求不匹配');
         }
@@ -117,16 +128,16 @@ export function SalesOrdersList({
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
+        console.error('Sales order detail could not be loaded', error);
         setRemoteResult({
           orderNo: openOrderNo,
-          error:
-            error instanceof Error ? error.message : '工单明细加载失败',
+          error: '工单明细加载失败，请返回列表后重新打开。',
         });
       });
     return () => controller.abort();
   }, [openOrderNo, pageOrder]);
 
-  function showOrder(orderNo: string) {
+  function showOrder(orderNo: string, section: 'overview' | 'shipments' = 'overview') {
     const url = new URL(window.location.href);
     url.hash = `wo=${encodeURIComponent(orderNo)}`;
     window.history.pushState(
@@ -135,6 +146,7 @@ export function SalesOrdersList({
       url,
     );
     setRemoteResult(null);
+    setPreviewSection(section);
     setOpenOrderNo(orderNo);
   }
 
@@ -157,24 +169,29 @@ export function SalesOrdersList({
   return (
     <div data-slot="sales-orders-list" className="min-w-0">
       {orders.length > 0 ? (
-        <ul aria-label="销售工单列表" className="grid gap-2">
-          {orders.map((order) => (
-            <SalesOrderCard
-              key={order.id}
-              order={order}
-              nowIso={nowIso}
-              onOpen={() => showOrder(order.orderNo)}
-              onCopy={copyValue}
-            />
-          ))}
-        </ul>
+        <>
+          <div className="hidden min-w-0 rounded-xl border bg-card md:block">
+            <SalesOrdersTable orders={orders} onOpen={showOrder} onCopy={copyValue} />
+          </div>
+          <ul aria-label="销售工单列表" className="grid gap-2 md:hidden">
+            {orders.map((order) => (
+              <SalesOrderCard
+                key={order.id}
+                order={order}
+                nowIso={nowIso}
+                onOpen={() => showOrder(order.orderNo)}
+                onCopy={copyValue}
+              />
+            ))}
+          </ul>
+        </>
       ) : (
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <EmptyState
-            kind={query.filters.q || query.view ? 'no-result' : 'no-data'}
+            kind={query.filters.q || query.createdMonth || query.view ? 'no-result' : 'no-data'}
             noun="工单"
             onClear={
-              query.filters.q || query.view ? (
+              query.filters.q || query.createdMonth || query.view ? (
                 <Link
                   href="/orders"
                   prefetch={false}
@@ -201,6 +218,7 @@ export function SalesOrdersList({
         {openOrder ? (
           <SalesOrderDrawer
             order={openOrder}
+            initialSection={previewSection}
             onCopy={copyValue}
             onClose={closeOrder}
           />
@@ -217,6 +235,148 @@ export function SalesOrdersList({
         {copyFeedback?.message}
       </p>
     </div>
+  );
+}
+
+function SalesOrdersTable({
+  orders,
+  onOpen,
+  onCopy,
+}: {
+  orders: SalesOrderListRow[];
+  onOpen: (orderNo: string, section?: 'overview' | 'shipments') => void;
+  onCopy: (value: string, label: string) => void;
+}) {
+  return (
+    <Table label="销售工单明细表" className="min-w-[64rem] [&_td]:px-3 [&_td]:py-1 [&_th]:px-3">
+      <TableHeader>
+        <TableRow>
+          <TableHead>工单号</TableHead>
+          <TableHead>下单日期</TableHead>
+          <TableHead>工单名称</TableHead>
+          <TableHead>工艺 / 纸张</TableHead>
+          <TableHead className="text-right">数量</TableHead>
+          <TableHead className="text-right">工单金额</TableHead>
+          <TableHead>状态</TableHead>
+          <TableHead>月账单</TableHead>
+          <TableHead className="text-right">操作</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {orders.map((order) => {
+          const amount = salesOrderAmountPresentation(order);
+          const attention = [
+            order.pendingChangeRequest ? (order.pendingChangeRequest.type === 'CANCEL' ? '取消申请中' : '修改申请中') : null,
+            order.pricingAttentionReason,
+            order.rejectedChangeRequest ? (order.rejectedChangeRequest.type === 'CANCEL' ? '取消申请被拒' : '修改申请被拒') : null,
+          ].filter(Boolean).join(' · ');
+          return (
+            <TableRow
+              key={order.id}
+              data-sales-order-row=""
+              data-order-id={order.id}
+              className={cn(order.needsAction && 'bg-warning/5')}
+            >
+              <TableCell>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="link"
+                    onClick={() => onOpen(order.orderNo)}
+                    title={`预览工单 ${order.orderNo}`}
+                    aria-haspopup="dialog"
+                    className="h-auto max-w-48 justify-start p-0 text-left font-normal tabular-nums"
+                  >
+                    <span className="truncate" title={order.orderNo}>{order.orderNo}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`复制工单号 ${order.orderNo}`}
+                    onClick={() => onCopy(order.orderNo, '工单号')}
+                  >
+                    <Copy aria-hidden="true" />
+                  </Button>
+                </div>
+              </TableCell>
+              <TableCell className="text-xs tabular-nums">
+                {formatDateShanghai(new Date(order.createdAt))}
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="link"
+                    onClick={() => onOpen(order.orderNo)}
+                    title="快速预览工单"
+                    aria-haspopup="dialog"
+                    className="h-auto max-w-48 justify-start p-0 text-left font-medium"
+                  >
+                    <span className="truncate" title={order.customName ?? '未命名工单'}>{order.customName ?? '未命名工单'}</span>
+                  </Button>
+                  <OrderPurposeBadge purpose={order.purpose} />
+                  {order.isUrgent ? <UrgentBadge /> : null}
+                </div>
+              </TableCell>
+              <TableCell>
+                <p className="max-w-40 truncate text-xs text-muted-foreground" title={order.craftSummary}>{order.craftSummary}</p>
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {order.itemCount > 0 ? (
+                  <>
+                    <p>{order.totalQuantity.toLocaleString('zh-CN')} 个</p>
+                    <p className="text-xs text-muted-foreground">{order.itemCount} 款</p>
+                  </>
+                ) : <span className="text-xs text-muted-foreground">待填写</span>}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                <p className={cn('font-medium', amount.pending && 'text-xs text-primary')}>
+                  {amount.label}
+                  {amount.estimated ? <span className="ml-1 text-xs font-normal text-muted-foreground">估</span> : null}
+                </p>
+                {!amount.pending && order.feeLines.some((line) => line.amount === null) ? (
+                  <p className="text-xs text-muted-foreground">不含待定</p>
+                ) : null}
+              </TableCell>
+              <TableCell>
+                <SalesOrderStatusBadge status={order.status} />
+                {attention ? <p className="max-w-40 truncate text-xs text-muted-foreground" title={attention}>{attention}</p> : null}
+              </TableCell>
+              <TableCell className="text-xs">
+                {order.bill ? (
+                  <Link
+                    href={`/sales/bills/${order.bill.id}`}
+                    aria-label={`${order.bill.period} 账单 · ${SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[order.bill.status].label}`}
+                    prefetch={false}
+                    className={cn(buttonVariants({ variant: 'link', size: 'sm' }), 'h-auto flex-col items-start p-0')}
+                  >
+                    <span>{order.bill.period}</span>
+                    <span className="font-normal text-muted-foreground">{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[order.bill.status].label}</span>
+                  </Link>
+                ) : <span className="text-muted-foreground">未入账单</span>}
+              </TableCell>
+              <TableCell>
+                <div className="flex items-center justify-end gap-1">
+                  <Link
+                    href={`/orders/${order.id}`}
+                    prefetch={false}
+                    className={buttonVariants({ variant: order.needsAction ? 'default' : 'outline', size: 'sm' })}
+                  >
+                    {salesOrderPrimaryAction(order)}
+                  </Link>
+                  {order.shipments.length > 0 ? (
+                    <Button type="button" variant="ghost" size="sm" aria-haspopup="dialog" onClick={() => onOpen(order.orderNo, 'shipments')}>
+                      查看物流
+                    </Button>
+                  ) : null}
+                </div>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -240,7 +400,7 @@ function SalesOrderCard({
       className={cn(
         'grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-xl border bg-background p-3 transition-colors hover:border-foreground/30 sm:grid-cols-[3.25rem_minmax(0,1fr)_auto] sm:px-4',
         order.needsAction &&
-          'border-destructive/50 bg-linear-to-r from-destructive/8 via-background to-background',
+          'border-warning/60 bg-linear-to-r from-warning/10 via-background to-background',
       )}
     >
       <OrderThumbnail order={order} />
@@ -276,18 +436,19 @@ function SalesOrderCard({
           >
             <Copy aria-hidden="true" />
           </Button>
-          <span>v{order.revision}</span>
+          <span>记录版本 {order.revision}</span>
         </div>
 
         <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>下单 {formatDateShanghai(new Date(order.createdAt))}</span>
           <DueDate order={order} />
-          <span>
+          {order.itemCount > 0 ? <span>
             <b className="font-medium text-foreground">{order.itemCount}</b> 款 ·{' '}
             <b className="font-medium text-foreground tabular-nums">
               {order.totalQuantity.toLocaleString('zh-CN')}
             </b>{' '}
             个
-          </span>
+          </span> : <span>款式与数量未填写</span>}
           <span className="max-w-full truncate" title={order.craftSummary}>
             {order.craftSummary}
           </span>
@@ -295,10 +456,13 @@ function SalesOrderCard({
         </div>
 
         {order.pricingAttentionReason ? (
-          <p className="mt-2 border-l-2 border-destructive pl-2 text-xs font-medium text-destructive">
+          <p className="mt-2 border-l-2 border-primary pl-2 text-xs font-medium text-primary">
             {order.pricingAttentionReason}
           </p>
         ) : null}
+        {order.bill ? <Link href={`/sales/bills/${order.bill.id}`} className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'mt-2 max-w-full whitespace-normal text-left')}>
+          {order.bill.period} 账单 · {SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[order.bill.status].label}
+        </Link> : null}
         {order.rejectedChangeRequest ? (
           <p className="mt-2 border-l-2 border-destructive pl-2 text-xs font-medium text-destructive">
             {order.rejectedChangeRequest.type === 'CANCEL' ? '取消申请被拒' : '修改申请被拒'} ·{' '}
@@ -353,7 +517,7 @@ function SalesOrderCard({
           href={`/orders/${order.id}`}
           prefetch={false}
           className={cn(
-            buttonVariants({ variant: order.needsAction ? 'destructive' : 'outline', size: 'sm' }),
+            buttonVariants({ variant: order.needsAction ? 'default' : 'outline', size: 'sm' }),
             'min-h-9 px-3',
           )}
         >
@@ -373,6 +537,7 @@ function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
             sequence: item.sequence,
             name: item.name,
             url: item.thumbnail.url,
+            previewUrl: item.thumbnail.previewUrl,
           },
         ]
       : [],
@@ -393,6 +558,10 @@ function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
             <img
               src={coverPhoto.url}
               alt=""
+              width={52}
+              height={72}
+              loading="lazy"
+              decoding="async"
               className="size-full rounded-md object-cover transition-transform duration-200 group-hover:scale-105 motion-reduce:transition-none"
             />
           </DialogTrigger>
@@ -418,7 +587,7 @@ function OrderThumbnail({ order }: { order: SalesOrderListRow }) {
                   <figure className="overflow-hidden rounded-lg border bg-card">
                     <div className="flex h-[min(56dvh,32rem)] items-center justify-center overflow-hidden bg-muted/40 p-2">
                       <img
-                        src={photo.url}
+                        src={photo.previewUrl}
                         alt={`第 ${photo.sequence} 款 ${photo.name} 的款式照片`}
                         decoding="async"
                         draggable={false}
@@ -461,25 +630,17 @@ function isStylePhotoFileName(fileName: string) {
   );
 }
 
-// 逾期 danger、临期 warning——与 lib/ui/status-registry.ts 的
-// PROMISED_DATE_ALERT_REGISTRY 同口径（§6：两档必须能区分开）。
+// 逾期 / 临期的文案与色调统一取自 lib/ui/status-registry 的
+// promisedDateAlertDefinition（§6：业务组件不写本地 tone 类名）。
 function DueDate({ order }: { order: SalesOrderListRow }) {
-  if (!order.promisedDate) return <span>交货未设置</span>;
+  if (!order.promisedDate) return <span>交期未设</span>;
   const shortDate = order.promisedDate.slice(5);
-  if (order.dueAlert?.kind === 'overdue') {
+  if (order.dueAlert) {
+    const definition = promisedDateAlertDefinition(order.dueAlert.kind, order.dueAlert.days);
     return (
-      <span className="rounded-md bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
-        交货 {shortDate} · 已超 {order.dueAlert.days} 天
-      </span>
-    );
-  }
-  if (order.dueAlert?.kind === 'due-soon') {
-    return (
-      <span className="font-medium text-warning-foreground">
-        交货 {shortDate} ·{' '}
-        {order.dueAlert.days === 0
-          ? '今天到期'
-          : `剩 ${order.dueAlert.days} 天`}
+      <span className="inline-flex flex-wrap items-center gap-1">
+        交货 {shortDate}
+        <StatusBadge tone={definition.tone}>{definition.label}</StatusBadge>
       </span>
     );
   }
@@ -488,10 +649,12 @@ function DueDate({ order }: { order: SalesOrderListRow }) {
 
 function SalesOrderDrawer({
   order,
+  initialSection,
   onCopy,
   onClose,
 }: {
   order: SalesOrderListRow;
+  initialSection: 'overview' | 'shipments';
   onCopy: (value: string, label: string) => void;
   onClose: () => void;
 }) {
@@ -521,7 +684,7 @@ function SalesOrderDrawer({
           >
             <Copy aria-hidden="true" />
           </Button>
-          <span>v{order.revision}</span>
+          <span>记录版本 {order.revision}</span>
         </SheetDescription>
       </SheetHeader>
 
@@ -531,10 +694,16 @@ function SalesOrderDrawer({
         tabIndex={0}
         className="min-h-0 flex-1 overflow-y-auto py-4 admin-safe-inline outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
+        {initialSection === 'shipments' ? <SalesOrderShipments order={order} onCopy={onCopy} /> : null}
         <DrawerSection title="进度">
+          <dl className="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+            <div><dt className="inline">下单日期 </dt><dd className="inline">{formatDateShanghai(new Date(order.createdAt))}</dd></div>
+            <div><dt className="sr-only">交货日期</dt><dd><DueDate order={order} /></dd></div>
+            {order.shippedAt ? <div><dt className="inline">发货日期 </dt><dd className="inline">{formatDateShanghai(new Date(order.shippedAt))}</dd></div> : null}
+          </dl>
           <SalesOrderProgress status={order.status} />
           {order.pricingAttentionReason ? (
-            <p className="mt-3 border-l-2 border-destructive pl-3 text-xs font-medium text-destructive">
+            <p className="mt-3 border-l-2 border-primary pl-3 text-xs font-medium text-primary">
               {order.pricingAttentionReason}
             </p>
           ) : null}
@@ -558,7 +727,14 @@ function SalesOrderDrawer({
           ) : null}
         </DrawerSection>
 
-        <DrawerSection title={`款式 · ${order.itemCount} 款`}>
+        <DrawerSection title={order.itemCount ? `款式 · ${order.itemCount} 款` : '款式'}>
+          {order.items.some((item) => item.thumbnail && isStylePhotoFileName(item.thumbnail.fileName)) ? (
+            <div className="mb-3 flex items-center gap-3">
+              <OrderThumbnail order={order} />
+              <span className="text-sm text-muted-foreground">点击照片查看大图</span>
+            </div>
+          ) : null}
+          {!order.itemCount ? <p className="text-sm text-muted-foreground">款式与数量未填写</p> : null}
           <ul className="divide-y">
             {order.items.map((item) => (
               <li key={item.id} className="flex min-w-0 items-center gap-3 py-2.5">
@@ -570,6 +746,10 @@ function SalesOrderDrawer({
                     <img
                       src={item.thumbnail.url}
                       alt={item.thumbnail.fileName}
+                      width={36}
+                      height={48}
+                      loading="lazy"
+                      decoding="async"
                       className="size-full object-cover"
                     />
                   ) : (
@@ -646,24 +826,7 @@ function SalesOrderDrawer({
           </div>
         </DrawerSection>
 
-        {order.shipment ? (
-          <DrawerSection title="发货">
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-              <span>{order.shipment.carrier}</span>
-              <span className="rounded-md bg-muted px-2 py-1 font-sans text-xs tabular-nums">
-                {order.shipment.trackingNo}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={() => onCopy(order.shipment!.trackingNo, '运单号')}
-              >
-                复制单号
-              </Button>
-            </div>
-          </DrawerSection>
-        ) : null}
+        {initialSection !== 'shipments' ? <SalesOrderShipments order={order} onCopy={onCopy} /> : null}
 
         <DrawerSection title="收货">
           <p className="text-sm font-medium">
@@ -690,6 +853,30 @@ function SalesOrderDrawer({
         </Link>
       </SheetFooter>
     </SheetContent>
+  );
+}
+
+function SalesOrderShipments({ order, onCopy }: {
+  order: SalesOrderListRow;
+  onCopy: (value: string, label: string) => void;
+}) {
+  if (order.shipments.length === 0) return null;
+  return (
+    <DrawerSection title={`发货 · ${order.shipments.length} 个运单`}>
+      <ul className="space-y-3">
+        {order.shipments.map((shipment, index) => (
+          <li key={`${shipment.trackingNo}:${index}`} className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+            <span>{shipment.carrier}</span>
+            <span className="admin-wrap-anywhere rounded-md bg-muted px-2 py-1 font-sans text-xs tabular-nums">
+              {shipment.trackingNo}
+            </span>
+            <Button type="button" variant="outline" size="xs" aria-label={`复制运单号 ${shipment.trackingNo}`} onClick={() => onCopy(shipment.trackingNo, '运单号')}>
+              复制单号
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </DrawerSection>
   );
 }
 
@@ -749,7 +936,7 @@ function DrawerSection({
 }) {
   return (
     <section className="mb-6 last:mb-0">
-      <h3 className="mb-2 border-b pb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <h3 className="mb-2 border-b pb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         {title}
       </h3>
       {children}

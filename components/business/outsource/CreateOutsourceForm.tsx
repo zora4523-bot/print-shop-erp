@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business';
+import { DisabledReason, PendingLink } from '@/components/ui-business';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -125,8 +125,9 @@ export function CreateOutsourceForm({
         ) : (
           <ul className="space-y-2">
             {items.map((it) => (
-              <li key={it.id} className="flex min-w-0 items-center gap-3 text-sm">
+              <li key={it.id} className="flex min-w-0 items-start gap-1 text-sm">
                 <Checkbox
+                  className="-ml-3"
                   id={`item-${it.id}`}
                   checked={!!selected[it.id]}
                   disabled={pending}
@@ -138,7 +139,7 @@ export function CreateOutsourceForm({
                     }))
                   }
                 />
-                <Label htmlFor={`item-${it.id}`} className="block min-w-0 flex-1 leading-relaxed">
+                <Label htmlFor={`item-${it.id}`} className="block min-w-0 flex-1 pt-3 leading-5">
                   #{it.sequence} · {externalPriceBusinessText(it.name)} · 数量{' '}
                   {it.quantity.toLocaleString()}
                 </Label>
@@ -156,9 +157,6 @@ export function CreateOutsourceForm({
           <output aria-live="polite" className="font-medium tabular-nums">
             {chosenTotalQty.toLocaleString()} 个
           </output>
-          <span className="ml-2 text-xs text-muted-foreground">
-            （由系统根据所选款式计算，不可手工修改）
-          </span>
         </div>
       </section>
 
@@ -221,7 +219,7 @@ export function CreateOutsourceForm({
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          供应商应付按外协报价或合同人工确认，不套用客户报价、员工计件工资或销售提成规则；金额未知时可留空，回货后再补录。
+          外协金额选填，回货后可补录。
         </p>
       </section>
 
@@ -232,12 +230,18 @@ export function CreateOutsourceForm({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="submit"
-          disabled={pending || chosenIds.length === 0 || supplierName === ''}
-        >
-          {pending ? '提交中…' : '创建外协单'}
-        </Button>
+        {!pending && (chosenIds.length === 0 || supplierName === '') ? (
+          <DisabledReason
+            cause="prerequisite"
+            reason={chosenIds.length === 0 ? '先勾选要外协的款式。' : '先选择外协厂。'}
+          >
+            <Button type="submit" disabled={pending || chosenIds.length === 0 || supplierName === ''}>创建并标记已发出</Button>
+          </DisabledReason>
+        ) : (
+          <Button type="submit" disabled={pending}>
+            {pending ? '正在创建外协单…' : '创建并标记已发出'}
+          </Button>
+        )}
         <PendingLink
           pending={pending}
           href={`/orders/${orderId}`}

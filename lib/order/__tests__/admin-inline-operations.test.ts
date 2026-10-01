@@ -51,6 +51,16 @@ describe('administrator inline-operation DTO', () => {
     expect(data?.shipping).toBeNull();
     expect(data?.fulfillment?.shipments[0].weightKg).toBe('12.5');
   });
+  it('keeps logistics review out of the to-do panel until the order is released (owner 2026-10-01)', async () => {
+    findFirst.mockResolvedValue({ ...record(), status: OrderStatus.CONFIRMED, pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION });
+    const awaitingRelease = { ...order, status: OrderStatus.CONFIRMED, capabilities: { ...order.capabilities, ship: false, release: true } } as AdminOrderWorkspaceRow;
+    const before = await getAdminOrderInlineOperations(actor, awaitingRelease);
+    expect(before?.pricing).toBeNull();
+    expect(before?.fulfillment).toBeNull();
+    findFirst.mockResolvedValue({ ...record(), status: OrderStatus.RELEASED, pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION });
+    const released = { ...awaitingRelease, status: OrderStatus.RELEASED, capabilities: { ...awaitingRelease.capabilities, release: false } } as AdminOrderWorkspaceRow;
+    expect((await getAdminOrderInlineOperations(actor, released))?.pricing).toBe('fulfillment');
+  });
   it('uses the pre-production pricing form only for chargeable pending prices', async () => {
     findFirst.mockResolvedValue({ ...record(), status: OrderStatus.PENDING_FACTORY, pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION });
     expect((await getAdminOrderInlineOperations(actor, { ...order, capabilities: { ...order.capabilities, ship: false } }))?.pricing).toBe('factory');

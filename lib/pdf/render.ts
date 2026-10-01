@@ -1,4 +1,4 @@
-import type { Browser, LaunchOptions, Page, PDFOptions } from 'puppeteer';
+import type { Browser, BrowserContext, LaunchOptions, Page, PDFOptions } from 'puppeteer';
 
 export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
 
@@ -7,14 +7,26 @@ export const PDF_PRINT_READY_TIMEOUT_MS = 12_000;
 // salary slips / bills / CDR cover sheets without duplicating the
 // launch boilerplate.
 //
-// Puppeteer launches a new browser per call for simplicity. That's
-// fine for MVP volume (a handful of PDFs per day). If we start seeing
-// >1 concurrent render we can memoize the browser across requests —
-// for now a fresh browser keeps tests / dev reloads clean.
+// Reuse is opt-in during HEAVY worker bootstrap; Web/inline rendering stays isolated.
+import { PdfBrowserPool } from './browser-pool';
+import { PDF_WORKER_RENDER_BUDGET_MS, pdfLaunchOptions } from './launch-options';
+let workerPool: PdfBrowserPool | undefined;
+export function enableWorkerPdfBrowserReuse() {
+  workerPool ??= new PdfBrowserPool(async () => {
+    const { default: puppeteer } = await import('puppeteer');
+    return puppeteer.launch(pdfLaunchOptions());
+  });
+}
+export async function closeWorkerPdfBrowser() {
+  const pool = workerPool;
+  workerPool = undefined;
+  await pool?.close();
+}
 
 export type RenderPdfOptions = {
   html: string;
   requireArtwork?: boolean;
+  onArtworkUnavailable?: () => void;
   // Extra `page.pdf()` flags. The work-order paper invariants below (A4,
   // background graphics, CSS page size, and zero Puppeteer margins) always
   // win so preview and downloaded PDF cannot drift apart.
@@ -25,35 +37,36 @@ export type RenderPdfOptions = {
   // Inject an already-launched browser (tests). When present, launch
   // is skipped and the caller retains responsibility for teardown.
   browser?: Browser;
+  context?: BrowserContext;
   // Durable workers abort this when they can no longer prove lease ownership.
   signal?: AbortSignal;
+  // Pool budget override. It starts only once the render owns the browser, so
+  // time spent queued behind another render never counts against it.
+  budgetMs?: number;
 };
 
 export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
-  const puppeteer = await import('puppeteer');
-  const browser =
-    opts.browser ??
-    (await puppeteer.default.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      ...opts.launch,
-    }));
-
-  let page: Page;
-  try {
-    const expectedVersion = process.env.PDF_CHROMIUM_VERSION;
-    if (expectedVersion && (await browser.version()).split('/').pop() !== expectedVersion) {
-      throw new PdfBrowserVersionMismatchError();
-    }
-    page = await browser.newPage();
-  } catch (error) {
-    if (!opts.browser) await browser.close();
-    throw error;
+  if (workerPool && !opts.browser && !opts.launch) {
+    return workerPool.run(
+      (browser, context, signal) => renderHtmlToPdf({ ...opts, browser, context, signal }),
+      { ...(opts.signal ? { signal: opts.signal } : {}), budgetMs: opts.budgetMs ?? PDF_WORKER_RENDER_BUDGET_MS },
+    );
   }
-  const abortRender = () => {
-    void page.close().catch(() => undefined);
-    if (!opts.browser) void browser.close().catch(() => undefined);
-  };
+  const puppeteer = await import('puppeteer');
+  if (!opts.browser) {
+    const pool = new PdfBrowserPool(() => puppeteer.default.launch({ ...pdfLaunchOptions(), ...opts.launch }));
+    try {
+      return await pool.run((browser, context, signal) => renderHtmlToPdf({ ...opts, browser, context, signal }),
+        { signal: opts.signal, budgetMs: opts.budgetMs ?? PDF_WORKER_RENDER_BUDGET_MS });
+    } finally { await pool.close(); }
+  }
+  const browser = opts.browser;
+  const expectedVersion = process.env.PDF_CHROMIUM_VERSION;
+  if (expectedVersion && (await browser.version()).split('/').pop() !== expectedVersion) {
+    throw new PdfBrowserVersionMismatchError();
+  }
+  const page: Page = await (opts.context ?? browser).newPage();
+  const abortRender = () => { void page.close().catch(() => undefined); };
   opts.signal?.addEventListener('abort', abortRender, { once: true });
   try {
     opts.signal?.throwIfAborted();
@@ -87,8 +100,9 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
       : null);
     if (pagination !== null && pagination !== 'ready') throw new PrintLayoutOverflowError();
     opts.signal?.throwIfAborted();
-    if (opts.requireArtwork && await page.evaluate(() => document.querySelector('.thumb.image-failed') !== null)) {
-      throw new PrintArtworkUnavailableError();
+    if ((opts.requireArtwork || opts.onArtworkUnavailable) && await page.evaluate(() => document.querySelector('.thumb.image-failed') !== null)) {
+      if (opts.requireArtwork) throw new PrintArtworkUnavailableError();
+      opts.onArtworkUnavailable?.();
     }
     const pdf = await page.pdf({
       ...opts.pdf,
@@ -106,11 +120,6 @@ export async function renderHtmlToPdf(opts: RenderPdfOptions): Promise<Buffer> {
     // renders. Swallow errors so a page-close failure doesn't mask
     // the original thrown error on the PDF path.
     await page.close().catch(() => undefined);
-    // Only close the browser we launched. A caller-provided browser
-    // is someone else's to dispose of (e.g. tests sharing one).
-    if (!opts.browser) {
-      await browser.close();
-    }
   }
 }
 

@@ -46,6 +46,31 @@ describe('rule center workspace UI', () => {
     );
   });
 
+  it('does not refetch the version summary for view-only section/focus switches', () => {
+    expect(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=blank&focus=r1'),
+      ),
+    ).toBe(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=foil'),
+      ),
+    );
+    expect(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=blank&start=1&purpose=processing'),
+      ),
+    ).not.toBe(
+      priceWorkspaceNavigationKey(
+        RULE_CENTER_HREFS.customerPricing,
+        new URLSearchParams('section=blank'),
+      ),
+    );
+  });
+
   it('keeps the overview as a real route instead of aliasing a price editor', () => {
     expect(RULE_CENTER_HREFS.root).toBe('/owner/rules');
     expect(RULE_CENTER_HREFS.root).not.toBe(
@@ -67,7 +92,7 @@ describe('rule center workspace UI', () => {
     expect(html).not.toContain('基础事实');
     expect(html).not.toContain('对客计价');
     expect(html).not.toContain('内部结算');
-    expect(html).toContain('保存后即时生效');
+    expect(html).not.toContain('保存后即时生效');
     expect(html).toContain('维护建单可选纸张。');
   });
 

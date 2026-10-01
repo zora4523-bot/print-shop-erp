@@ -1,4 +1,5 @@
 import type { ComponentProps } from 'react';
+import { Input } from '@/components/ui/input';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -92,7 +93,7 @@ function renderDetail(model = detailModel(), canEdit = true, simpleProduction = 
     printHint={printHint}
     decision={<div><p>当前待办：核对本版打印</p><Button type="button">核对打印任务</Button><a href="#pricing-review" className="inline-flex min-h-11 min-w-11 items-center p-3">前往核价</a></div>}
     prints={[{ id: 'print-1', version: 1, state: 'SUPERSEDED', at: '2026-09-07T02:00:00Z' }, { id: 'print-2', version: 2, state: 'PENDING', at: '2026-09-08T02:00:00Z' }]}
-    supplementary={[{ id: 'detail-other-actions', title: '其他工单操作', content: <div className="flex flex-wrap gap-2"><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf?view=inline`}>打印</a><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf`}>下载 PDF</a>{canEdit ? <a className="inline-flex min-h-11 items-center p-2" href={`/orders/${model.id}/edit`}>编辑工单</a> : null}<Button variant="outline" disabled>发货</Button></div> }, { id: 'detail-audit-records', title: '完整审核记录', content: <section data-testid="embedded-audit" className="rounded-xl border bg-card p-6 shadow-sm"><p>该记录来自已保存的审核结果。</p><section data-testid="nested-card" className="rounded-xl border bg-card p-4"><label htmlFor="audit-note">记录备注</label><input id="audit-note" className="block min-h-11 w-full rounded-md border bg-background" /></section></section> }, { id: 'detail-design-files', title: '设计文件管理', content: <p>设计原稿与生产文件记录。</p> }, { id: 'detail-pricing-tools', title: '计价与核价', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> }]}
+    supplementary={[{ id: 'detail-other-actions', title: '其他工单操作', content: <div className="flex flex-wrap gap-2"><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf?view=inline`}>打印</a><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf`}>下载 PDF</a>{canEdit ? <a className="inline-flex min-h-11 items-center p-2" href={`/orders/${model.id}/edit`}>编辑工单</a> : null}<Button variant="outline" disabled>发货</Button></div> }, { id: 'detail-audit-records', title: '完整审核记录', content: <section data-testid="embedded-audit" className="rounded-xl border bg-card p-6 shadow-sm"><p>该记录来自已保存的审核结果。</p><section data-testid="nested-card" className="rounded-xl border bg-card p-4"><label htmlFor="audit-note">记录备注</label><Input id="audit-note" className="block min-h-11 w-full rounded-md border bg-background" /></section></section> }, { id: 'detail-design-files', title: '设计文件管理', content: <p>设计原稿与生产文件记录。</p> }, { id: 'detail-pricing-tools', title: '计价与核价', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> }]}
     packaging={<section data-testid="embedded-packaging" className="rounded-xl border bg-card p-6 shadow-sm"><p>分袋明细：300 袋，每袋 10 个。</p></section>}
   />));
 }
@@ -162,10 +163,15 @@ describe('admin order detail design and interaction gates', () => {
         host.append(reference);
         expect(getComputedStyle(card).backgroundColor).toBe(getComputedStyle(reference).backgroundColor);
         expect(getComputedStyle(card).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
-        reference.className = 'bg-background';
-        expect(getComputedStyle(input).backgroundColor).toBe(getComputedStyle(reference).backgroundColor);
-        expect(getComputedStyle(input).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
         reference.remove();
+        // 嵌入层不得清空内层控件底色：与嵌入层之外、类名完全相同的控件比对（Input 原子件
+        // 在暗色下有自己的底色，不能再拿 bg-background 当基准）。
+        const referenceInput = document.createElement('input');
+        referenceInput.className = input.className;
+        host.append(referenceInput);
+        expect(getComputedStyle(input).backgroundColor).toBe(getComputedStyle(referenceInput).backgroundColor);
+        expect(getComputedStyle(input).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+        referenceInput.remove();
         expect(geometryFailures(host, width)).toEqual([]);
         const surface = host.querySelector<HTMLElement>('[data-testid="admin-order-detail"]')!;
         const actions = document.getElementById('order-detail-actions')!;
@@ -408,9 +414,11 @@ it('opens the selected style supplement and preserves fee and print destinations
   await expect.poll(() => document.activeElement).toBe(selected);
   const fees = document.getElementById('order-detail-fees')!;
   expect(fees.textContent).toContain('入袋费');
-  expect(fees.textContent).toContain('费用记录');
+  // 业主 2026-10-01：费用记录三阶段卡已去掉，合计统一叫「当前金额」。
+  expect(fees.textContent).not.toContain('费用记录');
+  expect(fees.textContent).toContain('当前金额');
   expect(fees.textContent).toContain('¥ 570.00');
-  expect(host.querySelector('a[href="/api/orders/detail-order-1/pdf?view=inline"]')).not.toBeNull();
+  expect(host.querySelector('a[href="/print/orders/detail-order-1?autoprint=1"]')).not.toBeNull();
   expect(geometryFailures(host, 1280)).toEqual([]);
 });
 
@@ -420,7 +428,7 @@ it('keeps each specification file editor in its own card and opens only the sele
   flushSync(() => root.render(<AdminOrderDetailView model={model} canEdit prints={[]} decision={null}
     itemDetails={model.items.map(item => ({ itemId: item.id, content:
       <Disclosure id={`detail-design-item-${item.id}`}><DisclosureSummary>设计文件与工艺资料</DisclosureSummary>
-        <label>稿件备注 {item.sequence}<input className="h-11" defaultValue="保留草稿" /></label>
+        <label>稿件备注 {item.sequence}<Input className="h-11" defaultValue="保留草稿" /></label>
       </Disclosure> }))}
     supplementary={[]} />));
   const second = document.getElementById('detail-design-item-item-2') as HTMLDetailsElement;
@@ -434,10 +442,8 @@ it('keeps each specification file editor in its own card and opens only the sele
   await page.getByRole('button', { name: '查看设计文件', exact: true }).nth(1).click();
   await expect.element(page.getByLabelText('稿件备注 2')).toHaveValue('未提交的资料');
   expect(host.querySelectorAll('#detail-design-item-item-2')).toHaveLength(1);
-  const fees = document.getElementById('order-detail-fees')!;
-  const stage = [...fees.querySelectorAll('p')].find(p => p.textContent === '确认金额当前')!;
-  expect(stage.parentElement?.textContent).toContain('估');
   expect(host.querySelector('[data-slot="current-order-amount"]')?.textContent).toContain('估');
+  expect(document.getElementById('order-detail-fees')?.textContent).not.toContain('当前确认金额');
 });
 
 it('keeps collect-shipping and plate-fee context next to the total without contradicting the current quote', async () => {

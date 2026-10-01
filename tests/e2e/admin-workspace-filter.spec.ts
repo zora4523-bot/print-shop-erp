@@ -112,7 +112,7 @@ async function expectWorkspace(page: Page, params: Record<string, string>, keys:
   const query = new URLSearchParams({ q: prefix, ...params });
   const response = await page.goto(`/orders?${query}`);
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: '工单管理', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '工单列表', exact: true })).toBeVisible();
   const list = page.getByRole('list', { name: '管理端工单列表', exact: true });
   await expect(list.locator(':scope > li')).toHaveCount(keys.length);
   for (const key of keys) await expect(list.getByText(`后台审查 ${key}`, { exact: true })).toBeVisible();
@@ -133,7 +133,7 @@ test('列表队列、信号与搜索连续切换保持真实数据库统计一�
   await expectWorkspace(page, { queue: 'shipped' }, ['shipped'], '75.00');
   await expectWorkspace(page, { queue: 'done' }, ['settled', 'cancelled'], '80.00');
   await expectWorkspace(page, { queue: 'all', signal: 'pending-pricing' }, ['manual'], '0.00');
-  await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('1 单待核价未计入');
+  await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('未计入：待核价 1 单');
   await expectWorkspace(page, { queue: 'all', signal: 'pending-release' }, ['confirmed'], '45.00');
   await expectWorkspace(page, { queue: 'all', signal: 'on-hold' }, ['hold'], '35.00');
   await expectWorkspace(page, { queue: 'all', q: `${prefix}-quote` }, ['quote'], '28.00');
@@ -144,28 +144,27 @@ test('列表队列、信号与搜索连续切换保持真实数据库统计一�
   await expect(page.getByRole('region', { name: '当前筛选合计' })).toContainText('60.00');
 });
 
-test('待核价详情不把部分报价当应收，完整报价在当前合计及阶段标为估价', async ({ page }) => {
+test('待核价详情不把部分报价当应收，完整报价在当前金额标为估价', async ({ page }) => {
   test.setTimeout(90_000);
   await login(page, { from: `/orders/${prefix}-manual#pricing-review`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
   await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toHaveAttribute('aria-expanded', 'true');
-  const processing = page.getByRole('region', { name: '订单级费用', exact: true }).locator('dt').filter({ hasText: /^款式加工费合计$/ }).locator('..').locator('dd');
+  const processing = page.getByRole('region', { name: '整单费用', exact: true }).locator('dt').filter({ hasText: /^款式加工费合计$/ }).locator('..').locator('dd');
   const currentTotal = page.locator('[data-slot="current-order-amount"]');
   for (const value of [processing, currentTotal]) {
     await expect(value).toContainText('待工厂核价');
     await expect(value).not.toContainText(/13\.30|0\.00/);
   }
-  const fees = page.getByRole('region', { name: '订单级费用', exact: true });
+  const fees = page.getByRole('region', { name: '整单费用', exact: true });
   await expect(fees).toContainText('待工厂核价');
   await expect(fees).not.toContainText('13.30');
   await expect(page.getByTestId('admin-order-detail')).not.toContainText(/160g艳红珠光纸\s*[·/]\s*160g/);
 
   const response = await page.goto(`/orders/${prefix}-quote`);
   expect(response?.status()).toBe(200);
-  const currentStage = page.getByRole('region', { name: '工单费用', exact: true }).getByText('当前', { exact: true }).locator('..').locator('..').locator('strong');
-  for (const value of [currentTotal, currentStage]) {
-    await expect(value).toContainText('28.00');
-    await expect(value).toContainText('估');
-  }
+  // 业主 2026-10-01：费用记录阶段卡已去掉，估价只在「当前金额」上标注。
+  await expect(currentTotal).toContainText('28.00');
+  await expect(currentTotal).toContainText('估');
+  await expect(currentTotal.locator('..')).toContainText('当前金额');
 });
 
 test('队列切换仅延迟显示按钮图标，连续点击只采用最后选择', async ({ page }) => {

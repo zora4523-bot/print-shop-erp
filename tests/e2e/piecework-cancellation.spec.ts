@@ -54,7 +54,7 @@ async function cancel(page: Page, book: Book) {
 }
 async function report(page: Page) {
   const form = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
-  for (const [name, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await form.getByRole('spinbutton', { name, exact: true }).fill(value);
+  for (const [name, value] of [['本次合格完成数', '10'], ['本次工单件数进度', '0'], ['不良数', '0'], ['返工数', '0']]) await form.getByRole('spinbutton', { name, exact: true }).fill(value);
   await form.getByRole('button', { name: '提交扫码报工', exact: true }).click(); await form.getByRole('button', { name: '确认报工', exact: true }).click();
   await expect(form.getByRole('status')).toContainText('已记录本次报工');
 }

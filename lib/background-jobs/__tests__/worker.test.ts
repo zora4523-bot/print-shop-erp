@@ -159,6 +159,24 @@ describe('runBackgroundWorker', () => {
     expect(failBackgroundJobMock).not.toHaveBeenCalled();
   });
 
+  it('releases an in-flight claim if PDF capability becomes unavailable before dispatch', async () => {
+    const controller = new AbortController();
+    let excluded: string[] = [];
+    let release!: (value: ClaimedBackgroundJob) => void;
+    claimNextBackgroundJobMock.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    releaseUndispatchedBackgroundJobClaimMock.mockImplementationOnce(async () => { controller.abort(); });
+    const handler = vi.fn();
+    const running = runBackgroundWorker({ queue: BackgroundJobQueue.HEAVY, workerId: 'pdf-worker',
+      handlers: { ORDER_PDF: handler }, excludedTypes: () => excluded, signal: controller.signal });
+    excluded = ['ORDER_PDF'];
+    const claimed = { ...job, type: 'ORDER_PDF' };
+    release(claimed);
+    await running;
+    expect(handler).not.toHaveBeenCalled();
+    expect(releaseUndispatchedBackgroundJobClaimMock).toHaveBeenCalledWith(claimed);
+    expect(failBackgroundJobMock).not.toHaveBeenCalled();
+  });
+
   it('aborts the handler and never writes with a stale lease when heartbeat fencing fails', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();

@@ -1,4 +1,4 @@
-import { writePdfArtifact, cleanupOldPdfArtifacts } from '../pdf/artifacts';
+import { writePdfArtifact, cleanupOldPdfArtifacts, PdfArtifactStorageError } from '../pdf/artifacts';
 import {
   BackgroundJobQueue,
   BackgroundJobStatus,
@@ -157,7 +157,8 @@ export async function handleOrderPdfJob(
     throw new OrderPdfVersionStaleError();
   }
   const artifactName = `${job.id}-${job.attempts}.pdf`;
-  await writePdfArtifact(artifactName, pdf);
+  try { await writePdfArtifact(artifactName, pdf); }
+  catch { throw new PdfArtifactStorageError(); }
   await job.assertLease?.();
   await cleanupOldPdfArtifacts();
   return {
@@ -171,7 +172,7 @@ export async function handleOrderPdfJob(
 export type OrderPdfJobWaitResult =
   | { status: 'ready'; artifactName: string }
   | { status: 'failed'; errorCode: string | null }
-  | { status: 'timeout' }
+  | { status: 'timeout'; phase?: 'queued' | 'running' }
   | { status: 'unavailable' }
   | { status: 'delayed' };
 
@@ -185,10 +186,12 @@ export async function waitForOrderPdfJob(
       actorId: string;
       actorRole: Role;
       workOrderVersion: number;
+      snapshotKey?: string;
     };
   } = {},
 ): Promise<OrderPdfJobWaitResult> {
   const deadline = Date.now() + Math.max(1_000, options.timeoutMs ?? 120_000);
+  let phase: 'queued' | 'running' = 'queued';
   while (Date.now() < deadline && !options.signal?.aborted) {
     const job = await db.backgroundJob.findUnique({
       where: { id: jobId },
@@ -201,11 +204,15 @@ export async function waitForOrderPdfJob(
         createdAt: true,
       },
     });
+    phase = job?.status === BackgroundJobStatus.RUNNING ? 'running' : 'queued';
     if (!job) return { status: 'failed', errorCode: 'JobNotFound' };
     if (options.expected && !matchesExpectedPdfJob(job, options.expected)) {
       // Do not reveal whether a caller-supplied job id exists or belongs to a
       // different user/order.
       return { status: 'failed', errorCode: 'JobNotFound' };
+    }
+    if (options.expected?.snapshotKey && asRecord(job.payload).snapshotKey !== options.expected.snapshotKey) {
+      return { status: 'failed', errorCode: 'OrderPdfVersionStaleError' };
     }
     if (job.status === BackgroundJobStatus.SUCCEEDED) {
       const result = asRecord(job.result);
@@ -220,9 +227,14 @@ export async function waitForOrderPdfJob(
     // Check only after the actor/order binding and completed-state checks.
     // Database time keeps queue age and remote worker heartbeats comparable.
     const at = await databaseNow();
-    const worker = await db.backgroundWorkerHeartbeat.findFirst({
+    // A RUNNING job is demonstrably owned by a worker; a stale capability
+    // heartbeat (e.g. a probe queued behind this very render) must not
+    // report it unavailable.
+    const worker = job.status === BackgroundJobStatus.RUNNING ? true : await db.backgroundWorkerHeartbeat.findFirst({
       where: {
         queue: BackgroundJobQueue.HEAVY,
+        pdfReady: true,
+        version: process.env.APP_VERSION || 'dev',
         lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) },
       },
       select: { workerId: true },
@@ -233,7 +245,7 @@ export async function waitForOrderPdfJob(
     }
     await delay(300, options.signal);
   }
-  return { status: 'timeout' };
+  return { status: 'timeout', phase };
 }
 
 function matchesExpectedPdfJob(

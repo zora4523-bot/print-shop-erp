@@ -44,10 +44,10 @@ export async function startHeavyWorker(testInfo: TestInfo) {
     await expect.poll(async () => {
       if (child.exitCode !== null) throw new Error(`HEAVY worker exited before startup: ${output.slice(-1500)}`);
       const heartbeat = await withSupplyChainDb((db) => db.query<{ version: string }>(
-        `SELECT version FROM "BackgroundWorkerHeartbeat" WHERE queue='HEAVY' AND "lastSeenAt">NOW()-INTERVAL '30 seconds'`,
+        `SELECT version FROM "BackgroundWorkerHeartbeat" WHERE queue='HEAVY' AND "pdfReady" IS TRUE AND "lastSeenAt">NOW()-INTERVAL '30 seconds'`,
       ));
       return heartbeat.rows.map((row) => row.version);
-    }, { timeout: 15_000 }).toEqual([process.env.APP_VERSION]);
+    }, { timeout: 60_000 }).toEqual([process.env.APP_VERSION]);
   } catch (error) {
     await stop();
     throw error;

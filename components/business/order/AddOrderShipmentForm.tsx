@@ -1,13 +1,13 @@
 'use client';
 
 import { useId, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { addOrderShipmentAction } from '@/actions/order-shipment';
 import type {
   AddOrderShipmentInput,
   AddOrderShipmentPreview,
 } from '@/lib/order/add-shipment-schema';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { ReceiverAddressPasteField } from './ReceiverAddressPasteField';
 import { applyParsedReceiverFact } from '@/lib/order/receiver-address-paste';
@@ -50,7 +50,6 @@ export function AddOrderShipmentForm({
   ...guard
 }: Props) {
   const uid = useId();
-  const router = useRouter();
   const [opened, setOpened] = useState(false);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? '');
   const [quantities, setQuantities] = useState<Record<string, string>>({});
@@ -113,7 +112,6 @@ export function AddOrderShipmentForm({
             receiverAddress: '',
             destinationProvince: '',
           });
-          router.refresh();
         }
       } catch {
         setError('添加地址未完成，请刷新工单核对后重试');
@@ -154,8 +152,8 @@ export function AddOrderShipmentForm({
           >
             <div className="min-w-0 sm:col-span-2">
               <Label htmlFor={`${uid}-source`}>从哪个地址分货</Label>
-              <select
-                className="flex min-h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm"
+              <NativeSelect
+                className="w-full min-w-0"
                 id={`${uid}-source`}
                 value={sourceId}
                 onChange={(event) => {
@@ -168,7 +166,7 @@ export function AddOrderShipmentForm({
                     地址 {row.sequence} · {row.receiverAddress}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
             {(
               [
@@ -293,7 +291,7 @@ export function AddOrderShipmentForm({
           ) : null}
           <div className="mt-4 flex flex-wrap gap-3">
             <Button type="submit" disabled={blocked}>
-              {pending ? '处理中…' : preview ? '保存地址' : '预览费用'}
+              {pending ? '正在处理…' : preview ? '保存地址' : '预览费用'}
             </Button>
             {preview ? (
               <Button

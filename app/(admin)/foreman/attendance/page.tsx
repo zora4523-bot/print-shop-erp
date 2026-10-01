@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { Users } from 'lucide-react';
 import { EmploymentType, WorkerType } from '@/generated/prisma/enums';
@@ -10,14 +11,16 @@ import { getActiveWorkHours } from '@/lib/salary/rules';
 import { roleLabel, workerTypeLabel } from '@/lib/auth/role-labels';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { AttendanceRecordDialog } from '@/components/business/attendance/AttendanceRecordDialog';
 import { EmptyState, PageHeader } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 import { formatDateInputShanghai } from '@/lib/format/dates';
+import { NativeSelect } from '@/components/ui/native-select';
 
-export const metadata = { title: '员工考勤' };
+export const metadata = { title: '工时录入' };
 
 type PageProps = {
   searchParams: Promise<{
@@ -102,7 +105,7 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
   return (
     <div className="space-y-6">
       <PageHeader
-        title="员工考勤"
+        title="工时录入"
         subtitle={
           <>
             按半天记录上班和请假；时薪岗位另填工时。
@@ -166,13 +169,19 @@ export default async function ForemanAttendancePage({ searchParams }: PageProps)
                 {EMPLOYMENT_LABELS[selectedWorker.employmentType]}
               </Badge>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7">
+            {/* 员工筛选走 next/form 软导航，React 会按位置复用日历。key 带上员工与月份，
+                切换员工后所有日卡（展开态）与录入面板（useState 初值）整体重建，
+                杜绝用 A 的输入值、B 的 workerId 保存（服务端按 workerId_date upsert）。 */}
+            <div
+              key={`${selectedWorker.id}|${selectedMonth}`}
+              className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7"
+            >
               {dates.map((d) => {
                 const att = attendanceByDate.get(d);
                 const dayOfWeek = new Date(d + 'T00:00:00Z').getUTCDay();
                 return (
                   <Disclosure
-                    key={d}
+                    key={`${selectedWorker.id}|${d}`}
                     className={`min-w-0 rounded-md border p-2 text-xs open:col-span-full ${
                       att ? 'bg-muted/40' : 'bg-background'
                     }`}
@@ -265,7 +274,8 @@ function FilterBar({
   }>;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form key={JSON.stringify([selectedMonth, selectedWorkerId ?? ''])} action="/foreman/attendance" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex min-w-0 max-w-full flex-col">
         <label
           htmlFor="attendance-month"
@@ -273,12 +283,12 @@ function FilterBar({
         >
           月份
         </label>
-        <input
+        <Input
           id="attendance-month"
           type="month"
           name="month"
           defaultValue={selectedMonth}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         />
       </div>
       <div className="flex min-w-0 max-w-full flex-col">
@@ -288,11 +298,11 @@ function FilterBar({
         >
           员工
         </label>
-        <select
+        <NativeSelect
           id="attendance-worker"
           name="workerId"
           defaultValue={selectedWorkerId ?? ''}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         >
           {workers.map((w) => (
             <option key={w.id} value={w.id}>
@@ -304,12 +314,12 @@ function FilterBar({
               ）
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <Button type="submit" size="sm">
         切换
       </Button>
-    </form>
+    </Form>
   );
 }
 

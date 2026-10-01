@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
@@ -18,8 +19,9 @@ import { ProductReferenceImpact } from '@/components/business/product/ProductRef
 import { ProductsTable } from '@/components/business/product/ProductsTable';
 import { ToggleActiveButton } from '@/components/business/product/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice, FormPageContainer, LinkPendingHint } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { RuleSpecWorkspace } from '@/components/business/rules/catalog/RuleSpecWorkspace';
 import type { ProductCategory } from '@/generated/prisma/enums';
@@ -120,20 +122,15 @@ export async function ProductCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title={specWorkspace ? '规格 · 烫金颜色' : '产品资料'}
+        title={specWorkspace ? '规格目录' : '产品资料'}
         effect="immediate"
-        subtitle={
-          specWorkspace
-            ? '规格和纸张来自产品资料；烫金颜色当前随工单事实维护。'
-            : '维护专版和彩印等路线的产品资料；空白封在单价表直接配置。'
-        }
         actions={
           <Link
             href={`${routeBase}/new`}
             prefetch={false}
             className={buttonVariants()}
           >
-            新增产品资料
+            新建产品资料
           </Link>
         }
       />
@@ -181,13 +178,18 @@ export async function ProductCatalogList({
                       page: null,
                     })}
                     prefetch={false}
+                    scroll={false}
                     aria-current={status === value ? 'page' : undefined}
-                    className={buttonVariants({
-                      variant: status === value ? 'secondary' : 'ghost',
-                      size: 'sm',
-                    })}
+                    className={cn(
+                      buttonVariants({
+                        variant: status === value ? 'selected' : 'ghost',
+                        size: 'sm',
+                      }),
+                      'relative',
+                    )}
                   >
                     {label}
+                    <LinkPendingHint />
                   </Link>
                 ))}
               </div>
@@ -245,19 +247,11 @@ export async function NewProductCatalogItem({
       )
     : activeCategoryNodes;
   return (
-    <div className="space-y-4">
+    <FormPageContainer>
       <RuleCenterPageHeader
         title="新建产品资料"
         effect="immediate"
-        subtitle="本页维护专版和彩印等路线的产品资料。价格及数量档在客户计价规则中维护。"
-        actions={
-          <Link
-            href={routeBase}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            返回列表
-          </Link>
-        }
+        back={{ href: routeBase, label: '返回产品资料' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <ProductForm
@@ -268,7 +262,7 @@ export async function NewProductCatalogItem({
           categoryManagementHref={RULE_CENTER_HREFS.productCategories}
         />
       </div>
-    </div>
+    </FormPageContainer>
   );
 }
 
@@ -322,17 +316,18 @@ export async function EditProductCatalogItem({
           externalPriceBusinessText(product.name) || '未命名产品'
         }`}
         effect="immediate"
+        back={{ href: routeBase, label: '返回产品资料' }}
+        status={
+          <>
+            <ActiveStatusBadge active={product.isActive} />
+            {isRetired ? <StatusBadge tone="warning">历史 / 已退役</StatusBadge> : null}
+          </>
+        }
         subtitle={
           <>
             {externalPriceBusinessText(product.categoryNode.name) ||
               '未命名分类'}
-            {product.isActive ? ' · 启用' : ' · 停用'}
             {isLegacyCompatibilityObject ? ' · 仅保留历史引用' : ''}
-            {isRetired ? (
-              <StatusBadge tone="warning" className="ml-2">
-                历史 / 已退役
-              </StatusBadge>
-            ) : null}
           </>
         }
       />
@@ -361,11 +356,6 @@ export async function EditProductCatalogItem({
           <h2 className="mb-2 text-base font-semibold">
             {product.isActive ? '停用产品资料' : '启用产品资料'}
           </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            {product.isActive
-              ? '停用后不再参与新建工单的隐式匹配；已有工单、BOM 和已发布价格不会被改写。'
-              : '启用后会重新参与新建工单的产品结构、纸张与规格匹配。'}
-          </p>
           <ToggleActiveButton
             key={`${product.id}-${product.isActive}`}
             productId={product.id}

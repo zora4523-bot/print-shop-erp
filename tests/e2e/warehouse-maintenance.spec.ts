@@ -11,8 +11,8 @@ async function changeState(page: Page, name: string, button: string) {
   // The confirmation closes before the server action settles. Wait for the
   // committed state before another tab reads the location list.
   const nextAction = button.startsWith('停用')
-    ? button.replace('停用', '恢复使用')
-    : button.replace('恢复使用', '停用');
+    ? button.replace('停用', '启用')
+    : button.replace('启用', '停用');
   await expect(section.getByRole('button', { name: nextAction, exact: true })).toBeEnabled();
 }
 
@@ -51,17 +51,17 @@ test('仓库与库位可改名停用恢复，旧出入库页面拒绝已停用�
     await stock.getByLabel('库位', { exact: true }).selectOption(locationId);
     await stock.getByLabel('数量（件）', { exact: true }).fill('2');
     await changeState(page, locationName, '停用库位');
-    await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '恢复使用库位', exact: true })).toBeVisible();
+    await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '启用库位', exact: true })).toBeVisible();
     await stock.getByRole('button', { name: '核对并提交出入库', exact: true }).click();
     await old.getByRole('alertdialog').getByRole('button', { name: '确认提交出入库', exact: true }).click();
     await expect(stock).toContainText('库位或所属仓库已停用');
     await expect(stock.getByLabel('库位', { exact: true })).toHaveValue(locationId);
     await changeState(page, renamed, '停用仓库');
-    await expect(page.getByLabel(`${locationName}维护`, { exact: true })).toContainText('请先恢复所属仓库，再恢复库位');
-    await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '恢复使用库位', exact: true })).toBeDisabled();
-    await changeState(page, renamed, '恢复使用仓库');
-    await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '恢复使用库位', exact: true })).toBeVisible();
-    await changeState(page, locationName, '恢复使用库位');
+    await expect(page.getByLabel(`${locationName}维护`, { exact: true })).toContainText('请先启用所属仓库，再启用库位');
+    await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '启用库位', exact: true })).toBeDisabled();
+    await changeState(page, renamed, '启用仓库');
+    await expect(page.getByLabel(`${locationName}维护`, { exact: true }).getByRole('button', { name: '启用库位', exact: true })).toBeVisible();
+    await changeState(page, locationName, '启用库位');
     await old.reload();
     await expect(stock.getByLabel('库位', { exact: true }).locator(`option[value="${locationId}"]`)).toContainText(renamed);
     await withSupplyChainDb(async (db) => {

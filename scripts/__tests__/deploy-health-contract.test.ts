@@ -30,7 +30,7 @@ function health(): BackgroundJobHealth {
         smartBotBotDigest: digest, lastSeenAt: now,
       },
       {
-        queue: BackgroundJobQueue.HEAVY, version: 'candidate',
+        queue: BackgroundJobQueue.HEAVY, pdfReady: true, version: 'candidate',
         smartBotStatus: null, smartBotBotDigest: null, lastSeenAt: now,
       },
     ],

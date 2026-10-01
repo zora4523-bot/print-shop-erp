@@ -36,6 +36,11 @@ type Props = {
     formData: FormData,
   ) => Promise<InventoryCountMutationResult>;
   initialIdempotencyKey: string;
+  /**
+   * 服务端首屏已读出的库位行（与 /api/admin/inventory-count/materials 默认查询一致）。
+   * 传入后首帧就有表格，不再挂载后补请求造成布局跳动（CLS）。
+   */
+  initialRows?: InventoryCountMaterialRow[];
 };
 
 /**
@@ -77,13 +82,15 @@ function diffTone(diff: number): 'outline' | 'secondary' | 'destructive' {
   return diff > 0 ? 'outline' : 'destructive';
 }
 
-export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
+export function InventoryCountClient({ action, initialIdempotencyKey, initialRows }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
-  const [rows, setRows] = useState<InventoryCountMaterialRow[]>([]);
+  const [rows, setRows] = useState<InventoryCountMaterialRow[]>(initialRows ?? []);
   // 账面基线在每个库位**首次展示**时钉住，不等到首次录入。
   // 否则操作员数完但还没输入时的一次刷新，会把基线推进到库存变动之后。
-  const [bookSnapshots, setBookSnapshots] = useState<Record<string, string>>({});
+  const [bookSnapshots, setBookSnapshots] = useState<Record<string, string>>(
+    () => (initialRows ? pinDisplayedBookQuantities({}, initialRows) : {}),
+  );
   // 值是 { value, book }；book 从上面的首次展示快照复制，提交时供服务端 CAS。
   const [counts, setCounts] = useState<Record<string, CountEntry>>({});
   // 服务端点名「账面数已变动、没给你过账」的行，等操作员重新录入就消掉。
@@ -125,9 +132,10 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
     });
   }, []);
 
+  const hasInitialRows = initialRows !== undefined;
   useEffect(() => {
-    fetchRows('');
-  }, [fetchRows]);
+    if (!hasInitialRows) fetchRows('');
+  }, [fetchRows, hasInitialRows]);
 
   const submitCount = useCallback(
     async (prev: InventoryCountMutationResult | null, formData: FormData) => {
@@ -319,7 +327,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
         }}
       >
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" />
+          <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             id="inventory-count-search"
             value={query}
@@ -331,7 +339,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
         </div>
         <div className="flex gap-2">
           <Button type="submit" disabled={fetchPending} aria-busy={fetchPending}>
-            {fetchPending ? '读取中…' : '搜索'}
+            {fetchPending ? '正在读取…' : '搜索'}
           </Button>
           <Button
             type="button"
@@ -344,7 +352,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
               aria-hidden
               className={fetchPending ? 'size-4 animate-spin' : 'size-4'}
             />
-            {fetchPending ? '读取中…' : '刷新'}
+            {fetchPending ? '正在读取…' : '刷新'}
           </Button>
         </div>
       </form>
@@ -571,13 +579,6 @@ export function InventoryCountClient({ action, initialIdempotencyKey }: Props) {
               className="mt-3"
             />
           ) : null}
-          <p className="mt-2 text-xs text-muted-foreground">
-            未录入的库位不会被改动；实盘数为 0 表示该库位全部盘亏。
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            提交时会带上你录入那一刻看到的账面数。如果这之后有人动过某个库位的库存，
-            那一行不会被过账，会点名要求重数，其余行照常过账。
-          </p>
         </div>
       </form>
     </section>

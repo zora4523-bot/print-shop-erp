@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { createOrderChangeRequestAction } from '@/actions/order';
 import type { CreateOrderChangeRequestMutationResult } from '@/actions/order.types';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
 type Props = {
   orderId: string;
@@ -44,7 +45,7 @@ export function OrderCancellationRequestForm({
         role="status"
         className="rounded-lg border border-success/40 bg-success/10 p-3 text-sm"
       >
-        取消申请已提交；工单仍保留，管理员裁决前不会改变生产或结算事实。
+        取消申请已提交，待管理员审批。
       </p>
     );
   }
@@ -70,15 +71,15 @@ export function OrderCancellationRequestForm({
     >
       <label className="block space-y-1 text-sm">
         <span className="font-medium">取消原因</span>
-        <textarea
+        <Textarea
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           rows={3}
           maxLength={500}
           required
           disabled={pending}
-          className="w-full rounded-md border bg-background px-3 py-2"
-          placeholder="说明取消原因，生产中订单由管理员核对已产数量并裁决"
+          className="w-full"
+          placeholder="填写取消原因"
         />
       </label>
       {error ? (
@@ -91,7 +92,7 @@ export function OrderCancellationRequestForm({
         variant="destructive"
         disabled={pending || reason.trim().length === 0}
       >
-        {pending ? '提交中…' : '提交取消申请'}
+        {pending ? '正在提交…' : '提交取消申请'}
       </Button>
     </form>
   );

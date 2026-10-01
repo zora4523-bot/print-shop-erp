@@ -42,17 +42,9 @@
 .feeLines small { margin-left: 8px; font-size: var(--text-xs); }
 .feeLines > div:last-child { font-weight: 700; }
 .orderFees { margin-top: 0; }
-.feeHistoryHeading { margin: 24px 0 12px; font-size: var(--text-xs); font-weight: 600; color: var(--muted-foreground); }
 .orderFees .feeLines { margin-top: 0; padding-top: 0; border: 0; }
 .total { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--border); font-weight: 600; }
 .total strong { font-size: var(--text-xl); font-family: var(--font-mono), monospace; }
-.feeStages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.feeStage { padding: 0; min-width: 0; color: var(--muted-foreground); }
-.feeStage > p { display: flex; flex-wrap: wrap; gap: 8px; font-size: var(--text-xs); }
-.feeStage p span { font-size: var(--text-xs); }
-.feeStage strong { display: block; font-family: var(--font-mono), monospace; font-size: var(--text-lg); margin-top: 10px; overflow-wrap: anywhere; }
-.feeStage small { display: block; font-size: var(--text-xs); margin-top: 6px; }
-.currentFee { color: var(--foreground); font-weight: 600; }
 .diff { padding: 14px 18px; border: 1px solid var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--card)); border-radius: var(--radius-lg); }
 .diffItems { display: flex; flex-wrap: wrap; gap: 8px; }
 .diffItems button { min-height: 44px; height: auto; flex: 1 1 200px; padding: 8px 12px; text-align: left; justify-content: flex-start; white-space: normal; overflow-wrap: anywhere; background: transparent; }
@@ -126,7 +118,6 @@
   .thumbnail { width: 100%; height: 140px; }
   .quantity { margin-left: 0; }
   .hint { display: none; }
-  .feeStages { grid-template-columns: 1fr; }
   .workRow { grid-template-columns: 78px minmax(0, 1fr) 68px; }
   .logRow { grid-template-columns: 78px minmax(0, 1fr); }
   .ledger b { display: none; }

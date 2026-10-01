@@ -15,7 +15,7 @@ export function AdminWorkspaceStatusBadge({
   return (
     <StatusBadge
       tone={definition.tone}
-      className="h-auto rounded-full px-2.5 py-0.5 text-xs font-extrabold"
+      className="h-auto rounded-full px-2.5 py-0.5 text-xs font-semibold"
     >
       {definition.label}
     </StatusBadge>

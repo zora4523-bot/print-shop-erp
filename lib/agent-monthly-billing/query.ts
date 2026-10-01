@@ -1,4 +1,8 @@
-import type { Prisma } from '../../generated/prisma/client';
+import type { Prisma } from '@/generated/prisma/client';
+import { agentBillPeriodRange } from './period';
+import { paginationWindow, paginatedResult } from '@/lib/admin/table';
+import { agentBillWhere } from './list-filter';
+import { summarizeAgentBills } from './list-summary';
 import {
   AgentMonthlyBillStatus,
   OrderBillingMode,
@@ -32,13 +36,11 @@ export async function listAgentMonthlyBills(
   if (filter.period) assertAgentBillPeriod(filter.period);
   const page = pageNumber(filter.page);
   const take = pageSize(filter.pageSize);
-  const where: Prisma.AgentMonthlyBillWhereInput = {
-    ...(filter.period ? { period: filter.period } : {}),
-    ...(filter.status ? { status: filter.status } : {}),
-    ...(filter.agentUserId ? { agentUserId: filter.agentUserId } : {}),
-  };
-  const [rows, total] = await db.$transaction([
-    db.agentMonthlyBill.findMany({
+  const where = agentBillWhere(filter);
+  return db.$transaction(async (tx) => {
+    const total = await tx.agentMonthlyBill.count({ where });
+    const window = paginationWindow(total, page, take);
+    const rows = await tx.agentMonthlyBill.findMany({
       where,
       select: {
         id: true,
@@ -55,18 +57,12 @@ export async function listAgentMonthlyBills(
         _count: { select: { items: true } },
       },
       orderBy: [{ period: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
-      skip: (page - 1) * take,
-      take,
-    }),
-    db.agentMonthlyBill.count({ where }),
-  ]);
-  return {
-    rows,
-    page,
-    pageSize: take,
-    total,
-    pageCount: Math.max(1, Math.ceil(total / take)),
-  };
+      skip: window.skip,
+      take: window.take,
+    });
+    const summary = await summarizeAgentBills(tx, where);
+    return { ...paginatedResult(rows, total, window), summary };
+  }, { isolationLevel: 'RepeatableRead' });
 }
 
 export async function getAgentMonthlyBillDetail(id: string) {
@@ -138,14 +134,7 @@ export async function getAgentMonthlyBillingStats() {
       _count: { _all: true },
     }),
     db.order.count({
-      where: {
-        settlementType: OrderSettlementType.EXTERNAL_SALES,
-        billingMode: OrderBillingMode.CHARGE,
-        status: { in: [OrderStatus.SETTLED, OrderStatus.CANCELLED] },
-        settledFee: { not: null },
-        settledAt: { not: null },
-        agentMonthlyBillItem: { is: null },
-      },
+      where: UNBILLED_AGENT_ORDER_WHERE,
     }),
     db.agentMonthlyBill.count({
       where: { status: AgentMonthlyBillStatus.DRAFT },
@@ -174,4 +163,30 @@ export async function listAgentBillAccounts() {
     select: { id: true, username: true, displayName: true, isActive: true },
     orderBy: [{ displayName: 'asc' }, { id: 'asc' }],
   });
+}
+
+const UNBILLED_AGENT_ORDER_WHERE = {
+  settlementType: OrderSettlementType.EXTERNAL_SALES,
+  billingMode: OrderBillingMode.CHARGE,
+  status: { in: [OrderStatus.SETTLED, OrderStatus.CANCELLED] },
+  settledFee: { not: null },
+  settledAt: { not: null },
+  agentMonthlyBillItem: { is: null },
+} satisfies Prisma.OrderWhereInput;
+
+export async function listUnbilledAgentOrders(filter: { page: number; period?: string }) {
+  const range = filter.period ? agentBillPeriodRange(filter.period) : undefined;
+  const where: Prisma.OrderWhereInput = {
+    ...UNBILLED_AGENT_ORDER_WHERE,
+    ...(range ? { settledAt: { gte: range.start, lt: range.end } } : {}),
+  };
+  return db.$transaction(async (tx) => {
+    const total = await tx.order.count({ where });
+    const window = paginationWindow(total, pageNumber(filter.page), 30);
+    const rows = await tx.order.findMany({
+      where, select: { id: true, orderNo: true, customName: true, settledAt: true, settledFee: true, submitter: { select: { id: true, username: true, displayName: true } } },
+      orderBy: [{ settledAt: 'asc' }, { id: 'asc' }], skip: window.skip, take: window.take,
+    });
+    return paginatedResult(rows, total, window);
+  }, { isolationLevel: 'RepeatableRead' });
 }

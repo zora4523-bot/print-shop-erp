@@ -43,7 +43,7 @@ function fixture(): BackgroundJobHealth {
         lastSeenAt: now,
       },
       {
-        queue: BackgroundJobQueue.HEAVY,
+        queue: BackgroundJobQueue.HEAVY, pdfReady: true,
         version: VERSION,
         smartBotStatus: null,
         smartBotBotDigest: null,
@@ -210,6 +210,7 @@ describe('GET /api/health/jobs', () => {
       'alerts',
       'jobs',
       'mode',
+      'pdf',
       'smartBot',
       'status',
       'time',

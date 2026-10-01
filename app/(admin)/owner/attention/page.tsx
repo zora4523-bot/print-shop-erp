@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { requirePermission } from '@/lib/auth/permissions';
-import { ErrorBoundary, PageHeader } from '@/components/ui-business';
+import { ErrorBoundary, LinkPendingHint, PageHeader } from '@/components/ui-business';
 import { buttonVariants } from '@/components/ui/button';
 import { DashboardSectionLoading } from '@/components/business/dashboard/DashboardSectionLoading';
 import { AttentionContent } from '@/components/business/dashboard/OwnerAttentionContent';
@@ -11,7 +11,7 @@ import {
 } from '@/lib/dashboard/attention';
 import { parsePositiveInt } from '@/lib/admin/table';
 
-export const metadata = { title: '关注事项 · 管理员工作台' };
+export const metadata = { title: '关注事项 · 工作台' };
 type Props = {
   searchParams: Promise<{
     kind?: string | string[];
@@ -30,24 +30,23 @@ export default async function OwnerAttentionPage({ searchParams }: Props) {
     <div className="min-w-0 space-y-4">
       <PageHeader
         title="关注事项"
-        actions={(
-          <Link href="/owner" className={buttonVariants({ variant: 'outline' })}>
-            返回工作台
-          </Link>
-        )}
+        back={{ href: '/owner', label: '返回工作台' }}
       />
       <nav aria-label="关注事项分类" className="flex flex-wrap gap-2">
         {ATTENTION_KINDS.map((item) => (
           <Link
             key={item}
             prefetch={false}
+            scroll={false}
             href={`/owner/attention?kind=${item}`}
             aria-current={item === kind ? 'page' : undefined}
             className={buttonVariants({
-              variant: item === kind ? 'secondary' : 'outline',
+              variant: item === kind ? 'selected' : 'outline',
+              className: 'relative',
             })}
           >
             {ATTENTION_TITLES[item]}
+            <LinkPendingHint />
           </Link>
         ))}
       </nav>

@@ -15,7 +15,7 @@ import {
 import { ProductCategoryNodesTable } from '@/components/business/product-category/ProductCategoryNodesTable';
 import { ToggleProductCategoryActiveButton } from '@/components/business/product-category/ToggleProductCategoryActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice, FormPageContainer } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -27,6 +27,7 @@ import {
   listProductCategoryNodes,
 } from '@/lib/product';
 import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
+import { FormPendingScope } from '@/components/business/form/FormPendingScope';
 
 export type ProductCategoryCatalogDetailProps = {
   params: Promise<{ id: string }>;
@@ -63,9 +64,8 @@ export async function ProductCategoryCatalogList({
   return (
     <div className="space-y-6">
       <RuleCenterPageHeader
-        title="产品结构分类 / BOM 分类"
+        title="产品结构分类 / 用料清单分类"
         effect="immediate"
-        subtitle="分类用于产品资料与用料；历史引用不会因停用而删除。"
         actions={
           <>
           {hasPermission('bom:manage', user.role) ? (
@@ -107,19 +107,14 @@ export async function NewProductCategoryCatalogItem({
       return { id: node.id, label: `${'　'.repeat(depth)}${node.name}` };
     });
   return (
-    <div className="space-y-6">
+    <FormPendingScope>
+    <FormPageContainer>
       <SupplementOwnership actorId={actor.id} context={supplement ?? null} />
       <RuleCenterPageHeader
+        lockBackWhilePending
         title="新建产品结构分类"
         effect="immediate"
-        actions={
-          <Link
-            href={backHref}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            {supplement ? '返回原录入' : '返回分类列表'}
-          </Link>
-        }
+        back={{ href: backHref, label: supplement ? '返回原录入' : '返回产品结构分类' }}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -131,7 +126,8 @@ export async function NewProductCategoryCatalogItem({
           routeBase={routeBase}
         />
       </section>
-    </div>
+    </FormPageContainer>
+    </FormPendingScope>
   );
 }
 
@@ -155,19 +151,20 @@ export async function EditProductCategoryCatalogItem({
   };
 
   return (
+    <FormPendingScope>
     <div className="space-y-6">
       <ReceiptNotice receipt={receipt} noun="产品结构分类" />
       <RuleCenterPageHeader
+        lockBackWhilePending
         title={`编辑产品结构分类：${node.name}`}
         effect="immediate"
         subtitle={`${node._count.products} 个产品资料`}
-        actions={
-          <div className="flex items-center gap-2">
+        back={{ href: routeBase, label: '返回产品结构分类' }}
+        status={
+          <>
             <ActiveStatusBadge active={node.isActive} />
-            {isRetired ? (
-              <StatusBadge tone="warning">历史 / 已退役</StatusBadge>
-            ) : null}
-          </div>
+            {isRetired ? <StatusBadge tone="warning">历史 / 已退役</StatusBadge> : null}
+          </>
         }
       />
 
@@ -187,11 +184,6 @@ export async function EditProductCategoryCatalogItem({
           <h2 className="mb-2 text-base font-semibold">
             {node.isActive ? '停用分类' : '启用分类'}
           </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            {node.isActive
-              ? '停用后，不能再用于新建产品资料或 BOM；已有引用保留。'
-              : '启用后会重新进入产品资料与 BOM 的分类选项。'}
-          </p>
           <ToggleProductCategoryActiveButton
             nodeId={node.id}
             currentlyActive={node.isActive}
@@ -199,5 +191,6 @@ export async function EditProductCategoryCatalogItem({
         </section>
       ) : null}
     </div>
+    </FormPendingScope>
   );
 }

@@ -236,6 +236,8 @@ describe('OrderFormB', () => {
 
     expect(html).toContain('data-slot="order-form-b"');
     expect(html).toContain('新建工单');
+    // 标题经统一页头渲染，不再手写 h1（§8.3）。
+    expect(html).toContain('data-slot="page-header"');
     expect(html).not.toContain(
       '一款的全部字段一屏展开，右侧价格实时跟着变。熟练销售录单最快，桌面优先。',
     );
@@ -266,8 +268,10 @@ describe('OrderFormB', () => {
     );
     expect(html).toContain('@min-[560px]:grid-cols-2');
     expect(html).toContain('has-[[data-disabled]]:cursor-not-allowed');
-    expect(html).toContain('dark:bg-foreground');
-    expect(html).toContain('dark:text-background');
+    // 选中态走 Button variant="selected"（品牌描边 + 10% 底），不再用 className 覆写墨色。
+    expect(html).toContain('bg-primary/10');
+    expect(html).toContain('dark:bg-primary/15');
+    expect(html).toContain('aria-pressed="true"');
     const htmlWithMissingSfCollect = render(undefined, {
       isSfCollect: undefined,
     });

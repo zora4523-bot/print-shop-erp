@@ -3,8 +3,10 @@
 import { Fragment, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { cn } from '@/lib/utils';
 import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
 import { ADMIN_MODULES } from '@/lib/navigation/admin-modules';
+import type { Role } from '@/generated/prisma/enums';
 import { RULE_CENTER_SIDEBAR_ITEMS } from '@/lib/navigation/rule-center';
 import {
   Breadcrumb,
@@ -15,22 +17,24 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 
-// 固定段名 → 中文标签。匹配不到的段（如 [id] 这类）直接回落到原 segment
-// 字符串显示。新增顶层导航时同步更新。
+// 固定段名 → 中文标签。名称与侧栏、H1、<title> 同源（ui-规范 §8.3）。
+// 新增顶层导航时同步更新；漏登记会被路由遍历单测拦下。
 const SEGMENT_LABELS: Record<string, string> = {
   owner: '管理后台',
+  workbench: '工作台',
   foreman: '生产管理',
   sales: '销售',
+  overview: '我的总览',
   worker: '师傅',
-  orders: '工单',
+  orders: '工单列表',
   purchases: '采购单',
   bills: '账单',
-  accounts: '账号管理',
+  accounts: '用户管理',
   parties: '客户/供应商',
   crafts: '工艺',
   'items': '产品资料',
   'product-categories': '产品分类',
-  boms: 'BOM/用料',
+  boms: '用料清单',
   materials: '物料',
   warehouses: '仓库/库位',
   'customer-pricing': '客户计价规则',
@@ -50,16 +54,18 @@ const SEGMENT_LABELS: Record<string, string> = {
   'order-changes': '工单修改申请',
   pigsty: 'Pigsty 运维',
   salary: '薪资',
-  daily: '计件工资',
+  daily: '历史日薪档案',
+  piecework: '工序计件结算',
   hourly: '历史时薪档案',
   scheduling: '排产',
   outsource: '外协',
-  attendance: '工时',
+  attendance: '工时录入',
   account: '账户',
   password: '修改密码',
   new: '新建',
   edit: '编辑',
   count: '盘点',
+  archive: '历史账单归档',
 };
 
 // 规则中心的子页使用完整路径标签，避免同名 segment 在不同
@@ -70,8 +76,12 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
       RULE_CENTER_SIDEBAR_ITEMS.map((item) => [item.href, item.breadcrumbLabel]),
     ),
     '/owner/rules/customer-pricing/blank': '空白封单价',
-    '/owner/rules/customer-pricing/blank/new': '新增纸张与规格价格',
-    '/orders/new': '创建工单',
+    '/owner/rules/customer-pricing/blank/new': '新建纸张与规格价格',
+    // '/orders' 不在此固定：管理员「工单列表」与外部销售「我的工单」按角色从模块表取。
+    '/orders/new': '新建工单',
+    '/owner/agent-bills/unbilled': '未出账工单',
+    '/owner/bills/archive': '历史账单归档',
+    '/owner/materials/count': '库存盘点',
     '/orders/production': '安排生产师傅',
     '/owner/purchases/new': '新建采购单',
     '/owner/accounts/new': '新建账号',
@@ -82,20 +92,36 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     '/owner/rules/crafts/new': '新建工艺',
     '/owner/rules/product-categories/new': '新建产品结构分类',
     '/owner/rules/product-categories/items/new': '新建产品资料',
-    '/foreman/outsource/new': '创建外协单',
+    '/foreman/outsource/new': '新建外协单',
     '/foreman/materials/new': '新建物料',
-    '/owner/notifications/channels/new': '新建企业微信通知目标',
+    '/owner/notifications/channels/new': '新建通知目标',
   };
 
 // Routes that are layout-only (no page.tsx) — linking them produces
 // 404s. Render those segments as text instead。
 // Keep this in sync with the file tree in `app/`; if a layout-only
-// shell becomes a real page, drop the entry here.
-const LAYOUT_ONLY_PATHS = new Set<string>([
+// shell becomes a real page, drop the entry here. 单测会遍历 app 下的
+// page 路由，发现可点击祖先没有 page 时直接失败。
+const LAYOUT_ONLY_PATHS: ReadonlySet<string> = new Set<string>([
   '/foreman',
   '/sales',
+  '/owner/prices',
   '/owner/rules/customer-pricing/blank',
 ]);
+
+// 纯分组段：既无页面、也没有独立业务含义（通知目标 / 事件规则都在
+// 「推送配置」一页里维护）。面包屑直接跳过，父级就是推送配置。
+const SKIPPED_BREADCRUMB_PATHS: ReadonlySet<string> = new Set<string>([
+  '/owner/notifications/channels',
+  '/owner/notifications/rules',
+]);
+
+// 非 cuid 形态的动态段（如事件名）：按父路径给出服务端可确定的默认
+// 标签，详情页交上业务名后再替换，不再读 h1 回落。
+const DYNAMIC_CHILD_LABELS: Readonly<Record<string, string>> = {
+  '/owner/notifications/rules': '事件规则',
+  '/owner/notifications/channels': '通知目标',
+};
 
 // cuid（Prisma @default(cuid())）/ uuid 形态的路径段。这类段没有可读
 // 标签，把 25 位随机串印在面包屑上等于什么都没说。
@@ -103,31 +129,77 @@ const ID_SEGMENT =
   /^(c[a-z0-9]{20,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 // 导出供单测直接调用：给定段名 + 详情页交上来的业务编号，算出显示什么。
-function labelFromModules(path: string): string | undefined {
-  const labels = new Set<string>();
-  for (const adminModule of ADMIN_MODULES) {
-    if (adminModule.routeBase === '#') continue;
-    if (adminModule.routeBase === path) labels.add(adminModule.breadcrumbLabel);
-  }
+// 同一路径被多个角色的模块登记时（/orders：管理员「工单列表」、外部销售「我的工单」），
+// 按当前角色取自己侧栏里的那个名字，保证侧栏、面包屑、H1、<title> 同源（§8.3）。
+function labelFromModules(path: string, role?: Role): string | undefined {
+  const matches = ADMIN_MODULES.filter(
+    (adminModule) => adminModule.routeBase !== '#' && adminModule.routeBase === path,
+  );
+  const own = role ? matches.filter((adminModule) => adminModule.menuRoles.includes(role)) : [];
+  const labels = new Set((own.length > 0 ? own : matches).map((adminModule) => adminModule.breadcrumbLabel));
   return labels.size === 1 ? [...labels][0] : undefined;
 }
 
+/**
+ * 段标签解析。返回 null 表示服务端无法确定（未登记的静态段），
+ * 调用方只在末级用页面 H1 兜底；不再回落到无意义的「页面」。
+ */
 export function resolveSegmentLabel(
   segment: string,
   entityLabel: string | null,
   pageHeading?: string | null,
   path?: string,
-): string {
-  const fromModule = path ? BREADCRUMB_PATH_LABELS[path] ?? labelFromModules(path) : undefined;
+  role?: Role,
+): string | null {
+  const fromModule = path ? BREADCRUMB_PATH_LABELS[path] ?? labelFromModules(path, role) : undefined;
   if (fromModule) return fromModule;
   if (segment === 'new' && path) {
-    const parent = labelFromModules(path.slice(0, -4));
+    const parent = labelFromModules(path.slice(0, -4), role);
     if (parent) return `新建${parent}`;
   }
   const known = SEGMENT_LABELS[segment];
   if (known) return known;
-  if (ID_SEGMENT.test(segment)) return entityLabel ?? pageHeading ?? '详情';
-  return pageHeading ?? '页面';
+  // id 段：首帧就用「详情」，详情页交上业务编号后替换；不读 h1，避免闪变。
+  if (ID_SEGMENT.test(segment)) return entityLabel ?? '详情';
+  if (path) {
+    const parentPath = path.slice(0, path.lastIndexOf('/'));
+    const dynamicDefault = DYNAMIC_CHILD_LABELS[parentPath];
+    if (dynamicDefault) return entityLabel ?? dynamicDefault;
+  }
+  return pageHeading ?? null;
+}
+
+type BreadcrumbCrumb = {
+  href: string;
+  label: string;
+  linkable: boolean;
+  isLast: boolean;
+};
+
+/** 纯函数：路径 → 面包屑段。组件与路由遍历单测共用。 */
+export function buildBreadcrumbCrumbs(
+  pathname: string,
+  entityLabel: string | null = null,
+  pageHeading: string | null = null,
+  role?: Role,
+): BreadcrumbCrumb[] {
+  const segments = pathname.split('/').filter(Boolean);
+  const crumbs: BreadcrumbCrumb[] = [];
+  segments.forEach((seg, i) => {
+    const href = '/' + segments.slice(0, i + 1).join('/');
+    const isLast = i === segments.length - 1;
+    const isBillCredit = segments[0] === 'owner' && segments[1] === 'agent-bills' && segments[3] === 'credits';
+    if (isBillCredit && (i === 3 || i === 4)) return;
+    if (!isLast && SKIPPED_BREADCRUMB_PATHS.has(href)) return;
+    const label =
+      (isBillCredit && isLast ? '录入抵扣' : undefined) ??
+      BREADCRUMB_PATH_LABELS[href] ??
+      (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
+      resolveSegmentLabel(seg, entityLabel, isLast ? pageHeading : null, href, role);
+    if (!label) return;
+    crumbs.push({ href, label, linkable: !LAYOUT_ONLY_PATHS.has(href), isLast });
+  });
+  return crumbs;
 }
 
 function subscribePageHeading(listener: () => void) {
@@ -146,7 +218,7 @@ function getPageHeadingServerSnapshot(): null {
   return null;
 }
 
-export function AdminBreadcrumb() {
+export function AdminBreadcrumb({ role }: { role?: Role } = {}) {
   const pathname = usePathname();
   // 详情页通过 <BreadcrumbEntity> 把已经查出来的业务编号交上来，
   // 这里不发任何请求。
@@ -156,9 +228,9 @@ export function AdminBreadcrumb() {
     getPageHeadingSnapshot,
     getPageHeadingServerSnapshot,
   );
-  const segments = pathname.split('/').filter(Boolean);
+  const crumbs = buildBreadcrumbCrumbs(pathname, entityLabel, pageHeading, role);
 
-  if (segments.length === 0) {
+  if (crumbs.length === 0) {
     return (
       <Breadcrumb>
         <BreadcrumbList>
@@ -170,24 +242,17 @@ export function AdminBreadcrumb() {
     );
   }
 
+  const parentIndex = crumbs.length - 2;
+  // 窄屏：保留父级（倒数第二段）与末级；根段 lg 起显示，其它中间段 xl 起显示。
+  const visibility = (i: number): string =>
+    i >= parentIndex ? '' : i === 0 ? 'hidden lg:inline-flex' : 'hidden xl:inline-flex';
+
   return (
     <Breadcrumb className="min-w-0 overflow-hidden">
       <BreadcrumbList className="w-full min-w-0 flex-nowrap overflow-hidden whitespace-nowrap">
-        {segments.map((seg, i) => {
-          const isLast = i === segments.length - 1;
-          const href = '/' + segments.slice(0, i + 1).join('/');
-          const label =
-            BREADCRUMB_PATH_LABELS[href] ??
-            (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
-            resolveSegmentLabel(
-              seg,
-              entityLabel,
-              isLast ? pageHeading : null,
-              href,
-            );
-          // Layout-only paths can't be navigated to (404)；render the
-          // label as text not link。
-          const isLinkable = !LAYOUT_ONLY_PATHS.has(href);
+        {crumbs.map((crumb, i) => {
+          const { href, label, isLast } = crumb;
+          const shown = visibility(i);
           return (
             // Separator must be a SIBLING of BreadcrumbItem, not a
             // child — both render `<li>`, and `<li>` inside `<li>` is
@@ -197,9 +262,9 @@ export function AdminBreadcrumb() {
                 className={
                   isLast
                     ? 'min-w-0 flex-1'
-                    : i === 0
-                      ? (segments[0] === 'orders' ? 'shrink-0' : 'hidden shrink-0 lg:inline-flex')
-                      : 'hidden shrink-0 2xl:inline-flex'
+                    : i === parentIndex
+                      ? 'min-w-0 max-w-[40%] shrink'
+                      : cn('shrink-0', shown)
                 }
               >
                 {isLast ? (
@@ -210,34 +275,27 @@ export function AdminBreadcrumb() {
                   >
                     {label}
                   </BreadcrumbPage>
-                ) : isLinkable ? (
+                ) : crumb.linkable ? (
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
                   // useRender，不接受 Radix 的 asChild —— 走 render
                   // prop 把 <a> 替换成 next/link。
                   <BreadcrumbLink
+                    className="inline-flex min-h-11 min-w-0 max-w-full items-center"
                     render={<Link href={href} prefetch={false} />}
                   >
-                    {label}
+                    {/* The truncating element carries the full text (visual gate: hidden-clipping). */}
+                    <span className="min-w-0 truncate" title={label}>{label}</span>
                   </BreadcrumbLink>
                 ) : (
                   // Layout-only ancestor: not navigable AND not the
-                  // current page. Plain <span>, no aria-current —
-                  // BreadcrumbPage would hard-code aria-current="page"
-                  // and screen readers would announce two "current"s
-                  // on a single breadcrumb .
-                  <span className="text-muted-foreground">
+                  // current page. Plain <span>, no aria-current.
+                  <span className="block truncate text-muted-foreground" title={label}>
                     {label}
                   </span>
                 )}
               </BreadcrumbItem>
               {!isLast && (
-                <BreadcrumbSeparator
-                  className={
-                    i === 0
-                      ? (segments[0] === 'orders' ? 'shrink-0' : 'hidden shrink-0 lg:block')
-                      : 'hidden shrink-0 2xl:block'
-                  }
-                />
+                <BreadcrumbSeparator className={cn('shrink-0', shown && shown.replace('inline-flex', 'block'))} />
               )}
             </Fragment>
           );

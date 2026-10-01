@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, utimes } from 'node:fs/promises';
+import { mkdtemp, rm, utimes, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -7,7 +7,7 @@ import { join } from 'node:path';
 const oss = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn() }));
 vi.mock('../../oss/client', () => ({ createOssClient: () => oss }));
 vi.mock('../../oss/config', () => ({ readOssConfig: () => ({ configured: true, cfg: {} }) }));
-import { cleanupOldPdfArtifacts, PDF_ARTIFACT_TTL_MS, readPdfArtifact, writePdfArtifact } from '../artifacts';
+import { checkPdfArtifactStorage, cleanupOldPdfArtifacts, PDF_ARTIFACT_TTL_MS, readPdfArtifact, writePdfArtifact } from '../artifacts';
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'erp-pdf-storage-test-'));
@@ -56,4 +56,11 @@ describe('PDF artifact persistence', () => {
     oss.get.mockResolvedValue({ content, res: { headers: { 'last-modified': new Date(Date.now() - PDF_ARTIFACT_TTL_MS - 1000).toUTCString() } } });
     await expect(readPdfArtifact('job.pdf')).rejects.toThrow('PDF_ARTIFACT_EXPIRED');
   });
+});
+
+it('probes storage with real bytes and cleans only its own artifact', async () => {
+  await writePdfArtifact('business.pdf', Buffer.from('business'));
+  await checkPdfArtifactStorage(Buffer.from('%PDF-probe'));
+  expect(await readdir(dir)).toEqual(['business.pdf']);
+  expect((await readPdfArtifact('business.pdf')).toString()).toBe('business');
 });

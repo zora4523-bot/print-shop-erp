@@ -4,6 +4,14 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { commands, page } from 'vitest/browser';
 import '@/app/globals.css';
 import { OrderRemark } from '../OrderRemark';
+
+/** 折叠提示只显示当前可做的一件事：收起时「展开」，展开时「收起」。 */
+function visibleIndicatorText(summary: HTMLElement): string {
+  return [...summary.querySelectorAll<HTMLElement>('[data-slot="disclosure-indicator"] span')]
+    .filter((label) => getComputedStyle(label).display !== 'none')
+    .map((label) => label.textContent)
+    .join('');
+}
 let host: HTMLDivElement;
 let root: Root;
 const note = '先核对样稿，再安排生产。\n' + '注意收货标签与款式对应。'.repeat(70);
@@ -33,8 +41,11 @@ for (const theme of ['light', 'dark']) for (const [width, height] of [[375,667],
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const summary = host.querySelector('details summary span[aria-describedby]')!;
     expect(document.getElementById(summary.getAttribute('aria-describedby')!)?.textContent).toBe(note);
-    await page.getByText('工单备注 · 展开/收起', { exact: true }).click();
+    const compactSummary = host.querySelector<HTMLElement>('details > summary')!;
+    expect(visibleIndicatorText(compactSummary)).toBe('展开');
+    await page.elementLocator(compactSummary).click();
     expect(host.querySelector('details')?.open).toBe(true);
+    expect(visibleIndicatorText(compactSummary)).toBe('收起');
     expect(host.querySelector('details > p')?.textContent).toBe(note);
     expect(rowClicks).toBe(0);
     expect(await commands.checkShellAccessibility('[data-testid="remark-fixture"]')).toEqual([]);

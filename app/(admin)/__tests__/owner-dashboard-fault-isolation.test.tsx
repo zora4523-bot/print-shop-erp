@@ -19,7 +19,7 @@ const reads = [mocks.today, mocks.monthly, mocks.shipments, mocks.outsource, moc
 function visit(node: ReactNode, predicate: (node: React.ReactElement<Record<string, unknown>>) => boolean): boolean {
   if (Array.isArray(node)) return node.some(child => visit(child, predicate));
   if (!isValidElement<Record<string, unknown>>(node)) return false;
-  return predicate(node) || visit(node.props.children as ReactNode, predicate);
+  return predicate(node) || visit(node.props.children as ReactNode, predicate) || visit(node.props.actions as ReactNode, predicate);
 }
 beforeEach(() => {
   vi.clearAllMocks();

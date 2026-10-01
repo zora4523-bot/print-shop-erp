@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { Input } from '@/components/ui/input';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ActionNotice,
@@ -14,7 +15,7 @@ import {
 import { focusFormErrorSummary } from '@/components/ui-business/FormErrorSummary';
 
 describe('ActionNotice', () => {
-  it.each(['success', 'info', 'warning'] as const)(
+  it.each(['success', 'info', 'primary', 'warning'] as const)(
     'announces %s feedback politely without destructive styling',
     (tone) => {
       const html = renderToStaticMarkup(
@@ -28,6 +29,16 @@ describe('ActionNotice', () => {
       expect(html).not.toContain('bg-destructive');
     },
   );
+
+  it('primary tone（待工厂核价）用品牌色，不借 warning / destructive', () => {
+    const html = renderToStaticMarkup(
+      <ActionNotice tone="primary" title="待工厂核价" />,
+    );
+    expect(html).toContain('bg-primary/10');
+    expect(html).toContain('border-primary/40');
+    expect(html).not.toContain('bg-warning');
+    expect(html).not.toContain('destructive');
+  });
 
   it('reserves assertive destructive semantics for errors', () => {
     const html = renderToStaticMarkup(
@@ -47,7 +58,7 @@ describe('form feedback', () => {
     const a11yProps = formMessageA11yProps(fieldId, 'error');
     const html = renderToStaticMarkup(
       <>
-        <input id={fieldId} {...a11yProps} />
+        <Input id={fieldId} {...a11yProps} />
         <FormMessage fieldId={fieldId} tone="error">
           单价必须大于或等于 0
         </FormMessage>

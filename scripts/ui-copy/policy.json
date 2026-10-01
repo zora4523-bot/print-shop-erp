@@ -24,6 +24,19 @@
     "ProductionTask",
     "PER_UNIT"
   ],
+  "bannedPatterns": [
+    {
+      "name": "camelCase 标识符",
+      "pattern": "\\b[a-z]+[A-Z][A-Za-z0-9]*\\b",
+      "flags": "",
+      "skipCodeKeys": true
+    },
+    {
+      "name": "内部版本/角色词",
+      "pattern": "\\b(?:legacy|v2|worker)\\b",
+      "flags": "i"
+    }
+  ],
   "exemptions": [
     {
       "file": "app/(admin)/owner/pigsty/page.tsx",
@@ -65,6 +78,13 @@
       ]
     },
     {
+      "prefix": "app/(admin)/owner/notifications/",
+      "words": [
+        "Bot ID",
+        "Secret"
+      ]
+    },
+    {
       "prefix": "components/business/order/",
       "words": [
         "SSR",
@@ -99,6 +119,46 @@
       "prefix": "components/business/production/TaskDisputeAdminPanel.tsx",
       "words": [
         "如需调整，请到对应页面处理"
+      ]
+    },
+    {
+      "prefix": "app/(admin)/sales/",
+      "words": [
+        "您应付给工厂的货款，按结算月份生成月账单",
+        "本账单用于核对您应付给工厂的货款",
+        "按已确认应收的结算月份归集"
+      ]
+    },
+    {
+      "prefix": "components/business/agent-monthly-billing/",
+      "words": [
+        "点击账期查看明细",
+        "金额统计来自账单"
+      ]
+    },
+    {
+      "prefix": "components/business/order/OrderCreationWorkspace.tsx",
+      "words": [
+        "每张工单独立填写地址、设计款和费用"
+      ]
+    },
+    {
+      "prefix": "components/business/rules/pricing/CustomerPricingSectionViews.tsx",
+      "words": [
+        "当前参数试算",
+        "版费默认 0 元；需要收费时"
+      ]
+    },
+    {
+      "prefix": "components/business/product/ProductReferenceImpact.tsx",
+      "words": [
+        "BOM 版本"
+      ]
+    },
+    {
+      "prefix": "components/business/notification/ChannelForm.tsx",
+      "words": [
+        "先保存通知目标，再生成绑定码"
       ]
     }
   ]

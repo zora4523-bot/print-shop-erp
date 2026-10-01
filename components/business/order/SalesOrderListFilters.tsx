@@ -1,14 +1,19 @@
+import Form from 'next/form';
 import Link from 'next/link';
-import { Search, X } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { buildTableHref } from '@/lib/admin/table';
-import type { OrderListQuery } from '@/lib/order/list-query';
 import type {
+  SalesOrderListQuery,
   SalesOrderListSummary,
   SalesOrderListView,
 } from '@/lib/order/sales-list-query';
 import { cn } from '@/lib/utils';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FilterClearLink, LinkPendingHint } from '@/components/ui-business';
+
+/** 销售工单搜索表单的 id，供「清除筛选」在导航时 reset 未提交的输入。 */
+const SALES_ORDER_FILTER_FORM_ID = 'sales-order-filters';
 
 const SALES_TABS: Array<{
   id: 'all' | SalesOrderListView;
@@ -22,7 +27,7 @@ const SALES_TABS: Array<{
   { id: 'todo', label: '需关注', count: 'todo' },
   { id: 'doing', label: '进行中', count: 'doing' },
   { id: 'shipped', label: '已发货', count: 'shipped' },
-  { id: 'done', label: '已完成', count: 'done' },
+  { id: 'done', label: '已结算', count: 'done' },
   { id: 'cancelled', label: '已取消', count: 'cancelled' },
   { id: 'draft', label: '草稿', count: 'draft' },
 ];
@@ -32,14 +37,17 @@ export function SalesOrderListFilters({
   summary,
   issues,
 }: {
-  query: OrderListQuery;
+  query: SalesOrderListQuery;
   summary: SalesOrderListSummary;
   issues: readonly string[];
 }) {
   const activeView = query.view ?? 'all';
   const q = query.filters.q ?? '';
+  const createdMonth = query.createdMonth ?? '';
+  const filtered = Boolean(q || createdMonth);
   const baseParams = {
     q: q || undefined,
+    createdMonth: createdMonth || undefined,
     pageSize: query.pageSize !== 20 ? query.pageSize : undefined,
   };
 
@@ -51,20 +59,21 @@ export function SalesOrderListFilters({
     >
       <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
-          <h2 id="sales-order-list-filter-heading" className="font-semibold">
-            我的工单
+          {/* 页面 H1 已是「我的工单」，卡片标题只留给读屏（业主 2026-10-01）。 */}
+          <h2 id="sales-order-list-filter-heading" className="sr-only">
+            工单筛选
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {summary.todo} 单需关注 · 本月已发 {summary.shippedThisMonth} 单
+            {filtered ? `当前筛选：${summary.all} 单 · ${summary.todo} 单需关注` : `${summary.todo} 单需关注 · 本月已发 ${summary.shippedThisMonth} 单`}
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">共 {summary.all} 单</p>
+        {createdMonth ? <p className="text-xs text-muted-foreground">下单月份 {createdMonth}</p> : null}
       </div>
 
-      <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
+      <div className="flex min-w-0 flex-col gap-3">
         <nav
           aria-label="销售工单视图"
-          className="flex min-w-0 gap-2 overflow-x-auto pb-1 xl:flex-1"
+          className="flex min-w-0 flex-wrap gap-2 xl:flex-1"
         >
           {SALES_TABS.map((tab) => {
             const active = activeView === tab.id;
@@ -77,40 +86,45 @@ export function SalesOrderListFilters({
                 key={tab.id}
                 href={href}
                 prefetch={false}
+                scroll={false}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors',
-                  active
-                    ? 'border-foreground bg-foreground text-background'
-                    : 'bg-background hover:border-foreground/50 hover:bg-muted',
+                  buttonVariants({ variant: active ? 'selected' : 'outline' }),
+                  'relative shrink-0 gap-1.5',
                   tab.id === 'todo' &&
                     !active &&
                     summary.todo > 0 &&
-                    'border-destructive/40 text-destructive',
+                    'border-warning/40 text-warning-foreground',
                 )}
               >
                 {tab.label}
                 <span
                   className={cn(
                     'rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground',
-                    active && 'bg-background/15 text-background',
+                    // 选中态按钮自身已是 primary 淡底；计数胶囊再叠一层会让暗色对比跌破 4.5:1。
+                    active && 'bg-transparent text-primary ring-1 ring-inset ring-primary/40',
                     tab.id === 'todo' &&
                       summary.todo > 0 &&
                       !active &&
-                      'bg-destructive/10 text-destructive',
+                      'bg-warning/10 text-warning-foreground',
                   )}
                 >
                   {summary[tab.count]}
                 </span>
+                <LinkPendingHint />
               </Link>
             );
           })}
         </nav>
 
-        <form
+        {/* Applied filters reset input values; switching views preserves pending edits. */}
+        <Form
+          key={`${q}:${createdMonth}`}
+          id={SALES_ORDER_FILTER_FORM_ID}
           action="/orders"
           role="search"
-          className="flex w-full min-w-0 items-center gap-2 xl:ml-auto xl:w-72 xl:shrink-0"
+          scroll={false}
+          className="flex w-full min-w-0 flex-wrap items-end gap-2"
         >
           {query.view ? (
             <input type="hidden" name="view" value={query.view} />
@@ -118,7 +132,11 @@ export function SalesOrderListFilters({
           {query.pageSize !== 20 ? (
             <input type="hidden" name="pageSize" value={query.pageSize} />
           ) : null}
-          <div className="relative min-w-0 flex-1">
+          <label className="grid min-w-0 flex-1 gap-1 text-xs text-muted-foreground sm:max-w-48">
+            下单月份
+            <Input type="month" name="createdMonth" defaultValue={createdMonth} className="min-w-0 bg-background text-foreground" />
+          </label>
+          <div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1 sm:max-w-sm">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -129,30 +147,25 @@ export function SalesOrderListFilters({
               defaultValue={q}
               aria-label="搜索工单名或工单号"
               placeholder="搜工单名 / 单号"
-              className="h-10 rounded-full pl-9 pr-9"
+              className="pl-9"
             />
-            {q ? (
-              <Link
-                href={buildTableHref('/orders', {}, {
-                  ...baseParams,
-                  q: undefined,
-                  view: query.view,
-                })}
-                prefetch={false}
-                aria-label="清除搜索"
-                className={cn(
-                  buttonVariants({ variant: 'ghost', size: 'icon-xs' }),
-                  'absolute right-2 top-1/2 -translate-y-1/2 rounded-full',
-                )}
-              >
-                <X aria-hidden="true" />
-              </Link>
-            ) : null}
           </div>
-          <Button type="submit" className="h-10 rounded-full px-4">
-            搜索
+          <Button type="submit" variant="outline">
+            应用筛选
           </Button>
-        </form>
+          {filtered ? (
+            <FilterClearLink
+              href={buildTableHref('/orders', {}, {
+                ...baseParams,
+                q: undefined,
+                createdMonth: undefined,
+                view: query.view,
+              })}
+              formId={SALES_ORDER_FILTER_FORM_ID}
+              className={buttonVariants({ variant: 'ghost' })}
+            />
+          ) : null}
+        </Form>
       </div>
 
       {issues.length > 0 ? (

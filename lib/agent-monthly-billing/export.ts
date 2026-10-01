@@ -1,3 +1,4 @@
+import { billOrderStatus } from './presentation';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -28,6 +29,8 @@ import {
   openAgentMonthlyBillExportArtifact,
 } from './export-artifact';
 import { isAgentBillPeriod } from './period';
+import { agentBillWhere } from './list-filter';
+import { readBillSettlementDetail } from './settlement-detail';
 
 const EXPORT_SCHEMA_VERSION = 1;
 const EXPORT_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -84,6 +87,7 @@ type ExportSnapshotPayload = {
     orderNoSnapshot: string;
     // 请求时的工单名称，2026-09-27 起写入；更早入队的快照没有此键，表格留空。
     orderNameSnapshot?: string | null;
+    orderNameAtSettlement?: boolean;
     // 已停用的客户名称/简称，只存在于 2026-09-27 前写入的快照。不再写入、不再输出，
     // 但键仍留在 strict schema 里，停用前入队、尚未生成的导出才能照常解析。
     customerRefSnapshot?: string | null;
@@ -139,6 +143,7 @@ const EXPORT_SNAPSHOT_PAYLOAD_SCHEMA = z
         .object({
           orderNoSnapshot: z.string(),
           orderNameSnapshot: z.string().nullable().optional(),
+        orderNameAtSettlement: z.boolean().optional(),
           customerRefSnapshot: z.string().nullable().optional(),
           orderStatusSnapshot: z.string(),
           workOrderVersionSnapshot: z.number().int().positive(),
@@ -195,6 +200,7 @@ const EXPORT_SNAPSHOT_SELECT = {
       orderStatusSnapshot: true,
       workOrderVersionSnapshot: true,
       settledFeeSnapshot: true,
+      settlementDetailSnapshot: true,
       settledAtSnapshot: true,
       order: { select: { customName: true } },
     },
@@ -249,14 +255,18 @@ function exportSnapshotPayload(source: ExportSnapshotSource): ExportSnapshotPayl
       createdAt: source.createdAt.toISOString(),
       orderCount: source.items.length,
     },
-    items: source.items.map((item) => ({
-      orderNoSnapshot: item.orderNoSnapshot,
-      orderNameSnapshot: item.order.customName,
-      orderStatusSnapshot: item.orderStatusSnapshot,
-      workOrderVersionSnapshot: item.workOrderVersionSnapshot,
-      settledFeeSnapshot: item.settledFeeSnapshot.toFixed(2),
-      settledAtSnapshot: item.settledAtSnapshot.toISOString(),
-    })),
+    items: source.items.map((item) => {
+      const detail = readBillSettlementDetail(item.settlementDetailSnapshot, item.settledFeeSnapshot);
+      return {
+        orderNoSnapshot: item.orderNoSnapshot,
+        orderNameSnapshot: detail ? detail.orderName : item.order.customName,
+        orderNameAtSettlement: Boolean(detail),
+        orderStatusSnapshot: item.orderStatusSnapshot,
+        workOrderVersionSnapshot: item.workOrderVersionSnapshot,
+        settledFeeSnapshot: item.settledFeeSnapshot.toFixed(2),
+        settledAtSnapshot: item.settledAtSnapshot.toISOString(),
+      };
+    }),
     adjustments: source.adjustments.map((adjustment) => ({
       targetPeriod: source.period,
       targetAgentDisplayNameSnapshot: source.agentDisplayNameSnapshot,
@@ -312,9 +322,7 @@ export async function requestAgentMonthlyBillExport(input: {
       const snapshotAt = await databaseClockNow(tx);
       const snapshotWhere: Prisma.AgentMonthlyBillWhereInput = {
         createdAt: { lte: snapshotAt },
-        ...(filter.period ? { period: filter.period } : {}),
-        ...(filter.status ? { status: filter.status } : {}),
-        ...(filter.agentUserId ? { agentUserId: filter.agentUserId } : {}),
+        ...agentBillWhere(filter),
       };
       const sourceRows = await tx.agentMonthlyBill.findMany({
         where: snapshotWhere,
@@ -700,9 +708,9 @@ function buildWorkbookSheets(
 ): XlsxSheet[] {
   return [
     trackedSheet('月账单', billRows(membershipPath, context, client), rowCounts, [12, 20, 20, 12, 14, 14, 14, 16, 12, 18, 18]),
-    trackedSheet('结算成员', itemRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 12, 14, 14, 18]),
-    trackedSheet('跨月负项', adjustmentRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 14, 40, 18, 18]),
-    trackedSheet('收款回执', receiptRows(membershipPath, context, client), rowCounts, [12, 20, 14, 18, 18, 22, 18]),
+    trackedSheet('工单明细', itemRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 12, 14, 14, 18, 18, 28]),
+    trackedSheet('跨月抵扣', adjustmentRows(membershipPath, context, client), rowCounts, [12, 20, 20, 20, 14, 40, 18, 18, 28]),
+    trackedSheet('收款回执', receiptRows(membershipPath, context, client), rowCounts, [12, 20, 14, 18, 18, 22, 18, 28]),
   ];
 }
 
@@ -730,7 +738,7 @@ async function* billRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '账期', '代理商', '账号快照', '状态', '工单数', '成员小计', '跨月负项',
+    '账期', '外部销售', '销售账号', '状态', '工单数', '工单合计', '跨月抵扣',
     '应收总额', '确认时间', '结清时间', '创建时间',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
@@ -764,7 +772,7 @@ async function* itemRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间',
+    '账期', '外部销售', '工单号', '工单名称', '工单状态', '纸单版本', '工单金额', '结算时间', '名称依据', '销售账号',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
@@ -781,10 +789,12 @@ async function* itemRows(
           item.orderNoSnapshot,
           // 与工单导出的“工单名称”列同口径：未命名留空，不重复工单号。
           item.orderNameSnapshot?.trim() || null,
-          item.orderStatusSnapshot,
+          billOrderStatus(item.orderStatusSnapshot).label,
           item.workOrderVersionSnapshot,
           moneyText(item.settledFeeSnapshot),
           dateTime(item.settledAtSnapshot),
+          item.orderNameAtSettlement ? '出账时名称' : '导出时名称',
+          snapshot.bill.agentUsernameSnapshot,
         ];
       }
     }
@@ -797,7 +807,7 @@ async function* adjustmentRows(
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
   yield [
-    '目标账期', '目标代理商', '来源账期', '来源工单', '负项金额', '原因', '记录人', '创建时间',
+    '目标账期', '目标外部销售', '来源账期', '来源工单', '抵扣金额', '原因', '记录人', '创建时间', '销售账号',
   ];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
@@ -806,7 +816,8 @@ async function* adjustmentRows(
       orderBy: { sequence: 'asc' },
     });
     for (const row of rows) {
-      for (const adjustment of parseExportSnapshot(row.payload).adjustments) {
+      const snapshot = parseExportSnapshot(row.payload);
+      for (const adjustment of snapshot.adjustments) {
         yield [
           adjustment.targetPeriod,
           adjustment.targetAgentDisplayNameSnapshot,
@@ -816,6 +827,7 @@ async function* adjustmentRows(
           adjustment.reason,
           adjustment.createdByDisplayName,
           dateTime(adjustment.createdAt),
+          snapshot.bill.agentUsernameSnapshot,
         ];
       }
     }
@@ -827,7 +839,7 @@ async function* receiptRows(
   context: ExportExecutionContext,
   client: ExportReadClient,
 ): AsyncGenerator<XlsxRow> {
-  yield ['账期', '代理商', '收款金额', '收款时间', '收款方式', '流水号', '记录人'];
+  yield ['账期', '外部销售', '收款金额', '收款时间', '收款方式', '流水号', '记录人', '销售账号'];
   for await (const snapshotIds of membershipBatches(membershipPath, context)) {
     const rows = await client.agentMonthlyBillExportSnapshot.findMany({
       where: { id: { in: snapshotIds } },
@@ -835,7 +847,8 @@ async function* receiptRows(
       orderBy: { sequence: 'asc' },
     });
     for (const row of rows) {
-      for (const receipt of parseExportSnapshot(row.payload).receipts) {
+      const snapshot = parseExportSnapshot(row.payload);
+      for (const receipt of snapshot.receipts) {
         yield [
           receipt.period,
           receipt.agentDisplayNameSnapshot,
@@ -844,6 +857,7 @@ async function* receiptRows(
           receipt.paymentMethod,
           receipt.referenceNo,
           receipt.recordedByDisplayName,
+          snapshot.bill.agentUsernameSnapshot,
         ];
       }
     }

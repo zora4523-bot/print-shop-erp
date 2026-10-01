@@ -22,7 +22,7 @@ describe('production deploy smoke jobs gate', () => {
     'rejects production %s even when ready is healthy and the bot is connected', async (alert) => {
       const result = await runSmokeWithJobs({
         statusCode: 503, body: { mode: 'durable', alerts: [alert],
-          smartBot: { status: 'CONNECTED', required: true,
+          pdf: { ready: true }, smartBot: { status: 'CONNECTED', required: true,
             configurationValid: true, identityMatch: true, operational: true } },
       });
       expect(result.code).toBe(1);
@@ -33,7 +33,7 @@ describe('production deploy smoke jobs gate', () => {
   it.each([200, 403, 500])('rejects unexpected production cron status %s', async (cronStatus) => {
     const result = await runSmokeWithJobs({
       statusCode: 200,
-      body: { smartBot: { status: 'CONNECTED', required: true,
+      body: { pdf: { ready: true }, smartBot: { status: 'CONNECTED', required: true,
         configurationValid: true, identityMatch: true, operational: true } },
       cronStatus,
     });
@@ -44,7 +44,7 @@ describe('production deploy smoke jobs gate', () => {
   it('rejects missing production cron configuration instead of accepting a 503', async () => {
     const result = await runSmokeWithJobs({
       statusCode: 200,
-      body: { smartBot: { status: 'CONNECTED', required: true,
+      body: { pdf: { ready: true }, smartBot: { status: 'CONNECTED', required: true,
         configurationValid: true, identityMatch: true, operational: true } },
       cronStatus: 503,
     });
@@ -63,7 +63,7 @@ describe('production deploy smoke jobs gate', () => {
         statusCode,
         body: {
           status: 'alert',
-          smartBot: {
+          pdf: { ready: true }, smartBot: {
             status: smartBotStatus,
             required: true,
             configurationValid: true,
@@ -86,7 +86,7 @@ describe('production deploy smoke jobs gate', () => {
       statusCode: 503,
       body: {
         status: 'alert',
-        smartBot: {
+        pdf: { ready: true }, smartBot: {
           status: 'CONNECTED',
           required: true,
           configurationValid: true,
@@ -108,7 +108,7 @@ describe('production deploy smoke jobs gate', () => {
       statusCode: 200,
       body: {
         status: 'degraded',
-        smartBot: {
+        pdf: { ready: true }, smartBot: {
           status: 'DISCONNECTED',
           required: true,
           configurationValid: true,
@@ -131,7 +131,7 @@ function inlineHealth() {
     status: 'ok', mode: 'inline', time: '2026-09-10T00:00:00.000Z',
     jobs: { pending: { LIGHT: 0, HEAVY: 0 }, running: 0, staleRunning: 0,
       deadLast24h: 0, deadNotificationLast24h: 0 },
-    smartBot: { status: null, required: false, configurationValid: true,
+    pdf: { ready: true }, smartBot: { status: null, required: false, configurationValid: true,
       identityMatch: null, operational: true, recoveryWaitMs: 0 },
     alerts: [], warnings: [],
   };

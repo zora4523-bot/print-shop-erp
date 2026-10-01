@@ -173,14 +173,14 @@ function buildDiffGroups(
         return [
           {
             key: `update-${changeIndex}`,
-            title: `原款式 ${change.itemId}`,
+            title: '原款式资料缺失',
             operation: '修改' as const,
             rows: [
               {
                 key: `missing-${changeIndex}`,
-                field: '数据校验',
-                before: '申请中缺少该款式',
-                after: '无法展示',
+                field: '修改前资料',
+                before: '资料缺失',
+                after: '无法核对，请联系提交人重新申请',
               },
             ],
           },

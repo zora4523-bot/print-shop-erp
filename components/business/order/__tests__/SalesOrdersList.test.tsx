@@ -4,11 +4,36 @@ import {
   OrderPricingStatus,
   OrderStatus,
 } from '@/generated/prisma/enums';
-import type { OrderListQuery } from '@/lib/order/list-query';
-import type { SalesOrderListRow } from '@/lib/order/sales-list-query';
 import { SalesOrdersList } from '../SalesOrdersList';
+import { query, row } from './sales-orders-list-fixtures';
 
 describe('SalesOrdersList', () => {
+  it('uses independent compact ledger columns while retaining preview, copy, billing and detail actions', () => {
+    const order = { ...row(), bill: { id: 'bill-1', period: '2026-08', status: 'CONFIRMED' as const } };
+    const html = renderToStaticMarkup(<SalesOrdersList orders={[order]} query={query()} nowIso="2026-08-27T08:00:00Z" />);
+    const table = html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? '';
+    const headers = [...table.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((match) => match[1]);
+    expect(headers).toEqual(['工单号', '下单日期', '工单名称', '工艺 / 纸张', '数量', '工单金额', '状态', '月账单', '操作']);
+    expect(table).toContain('title="预览工单 GD-260827-001"');
+    expect(table).toContain('title="快速预览工单"');
+    expect(table).toContain('aria-label="复制工单号 GD-260827-001"');
+    expect(table).toContain('查看物流');
+    expect(table).toContain('href="/orders/order-1"');
+    expect(table).toContain('查看原因');
+    expect(table).toContain('href="/sales/bills/bill-1"');
+    expect(table).toContain('2026-08 账单 · 待付款');
+    expect(table).toContain('局部烫金 · 触感纸');
+    expect(table).toContain('待工厂核价');
+    expect(table).not.toContain('<img');
+    expect(table).not.toContain('75312884629891');
+    expect(table).not.toContain('记录版本');
+  });
+
+  it('不把缺少款式和数量的记录显示为零件生产', () => {
+    const html = renderToStaticMarkup(<SalesOrdersList orders={[{ ...row(), itemCount: 0, totalQuantity: 0, items: [] }]} query={query()} nowIso="2026-09-30T00:00:00Z" />);
+    expect(html).toContain('款式与数量未填写');
+    expect(html).not.toContain('>0</b> 款');
+  });
   it('renders the sales card fields without exposing workshop details', () => {
     const html = renderToStaticMarkup(
       <SalesOrdersList
@@ -23,8 +48,12 @@ describe('SalesOrdersList', () => {
     expect(html).toContain(
       'data-slot="sales-orders-list" class="min-w-0"',
     );
-    expect(html).toContain('aria-label="销售工单列表" class="grid gap-2"');
+    expect(html).toContain('aria-label="销售工单列表" class="grid gap-2 md:hidden"');
     expect(html).toContain('data-sales-order-card=""');
+    expect(html).toContain('data-sales-order-row=""');
+    expect(html).toContain('aria-label="销售工单明细表"');
+    expect(html).toContain('2026/08/27');
+    expect(html).toContain('下单日期');
     expect(html).toContain(
       'data-slot="sales-orders-pagination" class="mt-4"',
     );
@@ -90,12 +119,14 @@ describe('SalesOrdersList', () => {
   it('有款式照片时提供可访问的画廊预览入口', () => {
     const firstPhoto = {
       url: 'https://static.example.com/styles/dragon-boat-front.jpg',
+      previewUrl: 'https://static.example.com/styles/dragon-boat-front.jpg?full',
       fileName: '端午正面.jpg',
     };
     const order = {
       ...row(),
       thumbnail: {
         url: 'https://static.example.com/orders/work-order.png',
+        previewUrl: 'https://static.example.com/orders/work-order.png?full',
         fileName: '工单.png',
       },
       items: [
@@ -110,6 +141,7 @@ describe('SalesOrdersList', () => {
           name: '端午定制 图2',
           thumbnail: {
             url: 'https://static.example.com/styles/dragon-boat-back.jpg',
+            previewUrl: 'https://static.example.com/styles/dragon-boat-back.jpg?full',
             fileName: '端午背面.jpg',
           },
         },
@@ -139,6 +171,7 @@ describe('SalesOrdersList', () => {
   it('不把打印视觉基线快照当成款式照片', () => {
     const printSnapshot = {
       url: 'https://static.example.com/orders/order-print.png',
+      previewUrl: 'https://static.example.com/orders/order-print.png?full',
       fileName: 'order-print-1-designs-chromium-darwin.png',
     };
     const order = {
@@ -164,78 +197,3 @@ describe('SalesOrdersList', () => {
     expect(html).toContain('暂无款式照片');
   });
 });
-
-function row(): SalesOrderListRow {
-  return {
-    id: 'order-1',
-    orderNo: 'GD-260827-001',
-    customName: '端午定制',
-    status: OrderStatus.SUBMITTED,
-    isUrgent: false,
-    revision: 2,
-    pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
-    totalAmount: '404.30',
-    promisedDate: '2026-08-30',
-    dueAlert: { kind: 'due-soon', days: 3 },
-    updatedAt: '2026-08-27T07:00:00.000Z',
-    receiver: {
-      name: 'Lam',
-      phone: '021-53395199',
-      address: '上海市黄浦区测试路 88 号',
-    },
-    itemCount: 2,
-    totalQuantity: 2000,
-    craftSummary: '局部烫金 · 触感纸',
-    thumbnail: null,
-    items: [
-      {
-        id: 'item-1',
-        sequence: 1,
-        name: '端午定制 图1',
-        quantity: 2000,
-        specification: '大号封 90×165',
-        paper: '触感纸 200g',
-        crafts: ['局部烫金'],
-        thumbnail: null,
-      },
-    ],
-    feeLines: [
-      {
-        id: 'processing',
-        label: '款式加工费',
-        amount: '404.30',
-        estimated: true,
-      },
-      {
-        id: 'plate',
-        label: '制烫金版费',
-        amount: null,
-        estimated: false,
-      },
-    ],
-    pricingAttentionReason: '价格待管理员确认',
-    pendingChangeRequest: {
-      id: 'change-1',
-      type: 'MODIFY',
-      reason: '客户改数量',
-      createdAt: '2026-08-27T07:30:00.000Z',
-    },
-    rejectedChangeRequest: null,
-    shipment: {
-      carrier: '中通',
-      trackingNo: '75312884629891',
-      additionalCount: 0,
-    },
-    needsAction: true,
-  };
-}
-
-function query(): OrderListQuery {
-  return {
-    filters: {} as OrderListQuery['filters'],
-    page: 1,
-    pageSize: 20,
-    sort: 'createdAt',
-    dir: 'desc',
-  };
-}

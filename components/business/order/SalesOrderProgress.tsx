@@ -19,7 +19,7 @@ export function SalesOrderProgress({ status }: { status: OrderStatus }) {
             index < progress.currentStep &&
               'text-foreground before:border-foreground before:bg-foreground after:bg-foreground',
             index === progress.currentStep &&
-              'font-medium text-foreground before:border-destructive before:bg-destructive',
+              'font-medium text-primary before:border-primary before:bg-primary',
           )}
         >
           {step}

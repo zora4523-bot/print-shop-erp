@@ -390,3 +390,21 @@ pnpm db:studio
 通知日志保留为运行记录，应用层不再允许重试 / 重发（见 API.md「已删除功能的历史任务与通知」）。
 生产执行前的只读预查 SQL 见 [部署指南](./docs/部署指南.md#删除客服--清废厨师的三条迁移2026-09-24)。
 以后删除列或表时，同一迁移或紧随的前向迁移必须清理对应脱敏策略。
+
+### PDF 能力迁移（2026-09-30）
+
+`20260930160000_pdf_worker_capability` 仅向 BackgroundWorkerHeartbeat 添加 nullable Boolean `pdfReady`，无默认 true、无业务表回填。新 HEAVY 上报动态能力，旧代码的 INSERT/UPDATE 不受可空列影响；旧进程的 NULL 心跳不可满足新 jobs gate。先执行新增前向迁移，再切换 Web/worker；不修改既有 migration，不改历史工单/产物/尝试记录。回退代码可忽略新增列，不需删除列。
+
+### 外部销售账单结算依据（2026-09-30）
+
+`20260930100000_agent_bill_settlement_detail` 添加可空 JSONB `AgentMonthlyBillItem.settlementDetailSnapshot`。只在生成/更新草稿及最终确认时写入 schemaVersion、出账时工单名称、加工费与对客收费名称/金额，分项以 Decimal 核对结算总额。既有 `AgentMonthlyBillItem_parent_draft_guard` 覆盖整行，已确认账单仍禁止修改。历史确认账单保留 NULL，不以当前工单反填。
+
+先迁移数据库，再启动新 Web/worker；旧代码可忽略新列，回退不删除字段。导出任务 schemaVersion 保持兼容，只添加可选名称依据标记；已排队旧导出继续使用请求时保存的内容。新增字段不包含内部成本、工资、调价审批原因。2026-09-30 已在隔离测试库和备份后的本地开发库应用此迁移，未部署生产。名称采集于生成/确认账单，不声称能够还原此前结算当天的名称。
+
+### 功能切换性能索引（2026-10-01）
+
+`20261001100000_switch_performance_indexes` 新增 `OrderItem(productId, orderId)`、`Order(submitterId, settlementType)`；`20261001110000_list_ordering_indexes` 新增 `BackgroundJob(createdAt DESC)`、`OutsourceOrder(createdAt DESC, id DESC)`。四条都是纯新增的普通 B-tree 索引，不改列、不回填数据，完整迁移链为 183 项。
+
+- **依据**：3 万工单 / 9 万款式隔离库实测——产品目录引用计数 385 ms → 0.9 ms、代理商账单代理人筛选 4.9 s → 0.5 ms、后台任务账本 30 万行取最近 100 条 53 ms → 0.03 ms；外协单列表改为按 `(createdAt, id)` 倒序分页。见 [审查记录](docs/audits/2026-10-01-switch-performance-review.md)。
+- **上线锁影响**：Prisma 在迁移事务内执行普通 `CREATE INDEX`（不能用 `CONCURRENTLY`），建索引期间对应表持 SHARE 锁，阻塞写入、不阻塞读取。09-27 发布记录显示正式库工单 / 款式 / 外协单为空，这三张表建索引应为毫秒级；`BackgroundJob` 行数未核对，上线前在正式库副本上计时，或按 09-27 发布流程放在停写窗口内执行。
+- **回退**：代码不依赖索引存在即可运行（只影响查询计划）；如需回退，可前向迁移 `DROP INDEX`，不得修改已应用的迁移文件。

@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { createBillSettlementDetail } from './settlement-detail';
 import type { Prisma } from '../../generated/prisma/client';
 import {
   AgentMonthlyBillStatus,
@@ -34,6 +35,7 @@ type Tx = Prisma.TransactionClient;
 const ELIGIBLE_ORDER_SELECT = {
   id: true,
   orderNo: true,
+  customName: true,
   submitterId: true,
   status: true,
   // 客户名称/简称已停用、不再展示（业主 2026-09-27），但确认触发器要求成员
@@ -43,9 +45,9 @@ const ELIGIBLE_ORDER_SELECT = {
   settledFee: true,
   processingAmount: true,
   totalAmount: true,
-  customerCharges: { select: { amount: true } },
+  customerCharges: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { amount: true, description: true } },
   settledAt: true,
-} as const;
+} satisfies Prisma.OrderSelect;
 
 type EligibleOrder = Prisma.OrderGetPayload<{
   select: typeof ELIGIBLE_ORDER_SELECT;
@@ -59,14 +61,14 @@ function decimal(value: unknown): Decimal {
       typeof value !== 'number' &&
       typeof value !== 'object')
   ) {
-    throw new AgentMonthlyBillingError('账单金额事实缺失或格式不合法');
+    throw new AgentMonthlyBillingError('账单金额缺失或异常，请联系管理员核对结算金额');
   }
   try {
     const parsed = new Decimal(String(value));
     if (!parsed.isFinite()) throw new Error('non-finite');
     return parsed;
   } catch {
-    throw new AgentMonthlyBillingError('账单金额事实缺失或格式不合法');
+    throw new AgentMonthlyBillingError('账单金额缺失或异常，请联系管理员核对结算金额');
   }
 }
 
@@ -296,7 +298,7 @@ export async function synchronizeDraftBillInTx(
   );
   if (foreignMember) {
     throw new AgentMonthlyBillingError(
-      `工单 ${foreignMember.orderId} 已归入其他 v2 月度账单`,
+      `工单 ${candidates.find((order) => order.id === foreignMember.orderId)?.orderNo ?? '资料缺失'} 已列入其他账单，请核对该工单的账单归属`,
     );
   }
 
@@ -312,7 +314,7 @@ export async function synchronizeDraftBillInTx(
 
   for (const order of candidates) {
     if (order.settledFee === null || order.settledAt === null) {
-      throw new AgentMonthlyBillingError('月度账单候选工单缺少结算事实');
+      throw new AgentMonthlyBillingError('待入账工单缺少结算金额或时间，请在未出账工单中核对');
     }
     await tx.agentMonthlyBillItem.upsert({
       where: { orderId: order.id },
@@ -324,6 +326,7 @@ export async function synchronizeDraftBillInTx(
         orderStatusSnapshot: order.status,
         customerRefSnapshot: order.customerRef,
         settledFeeSnapshot: money(order.settledFee),
+        settlementDetailSnapshot: createBillSettlementDetail(order),
         settledAtSnapshot: order.settledAt,
       },
       update: {
@@ -332,6 +335,7 @@ export async function synchronizeDraftBillInTx(
         orderStatusSnapshot: order.status,
         customerRefSnapshot: order.customerRef,
         settledFeeSnapshot: money(order.settledFee),
+        settlementDetailSnapshot: createBillSettlementDetail(order),
         settledAtSnapshot: order.settledAt,
       },
       select: { id: true },
@@ -363,7 +367,7 @@ async function frozenBillResult(
   const unbilled = candidates.find((order) => !attachedIds.has(order.id));
   if (unbilled) {
     throw new AgentMonthlyBillFrozenError(
-      `已冻结账单后发现未入账工单 ${unbilled.orderNo}，已停止而非静默遗漏`,
+      `本月账单已确认，工单 ${unbilled.orderNo} 尚未入账，请联系管理员核对该工单`,
     );
   }
   return {

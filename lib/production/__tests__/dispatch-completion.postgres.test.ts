@@ -113,6 +113,26 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(await db.productionWageEntry.count({ where: { wage: { jobId: f.job.id } } })).toBe(1);
     expect((await db.productionOperation.findFirstOrThrow({ where: { orderId: f.order.id, operationType: 'PACKING' } })).status).toBe('PENDING');
   });
+  it('rejects a worker per-item split; the worker registers the total and the order items keep their planned split', async () => {
+    const f = await fixture();
+    const craft = await db.craft.findUniqueOrThrow({ where: { code: 'FLAT_FOIL_PARTIAL' } });
+    const second = await db.orderItem.create({ data: { orderId: f.order.id, name: '验收款B', sequence: 2, quantity: 1000, craft: 'PARTIAL', pricingRoute: 'CUSTOM_SINGLE_FLAT_FOIL', productStructure: 'STANDARD_ENVELOPE', foilTechnique: 'FLAT', frontFoilColors: ['亚金'], crafts: [craft.id], paperType: '珠光纸' } });
+    await db.orderPackagingGroup.create({ data: { orderId: f.order.id, sequence: 2, mode: 'SINGLE_STYLE', actualBagCount: 1000, lines: { create: { orderItemId: second.id, unitsPerBag: 1 } } } });
+    const { targets } = await currentDispatchTargets(db, f.order.id);
+    await publishProductionDispatch({ requestKey: randomUUID(), orders: [{ ...f.request.orders[0], assignments: Object.fromEntries(targets.map(target => [target.key, worker.id])) }] }, admin);
+    const job = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id } });
+    expect(job.plannedQty.toString()).toBe('2000');
+    const [first] = f.order.items;
+    // 业主 2026-10-01：师傅不逐款登记，逐款数量按工单、由管理员核定。
+    await expect(registerProductionCompletion({ ...completion(job, '2000'), itemQuantities: { [first.id]: '0', [second.id]: '2000' }, reason: '只做了 B 款' }, worker)).rejects.toThrow('逐款数量由管理员核定');
+    const untouched = await db.productionJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(untouched.status).toBe('PENDING');
+    expect(await db.productionWage.count({ where: { jobId: job.id } })).toBe(0);
+    await registerProductionCompletion(completion(untouched, '2000'), worker);
+    const done = await db.productionJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(done.status).toBe('COMPLETED');
+    expect((done.snapshot as { actualItemQuantities?: unknown }).actualItemQuantities).toEqual({ [first.id]: '1000', [second.id]: '1000' });
+  });
   it('holds altered quantity without wages, rejects bypass, then approves exactly once', async () => {
     const f = await assigned();
     await registerProductionCompletion({ ...completion(f.job, '990'), reason: '核对实际成品' }, worker);
@@ -235,7 +255,7 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(job.workerId).toBe(worker.id); expect(job.manualPricing).toBe(true);
     await registerProductionCompletion(completion(job, '200'), worker);
     expect((await db.productionWage.findFirstOrThrow({ where: { jobId: job.id } })).amount).toBeNull();
-    await db.$transaction(async tx => { await expect(assertShipOrderReadinessInTx(tx, { orderId: redo.order.id, workOrderVersion: 1, settlementType: 'NO_CHARGE', isVersionedCommand: false, hasSubmittedShipmentDetails: true, simpleProduction: true })).resolves.toHaveLength(1); });
+    await db.$transaction(async tx => { await expect(assertShipOrderReadinessInTx(tx, { orderId: redo.order.id, workOrderVersion: 1, settlementType: 'NO_CHARGE', isVersionedCommand: false, hasSubmittedShipmentDetails: true, simpleProduction: true, requiresOutsource: false })).resolves.toHaveLength(1); });
     const ready = await db.order.findUniqueOrThrow({ where: { id: redo.order.id }, include: { shipments: true } });
     const shipmentInput = { orderId: ready.id, shipmentId: ready.shipments[0].id, expectedVersion: ready.shipments[0].registrationVersion, expectedRevision: ready.revision, expectedEditVersion: ready.editVersion, expectedWorkOrderVersion: ready.workOrderVersion, expectedPriceRevision: ready.priceRevision, idempotencyKey: randomUUID(), trackingNo: 'TEST12345', carrierCode: 'ZTO' as const, carrierName: '', confirm: true };
     await registerShipment(shipmentInput, admin); await registerShipment(shipmentInput, admin);

@@ -13,7 +13,7 @@ import {
 } from '@/lib/dashboard/owner-watchlist';
 import { formatMoney } from '@/lib/dashboard/format';
 import { DASHBOARD_PREVIEW_LIMIT } from '@/lib/dashboard/attention';
-import { ErrorBoundary, StatCard } from '@/components/ui-business';
+import { ErrorBoundary, PageHeader, StatCard } from '@/components/ui-business';
 import { buttonVariants } from '@/components/ui/button';
 import {
   OrderAttentionLoading,
@@ -29,7 +29,7 @@ import {
 } from '@/components/business/dashboard/OwnerWatchlists';
 import { countRecentFailures } from '@/lib/notification/admin';
 
-export const metadata = { title: '管理员工作台' };
+export const metadata = { title: '工作台' };
 
 export default async function OwnerDashboardPage() {
   await requirePermission('report:all');
@@ -45,8 +45,9 @@ export default async function OwnerDashboardPage() {
 
   return (
     <div className="min-w-0 space-y-4">
-      <header className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">工作台</h1>
+      <PageHeader
+        title="工作台"
+        actions={
         <nav
           data-slot="dashboard-shortcuts"
           aria-label="工作台快捷操作"
@@ -68,7 +69,8 @@ export default async function OwnerDashboardPage() {
             新建工单
           </Link>
         </nav>
-      </header>
+        }
+      />
       <ErrorBoundary
         scope="section"
         title="工单待办暂时无法加载"

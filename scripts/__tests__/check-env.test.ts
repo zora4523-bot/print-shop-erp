@@ -93,6 +93,7 @@ function runCheckEnv(
         APP_PUBLIC_URL: 'https://erp.example.com',
         APP_VERSION: 'test',
         PDF_CHROMIUM_VERSION: '152.0.7977.75',
+        PDF_ORDER_MODE: 'direct',
         PDF_ARTIFACT_DIR: '/tmp/print-shop-erp-pdf-test',
         ORDER_EXPORT_ARTIFACT_DIR: '/tmp/print-shop-erp-export-test',
         ...overrides,
@@ -110,6 +111,9 @@ function runCheckEnv(
 }
 
 describe('portable PDF deployment configuration', () => {
+  it('rejects an unknown single-order execution mode', async () => {
+    expect((await runCheckEnv({ PDF_ORDER_MODE: 'unknown' })).code).toBe(1);
+  });
   it('rejects an unpinned production browser', async () => {
     expect((await runCheckEnv({ PDF_CHROMIUM_VERSION: '' })).code).toBe(1);
   });
@@ -119,4 +123,10 @@ describe('portable PDF deployment configuration', () => {
   it('rejects unknown storage backends', async () => {
     expect((await runCheckEnv({ PDF_ARTIFACT_STORAGE: 'unknown' })).code).toBe(1);
   });
+});
+
+it('requires an explicit PDF mode before production startup', async () => {
+  const result = await runCheckEnv({ PDF_ORDER_MODE: '' });
+  expect(result.code).toBe(1);
+  expect(result.stdout).toContain('PDF_ORDER_MODE 必须显式配置');
 });

@@ -1,6 +1,7 @@
 import { Role } from '../../generated/prisma/enums';
 import type { Permission } from '../auth/permissions-dict';
 import { RULE_CENTER_SIDEBAR_ITEMS } from './rule-center';
+import { SALES_BILL_PAGE_TITLE } from '../agent-monthly-billing/labels';
 
 // 受控的图标名集合。新增图标时同时更新 AppSidebar 的 ICONS map。
 export type IconName =
@@ -77,6 +78,18 @@ const RULE_CENTER_ADMIN_MODULES: readonly AdminModuleMetadata[] =
 
 export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   {
+    id: 'sales.overview',
+    label: '我的总览',
+    routeBase: '/sales/overview',
+    iconName: 'LayoutDashboard',
+    breadcrumbLabel: '我的总览',
+    menuSection: 'workflow',
+    status: 'implemented',
+    menuOrder: 5,
+    menuRoles: [Role.SALES],
+    requiredPermission: 'bill:view:self',
+  },
+  {
     id: 'sales.workbench',
     label: '工作台',
     routeBase: '/workbench',
@@ -129,7 +142,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     label: '工单列表',
     routeBase: '/orders',
     iconName: 'ClipboardList',
-    breadcrumbLabel: '工单',
+    breadcrumbLabel: '工单列表',
     menuSection: 'workflow',
     status: 'implemented',
     menuOrder: 20,
@@ -144,7 +157,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     routeBase: '/orders/new',
     iconName: 'PlusCircle',
     // Crumb keeps the wording the rest of the shell already uses for this route.
-    breadcrumbLabel: '创建工单',
+    breadcrumbLabel: '新建工单',
     menuSection: 'workflow',
     status: 'implemented',
     menuOrder: 21,
@@ -181,7 +194,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     label: '账单',
     routeBase: '/owner/agent-bills',
     iconName: 'Wallet',
-    breadcrumbLabel: '代理商月度账单',
+    breadcrumbLabel: '外部销售月账单',
     menuSection: 'finance',
     status: 'implemented',
     menuOrder: 30,
@@ -394,10 +407,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'sales.orders.new',
-    label: '创建工单',
+    label: '新建工单',
     routeBase: '/orders/new',
     iconName: 'PlusCircle',
-    breadcrumbLabel: '创建工单',
+    breadcrumbLabel: '新建工单',
     menuSection: 'workflow',
     status: 'implemented',
     menuOrder: 20,
@@ -418,10 +431,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'sales.bills',
-    label: '我的账单',
+    label: SALES_BILL_PAGE_TITLE,
     routeBase: '/sales/bills',
     iconName: 'Wallet',
-    breadcrumbLabel: '我的账单',
+    breadcrumbLabel: SALES_BILL_PAGE_TITLE,
     menuSection: 'finance',
     status: 'implemented',
     menuOrder: 40,

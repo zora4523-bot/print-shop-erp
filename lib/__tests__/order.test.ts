@@ -3369,6 +3369,55 @@ describe('shipOrder', () => {
     });
   });
 
+  describe('legacy-scan PACKING order with required outsourcing (shared completion gate)', () => {
+    // 旧扫码模式下打包工序首次报工就把工单推进到 PACKING；内部工序全部
+    // 完成后完成闸口仍可能被外协挡住（缺单 / 数量不足），工单停在 PACKING。
+    // 发货闸口必须复用同一段外协判定，而不是只看「在途外协」。
+    function outsourceStore(rows: Array<{ status: string; itemSnapshots: Array<{ orderItemId: string; quantity: number }> }>) {
+      dbMock.outsourceOrder.findMany.mockImplementation(
+        async ({ where }: { where: { status: { in?: string[]; not?: string } } }) =>
+          where.status.in
+            ? rows.filter((row) => where.status.in!.includes(row.status)).map((_, i) => ({ id: `os-${i}` }))
+            : rows.map((row, i) => ({ id: `os-${i}`, orderItemIds: [], ...row })),
+      );
+      dbMock.orderItem.findMany.mockResolvedValue([
+        { id: 'item-1', sequence: 1, name: '烫金款', quantity: 1000, crafts: ['craft-out'] },
+      ]);
+      dbMock.craft.findMany.mockResolvedValue([{ id: 'craft-out', isOutsource: true }]);
+      dbMock.order.findUnique.mockResolvedValue(
+        shippableOrder({ status: OrderStatus.PACKING, requiresOutsource: true }),
+      );
+      dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+    }
+
+    it('refuses to ship when the required outsource order was never created', async () => {
+      outsourceStore([]);
+      await expect(shipOrder('o1', ownerActor, oneShipmentCommand)).rejects.toThrow(
+        /尚无外协单/,
+      );
+      expect(dbMock.order.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to ship when received outsource quantity does not cover the item', async () => {
+      outsourceStore([
+        { status: 'RECEIVED', itemSnapshots: [{ orderItemId: 'item-1', quantity: 600 }] },
+      ]);
+      await expect(shipOrder('o1', ownerActor, oneShipmentCommand)).rejects.toThrow(
+        /款式 1「烫金款」.*外协数量未覆盖/,
+      );
+      expect(dbMock.order.update).not.toHaveBeenCalled();
+    });
+
+    it('ships once required outsourcing is fully received and covered', async () => {
+      outsourceStore([
+        { status: 'RECEIVED', itemSnapshots: [{ orderItemId: 'item-1', quantity: 1000 }] },
+      ]);
+      await expect(shipOrder('o1', ownerActor, oneShipmentCommand)).resolves.toMatchObject({
+        status: OrderStatus.SHIPPED,
+      });
+    });
+  });
+
   it('finalizes administrator-entered actual shipment charges without discarding them', async () => {
     dbMock.order.findUnique
       .mockResolvedValueOnce({

@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { ActionNotice } from '@/components/ui-business';
 import { ActiveStateConfirmButton } from '@/components/business/master-data/ActiveStateConfirmButton';
 import { setMaterialActiveAction } from '@/actions/owner-materials';
@@ -21,9 +22,9 @@ export function ToggleMaterialActiveButton({
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<
-    MaterialMutationResult | null,
+    AppliedActiveState<MaterialMutationResult> | null,
     FormData
-  >(async () => action(materialId, nextActive), null);
+  >(async () => withAppliedActive(await action(materialId, nextActive), nextActive), null);
 
   const visibleState = pending ? null : state;
   const error = visibleState?.status === 'error' ? visibleState.message : null;
@@ -46,14 +47,14 @@ export function ToggleMaterialActiveButton({
       {error ? (
         <ActionNotice
           tone="error"
-          title={currentlyActive ? '物料停用失败' : '物料启用失败'}
+          title={visibleState?.appliedActive ? '物料启用失败' : '物料停用失败'}
           description={error}
         />
       ) : null}
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '物料已停用' : '物料已启用'}
+          title={visibleState?.appliedActive ? '物料已启用' : '物料已停用'}
         />
       ) : null}
     </div>

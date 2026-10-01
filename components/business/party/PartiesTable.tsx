@@ -1,4 +1,5 @@
 import type { SupplementContext } from '@/lib/form-drafts/model';
+import { buttonVariants } from '@/components/ui/button';
 import { supplementParams } from '@/lib/form-drafts/return-context';
 import Link from 'next/link';
 import {
@@ -134,7 +135,7 @@ export function PartiesTable({
                 <Link
                   href={`/owner/parties/${party.id}${supplement ? `?${new URLSearchParams(supplementParams(supplement))}` : ''}`}
                   prefetch={false}
-                  className="text-sm text-primary underline hover:no-underline"
+                  className={buttonVariants({ variant: 'ghost', size: 'sm' })}
                 >
                   编辑
                 </Link>

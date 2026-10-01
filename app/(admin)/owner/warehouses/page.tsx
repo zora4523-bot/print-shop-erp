@@ -38,7 +38,7 @@ import { listRecentStockTransfers } from '@/lib/stock-transfer';
 import { getWarehouseDashboard } from '@/lib/warehouse';
 
 export const metadata = {
-  title: '仓库作业台',
+  title: '仓库/库位',
 };
 
 type WarehouseDashboardPromise = ReturnType<typeof getWarehouseDashboard>;
@@ -59,8 +59,7 @@ export default async function OwnerWarehousesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="仓库作业台"
-        subtitle="库存仅在收货过账后增加。"
+        title="仓库/库位"
         actions={
           <Link href="/owner/materials/count" className={buttonVariants()}>
             <ClipboardCheck aria-hidden />
@@ -130,11 +129,11 @@ async function WarehouseDashboardContent({
   return (
     <>
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <StatCard label="启用仓库" value={`${dashboard.metrics.warehouseCount}`} icon={Warehouse} tone="info" />
-        <StatCard label="启用库位" value={`${dashboard.metrics.activeLocationCount}`} icon={MapPin} tone="info" />
-        <StatCard label="有库存库位" value={`${dashboard.metrics.stockPositionCount}`} icon={PackageCheck} tone="primary" />
-        <StatCard label="待收货明细" value={`${dashboard.metrics.pendingReceiptLineCount}`} icon={PackageOpen} tone={dashboard.metrics.pendingReceiptLineCount ? 'warning' : 'success'} />
-        <StatCard label="今日收货单" value={`${dashboard.metrics.todayReceiptCount}`} icon={History} tone="success" />
+        <StatCard label="启用仓库" value={`${dashboard.metrics.warehouseCount}`} icon={Warehouse} tone="neutral" />
+        <StatCard label="启用库位" value={`${dashboard.metrics.activeLocationCount}`} icon={MapPin} tone="neutral" />
+        <StatCard label="有库存库位" value={`${dashboard.metrics.stockPositionCount}`} icon={PackageCheck} tone="neutral" />
+        <StatCard label="待收货明细" value={`${dashboard.metrics.pendingReceiptLineCount}`} icon={PackageOpen} tone={dashboard.metrics.pendingReceiptLineCount ? 'warning' : 'neutral'} />
+        <StatCard label="今日收货单" value={`${dashboard.metrics.todayReceiptCount}`} icon={History} tone="neutral" />
         <StatCard
           label="库存一致性"
           value={integrityOk ? '正常' : `${dashboard.metrics.integrityMismatchCount} 项异常`}
@@ -147,7 +146,6 @@ async function WarehouseDashboardContent({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">采购待收货</h2>
-            <p className="text-sm text-muted-foreground">到货后在采购单中选择实际库位收货；支持分批收货。</p>
           </div>
           <Link href="/owner/purchases" className={buttonVariants({ variant: 'outline' })}>查看采购单</Link>
         </div>
@@ -176,7 +174,6 @@ async function WarehouseDashboardContent({
       <section className="rounded-xl border bg-card p-5 shadow-sm">
         <div className="mb-4">
           <h2 className="flex items-center gap-2 font-semibold"><ArrowRightLeft className="size-4" aria-hidden />库位调拨</h2>
-          <p className="text-sm text-muted-foreground">调拨会同时减少来源库存并增加目标库存；任一步失败则不生效。</p>
         </div>
         <StockTransferForm
           action={createStockTransferAction}

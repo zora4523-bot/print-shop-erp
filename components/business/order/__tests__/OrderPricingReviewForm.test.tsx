@@ -227,7 +227,7 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     expect(html).toContain('请补录待核价项。');
     expect(html).toContain('已报价');
     expect(html).toContain('建单转人工原因：客户自带纸，建单时转人工');
-    expect(html).toContain('订单级待核价费用');
+    expect(html).toContain('整单待核价费用');
     expect(html).toContain('制版费待工厂确认');
     expect(html).toContain('待管理员补录');
     expect(html).toContain('href="#pricing-review-item-item-manual"');
@@ -420,6 +420,7 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     expect(html).toContain('费用已确认，正在刷新工单状态');
     expect(harness.confirmDisabled).toBe(true);
     expect(harness.previewAction).toHaveBeenCalledTimes(1);
-    expect(harness.refresh).toHaveBeenCalledTimes(1);
+    // finalizeOrderPricingAction revalidates; its response re-renders the page (DECISIONS 2026-08-27).
+    expect(harness.refresh).not.toHaveBeenCalled();
   });
 });

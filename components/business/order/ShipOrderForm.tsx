@@ -197,7 +197,7 @@ export function ShipOrderForm({
         disabled={pending || state?.status === 'success' || shipments.length === 0}
         aria-busy={pending}
       >
-        {pending ? '处理中…' : state?.status === 'success' ? '已发货' : `确认 ${shipments.length} 个地址已发货`}
+        {pending ? '正在处理…' : state?.status === 'success' ? '已发货' : `确认 ${shipments.length} 个地址已发货`}
       </Button>
       <ConfirmActionController level="L2"
         open={confirmationOpen}

@@ -30,7 +30,7 @@ export default async function SalaryIndexPage() {
               href={RULE_CENTER_HREFS.employeePay}
               className={buttonVariants({ variant: 'outline' })}
             >
-              设置员工工资规则
+              设置员工薪酬规则
             </Link>
           </div>
         }
@@ -43,7 +43,7 @@ export default async function SalaryIndexPage() {
             label="今日已锁定"
             value={`${s.pieceworkToday.count} 条`}
             icon={Calculator}
-            tone="info"
+            tone="neutral"
             hint={`合计 ${formatMoney(s.pieceworkToday.payableTotal)}`}
           />
           <StatCard
@@ -56,7 +56,7 @@ export default async function SalaryIndexPage() {
             label="累计未发（所有日期）"
             value={formatMoney(s.pieceworkUnpaidAllTime.payableTotal)}
             icon={Calculator}
-            tone="primary"
+            tone="warning"
             hint={`${s.pieceworkUnpaidAllTime.count} 条`}
           />
         </div>
@@ -65,13 +65,13 @@ export default async function SalaryIndexPage() {
             href="/owner/salary/piecework"
             className={buttonVariants({ variant: 'outline', size: 'sm' })}
           >
-            查看工序计件结算 →
+            查看工序计件结算
           </Link>
         </div>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-base font-semibold">历史开机师傅日薪档案</h2>
+        <h2 className="text-base font-semibold">历史日薪档案</h2>
         <p className="text-sm text-muted-foreground">
           历史日薪记录
         </p>
@@ -87,21 +87,31 @@ export default async function SalaryIndexPage() {
             label="历史累计未发"
             value={formatMoney(s.dailyUnpaidAllTime.actualTotal)}
             icon={Archive}
-            tone="neutral"
+            tone="warning"
             hint={`${s.dailyUnpaidAllTime.count} 条`}
           />
         </div>
-        <Link
-          href="/owner/salary/daily"
-          className={buttonVariants({ variant: 'outline', size: 'sm' })}
-        >
-          查看历史日薪档案 →
-        </Link>
+        <div>
+          <Link
+            href="/owner/salary/daily"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看历史日薪档案
+          </Link>
+        </div>
       </section>
 
-      <Link href="/owner/salary/hourly" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-        历史时薪档案
-      </Link>
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold">历史时薪档案</h2>
+        <div>
+          <Link
+            href="/owner/salary/hourly"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看历史时薪档案
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }

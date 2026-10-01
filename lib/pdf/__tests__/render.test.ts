@@ -2,9 +2,13 @@ import type { Browser, Page } from 'puppeteer';
 import { TimeoutError } from 'puppeteer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  closeWorkerPdfBrowser,
+  enableWorkerPdfBrowserReuse,
   PDF_PRINT_READY_TIMEOUT_MS,
   renderHtmlToPdf,
 } from '../render';
+import { PdfBrowserPool } from '../browser-pool';
+import { PDF_WORKER_RENDER_BUDGET_MS } from '../launch-options';
 
 function renderHarness() {
   const page = {
@@ -130,4 +134,27 @@ it('rejects failed uploaded artwork before producing a cacheable PDF', async () 
   await expect(renderHtmlToPdf({ html: '<html></html>', browser, requireArtwork: true })).rejects.toMatchObject({ name: 'PrintArtworkUnavailableError' });
   expect(page.pdf).not.toHaveBeenCalled();
   expect(page.close).toHaveBeenCalledOnce();
+});
+
+it('preserves the warning PDF contract while reporting incomplete artwork to the cache', async () => {
+  const { browser, page } = renderHarness();
+  vi.mocked(page.evaluate).mockResolvedValueOnce('ready').mockResolvedValueOnce('ready').mockResolvedValueOnce(true);
+  const unavailable = vi.fn();
+  await renderHtmlToPdf({ html: '<html></html>', browser, onArtworkUnavailable: unavailable });
+  expect(unavailable).toHaveBeenCalledOnce();
+  expect(page.pdf).toHaveBeenCalledOnce();
+});
+
+it('passes a caller budget to the reused worker pool, where it starts only once the browser is owned', async () => {
+  const run = vi.spyOn(PdfBrowserPool.prototype, 'run').mockResolvedValue(Buffer.from('%PDF-'));
+  enableWorkerPdfBrowserReuse();
+  try {
+    await renderHtmlToPdf({ html: '<p>probe</p>', budgetMs: 30_000 });
+    await renderHtmlToPdf({ html: '<p>job</p>' });
+    expect(run.mock.calls[0]![1]).toEqual({ budgetMs: 30_000 });
+    expect(run.mock.calls[1]![1]).toEqual({ budgetMs: PDF_WORKER_RENDER_BUDGET_MS });
+  } finally {
+    await closeWorkerPdfBrowser();
+    run.mockRestore();
+  }
 });

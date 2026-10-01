@@ -1,13 +1,13 @@
 'use client';
 
 import { useActionState } from 'react';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { PendingLink } from '@/components/ui-business';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { CraftMutationResult } from '@/actions/owner-crafts.types';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { useReportFormPending } from '@/components/business/form/FormPendingScope';
 
 type EditInitial = {
   name: string;
@@ -44,13 +44,13 @@ export function CraftForm(props: Props) {
     props.action,
     null,
   );
+  useReportFormPending(pending);
   const isCreate = props.mode === 'create';
   const initial = props.mode === 'edit' ? props.initial : undefined;
 
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
-  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.crafts;
   const hasUnassignedFieldError = Object.entries(errs).some(
     ([field, messages]) =>
       !['name', 'sortOrder'].includes(field) && Boolean(messages?.length),
@@ -68,7 +68,7 @@ export function CraftForm(props: Props) {
         defaultValue={initial?.name}
       />
 
-      <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+      <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
         <Checkbox
           name="isOutsource"
           defaultChecked={initial?.isOutsource}
@@ -77,9 +77,6 @@ export function CraftForm(props: Props) {
         />
         <span className="min-w-0 space-y-1 py-2.5">
           <span className="block">外协工艺</span>
-          <span className="block text-xs text-muted-foreground">
-            勾选后，该工艺进入外协清单；内部工序由工单收费项固定生成。
-          </span>
         </span>
       </label>
 
@@ -114,15 +111,8 @@ export function CraftForm(props: Props) {
 
       <div className="flex gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? '提交中…' : isCreate ? '创建工艺' : '保存修改'}
+          {pending ? '正在提交…' : isCreate ? '创建工艺' : '保存修改'}
         </Button>
-        <PendingLink
-          href={routeBase}
-          pending={pending}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          返回列表
-        </PendingLink>
       </div>
     </form>
   );

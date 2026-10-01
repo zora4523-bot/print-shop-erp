@@ -34,7 +34,6 @@ export default async function BackgroundJobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="后台任务"
-        subtitle="查看后台任务状态和失败记录；普通失败可重试，导出失败需重新发起。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -42,7 +41,7 @@ export default async function BackgroundJobsPage() {
         <Metric label="重任务待处理" value={health.pending.HEAVY} />
         <Metric label="执行中" value={health.running} />
         <Metric
-          label="24h 死信"
+          label="24 小时内失败"
           value={health.deadLast24h}
           // 只有非通知类死信才标红：企业微信抖一次就能产出上百条通知死信，
           // 一直红着反而让人对这个数字脱敏。通知的部分放在副标里。
@@ -56,13 +55,14 @@ export default async function BackgroundJobsPage() {
       </div>
 
       <div className="rounded-xl border bg-card p-4 text-sm shadow-sm">
-        <div className="font-medium">活跃 worker</div>
+        <div className="font-medium">在线的后台处理进程</div>
         <div className="mt-2 flex flex-wrap gap-2">
           {health.activeWorkers.length ? health.activeWorkers.map((worker, index) => (
             <Badge key={`${worker.queue}-${index}`} variant="outline">
               {backgroundJobQueueLabel(worker.queue)} · {formatDateTimeShanghai(worker.lastSeenAt)}
+              {worker.queue === 'HEAVY' ? ` · PDF ${worker.pdfReady === true ? '可用' : worker.pdfReady === false ? '暂不可用' : '状态未知'}` : ''}
             </Badge>
-          )) : <span className="text-destructive">未检测到 worker 心跳</span>}
+          )) : <span className="text-destructive">未检测到在线的后台处理进程</span>}
         </div>
       </div>
 
@@ -74,8 +74,8 @@ export default async function BackgroundJobsPage() {
               <th className="px-3 py-2 text-left">类型</th>
               <th className="px-3 py-2 text-left">队列</th>
               <th className="px-3 py-2 text-left">状态</th>
-              <th className="px-3 py-2 text-right">尝试</th>
-              <th className="px-3 py-2 text-left">错误码</th>
+              <th className="px-3 py-2 text-right">尝试次数</th>
+              <th className="px-3 py-2 text-left">失败原因</th>
               <th className="px-3 py-2 text-right">操作</th>
             </tr>
           </thead>
@@ -87,7 +87,7 @@ export default async function BackgroundJobsPage() {
                   colSpan={7}
                   className="px-3 py-8 text-center text-sm text-muted-foreground"
                 >
-                  暂无后台任务。通知、定时结算与文件生成的任务会落在这里。
+                  暂无后台任务。
                 </td>
               </tr>
             ) : null}

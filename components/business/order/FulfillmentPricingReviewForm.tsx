@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState, useTransition, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   finalizeFulfillmentPricingAction,
   previewFulfillmentPricingAction,
@@ -14,7 +13,9 @@ import type {
 import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 import { formatMoney } from '@/lib/dashboard/format';
 import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
 import { useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 
 type Props = {
@@ -22,6 +23,8 @@ type Props = {
   currentValue: boolean;
   isPricingPending: boolean;
   variant?: 'page' | 'drawer';
+  /** 详情页费用区默认收起（业主 2026-10-01：先下发生产，物流后处理；缩短详情页）。 */
+  collapsible?: boolean;
   onSuccess?: () => void;
   shipments: Array<{
     id: string;
@@ -57,8 +60,7 @@ function readCommand(form: HTMLFormElement, orderId: string, isSfCollect: boolea
   };
 }
 
-export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments, variant = 'page', onSuccess }: Props) {
-  const router = useRouter();
+export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments, variant = 'page', collapsible = false, onSuccess }: Props) {
   const [target, setTarget] = useState(currentValue);
   const [edited, setEdited] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -136,8 +138,8 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
         });
         if (result.status === 'success') {
           setConfirmed(true);
-          if (onSuccess) onSuccess();
-          else router.refresh();
+          // The action revalidated; its response re-renders the page (DECISIONS 2026-08-27).
+          onSuccess?.();
         } else {
           setError(failureText(result));
           setAccepted(null);
@@ -151,31 +153,28 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   }
 
   const quote = accepted?.preview;
-  return (
-    <section data-variant={variant} id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
-      {auxiliary.blocked ? <p className="text-xs text-muted-foreground">请先保存或还原正在编辑的工单资料或费用。</p> : null}
-      <h3 className="text-sm font-semibold">物流费用确认</h3>
-
+  const heading = <h3 className="text-sm font-semibold">物流费用确认</h3>;
+  const blockedNotice = auxiliary.blocked ? <p className="text-xs text-muted-foreground">请先保存或还原正在编辑的工单资料或费用。</p> : null;
+  const body = (
+    <>
       {confirmed ? (
-        <p role="status" className="mt-3 text-sm">物流费用已确认，工单已刷新。</p>
+        <p role="status" className="mt-3 text-sm">物流费用已确认。</p>
       ) : (
         <form key={formVersion} onSubmit={preview} onChange={invalidatePreview} aria-busy={pending} className="mt-4 min-w-0 space-y-4">
           <fieldset disabled={pending || auxiliary.blocked} className="min-w-0 space-y-4">
             <div className="max-w-sm space-y-1">
               <label htmlFor={`fulfillment-mode-${orderId}`} className="text-sm font-medium">更正后的物流方式</label>
-              <select
+              <NativeSelect
                 id={`fulfillment-mode-${orderId}`}
                 value={String(target)}
                 onChange={(event) => setTarget(event.target.value === 'true')}
-                className={fieldClass}
+                className="w-full"
               >
                 <option value="true">顺丰到付（本单不收快递费）</option>
                 <option value="false">非到付（确认对客快递费）</option>
-              </select>
+              </NativeSelect>
             </div>
-            {target ? (
-              <p className="text-sm text-muted-foreground">对客快递费将按零元核对，其他收费保持不变；存在已记录运费成本时仍需先处理成本冲突。</p>
-            ) : shipments.map((shipment) => {
+            {target ? null : shipments.map((shipment) => {
               const prefix = `fulfillment-${shipment.id}`;
               return (
                 <fieldset key={shipment.id} className="grid min-w-0 gap-3 rounded-lg border p-3 sm:grid-cols-2">
@@ -183,10 +182,10 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
                   <input type="hidden" name="sfShipmentId" value={shipment.id} />
                   <div className="min-w-0 space-y-1">
                     <label htmlFor={`${prefix}-province`} className="text-xs font-medium">计费省份</label>
-                    <select id={`${prefix}-province`} name="sfShipmentDestinationProvince" defaultValue={shipment.destinationProvince ?? ''} className={fieldClass}>
+                    <NativeSelect id={`${prefix}-province`} name="sfShipmentDestinationProvince" defaultValue={shipment.destinationProvince ?? ''} className="w-full">
                       <option value="">请选择计费省份</option>
                       {ZTO_PROVINCE_OPTIONS.map((province) => <option key={province} value={province}>{province}</option>)}
-                    </select>
+                    </NativeSelect>
                   </div>
                   <div className="min-w-0 space-y-1">
                     <label htmlFor={`${prefix}-weight`} className="text-xs font-medium">计费重量（kg）</label>
@@ -204,7 +203,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
               );
             })}
             <Button type="submit" variant="outline" disabled={pending || auxiliary.blocked || (!isPricingPending && target === currentValue && (target || !edited))}>
-              {pending ? '处理中…' : '预览费用差额'}
+              {pending ? '正在处理…' : '预览费用差额'}
             </Button>
           </fieldset>
           {quote ? (
@@ -222,7 +221,6 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
                 ))}
               </ul>
               {quote.issues.length > 0 ? <ul role="alert" className="list-inside list-disc text-sm text-destructive">{quote.issues.map((issue, index) => <li key={`${index}-${issue}`}>{issue}</li>)}</ul> : null}
-              <p className="text-xs text-muted-foreground">确认后采用上方物流金额。</p>
               <Button type="button" disabled={pending || auxiliary.blocked || !quote.canConfirm} onClick={confirmPricing}>
                 确认物流费用
               </Button>
@@ -232,8 +230,23 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
         </form>
       )}
       {auxiliary.managed && dirty ? <Button type="button" variant="outline" className="mt-3" disabled={pending || auxiliary.pending} onClick={resetDraft}>还原物流输入</Button> : null}
+    </>
+  );
+  // 收起时表单仍挂载在 <details> 内，未提交的输入不丢；#fulfillment-pricing 深链会展开祖先 details。
+  if (collapsible) {
+    return (
+      <Disclosure data-variant={variant} id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-1">
+        <DisclosureSummary className="gap-2">{heading}<DisclosureIndicator /></DisclosureSummary>
+        {blockedNotice}
+        {body}
+      </Disclosure>
+    );
+  }
+  return (
+    <section data-variant={variant} id="fulfillment-pricing" className="min-w-0 scroll-mt-24 border-t pt-4">
+      {blockedNotice}
+      {heading}
+      {body}
     </section>
   );
 }
-
-const fieldClass = 'min-h-9 w-full rounded-lg border border-input bg-background px-2.5 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';

@@ -15,11 +15,11 @@ test('从外协列表选择工单后真实创建外协', async ({ page }) => {
   await page.getByRole('textbox', { name: '搜索工单', exact: true }).fill(fixture.orderNo);
   await page.getByRole('button', { name: '应用筛选', exact: true }).click();
   await page.locator(`a[href="/orders/${fixture.orderId}"]`).first().click();
-  await page.getByRole('link', { name: '创建外协单', exact: true }).click();
+  await page.getByRole('link', { name: '新建外协单', exact: true }).click();
   await page.getByRole('checkbox', { name: /^#1 · 外协回归款1/ }).check();
   const supplierName = `可发现性回归外协厂 ${fixture.orderNo}`;
   await page.getByLabel('外协厂名 *', { exact: true }).fill(supplierName);
-  await page.getByRole('button', { name: '创建外协单', exact: true }).click();
+  await page.getByRole('button', { name: '创建并标记已发出', exact: true }).click();
   await expect(page).toHaveURL(/\/foreman\/outsource\/(?!new)[a-z0-9_-]+$/i);
   await page.getByRole('navigation', { name: '后台主导航', exact: true }).getByRole('link', { name: '外协', exact: true }).click();
   await expect(page).toHaveURL(/\/foreman\/outsource$/);
@@ -59,7 +59,7 @@ test('外协列表引导到工单列表，规则中心只有一个薪酬入口',
   await expect(page).toHaveURL(/\/orders$/);
   await page.goto('/owner/rules');
   const main = page.locator('#admin-main');
-  await expect(main.getByText('维护计件工价、标准工时与加班起点', { exact: true })).toBeVisible();
+  await expect(main.getByText('计件工价、标准工时与加班起点', { exact: true })).toBeVisible();
   const link = main.locator('a[href="/owner/rules/employee-pay"]');
   await expect(link).toHaveCount(1);
   await link.click();

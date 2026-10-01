@@ -171,10 +171,14 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
       const fees = adminPage.locator('#admin-fee-editor');
       await expect(fees.getByLabel('收费金额（元）').first()).toBeVisible();
       await fees.getByLabel('收费金额（元）').last().fill(purpose === '打样' ? '99.00' : '3.00');
-      await fees.getByLabel('定价依据（必填）').fill('管理员调整样品收费');
+      await fees.getByLabel('定价依据').fill('管理员调整样品收费');
       await fees.getByRole('button', { name: '保存收费', exact: true }).click();
       await expect.poll(async () => (await db.query('SELECT "confirmedFee"::text AS fee FROM "Order" WHERE id=$1', [orderId])).rows[0].fee).toBe(purpose === '打样' ? '99.00' : '3.00');
-      await adminPage.goto('/orders');
+      // 按工单号定位：其他夹具（看板夹具按上海「今天中午」建单、原生 SQL 以
+      // Asia/Shanghai 会话 NOW() 写入无时区列）会产生晚于当前 UTC 的 createdAt，
+      // 上海时间 0–12 点跑全套时把本单挤出默认队列首页（每页 20 条）。
+      const { orderNo } = (await db.query('SELECT "orderNo" FROM "Order" WHERE id=$1', [orderId])).rows[0];
+      await adminPage.goto(`/orders?q=${encodeURIComponent(orderNo)}`);
       await expect(
         adminPage
           .locator('[data-slot="badge"]')
@@ -243,7 +247,7 @@ for (const purpose of ['寄样品', '打样'] as const) {
     const lookup = await database();
     const sales = (await lookup.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
     await lookup.end();
-    await page.getByLabel('关联外部销售（必填）', { exact: true }).selectOption(sales);
+    await page.getByLabel('关联外部销售', { exact: true }).selectOption(sales);
     await page.getByLabel('工单名称', { exact: false }).fill('管理员样品工单名称');
     await page.getByRole('button', { name: purpose, exact: true }).click();
     await contact(page);
@@ -307,7 +311,7 @@ test('管理员关联销售后切换寄样、刷新仍保留工单归属', async
   const db = await database();
   try {
     const sales = (await db.query('SELECT id FROM "User" WHERE username=$1', ['e2e-sample-sales'])).rows[0].id;
-    await page.getByLabel('关联外部销售（必填）', { exact: true }).selectOption(sales);
+    await page.getByLabel('关联外部销售', { exact: true }).selectOption(sales);
     await page.getByRole('button', { name: '寄样品', exact: true }).click();
     await page.getByLabel('样品名称').fill('归属保留验收');
     await contact(page);
@@ -338,7 +342,7 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
     await page.evaluate(() => sessionStorage.clear());
     await page.reload();
     await page.getByRole('button', { name: purpose, exact: true }).click();
-    const sales = page.getByLabel('关联外部销售（必填）', { exact: true });
+    const sales = page.getByLabel('关联外部销售', { exact: true });
     await expect(sales).toBeVisible();
     await expect(sales).toHaveValue('');
     if (purpose === '寄样品') {

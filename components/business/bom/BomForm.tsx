@@ -5,13 +5,14 @@ import { emptyBomDraft, type FormDraftContext, type BomDraft } from '@/lib/form-
 import { useFormDraft } from '@/components/business/form-drafts/useFormDraft';
 import { DraftIdentityFields, DraftNotice, SupplementLink } from '@/components/business/form-drafts/FormDraftControls';
 import type { BomMutationResult } from '@/actions/owner-boms.types';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
 import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { NativeSelect } from '@/components/ui/native-select';
+import { useReportFormPending } from '@/components/business/form/FormPendingScope';
 
 export type BomProductOption = {
   id: string;
@@ -46,11 +47,10 @@ type Props = {
   materials: BomMaterialOption[];
 };
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function BomForm({ action, products, categories, materials, papers, draftContext, initialRowId }: Props) {
   const [state, formAction, pending] = useActionState<BomMutationResult | null, FormData>(action, null);
+  useReportFormPending(pending);
   const formRef = useRef<HTMLFormElement>(null);
   const draft = useFormDraft(draftContext, emptyBomDraft(initialRowId), formRef);
   const [feedback, setFeedback] = useState({ result: state, requestId: draft.identity.clientRequestId });
@@ -83,10 +83,9 @@ export function BomForm({ action, products, categories, materials, papers, draft
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="targetType">适用对象</Label>
-          <select
+          <NativeSelect
             id="targetType"
             name="targetType"
-            className={selectClass}
             value={targetType}
             onChange={(event) =>
               change('targetType', event.target.value as BomDraft['targetType'])
@@ -96,7 +95,7 @@ export function BomForm({ action, products, categories, materials, papers, draft
             <option value="BLANK">空白封纸张与规格</option>
             <option value="PRODUCT">其他产品</option>
             <option value="CATEGORY">产品结构分类</option>
-          </select>
+          </NativeSelect>
           {errs.targetType?.[0] ? (
             <p className="text-sm text-destructive">{errs.targetType[0]}</p>
           ) : null}
@@ -105,7 +104,7 @@ export function BomForm({ action, products, categories, materials, papers, draft
           id="name"
           value={payload.name}
           onChange={(value) => change('name', value)}
-          label="BOM 名称"
+          label="用料清单名称"
           disabled={disabled}
           error={errs.name?.[0]}
         />
@@ -116,10 +115,9 @@ export function BomForm({ action, products, categories, materials, papers, draft
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor="productId">其他产品</Label>
           </div>
-          <select
+          <NativeSelect
             id="productId"
             name="productId"
-            className={selectClass}
             value={payload.productId}
             onChange={(event) => change('productId', event.target.value)}
             disabled={disabled || targetType !== 'PRODUCT' || missingProducts}
@@ -132,7 +130,7 @@ export function BomForm({ action, products, categories, materials, papers, draft
                 {externalPriceBusinessText(product.categoryName)}）
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.productId?.[0] ? (
             <p className="text-sm text-destructive">{errs.productId[0]}</p>
           ) : null}
@@ -143,10 +141,9 @@ export function BomForm({ action, products, categories, materials, papers, draft
             <Label htmlFor="categoryNodeId">产品结构分类</Label>
             <SupplementLink href={`${RULE_CENTER_HREFS.productCategories}/new`} disabled={pending || draft.blocked || targetType !== 'CATEGORY'} onSupplement={() => draft.supplement('CATEGORY', 'categoryNodeId')}>新建分类</SupplementLink>
           </div>
-          <select
+          <NativeSelect
             id="categoryNodeId"
             name="categoryNodeId"
-            className={selectClass}
             value={payload.categoryNodeId}
             onChange={(event) => change('categoryNodeId', event.target.value)}
             disabled={disabled || targetType !== 'CATEGORY' || missingCategories}
@@ -157,7 +154,7 @@ export function BomForm({ action, products, categories, materials, papers, draft
                 {category.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.categoryNodeId?.[0] ? (
             <p className="text-sm text-destructive">{errs.categoryNodeId[0]}</p>
           ) : null}
@@ -168,18 +165,18 @@ export function BomForm({ action, products, categories, materials, papers, draft
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="blankPaperMaterialId">纸张</Label>
-            <select id="blankPaperMaterialId" name="blankPaperMaterialId" className={selectClass} disabled={disabled} value={payload.blankPaperMaterialId} onChange={(event) => change('blankPaperMaterialId', event.target.value)}>
+            <NativeSelect id="blankPaperMaterialId" name="blankPaperMaterialId" disabled={disabled} value={payload.blankPaperMaterialId} onChange={(event) => change('blankPaperMaterialId', event.target.value)}>
               <option value="">请选择纸张</option>
               {papers.map((paper) => <option key={paper.id} value={paper.id}>{externalPriceBusinessText(paper.name)} {externalPriceBusinessText(paper.specification ?? '')}</option>)}
-            </select>
+            </NativeSelect>
             {errs.blankPaperMaterialId?.[0] ? <p className="text-sm text-destructive">{errs.blankPaperMaterialId[0]}</p> : null}
           </div>
           <div className="space-y-2">
             <Label htmlFor="blankSpecificationKey">规格</Label>
-            <select id="blankSpecificationKey" name="blankSpecificationKey" className={selectClass} disabled={disabled} value={payload.blankSpecificationKey} onChange={(event) => change('blankSpecificationKey', event.target.value)}>
+            <NativeSelect id="blankSpecificationKey" name="blankSpecificationKey" disabled={disabled} value={payload.blankSpecificationKey} onChange={(event) => change('blankSpecificationKey', event.target.value)}>
               <option value="">请选择规格</option>
               {BLANK_SPECIFICATIONS.map((spec) => <option key={spec.key} value={spec.key}>{spec.specification}</option>)}
-            </select>
+            </NativeSelect>
             {errs.blankSpecificationKey?.[0] ? <p className="text-sm text-destructive">{errs.blankSpecificationKey[0]}</p> : null}
           </div>
         </div>
@@ -252,10 +249,9 @@ export function BomForm({ action, products, categories, materials, papers, draft
                     <Label htmlFor={`items.${index}.materialId`}>物料</Label>
                     <SupplementLink href="/owner/materials/new" disabled={pending || draft.blocked} onSupplement={() => draft.supplement('MATERIAL', `row:${row.rowId}`)}>新建物料</SupplementLink>
                   </div>
-                  <select
+                  <NativeSelect
                     id={`items.${index}.materialId`}
                     name={`items.${index}.materialId`}
-                    className={selectClass}
                     value={row.materialId}
                     onChange={(event) => changeRow(row.rowId, 'materialId', event.target.value)}
                     disabled={disabled || missingMaterials}
@@ -267,7 +263,7 @@ export function BomForm({ action, products, categories, materials, papers, draft
                         {material.unit}）
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
                 <TextField
                   id={`items.${index}.quantity`}
@@ -305,15 +301,8 @@ export function BomForm({ action, products, categories, materials, papers, draft
 
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={pending || draft.blocked || missingTarget || missingMaterials}>
-          {pending ? '提交中…' : '创建 BOM'}
+          {pending ? '正在创建用料清单…' : '创建用料清单'}
         </Button>
-        <PendingLink
-          href="/owner/boms"
-          pending={pending}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          返回列表
-        </PendingLink>
       </div>
     </form>
   );

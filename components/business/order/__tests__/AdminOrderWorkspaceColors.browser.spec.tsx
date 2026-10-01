@@ -70,7 +70,7 @@ afterEach(() => {
 function fixtureRows(): AdminOrderWorkspaceRow[] {
   const ready = batchOrder({
     id: 'ready', orderNo: 'GD-260908-001', status: OrderStatus.PENDING_FACTORY,
-    statusSummary: '费用已核定，待下发检查',
+    statusSummary: '费用已核定',
     capabilities: { ...batchOrder().capabilities, confirm: true, release: false },
   });
   return [
@@ -192,11 +192,12 @@ function expectControlsWithinViewport(width: number) {
     let rect = element.getBoundingClientRect();
     if (!rect.width || !rect.height || !element.checkVisibility()) continue;
     const label = element.getAttribute('aria-label') ?? element.textContent ?? element.tagName;
-    const queue = element.closest<HTMLElement>('nav[aria-label="工单队列"]');
-    if (queue && ['auto', 'scroll'].includes(getComputedStyle(queue).overflowX) && queue.scrollWidth > queue.clientWidth) {
-      const queueRect = queue.getBoundingClientRect();
-      expect(queueRect.left, '可滚动队列容器').toBeGreaterThanOrEqual(0);
-      expect(queueRect.right, '可滚动队列容器').toBeLessThanOrEqual(width);
+    // 看板、队列与快捷筛选在窄容器是条内横向滚动（审查 L-8）：条本身在视口内，项滚进来后再量。
+    const strip = element.closest<HTMLElement>('[data-slot="admin-order-scroll-strip"]');
+    if (strip && ['auto', 'scroll'].includes(getComputedStyle(strip).overflowX) && strip.scrollWidth > strip.clientWidth) {
+      const stripRect = strip.getBoundingClientRect();
+      expect(stripRect.left, '可滚动条容器').toBeGreaterThanOrEqual(0);
+      expect(stripRect.right, '可滚动条容器').toBeLessThanOrEqual(width);
       element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
       rect = element.getBoundingClientRect();
     }
@@ -224,6 +225,13 @@ describe('admin order workspace restrained semantic colors', () => {
         const cards = [...dashboard.querySelectorAll<HTMLElement>('a')];
         expect(cards).toHaveLength(9);
         if (width >= 1280) expect(new Set(cards.map((card) => card.getBoundingClientRect().top)).size).toBe(1);
+        // 任何视口都不出现孤行：每一行的卡片数相同（§8）。
+        const perRow = new Map<number, number>();
+        for (const card of cards) {
+          const top = Math.round(card.getBoundingClientRect().top);
+          perRow.set(top, (perRow.get(top) ?? 0) + 1);
+        }
+        expect(new Set(perRow.values()).size, `${width}px 每行卡片数`).toBe(1);
         expectControlsWithinViewport(width);
         expect(await commands.checkShellAccessibility('[data-testid="order-colors-fixture"]')).toEqual([]);
       });
@@ -281,18 +289,20 @@ describe('admin order workspace restrained semantic colors', () => {
         const number = card.firstElementChild as HTMLElement;
         const label = card.lastElementChild as HTMLElement;
         const expectedToken = signal === 'overdue' ? '--destructive'
-          : ['pending-pricing', 'pending-change', 'on-hold', 'due-today'].includes(signal ?? '') ? '--warning-foreground'
-            : '--foreground';
+          : signal === 'pending-pricing' ? '--primary'
+            : ['pending-change', 'on-hold', 'due-today'].includes(signal ?? '') ? '--warning-foreground'
+              : '--foreground';
         expectTextToken(number, expectedToken);
         expectTextToken(label, '--muted-foreground');
         expectNeutralCard(card);
       }
-      expectTextToken(rowText('ready', '费用已核定，待下发检查'), '--muted-foreground');
+      expectTextToken(rowText('ready', '费用已核定'), '--muted-foreground');
       expectTextToken(rowText('legacy', '待打印'), '--muted-foreground');
       expectTextToken(rowText('legacy', '急单'), '--warning-foreground');
       expectTextToken(rowText('legacy', '2026-09-10'), '--warning-foreground');
-      expectTextToken(rowText('pricing', '待核价 · 缺少专版报价'), '--warning-foreground');
-      expectTextToken(rowText('pricing', '待工厂核价'), '--warning-foreground');
+      // 待工厂核价 = 主强调，不是风险也不是失败（§4.3）。
+      expectTextToken(rowText('pricing', '待核价 · 缺少专版报价'), '--primary');
+      expectTextToken(rowText('pricing', '待工厂核价'), '--primary');
       expectTextToken(rowText('review', '⚠ 第 1 款缺 CDR'), '--warning-foreground');
       expectTextToken(rowText('hold', '等待补充设计文件'), '--warning-foreground');
       expectTextToken(rowText('rejected', '设计文件不符，已驳回'), '--destructive');
@@ -312,12 +322,13 @@ describe('admin order workspace restrained semantic colors', () => {
       const active = dashboard.querySelector<HTMLElement>('a[aria-current="page"]');
       expect(active).not.toBeNull();
       expect(active?.textContent).toContain('待核价');
-      expect(getComputedStyle(active!).borderTopColor).toBe(tokenColor(active!, '--foreground'));
+      // 选中态 = Button variant="selected"：primary 描边 + 淡底 + primary 字（§8.2）。
+      expect(getComputedStyle(active!).borderTopColor).toBe(tokenColor(active!, '--primary'));
       expect(getComputedStyle(active!).backgroundColor).not.toBe(tokenColor(active!, '--card'));
       expect(getComputedStyle(active!).backgroundImage).toBe('none');
       expect(dashboard.querySelectorAll('a[aria-current="page"]')).toHaveLength(1);
       for (const card of dashboard.querySelectorAll<HTMLElement>('a')) {
-        expectTextToken(card.firstElementChild as HTMLElement, '--foreground');
+        expectTextToken(card.firstElementChild as HTMLElement, card === active ? '--primary' : '--foreground');
         if (card !== active) expectNeutralCard(card);
       }
     });

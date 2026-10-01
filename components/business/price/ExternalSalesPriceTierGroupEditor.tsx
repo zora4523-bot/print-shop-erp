@@ -88,9 +88,9 @@ function TierActivationControl({
     <div className="flex min-w-0 items-center justify-end">
       <label
         aria-label={`${quantityFormatter.format(quantity)} 个价格档${active ? '启用' : '停用'}`}
-        className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+        className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
       >
-        <Checkbox
+        <Checkbox className="-ml-3"
           checked={active}
           disabled={disabled}
           onCheckedChange={onChange}
@@ -638,11 +638,12 @@ export function ExternalSalesPriceTierGroupEditor({
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           {presentation.instruction}
         </p>
-        <div className="mt-3 flex min-w-0 flex-wrap items-start gap-2">
-          <div className="min-w-0 flex-1 space-y-1">
-            <Label htmlFor={`${headingId}-batch-percent`} className="text-xs">
-              按百分比批量调草稿价
-            </Label>
+        {/* 标签、说明与错误放在「输入框 + 按钮」行之外，按钮与输入框底边对齐（ui-规范 §8.1）。 */}
+        <div className="mt-3 min-w-0 space-y-1">
+          <Label htmlFor={`${headingId}-batch-percent`} className="text-xs">
+            按百分比批量调草稿价
+          </Label>
+          <div className="flex min-w-0 flex-wrap items-end gap-2">
             <Input
               id={`${headingId}-batch-percent`}
               value={batchPercent}
@@ -650,7 +651,7 @@ export function ExternalSalesPriceTierGroupEditor({
               autoComplete="off"
               disabled={pending}
               placeholder="如 5.8 或 -3"
-              className="min-h-11 w-full font-sans tabular-nums"
+              className="min-h-11 min-w-0 flex-1 basis-40 font-sans tabular-nums"
               aria-invalid={Boolean(batchPercentError)}
               aria-describedby={
                 batchPercentError ? `${headingId}-batch-percent-error` : undefined
@@ -660,37 +661,37 @@ export function ExternalSalesPriceTierGroupEditor({
                 setBatchPercentError(null);
               }}
             />
-            <p className="text-xs text-muted-foreground">仅作用于当前启用档</p>
-            {batchPercentError ? (
-              <p
-                id={`${headingId}-batch-percent-error`}
-                role="alert"
-                className="admin-wrap-anywhere text-xs text-destructive"
-              >
-                {batchPercentError}
-              </p>
-            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              disabled={pending}
+              onClick={() => {
+                const result = applyExternalSalesTierPercentAdjustment(
+                  draftState,
+                  batchPercent,
+                );
+                if (!result.success) {
+                  setBatchPercentError(result.message);
+                  return;
+                }
+                setBatchPercentError(null);
+                commitDraftState(result.state);
+              }}
+            >
+              应用到启用档
+            </Button>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-11"
-            disabled={pending}
-            onClick={() => {
-              const result = applyExternalSalesTierPercentAdjustment(
-                draftState,
-                batchPercent,
-              );
-              if (!result.success) {
-                setBatchPercentError(result.message);
-                return;
-              }
-              setBatchPercentError(null);
-              commitDraftState(result.state);
-            }}
-          >
-            应用到启用档
-          </Button>
+          <p className="text-xs text-muted-foreground">仅作用于当前启用档</p>
+          {batchPercentError ? (
+            <p
+              id={`${headingId}-batch-percent-error`}
+              role="alert"
+              className="admin-wrap-anywhere text-xs text-destructive"
+            >
+              {batchPercentError}
+            </p>
+          ) : null}
         </div>
         <div className="mt-2 flex min-w-0 flex-wrap gap-2">
           <Button
@@ -806,7 +807,7 @@ export function ExternalSalesPriceTierGroupEditor({
                       inputMode="decimal"
                       autoComplete="off"
                       disabled={pending}
-                      className="min-h-11 min-w-0 pl-7 text-right font-sans tabular-nums @min-[31rem]:h-10 @min-[31rem]:!min-h-10"
+                      className="min-h-11 min-w-0 pl-7 text-right font-sans tabular-nums"
                       pattern="(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?"
                       required
                       aria-required="true"
@@ -876,7 +877,7 @@ export function ExternalSalesPriceTierGroupEditor({
         </ol>
       </div>
 
-      <footer className="sticky bottom-0 z-[5] min-w-0 border-t bg-card/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-card/85 admin-safe-bottom">
+      <footer className="sticky bottom-0 z-10 min-w-0 border-t bg-card/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-card/85 admin-safe-bottom">
         <div className="flex min-w-0 flex-col gap-3 @min-[31rem]:flex-row @min-[31rem]:items-center @min-[31rem]:justify-between">
           <div className="min-w-0">
             <TierMutationFeedback

@@ -32,8 +32,8 @@ describe('OrderExportControls polling recovery', () => {
     );
 
     expect(source).toContain('setPausedSignature(pendingSignature)');
-    expect(source).toContain('自动刷新已在 2 分钟后暂停');
-    expect(source).toContain('刷新并继续自动检查');
+    expect(source).toContain('尚未确认导出结果，请刷新进度。无需重新提交。');
+    expect(source).toContain('刷新进度');
     expect(source).toContain('setPausedSignature(null)');
     expect(source).toContain('router.refresh()');
     expect(source).toContain('<form action={formAction} aria-busy={pending}>');

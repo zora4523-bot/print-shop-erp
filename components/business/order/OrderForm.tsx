@@ -79,9 +79,11 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { OrderCreationLeaveBoundary, useOrderCompletion, useOrderLeaveReport, type LocalDraftSaveFailure } from './order-creation-leave';
+import { OrderCreatedSuccessView } from './OrderCreatedSuccessView';
 import { createOrderSchema, type CreateOrderInput } from '@/lib/auth/schemas';
 import {
   DesignFileType,
@@ -120,7 +122,6 @@ import {
 import {
   OrderFormB,
   OrderSubmissionReviewDialog,
-  OrderSubmissionSuccess,
   type OrderFormBErrors,
   type OrderSubmissionReviewItem,
 } from './order-form-b';
@@ -158,10 +159,7 @@ import { calculateCreateOrderBagCount } from '@/lib/order/create-order-packaging
 import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
 import { ADMIN_EXTERNAL_SALES_REQUIRED_MESSAGE, ORDER_SETTLEMENT_LABELS } from '@/lib/order/settlement';
 import { ORDER_PRICING_STATUS } from '@/lib/order/pricing-status';
-import {
-  shouldProtectOrderFormLeave,
-  useOrderFormLeaveGuard,
-} from './use-order-form-leave-guard';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 export type CraftOption = {
   id: string;
@@ -220,6 +218,11 @@ export type OrderFormProps = {
   initialEditor?: OrderEditorSnapshot;
   submissionId?: string;
   registerEditor?: (editor: OrderCreationEditor | null) => void;
+  /**
+   * 批量建单保活（审查 #47）：非当前工单的实例保持挂载但不在文档中，
+   * 此时不登记 editor、不挂离开守卫；草稿自动保存照常（各自独立的 draftScope）。
+   */
+  active?: boolean;
   lifecycle?: OrderCreationLifecycle;
   workbenchTransferId?: string;
   crafts: readonly CraftOption[];
@@ -599,7 +602,7 @@ function UrgentOrderField({
         <label
           htmlFor="isUrgent"
           data-slot="urgent-order-field"
-          className="grid min-w-0 cursor-pointer gap-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+          className="grid min-w-0 cursor-pointer gap-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
         >
           <span id="urgent-order-accessible-label" className="sr-only">
             急单（提交后会推送至排产群）
@@ -610,8 +613,8 @@ function UrgentOrderField({
           >
             急单
           </span>
-          <span className="flex min-w-0 items-center gap-1">
-            {/* 44px 触控目标里的 20px 勾选框与标题左对齐 */}
+          <span className="flex min-w-0 items-start gap-1">
+            {/* 44px 触控目标里的 20px 勾选框与标题左对齐；说明折行时勾选框对准首行（§8.1） */}
             <span className="-ml-3 shrink-0">
               <Checkbox
                 id="isUrgent"
@@ -626,7 +629,7 @@ function UrgentOrderField({
             </span>
             <span
               data-slot="urgent-order-description"
-              className="min-w-0 text-xs leading-4 text-muted-foreground"
+              className="min-w-0 pt-3.5 text-xs leading-4 text-muted-foreground"
             >
               提交后会推送至排产群
             </span>
@@ -637,7 +640,13 @@ function UrgentOrderField({
   );
 }
 
-export function OrderForm({
+export { GuardedOrderForm as OrderForm };
+
+function GuardedOrderForm(props: OrderFormProps) {
+  return <OrderCreationLeaveBoundary><OrderForm {...props} /></OrderCreationLeaveBoundary>;
+}
+
+function OrderForm({
   crafts,
   products,
   externalSalesAccounts,
@@ -647,7 +656,7 @@ export function OrderForm({
   workbenchTransferId,
   initialEditor,
   submissionId,
-  registerEditor,
+  registerEditor, active = true,
   lifecycle,
 }: OrderFormProps) {
   const sampleEditorRef = useRef(initialEditor?.sample);
@@ -666,7 +675,6 @@ export function OrderForm({
   // （持有 externalSalesAccounts）代建时必须选择外部销售。
   const canAssignExternalSales = externalSalesAccounts !== undefined;
   const isExternalSalesActor = !canAssignExternalSales;
-  const router = useRouter();
   const initialItem = useMemo(() => {
     const firstFoil = externalCreateOrderOptions?.foilColors[0]?.name;
     const item = createExternalOrderItem(
@@ -710,7 +718,7 @@ export function OrderForm({
     control,
     register,
     handleSubmit,
-    formState: { errors, isDirty, dirtyFields },
+    formState: { errors, dirtyFields },
     setValue,
     setError,
     clearErrors,
@@ -862,7 +870,7 @@ export function OrderForm({
     : localDraftSnapshot === LOCAL_DRAFT_STORAGE_UNAVAILABLE
       ? '浏览器暂时无法使用本地草稿；本次填写不会自动保存在本机。'
       : localDraftSnapshot && !storedLocalDraft
-        ? '本地旧草稿已损坏或版本过旧，已安全忽略。'
+        ? '旧草稿无法恢复，请重新填写。'
         : null;
   const localDraftStatusError = localDraftError ?? detectedLocalDraftError;
   const pendingState = resolveOrderFormPendingState({
@@ -878,14 +886,11 @@ export function OrderForm({
     (total, queue) => total + queue.length,
     0,
   );
-  useOrderFormLeaveGuard(
-    shouldProtectOrderFormLeave({
-      enabled: true,
-      dirty: isDirty,
-      pendingFileCount: pendingDesignFileCount,
-      submitted: Boolean(submittedOrder),
-    }),
-  );
+  const [persistedValues, setPersistedValues] = useState<CreateOrderInput>(() => initialEditor?.persistedValues ?? structuredClone(getValues()));
+  const persistedValuesRef = useRef(persistedValues);
+  const unsavedContent = JSON.stringify(getValues()) !== JSON.stringify(persistedValues);
+  const [completion, setCompletion] = useState<{ draft: NonNullable<typeof createdDraft>; manualQuote: boolean; readyForProduction: boolean } | null>(null);
+  const draftFailureRef = useRef<LocalDraftSaveFailure>('storage');
   const persistLocalDraftValues = useCallback(
     (values: CreateOrderInput) => {
       const savedAt = new Date();
@@ -895,7 +900,8 @@ export function OrderForm({
         savedAt,
       );
       if (!serialized) {
-        setLocalDraftError('当前表单无法安全序列化，本地草稿未更新。');
+        draftFailureRef.current = 'unserializable';
+        setLocalDraftError('本机草稿未保存，请留在本页，检查填写内容后重试。');
         return false;
       }
       try {
@@ -903,27 +909,32 @@ export function OrderForm({
         setLocalDraftDecisionComplete(true);
         setLastLocalDraftSavedAt(savedAt.toISOString());
         setLocalDraftError(null);
+        persistedValuesRef.current = structuredClone(values);
+        setPersistedValues(persistedValuesRef.current);
         return true;
       } catch {
+        draftFailureRef.current = 'storage';
         setLocalDraftError('本地草稿保存失败，请不要在创建工单前关闭页面。');
         return false;
       }
     },
     [localDraftPricingScope, localDraftStorageKey],
   );
+  // 离开保护由工作台统一管理（order-creation-leave）；这里只上报本单状态并取页头返回。
+  const leave = useOrderLeaveReport(clientSubmissionId, { active, dirty: unsavedContent, pendingFileCount: pendingDesignFileCount,
+    submitted: Boolean(submittedOrder), busy: submitting || uploading }, () => (persistLocalDraftValues(getValues()) ? null : draftFailureRef.current));
 
   useEffect(() => {
-    if (!registerEditor) return;
+    if (!registerEditor || !active) return;
     registerEditor({
       canLeave: localDraftReady && !submitting && !uploading && !createdDraft && !pendingSubmission,
-      save: () => {
+      capture: () => {
         const values = getValues();
-        persistLocalDraftValues(values);
-        return { sample: samplePurpose ? structuredClone(sampleEditorRef.current) : undefined, values: structuredClone(values), files: itemsArray.fields.map((field) => selectedDesignQueues[field.id] ?? []) };
+        return { persistedValues: structuredClone(persistedValuesRef.current), sample: samplePurpose ? structuredClone(sampleEditorRef.current) : undefined, values: structuredClone(values), files: itemsArray.fields.map((field) => selectedDesignQueues[field.id] ?? []) };
       },
     });
     return () => registerEditor(null);
-  }, [registerEditor, getValues, persistLocalDraftValues, itemsArray.fields, selectedDesignQueues, samplePurpose,
+  }, [registerEditor, active, getValues, persistedValues, itemsArray.fields, selectedDesignQueues, samplePurpose,
     localDraftReady, submitting, uploading, createdDraft, pendingSubmission]);
 
   useEffect(() => {
@@ -959,7 +970,7 @@ export function OrderForm({
   }, [clientSubmissionId, isExternalSalesActor, pendingLocalDraft, reset, transferReady]);
 
   useEffect(() => {
-    if (!localDraftReady || pendingLocalDraft || createdDraft || !isDirty) {
+    if (!localDraftReady || pendingLocalDraft || createdDraft || !unsavedContent) {
       return;
     }
     const timer = window.setTimeout(() => {
@@ -968,7 +979,7 @@ export function OrderForm({
     return () => window.clearTimeout(timer);
   }, [
     createdDraft,
-    isDirty,
+    unsavedContent,
     localDraftReady,
     pendingLocalDraft,
     externalInputRevision,
@@ -1089,20 +1100,7 @@ export function OrderForm({
           OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS;
       }
 
-      lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderNo, intent: draft.intent });
-      if (lifecycle?.retainResult && draft.intent !== 'fees') {
-        setPendingSubmission(null);
-      } else if (draft.intent === 'submit') {
-        setSubmittedOrder({
-          orderId: draft.orderId,
-          orderNo: draft.orderNo,
-          manualQuote: submittedManualQuote,
-          readyForProduction,
-        });
-        setPendingSubmission(null);
-      } else {
-        router.push(`/orders/${draft.orderId}${draft.intent === 'fees' ? '#admin-fee-editor' : ''}`);
-      }
+      setCompletion({ draft, manualQuote: submittedManualQuote, readyForProduction });
     } catch {
       setUploadProgress(null);
       setUploadError('草稿已安全保存，但后续处理未完成，请重试。');
@@ -1110,6 +1108,19 @@ export function OrderForm({
       setUploading(false);
     }
   }
+
+  useOrderCompletion(completion, submitting || uploading, ({ draft, manualQuote, readyForProduction }) => {
+    setCompletion(null);
+    leave.finishOrder?.(clientSubmissionId);
+    lifecycle?.onCompleted({ orderId: draft.orderId, orderNo: draft.orderNo, intent: draft.intent });
+    setPendingSubmission(null);
+    if (lifecycle?.retainResult && draft.intent !== 'fees') return;
+    if (draft.intent === 'submit') {
+      setSubmittedOrder({ orderId: draft.orderId, orderNo: draft.orderNo, manualQuote, readyForProduction });
+    } else {
+      leave.navigate?.(`/orders/${draft.orderId}${draft.intent === 'fees' ? '#admin-fee-editor' : ''}`);
+    }
+  });
 
   function applyWorkbenchTransfer(input: WorkbenchItemQuoteInput): string | null {
     const requested = { ...createBlankItem(crafts), ...input.item };
@@ -1256,6 +1267,9 @@ export function OrderForm({
       }
 
       lifecycle?.onCreated({ orderId: result.orderId, orderNo: result.orderNo, intent });
+      // The server now owns the text; only unsuccessful uploads remain at risk.
+      persistedValuesRef.current = structuredClone(getValues());
+      setPersistedValues(persistedValuesRef.current);
       clearLocalDraftAfterServerCreate();
 
       const draft = {
@@ -2063,7 +2077,7 @@ export function OrderForm({
             ? response.message
             : response.status === 'invalid'
               ? Object.values(response.fieldErrors).flat().join('；')
-              : '报价响应与当前工单不一致，请重试';
+              : '当前报价不可用，请重新报价。';
         setQuoteViews(
           Object.fromEntries(
             fieldIds.map((fieldId, index) => [
@@ -2602,34 +2616,14 @@ export function OrderForm({
     items: externalItemErrors,
   };
   if (samplePurpose && externalCreateOrderOptions) {
-    return <OrderSampleEntry editorSnapshot={restoredSample} onEditorSnapshot={captureSampleEditor} lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
+    return <OrderSampleEntry orderKey={clientSubmissionId} active={active} editorSnapshot={restoredSample} onEditorSnapshot={captureSampleEditor} lifecycle={lifecycle} canEditFees={canAssignExternalSales} form={form} purpose={samplePurpose} options={externalCreateOrderOptions}
       crafts={crafts} draftScope={draftScope} itemIndex={expandedItem}
       initialItem={initialItem} choosePurpose={chooseSamplePurpose} onRouteChange={changeExternalRoute}
       externalSalesAccounts={externalSalesAccounts} onExternalSalesChange={changeExternalSales} />;
   }
   if (submittedOrder) {
-    return (
-      <OrderSubmissionSuccess
-        orderNumber={submittedOrder.orderNo}
-        statusLabel={
-          submittedOrder.readyForProduction ? '待下发生产' : '待处理'
-        }
-        description={
-          submittedOrder.manualQuote
-            ? '这张单含系统暂时无法定价的参数，工厂核价后会通知你。核价前不会安排生产。'
-            : '工单已提交，资料与费用完整后进入待下发生产。可从详情查看当前进度。'
-        }
-        manualQuote={submittedOrder.manualQuote}
-        primaryAction={{
-          label: '再建一单',
-          onClick: () => window.location.assign('/orders/new'),
-        }}
-        secondaryAction={{
-          label: '返回工单列表',
-          onClick: () => router.push('/orders'),
-        }}
-      />
-    );
+    // 成功页只保留页头这一个返回入口（§8.3）；离开保护与提交锁同表单页。
+    return <OrderCreatedSuccessView order={submittedOrder} back={leave.back('/orders', '返回工单列表')} />;
   }
 
   return (
@@ -2655,10 +2649,7 @@ export function OrderForm({
           baseKey={existingLocalDraftKey}
           pricingScope={localDraftPricingScope}
           currentId={workbenchTransferId}
-          onNavigate={() =>
-            !submitting && !uploading &&
-            (!isDirty || !localDraftReady || persistLocalDraftValues(getValues()))
-          }
+          onNavigate={(href, event) => leave.guard?.(href)(event)}
         />
       ) : null}
       {localDraftReady && missingLaminationIndex >= 0 ? (
@@ -2698,6 +2689,8 @@ export function OrderForm({
         {(
           <OrderFormB
             title="新建工单"
+            // 页头唯一返回入口；提交 / 上传中锁住，避免中途离开（§8.3）。
+            back={leave.back('/orders', '返回工单列表')}
             settlementLabel={settlementLabel}
             customNameRequired
             designImageRequired
@@ -2719,11 +2712,11 @@ export function OrderForm({
                   {canAssignExternalSales ? (
                     <div>
                       <Label htmlFor="externalSalesUserId">
-                        关联外部销售（必填）
+                        关联外部销售<RequiredMark />
                       </Label>
-                      <select
+                      <NativeSelect
                         id="externalSalesUserId"
-                        className={`${selectClass} mt-2`}
+                        className="mt-2"
                         required
                         aria-required="true"
                         aria-invalid={Boolean(errors.externalSalesUserId)}
@@ -2747,11 +2740,10 @@ export function OrderForm({
                             {account.displayName} · {account.username}
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                       <FieldError
                         id="externalSalesUserId-hint"
                         reservedLines={1}
-                        hint="工单归属所选外部销售并按外部销售结算。"
                       >
                         {errors.externalSalesUserId?.message}
                       </FieldError>
@@ -2874,7 +2866,7 @@ export function OrderForm({
             : undefined}
             orderPackagingExtras={
               <div className="space-y-3">
-                <Label htmlFor="packageRequirement">包装补充说明（选填）</Label>
+                <Label htmlFor="packageRequirement">包装补充说明</Label>
                 <Input
                   id="packageRequirement"
                   maxLength={500}
@@ -2894,7 +2886,7 @@ export function OrderForm({
             }
             footerExtras={
               <section className="space-y-3">
-                <Label htmlFor="remark">工单备注（选填）</Label>
+                <Label htmlFor="remark">工单备注</Label>
                 <Textarea id="remark" maxLength={1000} className="mt-2 min-h-24"
                   disabled={orderFormControlsDisabled} aria-invalid={Boolean(errors.remark)}
                   aria-describedby={errors.remark ? 'order-remark-error' : undefined}
@@ -2912,7 +2904,7 @@ export function OrderForm({
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="text-xs font-extrabold tracking-[0.2em] text-muted-foreground">
+                      <h2 className="text-xs font-semibold tracking-widest text-muted-foreground">
                         多地址发货
                       </h2>
                       <p className="mt-1.5 text-xs text-muted-foreground">
@@ -2951,17 +2943,17 @@ export function OrderForm({
                       {shipmentsArray.fields.map((shipment, shipmentIndex) => (
                         <li key={shipment.id} className="rounded-xl border p-4">
                           <div className="flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-extrabold">
+                            <h3 className="text-sm font-semibold">
                               地址 {shipmentIndex + 2}
                             </h3>
+                            {/* 从本单拿掉一个地址 = 移除，不是永久删除；用中性 outline，不手写红色（§8.2）。 */}
                             <Button
                               type="button"
                               variant="outline"
-                              className="text-destructive"
                               disabled={orderFormControlsDisabled}
                               onClick={() => shipmentsArray.remove(shipmentIndex)}
                             >
-                              删除地址
+                              移除地址
                             </Button>
                           </div>
                           <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
@@ -3048,7 +3040,7 @@ export function OrderForm({
                             </div>
                           </div>
                           <fieldset className="mt-4">
-                            <legend className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
+                            <legend className="text-xs font-bold tracking-widest text-muted-foreground">
                               款式分配数量
                             </legend>
                             <div className="mt-2 grid min-w-0 grid-cols-1 gap-3 @min-[560px]:grid-cols-2">
@@ -3107,9 +3099,7 @@ export function OrderForm({
                 ? localDraftStatusError
                 : lastLocalDraftSavedAt
                 ? `草稿已保存 ${formatLocalDraftTime(lastLocalDraftSavedAt)}`
-                : initialExternalPriceSnapshot
-                  ? `加工 v${initialExternalPriceSnapshot.processing.version} / 物流 v${initialExternalPriceSnapshot.logistics.version} · 草稿未保存`
-                  : '草稿未保存'
+                : '草稿未保存'
             }
             fieldErrors={externalFieldErrors}
             errorFocusRequest={errorFocusRequest}
@@ -3334,6 +3324,7 @@ export function OrderForm({
               </Button>
               <Link
                 href={`/orders/${createdDraft.orderId}`}
+                onNavigate={leave.guard?.(`/orders/${createdDraft.orderId}`)}
                 className={buttonVariants({ variant: 'outline' })}
               >
                 打开草稿
@@ -3459,9 +3450,6 @@ export function orderServerFieldErrorMessages(
 // ──────────────────────────────────────────────────────────────────────
 // Field primitives — keep the big form body readable
 // ──────────────────────────────────────────────────────────────────────
-
-const selectClass =
-  'flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 function initialOrderFormValues(clientSubmissionId: string, initialItem: ReturnType<typeof createExternalOrderItem>): CreateOrderInput {
   return {

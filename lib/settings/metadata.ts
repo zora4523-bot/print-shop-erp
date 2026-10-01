@@ -31,12 +31,12 @@ export const SETTING_METADATA = {
   },
   cdr_link_expire_hours: {
     label: 'CDR 下载链接有效期',
-    help: '打包完成后签发的下载链接多久过期。只影响此后新签发的链接，已发出去的不受影响。',
+    help: '1–168 小时。',
     field: { kind: 'int', name: 'hours', min: 1, max: 168, unit: '小时' },
   },
   outsource_overdue_days: {
     label: '外协超期阈值',
-    help: '外协单超过预计回厂日多少天算超期。影响老板看板的「超期外协」和每日超期推送。',
+    help: '超过预计回厂日的天数，1–30 天。',
     field: { kind: 'int', name: 'days', min: 1, max: 30, unit: '天' },
   },
   report_qty_max_multiple: {
@@ -51,7 +51,7 @@ export const SETTING_METADATA = {
   },
   production_alert_scan_batch_size: {
     label: '生产提醒扫描批量',
-    help: '每次扫描最多读取的活跃工单数，用于控制追加式进度与认领事实的查询规模。',
+    help: '每批最多检查的工单数，1–500 单。',
     field: { kind: 'int', name: 'count', min: 1, max: 500, unit: '单' },
   },
   pending_factory_backlog_threshold: {
@@ -61,7 +61,7 @@ export const SETTING_METADATA = {
   },
   management_notification_routing: {
     label: '管理通知接收群',
-    help: '新单与变更申请固定发往工厂确认人；报工异常、生产停滞与待确认积压固定发往老板。这里只设置两个角色的开关和接收群，事件归属不可修改。',
+    help: '',
     field: {
       kind: 'management-notification-routing',
       name: 'factoryConfirmer',
@@ -69,27 +69,27 @@ export const SETTING_METADATA = {
   },
   notify_order_submitted_enabled: {
     label: '新单提交通知',
-    help: '新单事件的独立紧急开关；实际接收群由上方“工厂确认人”路由决定。',
+    help: '',
     field: { kind: 'boolean', name: 'enabled' },
   },
   notify_order_change_enabled: {
     label: '变更与取消申请通知',
-    help: '变更/取消申请事件的独立紧急开关；实际接收群由上方“工厂确认人”路由决定。',
+    help: '',
     field: { kind: 'boolean', name: 'enabled' },
   },
   notify_production_anomaly_enabled: {
     label: '报工异常通知',
-    help: '打包进度首次超过烫金进度时的独立紧急开关；实际接收群由上方“老板”路由决定。',
+    help: '',
     field: { kind: 'boolean', name: 'enabled' },
   },
   notify_production_stagnation_enabled: {
     label: '生产停滞通知',
-    help: '工单超过停滞阈值仍无人扫码认领时的独立紧急开关；实际接收群由上方“老板”路由决定。',
+    help: '',
     field: { kind: 'boolean', name: 'enabled' },
   },
   notify_pending_factory_backlog_enabled: {
     label: '待确认积压通知',
-    help: '待确认工单达到配置阈值时的独立紧急开关；实际接收群由上方“老板”路由决定。',
+    help: '',
     field: { kind: 'boolean', name: 'enabled' },
   },
 } as const satisfies Record<string, SettingMetadata>;

@@ -27,7 +27,7 @@ async function report(page: Page, id: string, qty: number, c: Client) {
   await page.goto(`/worker/tasks/${id}`);
   await expect(page).toHaveURL(new RegExp(`/worker/tasks/${id}\\?reportBatch=\\d+$`));
   const panel = page.locator('section').filter({ has: page.getByRole('heading', { name: '扫码报工', exact: true }) });
-  for (const [name, value] of [['本次合格完成数', String(qty)], ['本次工单件数进度', '0'], ['缺陷数', '0'], ['返工数', '0']]) await panel.getByRole('spinbutton', { name, exact: true }).fill(value);
+  for (const [name, value] of [['本次合格完成数', String(qty)], ['本次工单件数进度', '0'], ['不良数', '0'], ['返工数', '0']]) await panel.getByRole('spinbutton', { name, exact: true }).fill(value);
   const before = Number((await c.query('SELECT count(*) AS n FROM \"ProductionReport\" WHERE \"operationId\"=$1', [id])).rows[0].n);
   await panel.getByRole('button', { name: '提交扫码报工' }).click();
   await panel.getByRole('button', { name: '确认报工', exact: true }).click();

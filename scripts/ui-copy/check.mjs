@@ -40,10 +40,39 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
   const found = new Map();
   const visited = new Set();
   const record = (node, text) => {
+    // 纯站内路径（如 <Form action="/worker/orders">）是导航目标，不是可见文案。
+    if (/^\/[\w\-./[\]]*$/.test(text)) return;
     const origin = node.getSourceFile();
     const originFile = context.root ? path.relative(context.root, origin.fileName).split(path.sep).join('/') : file;
     const banned = [...config.banned, ...(config.scopedBanned ?? []).filter(rule => originFile.startsWith(rule.prefix)).flatMap(rule => rule.words)];
     const words = banned.filter(word => new RegExp(word === 'null' ? '\\bnull\\b' : word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(text));
+    // 模式规则：可见文案里的 camelCase 字段名（finishedAt）与 legacy / v2 / worker 等内部词。
+    // 纯标识符字面量（'receiverName'、'match.perFoilColor'）是字段键 / 能力键，只有作为
+    // JSX 文本直接渲染时才算外显；带空格或中文的句子则一律检查。
+    // 直接处在显示位置（JSX 属性值、作为子节点的 {"…"}）的字面量不是字段键，照常检查
+    // （Codex 2026-09-29：`{"finishedAt"}`、`aria-label="finishedAt"` 曾被误豁免）。经常量 /
+    // 映射表间接传入的纯标识符仍按字段键豁免，避免把 label 映射的键名误报为外显文案。
+    // 穿透只决定「显示哪段文案」的表达式：括号、类型包装（as / satisfies / ! / <T>）、
+    // 三元的两个分支（不含条件）、|| 与 ?? 的两侧（左侧为真 / 非空时即被显示）、
+    // && 的右侧（左侧只是条件，永远不会显示）。
+    const passesThrough = (child, parent) =>
+      ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent) || ts.isSatisfiesExpression(parent)
+      || ts.isNonNullExpression(parent) || ts.isTypeAssertionExpression(parent)
+      || (ts.isConditionalExpression(parent) && parent.condition !== child)
+      || (ts.isBinaryExpression(parent) && (
+        [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(parent.operatorToken.kind)
+        || (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && parent.right === child)));
+    let site = node;
+    while (site.parent && passesThrough(site, site.parent)) site = site.parent;
+    const directDisplay = ts.isJsxAttribute(site.parent)
+      || (ts.isJsxExpression(site.parent) && (ts.isJsxAttribute(site.parent.parent) || ts.isJsxElement(site.parent.parent) || ts.isJsxFragment(site.parent.parent)));
+    const codeKey = !ts.isJsxText(node) && !directDisplay && /^[A-Za-z0-9_.]+$/.test(text);
+    for (const rule of config.bannedPatterns ?? []) {
+      if (codeKey && rule.skipCodeKeys) continue;
+      for (const match of text.matchAll(new RegExp(rule.pattern, `${rule.flags ?? ''}g`))) {
+        if (!words.includes(match[0])) words.push(match[0]);
+      }
+    }
     if (!words.length) return;
     if (originFile.startsWith('node_modules/') || originFile.startsWith('generated/')) return;
     if (config.exemptions.some(e => e.file === originFile && e.text === text && e.reason?.trim())) return;
@@ -57,8 +86,12 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     if (ts.isIdentifier(node)) return value(resolve(node));
     if (ts.isTemplateExpression(node)) { record(node.head, node.head.text); for (const s of node.templateSpans) { value(s.expression); record(s.literal, s.literal.text); } return; }
     if (ts.isConditionalExpression(node)) { value(node.whenTrue); value(node.whenFalse); return; }
+    // 类型包装在运行时被擦除：只看表达式，不扫类型里的字面量（`"草稿" as "草稿" | "DRAFT"`）。
+    if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node) || ts.isTypeAssertionExpression(node) || ts.isParenthesizedExpression(node)) return value(node.expression);
     if (ts.isBinaryExpression(node)) {
-      if ([ts.SyntaxKind.PlusToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.AmpersandAmpersandToken].includes(node.operatorToken.kind)) { value(node.left); value(node.right); }
+      // && 的左侧只是条件，永远不会显示；|| / ?? 左侧为真 / 非空时即被显示；+ 拼接两侧都显示。
+      if (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) value(node.right);
+      else if ([ts.SyntaxKind.PlusToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(node.operatorToken.kind)) { value(node.left); value(node.right); }
       return;
     }
     if (ts.isPropertyAssignment(node)) {
@@ -83,7 +116,38 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
     if (ts.isJsxAttribute(node)) return;
     ts.forEachChild(node, value);
   };
+  // List props contain both visible labels and internal keys. Follow only declared
+  // display fields; metadata, query values and commands are not UI copy.
+  const collectionVisited = new Set();
+  const collection = (node) => {
+    if (!node || collectionVisited.has(node)) return;
+    collectionVisited.add(node);
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) return value(node);
+    if (ts.isIdentifier(node)) return collection(resolve(node));
+    if (ts.isJsxExpression(node) || ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node)) return collection(node.expression);
+    if (ts.isArrayLiteralExpression(node)) { for (const item of node.elements) collection(item); return; }
+    if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (ts.isSpreadAssignment(property)) collection(property.expression);
+        else if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
+          const name = property.name.getText().replace(/["']/g, '');
+          const initializer = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+          if (name === 'items' || name === 'children') collection(initializer);
+          else if (visibleProps.has(name)) value(initializer);
+        }
+      }
+      return;
+    }
+    if (ts.isCallExpression(node)) return collection(node.expression);
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return collection(node.body);
+    if (ts.isConditionalExpression(node)) { collection(node.whenTrue); collection(node.whenFalse); return; }
+    if (ts.isReturnStatement(node)) return collection(node.expression);
+    if (ts.isBlock(node)) { for (const statement of node.statements) collection(statement); return; }
+    if (ts.isIfStatement(node)) { collection(node.thenStatement); collection(node.elseStatement); }
+  };
   const visit = (n) => {
+    // <script> / next <Script> / <style> 的内联源码不是可见文案。
+    if (ts.isJsxElement(n) && /^(?:script|Script|style)$/.test(n.openingElement.tagName.getText(sf))) return;
     if (ts.isJsxText(n)) value(n);
     if (ts.isJsxExpression(n) && !ts.isJsxAttribute(n.parent)) value(n.expression);
     if (ts.isJsxAttribute(n)) {
@@ -91,6 +155,7 @@ export function inspectUiCopy(source, file, config = policy, context = {}) {
       const tag = n.parent.parent;
       const textInput = /^(?:input|Input|ReadOnlyInput|textarea|Textarea)$/.test(tag.tagName?.getText(sf) ?? '');
       const hidden = n.parent.properties.some(p => ts.isJsxAttribute(p) && p.name.getText(sf) === 'type' && p.initializer && ts.isStringLiteral(p.initializer) && ['hidden', 'checkbox', 'radio'].includes(p.initializer.text));
+      if (name === 'items') collection(n.initializer);
       if (visibleProps.has(name) || (textInput && !hidden && ['value', 'defaultValue'].includes(name))) value(n.initializer);
     }
     if (ts.isCallExpression(n)) {

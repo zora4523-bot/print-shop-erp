@@ -1,12 +1,9 @@
 'use client';
 
 import type { SupplementContext } from '@/lib/form-drafts/model';
-import { supplementReturnHref } from '@/lib/form-drafts/return-context';
 import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
 
-import Link from 'next/link';
 import { useActionState, useRef } from 'react';
-import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,6 +18,7 @@ import {
 import type { MaterialMutationResult } from '@/actions/owner-materials.types';
 import type { MaterialSummary } from '@/lib/material';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export type MaterialRouteBase =
   | '/owner/materials'
@@ -74,8 +72,6 @@ const CATEGORY_OPTIONS = [
   { value: 'OTHER', label: '其他' },
 ] as const;
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const MATERIAL_FIELD_LABELS: Record<string, string> = {
   code: '物料编码',
@@ -141,7 +137,7 @@ export function MaterialForm(props: Props) {
         <TextField
           id="code"
           label="物料编码"
-          hint="大小写不敏感；修改前请确认对库存对接的影响。"
+          hint="大小写不敏感。"
           required
           disabled={pending}
           error={errs.code?.[0]}
@@ -194,13 +190,12 @@ export function MaterialForm(props: Props) {
       ) : (
         <div className="space-y-2">
           <Label htmlFor="category">分类</Label>
-          <select
+          <NativeSelect
             id="category"
             name="category"
             {...(errs.category?.[0]
               ? formMessageA11yProps('category', 'error')
               : {})}
-            className={selectClass}
             defaultValue={
               initial?.category ?? selectableCategories[0]?.value ?? 'OTHER'
             }
@@ -211,7 +206,7 @@ export function MaterialForm(props: Props) {
                 {option.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.category?.[0] ? (
             <FormMessage fieldId="category" tone="error">
               {errs.category[0]}
@@ -286,9 +281,6 @@ export function MaterialForm(props: Props) {
         <PendingButton pending={pending} pendingLabel="正在保存物料…">
           {isCreate ? '创建物料' : '保存修改'}
         </PendingButton>
-        <Link href={props.supplement ? supplementReturnHref(props.supplement) : props.routeBase} className={buttonVariants({ variant: 'outline' })}>
-          {props.supplement ? '返回原录入' : '返回列表'}
-        </Link>
       </div>
     </form>
   );

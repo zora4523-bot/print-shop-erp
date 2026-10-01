@@ -31,7 +31,7 @@ it('recovers a ready job whose PDF file was removed without exposing its diagnos
   });
   missingFile.stack = `Error: ENOENT\n at private-stack-frame (${artifactPath}:1:2)`;
   mocks.session.mockResolvedValue({ user: { id: 'admin-recovery', role: Role.ADMIN } });
-  mocks.order.mockResolvedValue({ id: 'order-recovery', workOrderVersion: 3 });
+  mocks.order.mockResolvedValue({ id: 'order-recovery', workOrderVersion: 3, items: [] });
   mocks.wait.mockResolvedValue({ status: 'ready', artifactName });
   mocks.read.mockRejectedValue(missingFile);
 
@@ -56,7 +56,7 @@ it('recovers a ready job whose PDF file was removed without exposing its diagnos
   expect(body).toContain('PDF 产物不可用');
   expect(body).toContain('生成结果已过期或被清理，请点击下方按钮重新生成。');
   const retryLinks = [...body.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
-  expect(retryLinks).toEqual(['/api/orders/order-recovery/pdf?regenerate=1']);
+  expect(retryLinks).toEqual(['/api/orders/order-recovery/pdf?regenerate=1', '/print/orders/order-recovery', '/orders/order-recovery', '/owner/background-jobs']);
   const publicPayload = JSON.stringify({ headers: Object.fromEntries(response.headers), body });
   for (const diagnostic of [artifactName, artifactPath, 'ENOENT', 'private-stack-frame', '%PDF', 'job-consumed', 'jobId']) {
     expect(publicPayload).not.toContain(diagnostic);

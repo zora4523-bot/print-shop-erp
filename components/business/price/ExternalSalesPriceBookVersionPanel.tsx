@@ -10,7 +10,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { StatusBadge, TableScrollArea } from '@/components/ui-business';
+import { StatusBadge, TableScrollArea, LinkPendingHint } from '@/components/ui-business';
 import {
   CustomerPriceBookPurpose,
   CustomerPriceCalculationType,
@@ -580,11 +580,12 @@ export function ExternalSalesPriceBookVersionPanel({
             const pendingDraft = versions.find(version => version.purpose === purpose && version.status === 'DRAFT');
             const href = pendingDraft ? versionsHref(pendingDraft.id) : `${priceVersionsHref()}?purpose=${purpose.toLowerCase()}`;
             return (
-              <Link key={purpose} href={href} prefetch={false} aria-current={activePurpose === purpose ? 'page' : undefined}
-                className={cn(buttonVariants({ variant: activePurpose === purpose ? 'secondary' : 'ghost' }), 'min-h-11 h-auto flex-wrap gap-2')}>
+              <Link key={purpose} href={href} prefetch={false} scroll={false} aria-current={activePurpose === purpose ? 'page' : undefined}
+                className={cn(buttonVariants({ variant: activePurpose === purpose ? 'selected' : 'ghost' }), 'relative min-h-11 h-auto flex-wrap gap-2')}>
                 <span className="font-semibold">{PURPOSE_LABELS[purpose]}</span>
-                <span className="text-xs text-muted-foreground">{current ? '默认价格' : '无生效版本'}</span>
+                <span className="text-xs text-muted-foreground group-aria-[current=page]/button:text-primary">{current ? '默认价格' : '无生效版本'}</span>
                 {pendingDraft ? <span className="text-xs text-warning-foreground">待发布</span> : null}
+                <LinkPendingHint />
               </Link>
             );
           })}

@@ -42,12 +42,14 @@ function render(existing = false, embedded = false, multiple = false) {
       id: 'item-1', sequence: 1, name: '测试款式', independentPlateEligible: true,
       plateDetails: existing ? [plate, ...(multiple ? [{ ...plate, id: 'plate-removed', sequence: 2, isActive: false }] : [])] : [],
     }, ...(multiple ? [{ id: 'item-2', sequence: 2, name: '长款式名称ABCDEFGHIJKLMNOPQRSTUVWXYZ'.repeat(3),
-      independentPlateEligible: false, plateDetails: [] }] : [])]} />;
+      independentPlateEligible: true, plateDetails: [] }] : [])]} />;
   flushSync(() => root.render(embedded ? <Disclosure open className="rounded-xl border bg-card">
     <DisclosureSummary className="px-4 py-4"><h2>版费与其他费用</h2></DisclosureSummary>
     <div className="px-4 pb-5 pt-2 sm:px-6 sm:pb-6">{manager}</div>
   </Disclosure> : manager));
-  return [...host.querySelectorAll('fieldset')].find((field) => field.textContent?.includes(existing ? '制版明细 #1' : '新增制版明细'))!;
+  // 2026-10-01 起「添加制版明细 / 添加整单费用」默认收起（仍挂载）；这里按用户展开后的状态验证。
+  for (const details of host.querySelectorAll('details')) details.open = true;
+  return [...host.querySelectorAll('fieldset')].find((field) => field.textContent?.includes(existing ? '制版明细 #1' : '添加制版明细'))!;
 }
 function fill(field: Element, label: string, value: string) {
   const input = [...field.querySelectorAll('label')].find((entry) => entry.textContent?.trim() === label)!.querySelector('input, textarea')!;

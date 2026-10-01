@@ -38,8 +38,8 @@ async function createPaper(page: Page, name: string) {
   await page.goto(`${papers}/new`);
   await page.getByLabel('纸张名称', { exact: true }).fill(name);
   await page.getByLabel('克重（g）', { exact: true }).fill('160');
-  await page.getByRole('button', { name: '复核新增纸张', exact: true }).click();
-  await page.getByRole('button', { name: '新增纸张', exact: true }).click();
+  await page.getByRole('button', { name: '复核新纸张', exact: true }).click();
+  await page.getByRole('button', { name: '创建纸张', exact: true }).click();
   return createdId(page, papers);
 }
 
@@ -57,7 +57,7 @@ async function fillBom(page: Page, productId: string, materialId: string, name: 
   await page.goto('/owner/boms/new');
   await page.getByLabel('适用对象', { exact: true }).selectOption('PRODUCT');
   await page.getByLabel('其他产品', { exact: true }).selectOption(productId);
-  await page.getByLabel('BOM 名称', { exact: true }).fill(name);
+  await page.getByLabel('用料清单名称', { exact: true }).fill(name);
   await page.getByLabel('版本号', { exact: true }).fill(String(version));
   await page.getByLabel('基准产量', { exact: true }).fill('10');
   await page.locator('select[name="items.0.materialId"]').selectOption(materialId);
@@ -269,35 +269,35 @@ test('类别、纸张、非空白封产品与 BOM 按不可变边界维护，停
   await expect.poll(() => readMasterRow('product', productId)).toMatchObject({ name: `已改名组合${actor.suffix}`, categoryNodeId: categoryId, paperType: paperName });
 
   await fillBom(page, productId, paperId, `验收用料${actor.suffix}第一版`, 1);
-  await page.getByRole('button', { name: '创建 BOM', exact: true }).click();
+  await page.getByRole('button', { name: '创建用料清单', exact: true }).click();
   const bom1 = await createdId(page, '/owner/boms');
   await expect(page.getByRole('button', { name: '保存修改', exact: true })).toHaveCount(0);
   const initialBom = (await readBomVersions(productId))[0];
   expect(initialBom).toMatchObject({ id: bom1, version: 1, baseQuantity: 10, isActive: true, items: [{ materialId: paperId, quantity: '12.5000', remark: '隔离验收用料' }] });
   await fillBom(page, productId, paperId, `验收用料${actor.suffix}第二版`, 2);
   const pendingRequestId = await page.locator('input[name="clientRequestId"]').inputValue();
-  await page.getByRole('button', { name: '创建 BOM', exact: true }).click();
+  await page.getByRole('button', { name: '创建用料清单', exact: true }).click();
   await expect(page.locator('main')).toContainText('该产品已有启用 BOM');
   expect(await readBomVersions(productId)).toEqual([initialBom]);
   await page.goto(`/owner/boms/${bom1}`);
-  await confirmState(page, '停用BOM');
+  await confirmState(page, '停用用料清单');
   await expect.poll(() => readBomVersions(productId)).toMatchObject([{ isActive: false }]);
   await page.goto('/owner/boms/new');
   await page.getByRole('button', { name: '继续上次录入', exact: true }).click();
   await expect(page.locator('input[name="clientRequestId"]')).toHaveValue(pendingRequestId);
   await expect(page.getByLabel('其他产品', { exact: true })).toHaveValue(productId);
-  await expect(page.getByLabel('BOM 名称', { exact: true })).toHaveValue(`验收用料${actor.suffix}第二版`);
+  await expect(page.getByLabel('用料清单名称', { exact: true })).toHaveValue(`验收用料${actor.suffix}第二版`);
   await expect(page.getByLabel('版本号', { exact: true })).toHaveValue('2');
   await expect(page.locator('select[name="items.0.materialId"]')).toHaveValue(paperId);
   await expect(page.locator('input[name="items.0.quantity"]')).toHaveValue('13.2500');
-  await page.getByRole('button', { name: '创建 BOM', exact: true }).click();
+  await page.getByRole('button', { name: '创建用料清单', exact: true }).click();
   const bom2 = await createdId(page, '/owner/boms');
   const versions = await readBomVersions(productId);
   expect(versions).toHaveLength(2);
   expect(versions[0]).toEqual({ ...initialBom, isActive: false });
   expect(versions[1]).toMatchObject({ id: bom2, version: 2, isActive: true, items: [{ materialId: paperId, quantity: '13.2500' }] });
   await page.goto(`/owner/boms/${bom1}`);
-  await confirmState(page, '启用BOM');
+  await confirmState(page, '启用用料清单');
   await expect(page.getByText('该产品已有启用 BOM', { exact: true })).toBeVisible();
   expect(await readBomVersions(productId)).toEqual(versions);
 
@@ -308,8 +308,8 @@ test('类别、纸张、非空白封产品与 BOM 按不可变边界维护，停
   await page.goto('/owner/boms/new');
   await expect(page.locator(`select[name="items.0.materialId"] option[value="${paperId}"]`)).toHaveCount(0);
   await page.goto(`/owner/boms/${bom2}`);
-  await expect(page.getByRole('region', { name: 'BOM 物料明细', exact: true })).toContainText(paperName);
-  await expect(page.getByRole('region', { name: 'BOM 物料明细', exact: true })).toContainText('已停用');
+  await expect(page.getByRole('region', { name: '用料清单物料明细', exact: true })).toContainText(paperName);
+  await expect(page.getByRole('region', { name: '用料清单物料明细', exact: true })).toContainText('已停用');
 
   await page.goto(`${products}/${productId}`);
   await page.getByRole('button', { name: '停用产品', exact: true }).click();

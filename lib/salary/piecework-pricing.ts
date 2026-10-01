@@ -157,7 +157,7 @@ export function calculatePieceworkAmount(
     input.completedQty,
     '合格完成数',
   );
-  const defectQty = nonNegativeWholeQuantity(input.defectQty, '缺陷数');
+  const defectQty = nonNegativeWholeQuantity(input.defectQty, '不良数');
   const reworkQty = nonNegativeWholeQuantity(input.reworkQty, '返工数');
 
   let passCount = new Decimal(1);

@@ -51,9 +51,11 @@ function render(existing = false, managed = false) {
     items={[{ id: 'item-1', sequence: 1, name: '测试款', independentPlateEligible: true,
       plateDetails: existing ? [{ id: 'plate-1', sequence: 1, name: '原制版', plateGroupId: null, specification: null, quantity: 1, unitPrice: '10.00', amount: '10.00', remark: '', isActive: true }] : [] }]} />;
   flushSync(() => root.render(<Boundary>{managed ? <Harness>{manager}</Harness> : manager}</Boundary>));
+  // 2026-10-01 起「添加整单费用 / 添加制版明细」默认收起（仍挂载）；恢复逻辑针对展开后的表单验证。
+  for (const details of host.querySelectorAll('details')) details.open = true;
 }
 async function submitManual() {
-  await page.getByRole('textbox', { name: '订单级费用金额', exact: true }).fill('25');
+  await page.getByRole('textbox', { name: '整单费用金额', exact: true }).fill('25');
   await page.getByRole('textbox', { name: '收费说明', exact: true }).fill('保留打样输入');
   await page.getByRole('textbox', { name: '原因', exact: true }).fill('客户已确认');
   await page.getByRole('button', { name: '添加费用', exact: true }).click();
@@ -99,7 +101,7 @@ for (const [label, action] of [['打样费', 'remove'], ['制版明细 #1', 'rem
     await field.getByRole('textbox', { name: '移除原因', exact: true }).fill('客户取消此项');
     await field.getByRole('button', { name: '移除并保留历史', exact: true }).click();
     expect(actions[action]).not.toHaveBeenCalled();
-    await page.getByRole('alertdialog').getByRole('button', { name: '确认移除', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: action === 'remove' ? '移除对客费用' : '移除制版明细', exact: true }).click();
     await expectRecovery();
     await expect.element(field.getByRole('textbox', { name: '移除原因', exact: true })).toHaveValue('客户取消此项');
     expect(actions[action]).toHaveBeenCalledTimes(1);
@@ -113,7 +115,7 @@ it('retains normal validation feedback and permits a deliberate corrected submis
   await expect.element(page.getByRole('alert')).toHaveTextContent('请核对费用金额');
   await expect.element(page.getByRole('button', { name: '添加费用', exact: true })).toBeEnabled();
   expect(host.textContent).not.toContain('暂时无法确认费用处理结果');
-  await page.getByRole('textbox', { name: '订单级费用金额', exact: true }).fill('26');
+  await page.getByRole('textbox', { name: '整单费用金额', exact: true }).fill('26');
   await page.getByRole('button', { name: '添加费用', exact: true }).click();
   await expect.element(page.getByRole('status')).toHaveTextContent('已保存，工单总额更新为 26.00 元');
   expect(actions.save).toHaveBeenCalledTimes(2);
@@ -128,7 +130,7 @@ it('supersedes an earlier save success when the following removal result is unkn
   await expect.element(charge.getByRole('status')).toHaveTextContent('已保存');
   await charge.getByRole('textbox', { name: '移除原因', exact: true }).fill('客户取消此项');
   await charge.getByRole('button', { name: '移除并保留历史', exact: true }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: '确认移除', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '移除对客费用', exact: true }).click();
   await expectRecovery();
   expect(host.textContent).not.toContain('已保存，工单总额更新为');
   expect(actions.remove).toHaveBeenCalledTimes(1);

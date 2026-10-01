@@ -112,6 +112,43 @@ function currentVersionWorkerOrderPredicate(
   `;
 }
 
+type WorkerOrderCardSource = {
+  id: string;
+  orderNo: string;
+  customName: string | null;
+  status: OrderStatus;
+  isUrgent: boolean;
+  promisedDate: Date | null;
+  createdAt: Date;
+} & Parameters<typeof orderExternalSalesName>[0];
+
+function workerOrderCard(order: WorkerOrderCardSource) {
+  return {
+    id: order.id,
+    orderNo: order.orderNo,
+    customName: order.customName,
+    status: order.status,
+    isUrgent: order.isUrgent,
+    promisedDate: order.promisedDate,
+    createdAt: order.createdAt,
+    // 工单归属的外部销售（业主 2026-09-27，取代「客户名称/简称」与「接单人」）：
+    // 免费重做由管理员发起，显示原单的外部销售而不是管理员。
+    externalSalesName: orderExternalSalesName(order),
+  };
+}
+
+function sumAmounts(rows: Array<{ amount: unknown }>): string {
+  return rows
+    .reduce(
+      (sum, row) =>
+        row.amount === null || row.amount === undefined
+          ? sum
+          : sum.plus(new Decimal(row.amount as Decimal.Value)),
+      new Decimal(0),
+    )
+    .toFixed(2);
+}
+
 export async function listWorkerOrders(
   actor: WorkerActor,
   options?: { page?: number; q?: string },
@@ -169,7 +206,22 @@ export async function listWorkerOrders(
           promisedDate: true,
           createdAt: true,
           workOrderVersion: true,
+          simpleProduction: true,
           ...ORDER_EXTERNAL_SALES_SELECT,
+          // 单负责人工单（simpleProduction）的完工提成写在 ProductionWage，不写
+          // ProductionReport（DECISIONS 2026-09-28「新旧账本按 simpleProduction 隔离」）。
+          // 只取本人任务与本人工资行。
+          productionJobs: {
+            where: { workerId: actor.id },
+            select: {
+              workOrderVersion: true,
+              status: true,
+              wages: {
+                where: { workerId: actor.id },
+                select: { amount: true },
+              },
+            },
+          },
           productionOperations: {
             where: {
               operationType: operationType ?? { in: [] },
@@ -203,6 +255,26 @@ export async function listWorkerOrders(
               (orderRank.get(right.id) ?? Number.MAX_SAFE_INTEGER),
           )
           .map((order) => {
+            if (order.simpleProduction) {
+              const currentJobs = order.productionJobs.filter(
+                (job) =>
+                  job.workOrderVersion === order.workOrderVersion &&
+                  job.status !== 'CANCELLED',
+              );
+              return {
+                ...workerOrderCard(order),
+                operationCount: currentJobs.length,
+                // 改版承接为 0 数量的任务（CARRIED）其工序已完成，同样计为已完成。
+                completedOperationCount: currentJobs.filter(
+                  (job) => job.status === 'COMPLETED' || job.status === 'CARRIED',
+                ).length,
+                // 改版淘汰的真实生产仍保留提成，故汇总本人在该单的全部代次工资；
+                // amount 为 NULL 是待管理员补价，不计入。
+                pieceworkAmount: sumAmounts(
+                  order.productionJobs.flatMap((job) => job.wages),
+                ),
+              };
+            }
             const operations = order.productionOperations.filter(
               (operation) =>
                 operation.workOrderVersion === order.workOrderVersion,
@@ -211,16 +283,7 @@ export async function listWorkerOrders(
               (step) => step.workOrderVersion === order.workOrderVersion,
             );
             return {
-              id: order.id,
-              orderNo: order.orderNo,
-              customName: order.customName,
-              status: order.status,
-              isUrgent: order.isUrgent,
-              promisedDate: order.promisedDate,
-              createdAt: order.createdAt,
-              // 工单归属的外部销售（业主 2026-09-27，取代「客户名称/简称」与「接单人」）：
-              // 免费重做由管理员发起，显示原单的外部销售而不是管理员。
-              externalSalesName: orderExternalSalesName(order),
+              ...workerOrderCard(order),
               operationCount: operations.length + progressSteps.length,
               completedOperationCount:
                 operations.filter(
@@ -231,14 +294,9 @@ export async function listWorkerOrders(
                   (step) =>
                     step.status === ProductionOperationStatus.COMPLETED,
                 ).length,
-              pieceworkAmount: operations
-                .flatMap((operation) => operation.reports)
-                .reduce(
-                  (sum, report) =>
-                    sum.plus(new Decimal(report.amount as Decimal.Value)),
-                  new Decimal(0),
-                )
-                .toFixed(2),
+              pieceworkAmount: sumAmounts(
+                operations.flatMap((operation) => operation.reports),
+              ),
             };
           }),
         total,

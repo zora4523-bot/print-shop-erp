@@ -43,13 +43,13 @@ pnpm deploy:smoke --skip-build --require-base-url
 |---|---|
 | Prisma | `validate`、`migrate status`；不会自动应用迁移；仅显式 `DEPLOY_SMOKE_RUN_SEED=true` 时运行 seed |
 | 通知/后台环境 | production 要求 `NOTIFICATION_MOCK_MODE=false`，拒绝显式 inline；不等于真实消息链已经验证 |
-| PDF 浏览器 | 启动并关闭 Puppeteer；不生成 PDF、不检查中文字形和真实 OSS 图稿 |
+| PDF 浏览器 | 实际生成中文 PDF，验证字体加载、单页结构和配置的私有产物读写；仍需人工检查真实工单与 OSS 图稿 |
 | 构建 | 未带 `--skip-build` 时运行 `next build`；必须确保没有共享产物的开发服务 |
 | HTTP | 有 base URL 才检查 login、live/ready/jobs、受保护页面跳转和无效 cron token；发布使用 `--require-base-url`，禁止以跳过路由检查代替通过 |
 | jobs | 调用真实部署 gate 校验机器人状态、必需配置和身份；HTTP 200 本身不足以通过。旧非通知死信等可能使健康响应为 503，脚本按既有 gate 规则记录警告，不等于所有队列任务已处理 |
 | cron | production 仅接受无效 token 返回 401；503 立即失败。development/test 允许 401 或 503 |
 
-`--skip-build` 仅在同一候选已完成构建时作为发布复查选项；`--skip-pdf-browser` 仅用于故障定位，不能据此记 PDF 通过。`--dry-run` 仅预览子命令和浏览器启动，配置 base URL 后仍会执行 HTTP 检查，不能当作完整验证结果。
+`--skip-build` 仅在同一候选已完成构建时作为发布复查选项；`--skip-pdf-browser` 仅用于故障定位，不能据此记 PDF 通过。`--dry-run` 仅预览子命令和 PDF 检查，配置 base URL 后仍会执行 HTTP 检查，不能当作完整验证结果。
 
 ## 发布前检查与生产探针
 
@@ -94,13 +94,13 @@ Local development and CI may use Puppeteer-managed Chrome instead:
 pnpm exec puppeteer browsers install chrome
 ```
 
-The browser-launch smoke is necessary but not sufficient: production acceptance
-must also generate a non-empty PDF with `page.pdf()` and inspect one downloaded
+The PDF runtime smoke is necessary but not sufficient: it
+now generates a Chinese PDF and verifies its private storage round trip; additionally inspect one downloaded
 order containing Chinese text and a real OSS design image. On 2026-08-02,
 `/usr/bin/chromium` generated a 37,646-byte Chinese test PDF in production.
 That dated observation is historical evidence, not acceptance of the current release.
-Use the in-memory `page.pdf()` command in `docs/部署指南.md` §13 until
-`scripts/deploy-smoke.mjs` performs that assertion itself.
+Use `pnpm check:pdf` for the same runtime probe independently; the manual
+`page.pdf()` command in `docs/部署指南.md` §13 remains available for diagnosis.
 
 ## Notification Mode
 

@@ -44,7 +44,7 @@ for (const actor of ['owner', 'sales'] as const) {
       expect(await top(mode)).toBe(modeTop);
 
       // 包装在整单区，每个规格一行；切换设计款标签不影响各行的值。
-      await page.getByRole('button', { name: '＋ 增加设计款' }).click();
+      await page.getByRole('button', { name: '＋ 添加设计款' }).click();
       await expect(pack).toHaveCount(2);
       await pack.nth(1).fill('6');
       const styles = page.getByRole('tablist', { name: '设计款', exact: true }).getByRole('tab');
@@ -92,7 +92,7 @@ for (const actor of ['owner', 'sales'] as const) {
       await expect
         .poll(async () => {
           const text = await rail.innerText();
-          return text !== railBefore && !/核价中…|待重新核价/.test(text);
+          return text !== railBefore && !/正在核价…|待重新核价/.test(text);
         }, { timeout: 30_000, message: '费用栏应按数量 1260 重新报价完成' })
         .toBe(true);
       expect(quoteResponses.every((status) => status === 200)).toBe(true);

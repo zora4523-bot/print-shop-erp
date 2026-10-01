@@ -7,6 +7,19 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 2026-10-01 导出展示名称
+
+月账单 XLSX 的工作表为“月账单 / 工单明细 / 跨月抵扣 / 收款回执”，外部销售账号、金额及日期列的取值边界不变；工单状态使用与账单页面相同的业务名称，未知状态不回显原始枚举。计件结算 XLSX 的前两表为“计件结算 / 报工明细”，工序、条目和单位使用业务名称；规则校验码连同结算/报工编号与工价版本放在独立“核验记录”表。已生成文件不重写，下载地址、权限、金额精度和源数据版本约束不变。
+
+## 2026-09-30 外部销售账单与导出
+
+- `GET /api/sales/bills/export`：当前数据库校验的 `bill:view:self` 会话（仅 SALES）；接受 `period=YYYY-MM`、`status=DRAFT|CONFIRMED|PAID`，空值表示全部，非法值返回 400。账号范围强制来自会话，忽略传入 `agentUserId`；忽略 `page`，导出全部筛选结果而非当前分页。
+- `GET /api/sales/bills/[id]/export`：相同授权；只读取本人账单及其结算快照。可选 `q`（去首尾空格，最多 100 字）与详情页共用工单号/历史名称匹配函数，忽略 `page`；不合法 ID 或非本人账单统一 404。历史费用证据不足时，仅名称允许使用当前名称并标注依据，金额仍使用原结算快照，绝不补当前价格。
+- 两个接口成功返回含 BOM 的 UTF-8 CSV，`Content-Disposition: attachment`、`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`；金额通过 Decimal 输出两位十进制，用户文本进行 CSV 转义和公式注入防护。整理中账单明确标注暂计、未定稿。结果超过 10,000 条返回 400 并要求缩小范围，不静默截断。会话/角色无权限 401，服务异常 503，错误响应不含内部信息。
+- 明细 CSV 包含结算时工单状态，明确区分正常结算与“已取消（取消费）”；同时输出有效结算快照中的加工费和其他费用说明；快照缺失或费用合计不符时标记“费用明细待补”，不从现价补算。
+- `SalesBillExportButton` 使用原生下载链接，增强后先检查状态码与 CSV/XLSX 文件类型，再保存文件；下载等待最多一分钟，失败在原页显示并可重试，不保存 JSON/登录页。管理员月账单 XLSX 仍沿用原权限、请求快照和持久化异步任务；生成失败返回结构化结果，状态检查最多两分钟，网络失败暂停并提供手动刷新，下载过期/失败明确要求重新生成。
+- 销售工单列表新增 `createdMonth=YYYY-MM`，按上海时区下单月份过滤；状态数量与当前 `q`、月份保持相同范围。`GET /api/orders/sales/[orderNo]` 的本人投影新增 `createdAt`、可空 `shippedAt` 及 `shipments` 完整已登记运单；不返回其他销售或内部成本。
+
 ## 2026-09-28 单负责人排单与完工提成
 
 `actions/production-dispatch.ts` 提供五个写入口。返回 `{ok,message}`，成功或幂等重放刷新管理工单、师傅任务/工资及工资结算页面；销售与管理员使用同一 `/orders` 权威状态。
@@ -152,12 +165,12 @@ v2 月账单入账前使用 Decimal 核对加工费＋对客收费明细＝工�
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
 | `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
 | `GET /api/cdr/bundles/:accessToken` | 256-bit capability URL | 服务端生成的 43 位 base64url token；不接受数据库 id | 就绪后校验 token 并 `302` 到 60 秒 OSS GET 签名；生成中 `409` + `Retry-After`；失效、撤销或不存在统一 `404`；频率超限 `429`；OSS 不可用 `503` |
-| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为可自动重试的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
+| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为就地查询进度的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 
-Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到登录 HTML；页面请求仍跳转登录。路由继续校验数据库账号状态、角色及资源所有权，不依赖 Proxy 作为最终授权。PDF 的内联渲染失败与后台任务失败只返回固定错误码 `PDF_GENERATION_FAILED` 和重试建议，不返回底层异常正文或部署路径。
+Proxy 对已纳入拦截的 API 匿名请求返回 JSON `401`，不重定向到登录 HTML；页面请求仍跳转登录。路由继续校验数据库账号状态、角色及资源所有权，不依赖 Proxy 作为最终授权。PDF 的内联渲染失败与后台任务失败只返回白名单错误码和恢复建议，不返回底层异常正文或部署路径；未知异常统一为 `PDF_GENERATION_FAILED`。
 
 下载响应使用 `private, no-store`；文件名同时提供安全的 ASCII fallback 和 UTF-8 名称（适用的端点）。新增下载接口时保持内容类型、长度、缓存和 `nosniff` 语义。
 
@@ -524,3 +537,29 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 - `retryDeadBackgroundJob` 以 `isRegisteredBackgroundJobType`（`BACKGROUND_JOB_TYPES`，与处理器表一一对应）判定；已删除类型 `CRON_HOURLY_PAYROLL`、`CRON_CS_SETTLE`、`CRON_CS_PERIOD_ENDING`，以及事件已不在 `NOTIFICATION_EVENTS` 的通知死信，抛 `RetiredBackgroundJobTypeError`，action 返回 `{ status: 'error', message: '该任务类型对应的功能已停用，无法重试；记录保留为运行历史' }`，历史行不改。运维页对这些行不渲染“重试”，列表只提取事件名，不把 payload 交给页面。
 - `resolveUnknownNotification` 对已删除事件（`CS_PERIOD_ENDING` / `CS_PERIOD_SETTLED`）的 `NOT_DELIVERED_RETRY` 在写入前拒绝（`RETIRED_EVENT`），action 返回“该通知事件已停用，无法重发；请核对后确认已送达或忽略”；`DELIVERED` / `IGNORED` 照常可用。同组仍有 `RETRYING` 日志（升级前已确认未送达）时，已删除事件在最后一条 UNKNOWN 收尾后**不**重新入队（2026-09-26 修复：此前会把任务改回 PENDING，处理器拒绝后这些日志永远停在 RETRYING）：同一事务内以 CAS（`id` + `deliveryKey` + `RETRYING` + `deliveryStateVersion`）把它们关闭为 `FAILED`（`IGNORED` 沿用“人工忽略：理由”，`DELIVERED` 记“人工核对：未送达；事件已停用，不再重发”），任务保持 `DEAD`、`lastErrorCode` 改为 `NotificationReplayTerminalError`（运维页不再给“去通知页处置”），审计行 `after.retiredEventClosedLogs` 逐条记录；返回值 `retiredClosedCount` 供 action 提示。通知页由服务端纯函数 `lib/notification/unknown-retry-availability.ts` 给出不可重发原因，组件据此禁用按钮。
 - 升级前已处于 `RETRYING` 的同组日志：对最后一条 `UNKNOWN` 选择“确认已送达”或“忽略”时，事件已删除则不再重新入队，这些日志在同一事务内按 CAS 关闭为 `FAILED`（确认已送达时记“人工核对：未送达；事件已停用，不再重发”，忽略时沿用忽略理由），任务保持 `DEAD`（`ec43cf66`）。
+
+### PDF 单张下载、状态查询与恢复（2026-09-30）
+
+开发单张下载默认 `PDF_ORDER_MODE=direct`；生产必须显式配置 direct 或 queued，缺少/非法配置返回 503 `PDF_CONFIGURATION_INVALID`。direct 模式：在 Web Node 进程生成，不入队、不要求 HEAVY 心跳或产物存储。相同账号/角色/工单/完整打印内容/base URL 合并并发请求，最多缓存五分钟（每进程 32 MiB、16 份；超大文件只返回不缓存）。每进程最多四个不同请求在途，Chromium 串行执行，每次独立上下文；包含等待在内上限 45 秒。超过容量返回恢复页 503 `PDF_BUSY`；客户端断开只结束自己的等待（499 空响应），不取消其他订阅者。每次下载仍复核当前身份、资源所有权和完整内容（包括未升版修改），内容改变返回 409。`regenerate=1` 绕过完成缓存，但仍合并同内容的在途请求。HTTP 始终 `private, no-store`，与服务内部短时复用不同。
+
+`PDF_ORDER_MODE=queued` 使用原 durable 队列路径；后台模式为 inline 时返回 503 `PDF_CONFIGURATION_INVALID`，不静默改用 direct。已有 `jobId` 在 durable 模式下继续走原授权任务，不会误生成新任务；重复、空或非法 jobId 返回 400。旧任务内容标识与当前内容不同或缺失时拒绝返回产物，提示重新生成。批量打印接口始终沿用原队列。单张 PDF 的 `view=inline` 协议保留，页面“打印”入口使用 `/print/orders/:id?autoprint=1`，减少对浏览器 PDF 插件的依赖。
+
+`GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
+
+202 HTML 每次查询结束后等待 3 秒再查询，单次网络查询上限 15 秒、页面自动查询上限两分钟；不刷新整页、不自动抢焦点。就绪后再次通过授权下载路由打开 PDF；离线、超时或错误停止自动查询。禁用 JS 时仍可手动查询。HTML 提供网页打印、返回工单，以及仅对 `ops:jobs:manage` 角色显示的后台任务入口；跳转目标仍独立授权。
+
+已知错误包括 PDF_WORKER_UNAVAILABLE、PDF_QUEUE_DELAYED、PDF_FONT_UNAVAILABLE、PDF_BROWSER_VERSION_MISMATCH、PDF_LAYOUT_OVERFLOW、PDF_ARTWORK_UNAVAILABLE、PDF_STORAGE_UNAVAILABLE、PDF_VERSION_CHANGED、PDF_RENDER_TIMEOUT；未知错误只显示 PDF_GENERATION_FAILED。inline 渲染失败现在与 durable 一致返回可恢复 HTML，而非只有 JSON 错误。
+
+### PDF 能力与诊断补强（2026-09-30）
+
+`/api/health/jobs` 新增 `pdf: {ready: boolean | null}`：durable 仅在当前发布版本的活跃 HEAVY 心跳明确上报 PDF 可用时为 true；inline 为 null（不代表 Web 渲染已检查）。失能产生 `pdf-worker-unavailable` 告警，jobs 返回 503，但不单独使 Web ready 失败。发布 jobs gate 在能力未知/失能时拒绝放行。PDF 等待端点要求相同版本和有效能力；已生成产物仍先按原授权规则读取。
+
+direct 生成失败返回 `X-Request-Id`，与只包含随机关联号、白名单错误码、模式、阶段和耗时的日志对应。容量、浏览器、字体、版本、产物存储不可用返回 503；其他渲染失败保留 500。图稿不完整时继续提供含原有警告的 PDF，但不保存到 direct 完成缓存；批量打印原有严格图稿校验不变。
+
+
+### 2026-09-30：销售工单与月账单浏览
+
+- 销售工单查询仍以当前登录账号的 `submitterId` 限定。`shipped` 视图包含 `SHIPPED`、`SETTLED`、`FINISHED`，`done`（界面“已结算”）为后两者的子集；各视图有交集，不应相加计算总单量。`COMPLETED` 显示“待打包发货”。
+- 销售工单列表及同源单条预览 DTO 增加可空 `bill: { id, period, status }`；仅当关联月账单的 `agentUserId` 与工单 `submitterId` 相同时投影。账单详情仍独立校验登录账号，不依赖列表链接授权。
+- `/sales/bills` 返回每张账单的成员数量，以及本人最近 12 个有账单月份的按状态金额。趋势不随列表筛选收窄，顶部统计仍按筛选条件汇总；各查询处于同一 RepeatableRead 事务。草稿金额不计入待支付。
+- `/sales/bills/:id` 支持 `q`（最多 100 字，工单号／展示名称）和 `page`（每页 30 条，越界收敛到末页）；有有效结算依据时按冻结名称搜索，否则按明确标为当前名称的回退值搜索。分页只限制展示，整张账单总额和抵扣保持不变。`returnTo` 沿用内部账单列表白名单。

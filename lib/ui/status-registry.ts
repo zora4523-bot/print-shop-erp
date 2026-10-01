@@ -52,7 +52,9 @@ export function statusFilterLabel(definition: StatusDefinition): string {
 
 export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
-  [OrderStatus.PENDING_FACTORY]: { label: '待处理', tone: 'info' },
+  // 业主 2026-10-01：原「待处理」与工单队列「待办」近义；改用管理员实际要做的事，
+  // 与详情「下发前检查」、列表行动作同词。
+  [OrderStatus.PENDING_FACTORY]: { label: '待下发检查', tone: 'info' },
   [OrderStatus.REJECTED]: { label: '已驳回', tone: 'danger' },
   [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'success' },
   [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'warning', dot: true },
@@ -60,12 +62,12 @@ export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.FOILING]: { label: '生产中', tone: 'info', dot: true },
   [OrderStatus.PACKING]: { label: '待打包发货', tone: 'info', dot: true },
   [OrderStatus.SETTLED]: { label: '已结算', tone: 'success' },
-  [OrderStatus.SUBMITTED]: { label: '待处理', tone: 'info' },
+  [OrderStatus.SUBMITTED]: { label: '待下发检查', tone: 'info' },
   // SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED 只存在于迁移前的老行
   // （见 lib/order/status-machine.ts 的转换表注释）。它们的名字与在产状态
   // 高度相似，不加标记会让管理员误判「我到底下发过没有」，因此把「（历史）」
   // 写进 label 本身——只在工作台加后缀会让同一状态在管理端出现两个名字。
-  // SUBMITTED 保持「待处理」不加标记：它与 PENDING_FACTORY 同名，加标记等于
+  // SUBMITTED 保持「待下发检查」不加标记：它与 PENDING_FACTORY 同名，加标记等于
   // 把枚举差异外显给用户。
   [OrderStatus.SCHEDULING]: {
     label: '排产中（历史）',
@@ -146,12 +148,12 @@ export const AGENT_MONTHLY_BILL_STATUS_REGISTRY: StatusRegistry<AgentMonthlyBill
 
 /**
  * 销售端（外部代理商）看到的同一组状态：管理端是收款视角（待收 / 已收），
- * 销售端是付款视角（待支付 / 已结清），DRAFT 对销售意味着"管理员还在整理、金额未定稿"。
+ * 销售端是付款视角（待付款 / 已结清），DRAFT 对销售意味着"管理员还在整理、金额未定稿"。
  * tone 与管理端一致，只换文案；两端页面都必须从这里取，不得各写字面量。
  */
 export const SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY: StatusRegistry<AgentMonthlyBillStatus> = {
   [AgentMonthlyBillStatus.DRAFT]: { label: '整理中', tone: 'neutral' },
-  [AgentMonthlyBillStatus.CONFIRMED]: { label: '待支付', tone: 'warning', dot: true },
+  [AgentMonthlyBillStatus.CONFIRMED]: { label: '待付款', tone: 'warning', dot: true },
   [AgentMonthlyBillStatus.PAID]: { label: '已结清', tone: 'success' },
 };
 
@@ -236,6 +238,43 @@ export function paymentStatusDefinition(isPaid: boolean): StatusDefinition {
   return PAYMENT_STATUS_REGISTRY[
     isPaid ? PAYMENT_DISPLAY_STATUS.PAID : PAYMENT_DISPLAY_STATUS.UNPAID
   ];
+}
+
+/**
+ * 工单详情「对客收费明细」每一笔收费的展示状态（2026-10-01 审查 D-10）。
+ * 存储状态是 OrderCustomerChargeStatus；「已人工核对（待结算）」来自可信的管理员
+ * 计价快照，不是独立枚举，所以这里是展示态。判定顺序与原页面三元一致：
+ * 已确认 > 已人工核对 > 已免收 > 金额待定 > 创建时估算。
+ */
+export const CUSTOMER_CHARGE_DISPLAY_STATUS = {
+  FINAL: 'FINAL',
+  ADMIN_REVIEWED: 'ADMIN_REVIEWED',
+  WAIVED: 'WAIVED',
+  PENDING_AMOUNT: 'PENDING_AMOUNT',
+  ESTIMATED: 'ESTIMATED',
+} as const;
+
+export type CustomerChargeDisplayStatus =
+  (typeof CUSTOMER_CHARGE_DISPLAY_STATUS)[keyof typeof CUSTOMER_CHARGE_DISPLAY_STATUS];
+
+export const CUSTOMER_CHARGE_STATUS_REGISTRY: StatusRegistry<CustomerChargeDisplayStatus> = {
+  [CUSTOMER_CHARGE_DISPLAY_STATUS.FINAL]: { label: '已确认', tone: 'success' },
+  [CUSTOMER_CHARGE_DISPLAY_STATUS.ADMIN_REVIEWED]: { label: '已人工核对（待结算）', tone: 'info' },
+  [CUSTOMER_CHARGE_DISPLAY_STATUS.WAIVED]: { label: '已免收', tone: 'neutral' },
+  [CUSTOMER_CHARGE_DISPLAY_STATUS.PENDING_AMOUNT]: { label: '金额待定', tone: 'warning' },
+  // 业主 2026-10-01：估算是「金额还会变」的提示态，用 info 与已定稿的 neutral 区分。
+  [CUSTOMER_CHARGE_DISPLAY_STATUS.ESTIMATED]: { label: '创建时估算', tone: 'info' },
+};
+
+export function customerChargeDisplayStatus(
+  status: string,
+  trustedAdminReview: boolean,
+): CustomerChargeDisplayStatus {
+  if (status === 'FINAL') return CUSTOMER_CHARGE_DISPLAY_STATUS.FINAL;
+  if (trustedAdminReview) return CUSTOMER_CHARGE_DISPLAY_STATUS.ADMIN_REVIEWED;
+  if (status === 'WAIVED') return CUSTOMER_CHARGE_DISPLAY_STATUS.WAIVED;
+  if (status === 'PENDING_AMOUNT') return CUSTOMER_CHARGE_DISPLAY_STATUS.PENDING_AMOUNT;
+  return CUSTOMER_CHARGE_DISPLAY_STATUS.ESTIMATED;
 }
 
 /**

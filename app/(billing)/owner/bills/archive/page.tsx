@@ -8,7 +8,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { EmptyState, PageHeader, TableScrollArea } from '@/components/ui-business';
 import { BillStatusBadge } from '@/components/business/bill/BillStatusBadge';
 
-export const metadata = { title: 'Legacy 账单只读归档' };
+export const metadata = { title: '历史账单归档' };
 
 export default async function LegacyBillArchivePage() {
   await requirePermission('bill:view:all');
@@ -16,16 +16,14 @@ export default async function LegacyBillArchivePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="历史账单"
-        subtitle="保留 finishedAt、补充账单与部分收款的原始历史语义；本页不提供任何写操作，也不与 v2 数字混算。"
+        title="历史账单归档"
+        subtitle="不计入当前月账单"
+        back={{ href: '/owner/agent-bills', label: '返回外部销售月账单' }}
       />
-      <Link href="/owner/agent-bills" className={buttonVariants({ variant: 'outline' })}>
-        ← 返回代理商月度账单
-      </Link>
       {rows.length === 0 ? (
-        <EmptyState icon={Archive} title="暂无 legacy 账单" description="归档表中尚无历史记录。" />
+        <EmptyState icon={Archive} title="暂无历史账单" />
       ) : (
-        <TableScrollArea label="Legacy 账单归档" className="rounded-xl border bg-card shadow-sm">
+        <TableScrollArea label="历史账单归档" className="rounded-xl border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>

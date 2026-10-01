@@ -74,7 +74,7 @@ export function SalesWorkbench({
             <Button
               key={value}
               type="button"
-              variant={section === value ? 'default' : 'ghost'}
+              variant={section === value ? 'selected' : 'ghost'}
               className="min-h-11 whitespace-normal px-2"
               aria-pressed={section === value}
               onClick={() => {
@@ -96,7 +96,7 @@ export function SalesWorkbench({
           })}
         >
           <Plus aria-hidden className="size-4" />
-          创建工单
+          新建工单
         </Link>
       </div>
       <section
@@ -218,7 +218,7 @@ export function SalesWorkbench({
         <div className="relative">
           <Search
             aria-hidden
-            className="pointer-events-none absolute left-3 top-3 size-5 text-muted-foreground"
+            className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-muted-foreground"
           />
           <Input
             aria-label="搜索销售话术"
@@ -234,7 +234,7 @@ export function SalesWorkbench({
               type="button"
               key={name}
               className="min-h-11"
-              variant={category === name ? 'secondary' : 'outline'}
+              variant={category === name ? 'selected' : 'outline'}
               aria-pressed={category === name}
               onClick={() => setCategory(name)}
             >

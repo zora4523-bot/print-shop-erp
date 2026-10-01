@@ -160,7 +160,7 @@ export function DesignUploadPanel({
               disabled={operationPending}
               onClick={() => inputRef.current?.click()}
             >
-              {busy ? '上传中…' : '选择设计文件'}
+              {busy ? '正在上传…' : '选择设计文件'}
             </Button>
           </div>
         ) : null}
@@ -259,9 +259,8 @@ export function DesignUploadPanel({
                       {canEdit ? (
                         <Button
                           type="button"
-                          variant="ghost"
+                          variant="destructive"
                           size="sm"
-                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                           disabled={operationPending}
                           onClick={() => handleDelete(design.id)}
                         >
@@ -303,9 +302,8 @@ export function DesignUploadPanel({
                     {canEdit ? (
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="destructive"
                         size="sm"
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                         disabled={operationPending}
                         onClick={() => handleDelete(design.id)}
                       >

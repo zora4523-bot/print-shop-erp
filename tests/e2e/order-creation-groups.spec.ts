@@ -35,7 +35,7 @@ for (const role of ['owner', 'sales'] as const) {
     await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('批量第一单');
     await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '艳红珠光纸', exact: true }).click();
     await page.locator('[data-slot="order-form-b"] input[type="file"]').last().setInputFiles({ name: 'shared-design.cdr', mimeType: 'application/octet-stream', buffer: Buffer.from('fixture-design-file') });
-    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
     await expect(page.getByText('shared-design.cdr', { exact: false })).toBeVisible();
     await expect(page.getByRole('tablist', { name: '规格明细' }).getByRole('tab', { selected: true })).toHaveCount(1);
     await page.getByRole('group', { name: '规格', exact: true }).getByRole('button', { name: '西封大号', exact: true }).click();
@@ -61,10 +61,10 @@ for (const role of ['owner', 'sales'] as const) {
     await expect(specs.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
     await expect(rowTypes.nth(1)).toHaveValue('UNPACKED');
     await expect(specPanel.getByRole('spinbutton', { name: '数量', exact: true })).toHaveValue('100');
-    await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
     await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
     await expect(specs.getByRole('tab', { name: /· \d+ 个/ })).toHaveCount(2);
-    await page.getByRole('button', { name: '＋ 增加设计款', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加设计款', exact: true }).click();
     await expect(page.getByRole('tablist', { name: '设计款' }).getByRole('tab')).toHaveCount(2);
     await expect(specs.getByRole('tab', { name: /· \d+ 个/ })).toHaveCount(1);
     await expect(page.getByText('shared-design.cdr', { exact: false })).toHaveCount(0);
@@ -75,7 +75,7 @@ for (const role of ['owner', 'sales'] as const) {
     await page.getByRole('button', { name: /编辑设计款 1 · 西封大号.*100 个/ }).click();
     await expect(specs.getByRole('tab', { selected: true })).toContainText('100 个');
     if (role === 'sales') await expect(page.getByRole('button', { name: '人工定价', exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加工单', exact: true }).click();
     await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('批量第二单');
     await expect(page.getByRole('tablist', { name: '设计款' }).getByRole('tab')).toHaveCount(1);
     await page.getByRole('navigation', { name: '待建工单' }).getByRole('button', { name: '工单 1', exact: true }).click();
@@ -111,12 +111,12 @@ test('批量逐张保存，规格分组持久化，刷新后不会重新创建',
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(names[0]);
   await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('张三 13800138000 广东省佛山市测试路一号');
   await page.getByRole('group', { name: '纸张材质', exact: true }).getByRole('button', { name: '艳红珠光纸', exact: true }).click();
-  await page.getByRole('button', { name: '＋ 增加规格', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
   await page.getByRole('group', { name: '规格', exact: true }).getByRole('button', { name: '西封大号', exact: true }).click();
   await page.getByRole('spinbutton', { name: '数量', exact: true }).fill('100');
   // 只给第二个规格不包装：整单区里改该行，顶部类型会作用于全部规格。
   await page.getByRole('combobox', { name: '包装类型', exact: true }).nth(1).selectOption('UNPACKED');
-  await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加工单', exact: true }).click();
   await selectExternalSalesForAdminOrder(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(names[1]);
   await page.getByRole('textbox', { name: '收货地址', exact: true }).fill('李四 13800138001 广东省佛山市测试路二号');
@@ -150,7 +150,7 @@ test('批量寄样工单保存后继续下一张普通工单', async ({ page }) 
   await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
   await openFirstOrderItemEditor(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('下一张普通工单');
-  await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加工单', exact: true }).click();
   // 业主 2026-09-24：管理员建单的每张工单都必须归属一个外部销售。
   await selectExternalSalesForAdminOrder(page);
   await page.getByRole('button', { name: '寄样品', exact: true }).click();
@@ -174,7 +174,7 @@ test('批量创建并编辑收费缺设计图时就地拦截，不创建工单�
   await openFirstOrderItemEditor(page);
   await selectExternalSalesForAdminOrder(page);
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill('后续普通工单');
-  await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+  await page.getByRole('button', { name: '＋ 添加工单', exact: true }).click();
   await selectExternalSalesForAdminOrder(page);
   const name = `批量编辑收费 ${Date.now()}`;
   await page.getByRole('textbox', { name: '工单名称', exact: true }).fill(name);
@@ -198,7 +198,7 @@ for (const purpose of ['寄样品', '打样'] as const) {
   test(`${purpose}在浏览器存储失败时切换工单仍保留编辑内容`, async ({ page }) => {
     await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/orders/new' });
     await openFirstOrderItemEditor(page);
-    await page.getByRole('button', { name: '＋ 增加工单', exact: true }).click();
+    await page.getByRole('button', { name: '＋ 添加工单', exact: true }).click();
     await page.evaluate(() => {
       const get = Storage.prototype.getItem;
       const set = Storage.prototype.setItem;

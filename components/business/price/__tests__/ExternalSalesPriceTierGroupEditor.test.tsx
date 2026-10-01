@@ -126,7 +126,7 @@ describe('ExternalSalesPriceTierGroupEditor', () => {
     expect(html).toContain('data-slot="checkbox"');
     expect(html).toContain('data-slot="checkbox-indicator"');
     expect(html).toContain(
-      'cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60',
+      'cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground',
     );
     expect(html).toContain('>当前<');
     expect(html).toContain('>草稿<');

@@ -43,4 +43,17 @@ describe('admin route states', () => {
     expect(html).toContain('data-keep-chrome="false"');
     expect(html).toContain('正在加载管理页面');
   });
+
+  it.each(['detail', 'form'] as const)('%s 变体画页头 + 卡片，不画表格骨架', (variant) => {
+    const html = renderToStaticMarkup(
+      <AdminRouteLoading variant={variant} label="正在加载采购单" />,
+    );
+
+    expect(html).toContain(`data-variant="${variant}"`);
+    expect(html).not.toContain('data-variant="table"');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('正在加载采购单');
+    expect(html).not.toContain('正在加载正在加载');
+    if (variant === 'form') expect(html).toContain('max-w-3xl');
+  });
 });

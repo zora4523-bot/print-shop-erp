@@ -47,6 +47,9 @@ import {
   externalPriceBusinessText,
   externalPriceRuleDisplayName,
 } from '@/lib/price/external-price-display';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 
 export type CustomerPriceBookDraftRuleContext =
   CustomerPriceRuleDraftEditorDto['context'];
@@ -56,10 +59,6 @@ type MutationState = CustomerPriceBookMutationResult | null;
 type FieldErrors = Record<string, string[]>;
 
 const controlClass = 'min-h-11';
-const selectClass =
-  'min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40';
-const textareaClass =
-  'w-full min-w-0 rounded-lg border border-input bg-background px-3 py-2 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40';
 
 const RULE_KIND_LABELS: Record<CustomerPriceRuleKind, string> = {
   [CustomerPriceRuleKind.BASE]: '基础费用',
@@ -553,11 +552,11 @@ export function CreateCustomerPriceBookDraftForm({
         </div>
       ) : null}
       <div className="space-y-2">
-        <Label htmlFor={changeReasonId}>调价原因（必填）</Label>
-        <textarea
+        <Label htmlFor={changeReasonId}>调价原因<RequiredMark /></Label>
+        <Textarea
           id={changeReasonId}
           name="changeReason"
-          className={`${textareaClass} min-h-24`}
+          className="min-h-24"
           placeholder="例如：2026 年 9 月原材料与快递调价"
           minLength={2}
           maxLength={500}
@@ -570,9 +569,6 @@ export function CreateCustomerPriceBookDraftForm({
             changeReasonHintId,
           )}
         />
-        <p id={changeReasonHintId} className="text-xs text-muted-foreground">
-          用于调价记录。
-        </p>
         <FieldErrorMessages
           id={changeReasonErrorId}
           messages={errors.changeReason}
@@ -650,8 +646,8 @@ export function PublishCustomerPriceBookDraftForm({
 
   useEffect(() => {
     if (state?.status !== 'success') return;
+    // publishCustomerPriceBookDraftAction revalidated the price-version paths.
     router.replace(RULE_CENTER_HREFS.priceVersions);
-    router.refresh();
   }, [router, state]);
 
   if (impact && !hasChanges) {
@@ -783,7 +779,7 @@ export function PublishCustomerPriceBookDraftForm({
               或价格在 0 元与非零之间、无报价与有报价之间切换，
               以及有效规则新增、移除或启停时，需要单独确认。
             </p>
-            <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+            <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
               <Checkbox
                 name="confirmedHighRisk"
                 value="true"
@@ -797,7 +793,7 @@ export function PublishCustomerPriceBookDraftForm({
                   errors.confirmedHighRisk,
                 )}
               />
-              <span className="min-w-0 py-2">
+              <span className="min-w-0 py-3">
                 我已逐条核对高风险变更，确认按当前新规则发布
               </span>
             </label>
@@ -839,10 +835,10 @@ export function PublishCustomerPriceBookDraftForm({
           </div>
           <div className="space-y-2">
             <Label htmlFor={publishNoteId}>补充发布说明（可选）</Label>
-            <textarea
+            <Textarea
               id={publishNoteId}
               name="publishNote"
-              className={`${textareaClass} min-h-20`}
+              className="min-h-20"
               placeholder="如需补充说明，请在此填写"
               minLength={2}
               maxLength={500}
@@ -933,13 +929,13 @@ export function DiscardCustomerPriceBookDraftForm({
             className="min-h-11"
             disabled={pending}
           >
-            {pending ? '放弃中…' : '放弃草稿'}
+            {pending ? '正在放弃…' : '放弃草稿'}
           </Button>
         }
         cancelLabel="返回检查">
         <ConfirmActionDialog action="放弃这份价目草稿" changes={[]} consequences={[
           '草稿及其中所有未发布修改将永久删除。',
-        ]} confirmText="确认放弃草稿" />
+        ]} confirmText="确认放弃草稿" danger />
       </ConfirmActionController>
       <MutationFeedback
         state={state}
@@ -965,10 +961,8 @@ export function CancelScheduledCustomerPriceBookForm({
     null,
   );
   const formId = useId();
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
+  // Success revalidates the price-book paths; no extra router.refresh()
+  // (DECISIONS 2026-08-27).
 
   return (
     <form
@@ -993,7 +987,7 @@ export function CancelScheduledCustomerPriceBookForm({
         cancelLabel="保留计划">
         <ConfirmActionDialog action={`取消第 ${version} 版的生效计划？`} changes={[]} consequences={[
           '前一版价格将延续覆盖原计划时段。',
-        ]} confirmText="取消计划" />
+        ]} confirmText="取消计划" danger />
       </ConfirmActionController>
       <MutationFeedback
         state={state}
@@ -1025,10 +1019,8 @@ export function RescheduleCustomerPriceBookForm({
   const [effectiveFrom, setEffectiveFrom] = useState(defaultEffectiveFrom);
   const errorId = `${inputId}-error`;
   const errors = mutationFieldErrors(state);
-
-  useEffect(() => {
-    if (state?.status === 'success') router.refresh();
-  }, [router, state]);
+  // Success revalidates the price-book paths; no extra router.refresh()
+  // (DECISIONS 2026-08-27).
 
   return (
     <form
@@ -1145,7 +1137,7 @@ function MatchCheckboxGroup<T extends string>({
           (value) => (
             <label
               key={value}
-              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
             >
               <Checkbox
                 name={name}
@@ -1228,10 +1220,9 @@ function MatcherTriStateField({
   const errorId = `${id}-error`;
   return (
     <Field label={label} htmlFor={id} errorId={errorId} errors={errors}>
-      <select
+      <NativeSelect
         id={id}
         name={name}
-        className={selectClass}
         defaultValue={defaultValue === null ? '' : String(defaultValue)}
         aria-invalid={Boolean(errors?.length)}
         aria-describedby={errors?.length ? errorId : undefined}
@@ -1239,7 +1230,7 @@ function MatcherTriStateField({
         <option value="">不限</option>
         <option value="true">{trueLabel}</option>
         <option value="false">{falseLabel}</option>
-      </select>
+      </NativeSelect>
     </Field>
   );
 }
@@ -1302,11 +1293,9 @@ export function CustomerPriceBookDraftRuleForm({
 
   useEffect(() => {
     if (state?.status !== 'success') return;
-    if (successHref) {
-      router.replace(successHref);
-      return;
-    }
-    router.refresh();
+    // updateCustomerPriceRuleDraftAction revalidated the price-book paths, so
+    // staying on this page needs no extra router.refresh() (DECISIONS 2026-08-27).
+    if (successHref) router.replace(successHref);
   }, [router, state, successHref]);
   const prefix = `price-rule-${rule.id}`;
   const isProcessing = rule.editorMode === 'PROCESSING';
@@ -1390,10 +1379,9 @@ export function CustomerPriceBookDraftRuleForm({
               errorId={errorIdFor('categoryId')}
               errors={errors.categoryId}
             >
-              <select
+              <NativeSelect
                 id={`${prefix}-category`}
                 name="categoryId"
-                className={selectClass}
                 defaultValue={rule.categoryId}
                 required
                 aria-required="true"
@@ -1404,7 +1392,7 @@ export function CustomerPriceBookDraftRuleForm({
                     {externalPriceBusinessText(category.name)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             <Field
               label="适用产品"
@@ -1414,10 +1402,9 @@ export function CustomerPriceBookDraftRuleForm({
               errorId={errorIdFor('productId')}
               errors={errors.productId}
             >
-              <select
+              <NativeSelect
                 id={`${prefix}-product`}
                 name="productId"
-                className={selectClass}
                 defaultValue={rule.productId ?? ''}
                 {...fieldA11y('productId', `${prefix}-product-hint`)}
               >
@@ -1427,7 +1414,7 @@ export function CustomerPriceBookDraftRuleForm({
                     {externalPriceBusinessText(product.name)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
             <Field
               label="费用类型"
@@ -1435,10 +1422,9 @@ export function CustomerPriceBookDraftRuleForm({
               errorId={errorIdFor('kind')}
               errors={errors.kind}
             >
-              <select
+              <NativeSelect
                 id={`${prefix}-kind`}
                 name="kind"
-                className={selectClass}
                 defaultValue={rule.kind}
                 required
                 aria-required="true"
@@ -1449,7 +1435,7 @@ export function CustomerPriceBookDraftRuleForm({
                     {RULE_KIND_LABELS[kind]}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
           </>
         ) : (
@@ -1521,10 +1507,9 @@ export function CustomerPriceBookDraftRuleForm({
             errorId={errorIdFor('calculationType')}
             errors={errors.calculationType}
           >
-            <select
+            <NativeSelect
               id={`${prefix}-calculationType`}
               name="calculationType"
-              className={selectClass}
               defaultValue={rule.calculationType ?? ''}
               {...fieldA11y('calculationType')}
             >
@@ -1534,7 +1519,7 @@ export function CustomerPriceBookDraftRuleForm({
                   {CALCULATION_TYPE_LABELS[type]}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </Field>
         ) : (
           null
@@ -1713,15 +1698,14 @@ export function CustomerPriceBookDraftRuleForm({
                 errorId={`${prefix}-craftMode-error`}
                 errors={errors['match.craftMode']}
               >
-                <select
+                <NativeSelect
                   id={`${prefix}-craftMode`}
                   name="match.craftMode"
-                  className={selectClass}
                   defaultValue={rule.match.craftMode === 'ALL' ? 'ALL' : ''}
                 >
                   <option value="">命中任一工艺（默认）</option>
                   <option value="ALL">必须同时包含全部工艺</option>
-                </select>
+                </NativeSelect>
               </Field>
               <MatchCheckboxGroup<string>
                 legend="排除工艺"
@@ -1827,7 +1811,7 @@ export function CustomerPriceBookDraftRuleForm({
                 ['match.perFoilPass', '按实际烫金道数乘算', rule.match.perFoilPass],
                 ['match.perPrintColor', '按实际彩印颜色数乘算', rule.match.perPrintColor],
               ].map(([name, label, checked]) => (
-                <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
                   <Checkbox
                     name={String(name)}
                     value="true"
@@ -1907,8 +1891,8 @@ export function CustomerPriceBookDraftRuleForm({
       >
         <legend className="px-1 text-sm font-medium">规则状态</legend>
         <input type="hidden" name="isActive" value="false" />
-        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-          <Checkbox
+        <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
+          <Checkbox className="-ml-3"
             name="isActive"
             value="true"
             defaultChecked={rule.isActive}
@@ -1929,8 +1913,8 @@ export function CustomerPriceBookDraftRuleForm({
               name="blocksAutomaticQuote"
               value="false"
             />
-            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
-              <Checkbox
+            <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
+              <Checkbox className="-ml-3"
                 name="blocksAutomaticQuote"
                 value="true"
                 defaultChecked={rule.blocksAutomaticQuote}
@@ -1966,7 +1950,7 @@ export function CustomerPriceBookDraftRuleForm({
           className="min-h-11 w-full sm:w-auto"
           disabled={pending}
         >
-          {pending ? '保存中…' : '保存草稿'}
+          {pending ? '正在保存…' : '保存草稿'}
         </Button>
       </div>
     </form>

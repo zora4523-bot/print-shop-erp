@@ -23,6 +23,8 @@ import {
 import type { CancellationSettlementPreview } from '@/lib/order/change-request';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import {
   ActionNotice,
@@ -57,7 +59,7 @@ type DecisionReceipt = { text: string; tone: 'success' | 'warning' };
 
 function DecisionConfirmation({
   label, title, impactItems, changes = [], confirmLabel, disabled,
-  onConfirm, describedBy, variant = 'default',
+  onConfirm, describedBy, variant = 'default', cancelLabel,
 }: {
   label: string;
   title: string;
@@ -68,14 +70,25 @@ function DecisionConfirmation({
   onConfirm: () => void;
   describedBy?: string;
   variant?: 'default' | 'destructive' | 'outline';
+  /** 确认层关闭按钮的具体文案；「取消X」类裁决不得叫「取消」（§8.2）。 */
+  cancelLabel?: string;
 }) {
+  // 危险裁决的红色必须同时落在确认层（danger 决定确认按钮配色），不只触发按钮。
   return <ConfirmActionController level="L2"
     disabled={disabled}
+    cancelLabel={cancelLabel}
     trigger={<Button type="button" size="sm" variant={variant} aria-describedby={describedBy}>{label}</Button>}
     onConfirm={onConfirm}>
-    <ConfirmActionDialog action={title} changes={changes} consequences={impactItems} confirmText={confirmLabel} />
+    <ConfirmActionDialog action={title} changes={changes} consequences={impactItems} confirmText={confirmLabel} danger={variant === 'destructive'} />
   </ConfirmActionController>;
 }
+
+/** 裁决确认层的关闭按钮文案：写清「不做」后工单怎样，避免与「取消工单」混淆。 */
+const DECISION_CANCEL_LABELS: Partial<Record<NonNullable<FormMode>, string>> = {
+  reject: '暂不驳回',
+  'change-approve': '保留工单',
+  'change-deny': '暂不拒绝',
+};
 
 function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow }) {
   if (order.status !== 'PENDING_FACTORY' && order.status !== 'SUBMITTED') {
@@ -328,12 +341,12 @@ function AdminDecisionForm({
           <label className="block text-xs font-medium" htmlFor="decision-reason">
             原因
           </label>
-          <select
+          <NativeSelect
             id="decision-reason"
             value={reasonCode}
             disabled={pending}
             onChange={(event) => setReasonCode(event.target.value as ReasonCode)}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            className="w-full"
           >
             {(mode === 'reject' ? REJECT_REASONS : HOLD_REASONS).map(
               ([value, label]) => (
@@ -342,7 +355,7 @@ function AdminDecisionForm({
                 </option>
               ),
             )}
-          </select>
+          </NativeSelect>
           <Input
             value={figs}
             disabled={pending}
@@ -418,7 +431,7 @@ function AdminDecisionForm({
           </label>
         </div>
       ) : null}
-      <textarea
+      <Textarea
         value={note}
         disabled={pending}
         onChange={(event) => setNote(event.target.value)}
@@ -433,18 +446,19 @@ function AdminDecisionForm({
         }
         aria-label="裁决说明"
         required={requiresNote}
-        className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full"
       />
       {formIssue ? <p id="admin-decision-form-help" role="status" className="text-xs text-muted-foreground">{formIssue}</p> : null}
       <div className="flex flex-wrap gap-2">
         <DecisionConfirmation
-          label={pending ? '提交中…' : `确认${actionLabel}`}
+          label={pending ? '正在提交…' : `确认${actionLabel}`}
           title={`${actionLabel}？`}
           impactItems={impactItems}
           confirmLabel={`确认${actionLabel}`}
           disabled={pending || Boolean(formIssue)}
           describedBy={formIssue ? 'admin-decision-form-help' : undefined}
           variant={mode === 'reject' || mode === 'change-approve' || mode === 'change-deny' ? 'destructive' : 'default'}
+          cancelLabel={DECISION_CANCEL_LABELS[mode]}
           onConfirm={submitDecision}
         />
         <Button
@@ -672,14 +686,12 @@ function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onComplet
           'warning',
         );
         setMode(null);
-        router.refresh();
         return;
       }
       clearDecisionFields();
       setMessage('');
       onCompleted('操作已完成，工单已更新。');
       setMode(null);
-      router.refresh();
       return;
     }
     if (result.status === 'invalid') {
@@ -754,7 +766,6 @@ function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onComplet
           return;
         }
         onCompleted(command === 'MARK_PRINTED' ? '已标记当前版本工单打印完成。' : '已创建当前版本的打印任务。');
-        router.refresh();
       } catch {
         setMessage('打印操作未完成，请刷新工单后重试。');
       } finally {
@@ -916,7 +927,7 @@ function DecisionPanelSection({
       <div data-slot={compact ? 'admin-order-decision-card' : undefined}>
         {compact ? (
           <>
-            <h4 data-slot="admin-order-decision-heading" className="text-sm font-extrabold">
+            <h4 data-slot="admin-order-decision-heading" className="text-sm font-semibold">
               {order.pendingChangeRequest
                 ? order.pendingChangeRequest.type === 'MODIFY'
                   ? '变更申请'

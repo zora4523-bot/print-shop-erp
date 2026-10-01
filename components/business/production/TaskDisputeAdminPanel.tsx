@@ -9,6 +9,7 @@ import { ActionNotice } from '@/components/ui-business';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { TaskDisputeStatusBadge } from './TaskDisputeStatusBadge';
 import { formatMoney } from '@/lib/dashboard/format';
+import { Textarea } from '@/components/ui/textarea';
 
 export type AdminTaskDisputeRow = {
   id: string;
@@ -140,14 +141,14 @@ function TaskDisputeReviewForm({
     <form action={action} aria-busy={pending} className="mt-3 space-y-2 border-t pt-3">
       <label className="block text-xs font-medium">
         处理回复
-        <textarea
+        <Textarea
           name="resolution"
           minLength={2}
           maxLength={1000}
           rows={3}
           required
           disabled={pending}
-          className="mt-1 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
+          className="mt-1 w-full"
           placeholder="说明核对结果、处理依据和后续操作"
         />
       </label>
@@ -170,7 +171,7 @@ function TaskDisputeReviewForm({
           disabled={pending}
           size="sm"
         >
-          {pending ? '处理中…' : '确认已解决'}
+          {pending ? '正在处理…' : '确认已解决'}
         </Button>
         <Button
           type="submit"

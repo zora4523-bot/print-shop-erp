@@ -117,7 +117,7 @@ it.each(['pricing'] as const)('%s completes and reports once after its pending f
     await page.getByLabelText('确认金额（元）').fill('45.50');
     await page.getByLabelText('定价依据', { exact: true }).fill('工厂报价已核对');
   } else {
-    await page.getByLabelText('运单号（选填）').fill('ZTO-987654');
+    await page.getByLabelText('运单号', { exact: true }).fill('ZTO-987654');
   }
   await page.getByRole('button', { name: kind === 'pricing' ? '确认工厂核价' : '确认 1 个地址已发货', exact: true }).click();
   await expect.poll(() => action.mock.calls.length).toBe(1);
@@ -131,7 +131,8 @@ it.each(['pricing'] as const)('%s completes and reports once after its pending f
   finish({ status: 'success' });
   await expect.poll(() => completed.mock.calls.length).toBe(1);
   expect(completed).toHaveBeenCalledWith(kind === 'pricing' ? '核价已确认' : '工单已发货');
-  await expect.poll(() => refresh.mock.calls.length).toBe(1);
+  // The finalize action revalidated; no second full-route refresh (DECISIONS 2026-08-27).
+  expect(refresh).not.toHaveBeenCalled();
   expect(action).toHaveBeenCalledTimes(1);
 });
 

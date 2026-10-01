@@ -66,16 +66,17 @@ it('traces imported display helpers and labels to their defining file', () => {
     mkdirSync(path.join(root, 'components'));
     mkdirSync(path.join(root, 'lib'));
     writeFileSync(path.join(root, 'components', 'Example.tsx'), `
-      import { label, describe } from '../lib/labels';
-      export function View() { return <p>{label}{describe()}</p>; }
+      import { label, describe, rows } from '../lib/labels';
+      export function View() { return <><p>{label}{describe()}</p><Summary items={rows()} /></>; }
     `);
     writeFileSync(path.join(root, 'lib', 'labels.ts'), `
       export const label = 'DRAFT';
       export function describe() { return '服务端快照'; }
+      export function rows() { return [{ description: '费用快照不会改写', key:'worker', metadata: { description:'Prisma' } }]; }
       console.log('Prisma debug');
     `);
     const hits = scan(root, {...policy, exemptions: []});
-    expect(hits.map(row => row.text).sort()).toEqual(['DRAFT', '服务端快照']);
+    expect(hits.map(row => row.text).sort()).toEqual(['DRAFT', '服务端快照', '费用快照不会改写']);
     expect(hits.every(row => row.file === 'lib/labels.ts')).toBe(true);
   } finally {
     rmSync(root, {recursive: true, force: true});
@@ -94,7 +95,7 @@ it('keeps every documented internal mapping in the gate and wires the required l
 
 it('blocks connection implementation terms in notification flows without banning diagnostic vocabulary globally', () => {
   expect(inspectUiCopy('<p>后台 worker 将使用 Secret</p>', 'components/business/notification/Example.tsx')).toHaveLength(1);
-  expect(inspectUiCopy('<p>worker 运行状态</p>', 'app/(admin)/owner/diagnostics/page.tsx')).toEqual([]);
+  expect(inspectUiCopy('<p>Secret 轮换状态</p>', 'app/(admin)/owner/diagnostics/page.tsx')).toEqual([]);
 });
 
 
@@ -107,4 +108,107 @@ it.each([
 });
 it('allows required order blockers and attachment warnings', () => {
   expect(inspectUiCopy('<p>完工后才可发货。图片和 CDR 文件不会保存在本地草稿中。</p>', 'components/business/order/OrderForm.tsx', policy)).toEqual([]);
+});
+
+describe('pattern rules (ui-review #30)', () => {
+  it.each([
+    ['<p>完成于 finishedAt</p>', 'finishedAt'],
+    ['<Badge label="legacy 规则" />', 'legacy'],
+    ['<p>Legacy 价格</p>', 'Legacy'],
+    ['<p>价目簿 v2</p>', 'v2'],
+    ['<p>V2版工价</p>', 'V2'],
+    ['<p>发给 worker</p>', 'worker'],
+    ['toast.error("Worker 不在线");', 'Worker'],
+  ])('rejects %s', (source, word) => {
+    const [hit] = check(source);
+    expect(hit?.words).toContain(word);
+  });
+
+  it.each([
+    '<p>师傅端</p>',
+    '<p>workers 队列</p>',
+    '<p>iv2x</p>',
+    '<p>PDF 与 CDR</p>',
+    '<p>Finished</p>',
+    'const x = <a href="/worker/tasks">师傅</a>;',
+    'const x = <Form action="/worker/orders">筛选</Form>;',
+  ])('accepts %s', (source) => {
+    expect(check(source)).toEqual([]);
+  });
+
+  it('bans notification credentials copy on the owner notifications pages too', () => {
+    const rule = policy.scopedBanned.find((entry: { prefix: string }) => entry.prefix === 'app/(admin)/owner/notifications/');
+    expect(rule?.words).toEqual(expect.arrayContaining(['Bot ID', 'Secret']));
+    expect(inspectUiCopy('<p>填写 Bot ID</p>', 'app/(admin)/owner/notifications/page.tsx', policy)).toHaveLength(1);
+    expect(inspectUiCopy('<p>填写 Bot ID</p>', 'app/(admin)/owner/orders/page.tsx', policy)).toEqual([]);
+  });
+});
+
+describe('pattern rule precision', () => {
+  it('treats bare identifier literals as code keys but still flags them as JSX text', () => {
+    expect(check("const f = [['receiverName', '收件人']]; export const V = () => <p>{f.map(x => x[1])}</p>;")).toEqual([]);
+    expect(check('setError("externalSalesUserId", { message: "请选择外部销售" });')).toEqual([]);
+    expect(check('<th>finishedAt</th>')).toHaveLength(1);
+  });
+
+  it('flags identifier literals placed directly in display positions', () => {
+    expect(check('const x = <th>{"finishedAt"}</th>;')).toHaveLength(1);
+    expect(check('const x = <button aria-label="finishedAt">x</button>;')).toHaveLength(1);
+    expect(check('const x = <p title={"settledTotal"}>x</p>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok ? "finishedAt" : "创建时间"}</span>;')).toHaveLength(1);
+    expect(check('const x = <span>{("finishedAt")}</span>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <button aria-label={ok ? "settledTotal" : "合计"}>x</button>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok && "finishedAt"}</span>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok ? ("finishedAt" as const) : "创建时间"}</span>;')).toHaveLength(1);
+    expect(check('const ok = true; const x = <span>{ok && ("finishedAt" satisfies string)}</span>;')).toHaveLength(1);
+  });
+
+  it('does not treat the left side of && as display copy', () => {
+    expect(check('const ok = true; const x = <span>{(ok ? "finishedAt" : undefined) && "完成时间"}</span>;')).toEqual([]);
+    expect(check('const ok = true; const x = <span>{(ok ? "DRAFT" : undefined) && "草稿"}</span>;')).toEqual([]);
+    expect(check('const ok = true; const x = <span>{(ok ? "worker 状态" : undefined) && "处理中"}</span>;')).toEqual([]);
+    // || 的左侧为真时会被显示，仍需检查。
+    expect(check('const x = <span>{"DRAFT" || "草稿"}</span>;')).toHaveLength(1);
+  });
+
+  it('ignores literals that only appear in erased type positions', () => {
+    expect(check('const x = <span>{"草稿" satisfies "草稿" | "DRAFT"}</span>;')).toEqual([]);
+    expect(check('const x = <span>{"草稿" as "草稿" | "DRAFT"}</span>;')).toEqual([]);
+    expect(check('const x = <span>{"DRAFT" as string}</span>;')).toHaveLength(1);
+  });
+
+  it('ignores inline script source', () => {
+    expect(check('<script>{`localStorage.getItem("x")`}</script>')).toEqual([]);
+    expect(check('<Script id="t">{`localStorage.getItem("x")`}</Script>')).toEqual([]);
+  });
+});
+
+
+describe('structured display props', () => {
+  it.each([
+    'const items = [{ description: "费用快照不会改写" }]; const View = () => <Summary items={items} />;',
+    'function items(){return [{label: "BOM", description: "费用快照"}]} const View = () => <Summary items={items()} />;',
+    'const rows = [{children: [{description: "服务端计价"}]}]; const View = () => <Summary items={rows} />;',
+    'const rows = [{children: "服务端计价"}]; const View = () => <Summary items={rows} />;',
+  ])('checks display fields supplied through items: %s', (source) => {
+    expect(check(source).length).toBeGreaterThan(0);
+  });
+
+  it('does not inspect non-display fields inside items', () => {
+    expect(check(`const items = [{id:'DRAFT', href:'/worker/tasks', label:'草稿',
+      metadata:{description:'Prisma'}, command:'worker', value:'DRAFT'}];
+      const View = () => <Summary items={items} />;`)).toEqual([]);
+  });
+});
+
+
+it.each([
+  ['app/(admin)/sales/bills/page.tsx', '您应付给工厂的货款，按结算月份生成月账单。'],
+  ['components/business/order/OrderCreationWorkspace.tsx', '每张工单独立填写地址、设计款和费用'],
+  ['components/business/rules/pricing/CustomerPricingSectionViews.tsx', '当前参数试算：1,000 个双面'],
+])('blocks retired explanatory introductions in %s', (file, text) => {
+  expect(inspectUiCopy(`<p>${text}</p>`, file, policy).length).toBeGreaterThan(0);
+});
+it('preserves financial scope, provisional amounts and actionable recovery copy', () => {
+  expect(inspectUiCopy('<p>整单应付货款 · 当前筛选 3 张账单 · 金额未定稿 · 登录已过期，请重新登录。</p>', 'app/(admin)/sales/bills/page.tsx', policy)).toEqual([]);
 });

@@ -48,7 +48,9 @@ test('price versions navigation, exact prices, responsive review and unchanged d
         const view = await context.newPage(); view.on('pageerror', error => errors.push(error.message));
         await view.goto(route);
         const info = { ...testInfo, project: { ...testInfo.project, use: { ...testInfo.project.use, viewport: { width, height } } } };
-        const options = view.getByText('预约生效或补充发布说明（可选）', { exact: true });
+        // Streamed Suspense segments wait in a hidden <div id="S:n"> outside the main region
+        // until React reveals them; only the rendered page content counts.
+        const options = view.locator('#admin-main').getByText('预约生效或补充发布说明（可选）', { exact: true });
         if (width <= 768) await options.tap(); else await options.click();
         await expect(view.getByLabel('预约生效时间（上海时间）')).toBeVisible();
         for (const theme of ['light', 'dark'] as const) {

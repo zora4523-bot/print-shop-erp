@@ -216,17 +216,17 @@ describe('status registry', () => {
       expect(ORDER_STATUS_REGISTRY[status].label).toContain('（历史）');
     }
     // SUBMITTED 与 PENDING_FACTORY 同名，标记它等于把枚举差异外显。
-    expect(ORDER_STATUS_REGISTRY[OrderStatus.SUBMITTED].label).toBe('待处理');
+    expect(ORDER_STATUS_REGISTRY[OrderStatus.SUBMITTED].label).toBe('待下发检查');
     expect(ORDER_STATUS_REGISTRY[OrderStatus.SHIPPED].label).toBe('已发货');
   });
 
   it('does not render queued, running, or unresolved work as danger', () => {
     expect(ORDER_STATUS_REGISTRY[OrderStatus.PENDING_FACTORY]).toMatchObject({
-      label: '待处理',
+      label: '待下发检查',
       tone: 'info',
     });
     expect(ORDER_STATUS_REGISTRY[OrderStatus.SUBMITTED].label).toBe(
-      '待处理',
+      '待下发检查',
     );
     expect(ORDER_STATUS_REGISTRY[OrderStatus.IN_PRODUCTION].tone).toBe('info');
     expect(BILL_STATUS_REGISTRY[BillStatus.ISSUED].tone).toBe('warning');
@@ -537,5 +537,28 @@ describe('status registry', () => {
     expect(
       statusFilterLabel(SHIPMENT_STATUS_REGISTRY[ShipmentStatus.PLANNED]),
     ).toBe('待发货');
+  });
+});
+
+describe('customer charge display status (2026-10-01 D-10)', () => {
+  it('keeps the original precedence: confirmed > trusted admin review > waived > amount pending > estimate', () => {
+    const { customerChargeDisplayStatus, CUSTOMER_CHARGE_STATUS_REGISTRY } = statusRegistryModule;
+    const label = (status: string, trusted: boolean) =>
+      CUSTOMER_CHARGE_STATUS_REGISTRY[customerChargeDisplayStatus(status, trusted)].label;
+    expect(label('FINAL', true)).toBe('已确认');
+    expect(label('FINAL', false)).toBe('已确认');
+    expect(label('ESTIMATED', true)).toBe('已人工核对（待结算）');
+    expect(label('WAIVED', true)).toBe('已人工核对（待结算）');
+    expect(label('WAIVED', false)).toBe('已免收');
+    expect(label('PENDING_AMOUNT', false)).toBe('金额待定');
+    expect(label('ESTIMATED', false)).toBe('创建时估算');
+    // 业主 2026-10-01：估算用 info，不与已定稿的 neutral 混在一起。
+    expect(
+      CUSTOMER_CHARGE_STATUS_REGISTRY[customerChargeDisplayStatus('ESTIMATED', false)].tone,
+    ).toBe('info');
+    // 正常的估算、免收与人工核对都不是失败，不用 danger。
+    for (const definition of Object.values(CUSTOMER_CHARGE_STATUS_REGISTRY)) {
+      expect(definition.tone).not.toBe('danger');
+    }
   });
 });

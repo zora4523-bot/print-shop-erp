@@ -12,6 +12,7 @@ vi.mock('next/navigation', () => ({
 import {
   AdminBreadcrumb,
   BREADCRUMB_PATH_LABELS,
+  buildBreadcrumbCrumbs,
   resolveSegmentLabel,
 } from '../AdminBreadcrumb';
 
@@ -25,7 +26,7 @@ describe('resolveSegmentLabel', () => {
   });
 
   it('已知段名走中文标签表', () => {
-    expect(resolveSegmentLabel('orders', null)).toBe('工单');
+    expect(resolveSegmentLabel('orders', null)).toBe('工单列表');
     expect(resolveSegmentLabel('attention', null)).toBe('关注事项');
     expect(resolveSegmentLabel('analytics', null)).toBe('经营概览');
   });
@@ -51,7 +52,7 @@ describe('resolveSegmentLabel', () => {
   it('模块表里的段优先于本地映射，漏网段不露出英文路由', () => {
     expect(resolveSegmentLabel('cdr', null)).toBe('CDR 汇总');
     expect(resolveSegmentLabel('order-changes', null)).toBe('工单修改申请');
-    expect(resolveSegmentLabel('e2e-admin-ui-missing', null)).toBe('页面');
+    expect(resolveSegmentLabel('e2e-admin-ui-missing', null)).toBeNull();
   });
 
   it('未知末级路由最终回落到页面 H1，不泄露英文路由段', () => {
@@ -77,16 +78,16 @@ describe('AdminBreadcrumb SSR', () => {
     ['/owner/rules/crafts/new', '新建工艺'],
     ['/owner/rules/product-categories/new', '新建产品结构分类'],
     ['/owner/rules/product-categories/items/new', '新建产品资料'],
-    ['/orders/new', '创建工单'],
+    ['/orders/new', '新建工单'],
     ['/orders/production', '安排生产师傅'],
     ['/foreman/materials/new', '新建物料'],
-    ['/owner/notifications/channels/new', '新建企业微信通知目标'],
+    ['/owner/notifications/channels/new', '新建通知目标'],
   ])('首帧按完整路径显示 %s 的末级标题', (path, label) => {
     usePathnameMock.mockReturnValue(path);
     const html = renderToStaticMarkup(<AdminBreadcrumb />);
     expect(html).toContain(`title="${label}"`);
     expect(html).toContain(`>${label}</span>`);
-    if (path !== '/orders/new') expect(visibleText(html)).not.toContain('创建工单');
+    if (path !== '/orders/new') expect(visibleText(html)).not.toContain('新建工单');
   });
 
   it.each(['/foreman/outsource/new', '/sales/orders/new'])('layout-only ancestors stay unlinked at %s', (path) => {
@@ -135,20 +136,32 @@ describe('order navigation hierarchy', () => {
     expect(html).toContain('工单详情');
     expect(html).toContain('href="/orders"');
     expect(visibleText(html)).not.toContain('e2e-custom-id');
-    expect(html).not.toContain('hidden shrink-0 lg:inline-flex');
+    // 窄屏保留父级：末级的上一段永远可见。
+    const crumbs = buildBreadcrumbCrumbs(path);
+    expect(crumbs.at(-2)?.label).toBe(path.endsWith('/edit') ? '工单详情' : '工单列表');
   });
   it('keeps creation distinct from detail', () => {
     usePathnameMock.mockReturnValue('/orders/new');
     const html = renderToStaticMarkup(<AdminBreadcrumb />);
-    expect(html).toContain('创建工单');
+    expect(html).toContain('新建工单');
     expect(html).not.toContain('工单详情');
   });
 });
 
-it('新增空白封纸张使用业务标题且不链接无页面的中间路径', () => {
+it('新建空白封纸张使用业务标题且不链接无页面的中间路径', () => {
   usePathnameMock.mockReturnValue('/owner/rules/customer-pricing/blank/new');
   const html = renderToStaticMarkup(<AdminBreadcrumb />);
-  expect(visibleText(html)).toContain('新增纸张与规格价格');
-  expect(visibleText(html)).not.toContain('创建工单');
+  expect(visibleText(html)).toContain('新建纸张与规格价格');
+  expect(visibleText(html)).not.toContain('新建工单');
   expect(html).not.toContain('href="/owner/rules/customer-pricing/blank"');
+});
+
+// 业主 2026-10-01：外部销售的工单列表统一叫「我的工单」（侧栏、面包屑、H1、<title> 同源）。
+it('names /orders by the viewer’s own module: 管理员「工单列表」，外部销售「我的工单」', () => {
+  expect(buildBreadcrumbCrumbs('/orders', null, null, 'ADMIN').map((crumb) => crumb.label)).toEqual(['工单列表']);
+  expect(buildBreadcrumbCrumbs('/orders', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单']);
+  expect(buildBreadcrumbCrumbs('/orders/order-1', '工单 A', null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '工单详情']);
+  expect(buildBreadcrumbCrumbs('/orders/new', null, null, 'SALES').map((crumb) => crumb.label)).toEqual(['我的工单', '新建工单']);
+  usePathnameMock.mockReturnValue('/orders');
+  expect(visibleText(renderToStaticMarkup(<AdminBreadcrumb role="SALES" />))).toContain('我的工单');
 });

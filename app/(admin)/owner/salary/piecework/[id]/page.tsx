@@ -46,7 +46,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const settlement = await getPageData(id);
   return {
     title: settlement
-      ? `${settlement.reporter.displayName} ${formatDateShanghai(settlement.workDate)} · 工序计件`
+      ? `${settlement.reporter.displayName} ${formatDateShanghai(settlement.workDate)} · 工序计件结算`
       : '计件结算不存在',
   };
 }
@@ -66,20 +66,18 @@ export default async function PieceworkSettlementDetailPage({
       <PageHeader
         title={`${settlement.reporter.displayName} · ${workDate}`}
         subtitle="已结算报工明细"
+        back={{ href: `/owner/salary/piecework?date=${workDate}`, label: '返回工序计件结算' }}
+        status={<SettlementStatus status={settlement.status} />}
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link
+            <a
               href={`/api/salary/piecework-settlements/export?from=${workDate}&to=${workDate}&workerId=${settlement.reporterId}`}
               className={buttonVariants({ variant: 'outline' })}
+
+              download
             >
-              导出新账本
-            </Link>
-            <Link
-              href={`/owner/salary/piecework?date=${workDate}`}
-              className={buttonVariants({ variant: 'ghost' })}
-            >
-              返回列表
-            </Link>
+              导出计件结算
+            </a>
           </div>
         }
       />
@@ -124,7 +122,7 @@ export default async function PieceworkSettlementDetailPage({
                 <th className="px-4 py-2 text-left">工单</th>
                 <th className="px-4 py-2 text-left">工序</th>
                 <th className="px-4 py-2 text-center">类型</th>
-                <th className="px-4 py-2 text-right">合格 / 缺陷 / 返工</th>
+                <th className="px-4 py-2 text-right">合格 / 不良 / 返工</th>
                 <th className="px-4 py-2 text-right">计薪数</th>
                 <th className="px-4 py-2 text-right">工价</th>
                 <th className="px-4 py-2 text-right">金额</th>
@@ -172,7 +170,7 @@ export default async function PieceworkSettlementDetailPage({
                     {formatMoney(report.amount)}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    v{report.priceBookVersion} · {report.ruleSetSha256.slice(0, 10)}…
+                    v{report.priceBookVersion}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {formatDateTimeShanghai(report.reportedAt)}

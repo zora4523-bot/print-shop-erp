@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -38,12 +39,8 @@ export function BomsTable({
   boms: BomSummary[];
   categoryLabelById: Record<string, string>;
 }) {
-  if (boms.length === 0) {
-    return null;
-  }
-
   return (
-    <Table label="BOM 列表">
+    <Table label="用料清单列表">
       <TableHeader>
         <TableRow>
           <TableHead>BOM</TableHead>
@@ -81,7 +78,7 @@ export function BomsTable({
               <Link
                 href={`/owner/boms/${bom.id}`}
                 prefetch={false}
-                className="text-sm text-primary underline hover:no-underline"
+                className={buttonVariants({ variant: 'ghost', size: 'sm' })}
               >
                 查看
               </Link>

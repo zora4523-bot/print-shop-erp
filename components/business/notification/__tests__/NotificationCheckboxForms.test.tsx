@@ -56,7 +56,8 @@ describe('notification form checkbox contracts', () => {
     expect(html).not.toContain('<select');
     expect(html).not.toContain('WECOM_GROUP_WEBHOOK');
     expect(html).not.toContain('name="webhookUrl"');
-    expect(html).toContain('先保存通知目标，再生成绑定码');
+    expect(html).toContain('绑定后可启用');
+    expect(html).not.toContain('先保存通知目标，再生成绑定码');
   });
 
   it('allows an already-bound smart-bot target to keep its active state', () => {
@@ -78,8 +79,8 @@ describe('notification form checkbox contracts', () => {
 
     expect(html).toContain('value="企业微信群"');
     expect(html).toContain('name="transport" value="WECOM_SMART_BOT"');
-    expect(html).toContain('已绑定群聊');
-    expect(html).toContain('••••a1b2');
+    expect(html).not.toContain('已绑定群聊');
+    expect(html).not.toContain('••••a1b2');
     expect(html).toContain('aria-checked="true"');
     expect(checkboxRoots(html)[0]).not.toContain('data-disabled=""');
   });
@@ -236,8 +237,24 @@ describe('notification form checkbox contracts', () => {
   it('启用校验失败显示服务端字段错误', () => {
     actionState.current = { status: 'invalid', fieldErrors: { isActive: ['请先完成企业微信群绑定再启用'] } };
     const html = renderToStaticMarkup(<ChannelForm mode="create" action={action} />);
-    expect(html).toContain('id="isActive-error"');
+    // 字段错误经 FormMessage 与控件连线（ui-规范 §5.4）。
+    expect(html).toContain('id="isActive-message"');
+    expect(html).toContain('aria-errormessage="isActive-message"');
     expect(html).toContain('请先完成企业微信群绑定再启用');
+  });
+
+  it('文本字段错误经 FormMessage 连线，保留常驻说明；只读字段不手写底色', () => {
+    actionState.current = {
+      status: 'invalid',
+      fieldErrors: { channelKey: ['标识已存在'], channelName: ['请填写名称'] },
+    };
+    const html = renderToStaticMarkup(<ChannelForm mode="create" action={action} />);
+    expect(html).toContain('id="channelKey-message"');
+    expect(html).toContain('aria-describedby="channelKey-message channelKey-hint"');
+    expect(html).toContain('aria-errormessage="channelName-message"');
+    expect(html).toContain('标识已存在');
+    expect(html).not.toMatch(/<p class="text-sm text-destructive">/);
+    expect(html).not.toContain('bg-muted/30');
   });
 
   it('托管事件显示固定角色并保留 legacy binding 但不再可编辑', () => {

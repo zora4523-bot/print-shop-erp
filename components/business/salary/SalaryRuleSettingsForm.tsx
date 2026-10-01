@@ -12,6 +12,7 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { FormMessage } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 function defaultValues(current: SalaryRuleSettingsData[SalaryRuleKey]) {
   const workHours = current?.ruleValue;
@@ -60,19 +61,18 @@ export function SalaryRuleSettingsForm({
     >
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="工资规则">
-          <select
+          <NativeSelect
             name="ruleKey"
             value={selectedKey}
             onChange={(event) => switchRule(event.target.value as SalaryRuleKey)}
             disabled={pending}
-            className={selectClass}
           >
             {SALARY_RULE_CATALOG.map((definition) => (
               <option key={definition.key} value={definition.key}>
                 {definition.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </Field>
         <Field label="生效时间（上海）">
           <Input
@@ -87,10 +87,8 @@ export function SalaryRuleSettingsForm({
 
       <div className="rounded-lg border bg-muted/20 p-3 text-sm">
         <p className="font-medium">{selected.label}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{selected.description}</p>
         <p className="mt-2 text-xs text-muted-foreground">
           当前版本：{current ? `自 ${formatDateTime(current.effectiveFrom)} 起生效` : '尚未配置'}。
-          已生成的工资不受影响，仍按生成时的规则计算。
         </p>
       </div>
 
@@ -118,14 +116,12 @@ export function SalaryRuleSettingsForm({
         </FormMessage>
       ) : null}
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending}>{pending ? '保存中…' : '保存新规则版本'}</Button>
-        <span className="text-xs text-muted-foreground">保存会自动关闭相交的上一版本，不会修改历史工资单。</span>
+        <Button type="submit" disabled={pending}>{pending ? '正在保存…' : '保存新规则版本'}</Button>
       </div>
     </form>
   );
 }
 
-const selectClass = 'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="space-y-1 text-sm"><span className="text-xs text-muted-foreground">{label}</span>{children}</label>;

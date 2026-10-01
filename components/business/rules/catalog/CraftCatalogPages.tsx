@@ -15,14 +15,16 @@ import {
 import { CraftsTable } from '@/components/business/craft/CraftsTable';
 import { ToggleActiveButton } from '@/components/business/craft/ToggleActiveButton';
 import { buttonVariants } from '@/components/ui/button';
-import { StatusBadge, ReceiptNotice } from '@/components/ui-business';
+import { StatusBadge, ReceiptNotice, FormPageContainer } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
 import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import { parsePositiveInt, type TableHrefParams } from '@/lib/admin/table';
 import { requirePermission } from '@/lib/auth/permissions';
 import { hasPermission } from '@/lib/auth/permissions-dict';
 import { getSession } from '@/lib/auth/session';
 import { getCraftSummary, isRetiredCraft, listCraftsPage } from '@/lib/craft';
+import { FormPendingScope } from '@/components/business/form/FormPendingScope';
 
 export type CraftCatalogListProps = {
   searchParams: Promise<{
@@ -78,7 +80,6 @@ export async function CraftCatalogList({
       <RuleCenterPageHeader
         title="建单工艺目录"
         effect="immediate"
-        subtitle="维护建单、计价与历史展示共用的工艺字典。"
         actions={
           <Link
             href={`${routeBase}/new`}
@@ -114,19 +115,13 @@ export async function NewCraftCatalogItem({
 }: Pick<CraftCatalogListProps, 'routeBase'>) {
   await requirePermission('dict:craft:manage');
   return (
-    <div className="space-y-4">
+    <FormPendingScope>
+    <FormPageContainer>
       <RuleCenterPageHeader
+        lockBackWhilePending
         title="新建工艺"
         effect="immediate"
-        subtitle="启用后会进入新工单与新规则的工艺选择器。"
-        actions={
-          <Link
-            href={routeBase}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            返回列表
-          </Link>
-        }
+        back={{ href: routeBase, label: '返回工艺' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <CraftForm
@@ -135,7 +130,8 @@ export async function NewCraftCatalogItem({
           routeBase={routeBase}
         />
       </div>
-    </div>
+    </FormPageContainer>
+    </FormPendingScope>
   );
 }
 
@@ -153,22 +149,21 @@ export async function EditCraftCatalogItem({
   const boundUpdate = updateCraftAction.bind(null, id);
 
   return (
+    <FormPendingScope>
     <div className="space-y-6">
       <ReceiptNotice receipt={receipt} noun="工艺" />
       <RuleCenterPageHeader
+        lockBackWhilePending
         title={`编辑工艺：${craft.name}`}
         effect="immediate"
-        subtitle={
+        back={{ href: routeBase, label: '返回工艺' }}
+        status={
           <>
-            {craft.isActive ? '启用' : '停用'}
-            {craft.isOutsource ? ' · 外协' : ''}
-            {isRetired ? (
-              <StatusBadge tone="warning" className="ml-2">
-                历史 / 已退役
-              </StatusBadge>
-            ) : null}
+            <ActiveStatusBadge active={craft.isActive} />
+            {isRetired ? <StatusBadge tone="warning">历史 / 已退役</StatusBadge> : null}
           </>
         }
+        subtitle={craft.isOutsource ? '外协工艺' : undefined}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -187,11 +182,6 @@ export async function EditCraftCatalogItem({
           <h2 className="mb-2 text-base font-semibold">
             {craft.isActive ? '停用工艺' : '启用工艺'}
           </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            {craft.isActive
-              ? '停用后不再出现在新工单和新规则的工艺选择器中；历史引用保留。'
-              : '启用后会重新进入新工单和新规则的工艺选择器。'}
-          </p>
           <ToggleActiveButton
             craftId={craft.id}
             currentlyActive={craft.isActive}
@@ -199,5 +189,6 @@ export async function EditCraftCatalogItem({
         </section>
       ) : null}
     </div>
+    </FormPendingScope>
   );
 }

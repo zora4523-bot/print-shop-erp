@@ -105,7 +105,6 @@ export default async function OwnerNotificationsPage({
       />
       <PageHeader
         title="推送配置"
-        subtitle="管理企业微信通知目标、通知规则和投递记录。"
       />
 
       {mock ? (
@@ -119,7 +118,6 @@ export default async function OwnerNotificationsPage({
       <SmartBotConnectionPanel
         status={smartBotConnection.status}
         lastSeenAt={smartBotConnection.lastSeenAt}
-        mock={mock}
       />
 
       {recentFailures > 0 ? (
@@ -160,7 +158,6 @@ export default async function OwnerNotificationsPage({
           <TableEmptyState
             variant="compact"
             title="没有待人工处理的消息"
-            description="当前没有结果不明或自动重试已耗尽的投递。"
           />
         ) : (
           <TableScrollArea label="待人工处理的推送" className="rounded-xl border bg-card shadow-sm">
@@ -248,7 +245,6 @@ export default async function OwnerNotificationsPage({
           <TableEmptyState
             variant="compact"
             title="尚无推送日志"
-            description="规则触发或发送测试消息后，最近结果会显示在这里。"
           />
         ) : (
           <TableScrollArea label="最近推送日志" className="rounded-xl border bg-card shadow-sm">
@@ -320,7 +316,6 @@ function NotificationChannelsSection({ channels }: {
         <TableEmptyState
           variant="compact"
           title="尚未配置企业微信通知目标"
-          description="新建智能机器人通知目标并完成群绑定后，才能把通知规则投递到对应群。"
           action={
             <Link
               href="/owner/notifications/channels/new"
@@ -364,7 +359,7 @@ function NotificationChannelsSection({ channels }: {
                       {smartBotUnbound ? (
                         <Badge variant="outline">未绑定</Badge>
                       ) : smartBotIdentityMismatch ? (
-                        <Badge variant="destructive">Bot ID 已变更</Badge>
+                        <Badge variant="destructive">机器人已变更</Badge>
                       ) : c.isActive ? (
                         <Badge>启用</Badge>
                       ) : (
@@ -375,7 +370,7 @@ function NotificationChannelsSection({ channels }: {
                       {c.referencingConfigurationCount}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-start justify-end gap-2">
                         <TestChannelButton
                           channelId={c.id}
                           disabled={testDisabled}
@@ -383,7 +378,7 @@ function NotificationChannelsSection({ channels }: {
                             smartBotUnbound
                               ? '智能机器人尚未绑定企业微信群'
                               : smartBotIdentityMismatch
-                                ? '当前 Bot ID 与该群绑定时不一致'
+                                ? '当前机器人与该群绑定时不一致'
                                 : '该通知目标已停用，请先启用'
                           }
                           disabledFixLabel={
@@ -489,11 +484,9 @@ function NotificationRulesSection({ rules }: {
 function SmartBotConnectionPanel({
   status,
   lastSeenAt,
-  mock,
 }: {
   status: SmartBotConnectionStatus | null;
   lastSeenAt: Date | null;
-  mock: boolean;
 }) {
   const presentation = smartBotConnectionPresentation(status);
   return (
@@ -504,19 +497,15 @@ function SmartBotConnectionPanel({
       <div className="flex flex-wrap items-center gap-2">
         <strong>智能机器人长连接</strong>
         <Badge variant={presentation.badgeVariant}>{presentation.label}</Badge>
-        {lastSeenAt ? (
-          <span className="text-xs text-muted-foreground">
-            最近心跳 {formatDateTimeShanghai(lastSeenAt)}
-          </span>
-        ) : null}
+        <span className="text-xs text-muted-foreground">
+          {lastSeenAt
+            ? `最近心跳 ${formatDateTimeShanghai(lastSeenAt)}`
+            : '暂无心跳记录'}
+        </span>
       </div>
-      <p className={presentation.danger ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>
+      {presentation.description ? <p className={presentation.danger ? 'mt-1 text-destructive' : 'mt-1 text-muted-foreground'}>
         {presentation.description}
-        {mock ? ' 当前为测试模式，不会向企业微信真实发送。' : ''}
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground">
-        此状态来自当前版本 LIGHT worker 的数据库心跳，不是 Web 进程根据环境变量推断。
-      </p>
+      </p> : null}
     </div>
   );
 }
@@ -533,49 +522,49 @@ function smartBotConnectionPresentation(
     case 'CONNECTED':
       return {
         label: '已连接',
-        description: 'LIGHT worker 已通过企业微信认证，可以接收群绑定消息并主动推送。',
+        description: '',
         badgeVariant: 'default',
         danger: false,
       };
     case 'CONNECTING':
       return {
         label: '连接中',
-        description: 'LIGHT worker 正在连接企业微信，请稍后刷新查看。',
+        description: '后台处理进程正在连接企业微信，请稍后刷新查看。',
         badgeVariant: 'outline',
         danger: false,
       };
     case 'DISCONNECTED':
       return {
         label: '暂时断开',
-        description: '企业微信连接暂时中断，worker 会自动重连；Web 服务仍可正常使用。',
+        description: '企业微信连接暂时中断，后台处理进程会自动重连；网页仍可正常使用。',
         badgeVariant: 'outline',
         danger: false,
       };
     case 'AUTH_FAILED':
       return {
         label: '认证失败',
-        description: '请立即轮换或核对 Bot Secret，更新受限环境中的凭据，并重启唯一的 LIGHT worker。',
+        description: '请立即轮换或核对机器人凭据，更新受限环境中的凭据，并重启后台处理进程。',
         badgeVariant: 'destructive',
         danger: true,
       };
     case 'CONNECTION_CONFLICT':
       return {
         label: '连接冲突',
-        description: '同一 Bot ID 被另一条长连接占用。请确认只运行一个 LIGHT worker，并排查其他连接者。',
+        description: '同一机器人被另一条长连接占用。请确认只运行一个后台处理进程，并排查其他连接者。',
         badgeVariant: 'destructive',
         danger: true,
       };
     case 'NOT_CONFIGURED':
       return {
         label: '未配置',
-        description: 'LIGHT worker 尚未获得成对的 Bot ID 与轮换后 Secret，当前不能绑定或真实推送。',
+        description: '后台处理进程尚未获得完整的机器人凭据，当前不能绑定或真实推送。',
         badgeVariant: 'destructive',
         danger: true,
       };
     default:
       return {
         label: '状态未知',
-        description: '未读到当前版本 LIGHT worker 的连接心跳，请检查 worker 是否运行及版本是否一致。',
+        description: '未读到后台处理进程的连接心跳，请检查后台处理进程是否运行及版本是否一致。',
         badgeVariant: 'destructive',
         danger: true,
       };

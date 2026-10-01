@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import Decimal from 'decimal.js';
 const { tx, authorize, audit } = vi.hoisted(() => ({
   authorize: vi.fn(), audit: vi.fn(), tx: { $transaction: vi.fn(), $executeRaw: vi.fn(), $queryRaw: vi.fn(),
     productionOperation: { findMany: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn() },
@@ -110,4 +111,22 @@ it('原报工日已结算时无法抵消残留差额：明确拒绝，不清核�
   expect(tx.productionReport.create).not.toHaveBeenCalled();
   expect(tx.productionOperation.update).not.toHaveBeenCalled();
   expect(audit).not.toHaveBeenCalled();
+});
+
+it.each(['-5.00', '8.00'])('核定预览仅在原报工日抵消人工差额 %s，保留跨日冲正的原额', async (adjustmentAmount) => {
+  const adjustment = { ...report, id: 'delta', entryType: 'ADJUSTMENT', amount: adjustmentAmount, reportedCompletedQty: '0', snapshot: { anchorReportId: 'r1' } };
+  useReports([report, adjustment, reversal]);
+  const wage = (await listOrderWages('order', actor))[0]!;
+  expect(wage.groups.map((group) => [group.date, group.voidedAdjustmentDelta])).toEqual([
+    ['2026-09-16', new Decimal(adjustmentAmount).negated().toFixed(2)], ['2026-09-17', '0.00'],
+  ]);
+  await reviewOrderWages(await targetsFor({}), actor);
+  expect(tx.productionReport.create).toHaveBeenCalledTimes(1);
+  expect(tx.productionReport.create.mock.calls[0]![0].data.amount).toBe(wage.groups[0]!.voidedAdjustmentDelta);
+});
+it('无人工差额的跨日冲正预览没有归零金额', async () => {
+  useReports([report, reversal]);
+  expect((await listOrderWages('order', actor))[0]!.groups.map((group) => [group.amount, group.voidedAdjustmentDelta])).toEqual([
+    ['24.00', '0.00'], ['-24.00', '0.00'],
+  ]);
 });

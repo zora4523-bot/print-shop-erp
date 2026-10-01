@@ -537,6 +537,9 @@ jobs:
         uses: ./.github/actions/browsers
         with:
           playwright: chromium
+          # `pnpm run dev` (scripts/dev-stack.mjs) renders a real PDF before
+          # starting Next; without Puppeteer's Chrome the web server never boots.
+          puppeteer: "true"
 
       - name: Prepare the regular and the disposable fixture databases
         run: |

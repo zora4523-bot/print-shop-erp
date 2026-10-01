@@ -112,6 +112,7 @@ describe('RulePaperWorkspace', () => {
     expect(html).toContain('第 2 / 3 页');
     expect(html).toContain('page=1');
     expect(html).toContain('page=3');
-    expect(html).toContain('清除搜索');
+    expect(html).toContain('清除筛选');
+    expect(html).not.toContain('清除搜索');
   });
 });

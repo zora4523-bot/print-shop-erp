@@ -60,8 +60,8 @@ function invalid(error: z.ZodError): AgentMonthlyBillActionResult {
     paymentMethod: '收款方式无效，请填写 100 字以内的文字',
     referenceNo: '流水号无效，请填写 100 字以内的文字',
     sourceItemId: '账单明细无效，请刷新页面后重试',
-    amount: '负项金额无效，请填写最多两位小数的正数',
-    reason: '负项原因无效，请填写 1 至 500 字',
+    amount: '抵扣金额无效，请填写最多两位小数的正数',
+    reason: '抵扣原因无效，请填写 1 至 500 字',
   };
   return {
     status: 'invalid',
@@ -76,6 +76,11 @@ function invalid(error: z.ZodError): AgentMonthlyBillActionResult {
 
 function refreshBillPages(billId?: string): void {
   revalidatePath('/owner/agent-bills');
+  revalidatePath('/owner/agent-bills/unbilled');
+  revalidatePath('/sales/bills');
+  revalidatePath('/owner/agent-bills/[id]', 'page');
+  revalidatePath('/sales/bills/[id]', 'page');
+  revalidatePath('/owner/agent-bills/[id]/credits/[itemId]/new', 'page');
   if (billId) revalidatePath(`/owner/agent-bills/${billId}`);
 }
 
@@ -127,7 +132,7 @@ export async function confirmAgentMonthlyBillAction(
       message:
         result.status === 'PAID'
           ? '零元账单已确认并自动结清'
-          : '账单已确认，成员与金额已冻结',
+          : '账单已确认',
     };
   } catch (error) {
     const mapped = mappedError(error);
@@ -191,8 +196,8 @@ export async function createAgentMonthlyBillCreditAction(
       status: 'success',
       message:
         result.allocatedBillIds.length > 0
-          ? '已记录负项，并已抵扣后续账单'
-          : '已记录负项，余额将在后续草稿账单中抵扣',
+          ? '抵扣已记录，已用于后续账单'
+          : '抵扣已记录，余额待抵扣',
     };
   } catch (error) {
     const mapped = mappedError(error);

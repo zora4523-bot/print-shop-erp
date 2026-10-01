@@ -1,9 +1,10 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { FileText, Pencil, Search } from 'lucide-react';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { EmptyState, StatusBadge } from '@/components/ui-business';
+import { EmptyState, FilterClearLink, StatusBadge } from '@/components/ui-business';
 import type { TableHrefParams } from '@/lib/admin/table';
 import type { MaterialSummary } from '@/lib/material';
 import { externalPriceBusinessText } from '@/lib/price/external-price-display';
@@ -22,6 +23,8 @@ type RulePaperWorkspaceProps = {
     queryParams: TableHrefParams;
   };
 };
+
+const PAPER_FILTER_FORM_ID = 'rule-paper-filters';
 
 function displayText(value: string | null, fallback: string): string {
   return externalPriceBusinessText(value ?? '') || fallback;
@@ -59,16 +62,11 @@ export function RulePaperWorkspace({
   pagination,
 }: RulePaperWorkspaceProps) {
   const clearSearch = (
-    <Link
+    <FilterClearLink
       href={routeBase}
-      prefetch={false}
-      className={cn(
-        buttonVariants({ variant: 'outline' }),
-        'min-h-11',
-      )}
-    >
-      清除搜索
-    </Link>
+      formId={PAPER_FILTER_FORM_ID}
+      className={cn(buttonVariants({ variant: 'outline' }), 'min-h-11')}
+    />
   );
 
   return (
@@ -88,7 +86,10 @@ export function RulePaperWorkspace({
           </span>
         </div>
 
-        <form
+        {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
+        <Form
+          id={PAPER_FILTER_FORM_ID}
+          key={JSON.stringify([query, hiddenSearchParams])}
           action={routeBase}
           role="search"
           aria-label="搜索纸张主数据"
@@ -113,12 +114,13 @@ export function RulePaperWorkspace({
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" className="min-h-11">
+            {/* 页头「新建纸张」是页面唯一主按钮，搜索降为 outline（ui-规范 §8.2）。 */}
+            <Button type="submit" variant="outline" className="min-h-11">
               搜索
             </Button>
             {query ? clearSearch : null}
           </div>
-        </form>
+        </Form>
       </div>
 
       {papers.length > 0 ? (

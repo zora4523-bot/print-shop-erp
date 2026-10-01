@@ -22,12 +22,15 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('next/link', () => ({
   __esModule: true,
-  default: ({
-    prefetch: _prefetch,
-    ...props
-  }: ComponentProps<'a'> & { prefetch?: boolean }) => {
+  default: ({ prefetch: _prefetch, onNavigate, onClick, ...props }: ComponentProps<'a'> & {
+    prefetch?: boolean; onNavigate?: (event: { preventDefault(): void }) => void;
+  }) => {
     void _prefetch;
-    return <a {...props} />;
+    return <a {...props} onClick={(event) => {
+      onClick?.(event);
+      if (!event.defaultPrevented && !event.ctrlKey && !event.metaKey) onNavigate?.(event);
+      event.preventDefault();
+    }} />;
   },
 }));
 import { WorkbenchOrderTransfer } from '../WorkbenchOrderTransfer';
@@ -186,7 +189,7 @@ for (const width of [375, 393, 768, 1024, 1280, 1920]) {
       document.documentElement.classList.toggle('dark', theme === 'dark');
       const id = crypto.randomUUID();
       localStorage.setItem(`${baseKey}:workbench:${id}`, raw());
-      const navigate = vi.fn(() => false);
+      const navigate = vi.fn((_href: string, event: { preventDefault(): void }) => event.preventDefault());
       render(
         <LocalOrderDrafts
           baseKey={baseKey}
@@ -223,7 +226,7 @@ it('hides the currently open draft and reacts to saved drafts in another tab', a
       baseKey={baseKey}
       pricingScope="external-sales"
       currentId={currentId}
-      onNavigate={() => false}
+      onNavigate={(_href, event) => event.preventDefault()}
     />,
   );
   expect(host.textContent).toBe('');

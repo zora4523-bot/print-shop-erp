@@ -1,8 +1,9 @@
 'use client';
 
-import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useOrderFormLeaveGuard } from './use-order-form-leave-guard';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { useOrderCreationLeave } from './order-creation-leave';
+import { PageHeader, PendingLink } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
 import { OrderForm, type OrderFormProps } from './OrderForm';
 import type { OrderCreatedEntry, OrderCreationEditor, OrderEditorSnapshot } from './order-creation-editor';
@@ -23,6 +24,30 @@ function readEntries(key: string): Entry[] {
   return [{ id: crypto.randomUUID(), primary: true }];
 }
 
+/**
+ * 审查 #47：批量建单切换工单时保留各张表单实例，不再 `key={active.id}` 重建。
+ *
+ * 取舍（方案 A `<Activity>` vs 方案 B 全挂载 + `hidden`，最终为 B 的变体）：
+ * - `<Activity mode="hidden">` 会卸载 effect；OrderForm 的草稿自动保存、离开守卫、
+ *   registerEditor 都要改成「重新可见时再启」，而隐藏态 DOM 仍留在文档里。
+ * - 两种方案都把非当前表单留在文档里，而 OrderForm / OrderFormB 大量使用静态 id
+ *   （`customName`、`externalSalesUserId`、`items.0.name`…）。重复 id 会让
+ *   label 关联、FormErrorSummary / 跨工单错误跳转（getElementById）命中别的表单。
+ * - 因此每张表单渲染进自己的常驻宿主节点（portal），只有当前工单的宿主被挂进
+ *   文档；其余宿主脱离文档保活。React 实例、react-hook-form 状态、effect 全部保留，
+ *   文档里任何时刻只有一张表单：id 唯一、只提交/校验/播报当前表单、隐藏实例不可聚焦。
+ * - 副作用以 `active` 控制：只有当前实例登记 editor；所有实例上报离开状态，自动保存照常
+ *   （各自 draftScope 独立）。切换前由 leave.saveDrafts 核对实际保存结果；失败则留在本单。
+ *   editor.capture 只保留内存内容与持久化基线，供撤销移除后的重挂载使用。
+ */
+function whenIdle(task: () => void) {
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(task, { timeout: 1000 });
+  } else {
+    window.setTimeout(task, 0);
+  }
+}
+
 /** Each slot uses the existing authorized create/quote/submit flow and a stable command ID. */
 export function OrderCreationWorkspace(props: OrderFormProps) {
   const storageKey = `order-creation-batch:v1:${props.draftScope}:${props.workbenchTransferId ?? 'new'}`;
@@ -35,10 +60,21 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const editor = useRef<OrderCreationEditor | null>(null);
   const [snapshots, setSnapshots] = useState<Record<string, OrderEditorSnapshot>>({});
   const entriesRef = useRef<Entry[]>([]);
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   const active = entries.find((entry) => entry.id === activeId);
   const showResult = Boolean(active?.done || active?.recovered);
-  const navigationLocked = locked || sampleBusy || Boolean(active?.created && !showResult);
-  useOrderFormLeaveGuard(Object.values(snapshots).some((snapshot) => snapshot.files.some((files) => files.length > 0)));
+  const entryNavigationLocked = locked || sampleBusy || Boolean(active?.created && !showResult);
+  // 离开保护收口在工作台一处：各表单 / 打样入口上报状态，所有站内离开入口经 leave.guard。
+  const leave = useOrderCreationLeave({
+    labelFor: (key) => {
+      if (entries.length <= 1) return '本单';
+      const index = entries.findIndex((entry) => entry.id === key.split(':')[0]);
+      return index < 0 ? '已移除的工单' : `工单 ${index + 1}`;
+    },
+    removedFileCount: removed ? snapshots[removed.id]?.files.flat().length ?? 0 : 0,
+  });
+
+  const navigationLocked = entryNavigationLocked || leave.pending;
 
   useEffect(() => {
     let cancelled = false;
@@ -68,9 +104,11 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   }, []);
 
   function retainCurrent() {
+    if (leave.pending) return false;
     if (showResult) return true;
     if (!editor.current?.canLeave || navigationLocked) return false;
-    const snapshot = editor.current.save();
+    if (!leave.saveDrafts(activeId)) return false;
+    const snapshot = editor.current.capture();
     setSnapshots((current) => ({ ...current, [activeId]: snapshot }));
     return true;
   }
@@ -91,21 +129,21 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
     setActiveId(next[0].id);
   }
 
-  function created(result: OrderCreatedEntry) {
-    saveEntries(entriesRef.current.map((entry) => entry.id === activeId ? { ...entry, created: result } : entry));
+  function created(entryId: string, result: OrderCreatedEntry) {
+    saveEntries(entriesRef.current.map((entry) => entry.id === entryId ? { ...entry, created: result } : entry));
     setLocked(true);
   }
 
-  function completed(result: OrderCreatedEntry) {
+  function completed(entryId: string, result: OrderCreatedEntry) {
     if (entriesRef.current.length === 1) {
       try { sessionStorage.removeItem(storageKey); } catch { setStorageError(true); }
       return;
     }
-    const next = entriesRef.current.map((entry) => entry.id === activeId
+    const next = entriesRef.current.map((entry) => entry.id === entryId
       ? { ...entry, done: true, created: { ...result, orderNo: entry.created?.orderNo ?? result.orderNo } }
       : entry);
     saveEntries(next);
-    setSnapshots((current) => { const next = { ...current }; delete next[activeId]; return next; });
+    setSnapshots((current) => { const next = { ...current }; delete next[entryId]; return next; });
     setLocked(false);
     const unfinished = next.find((entry) => !entry.created && !entry.done);
     if (unfinished) setActiveId(unfinished.id);
@@ -114,7 +152,7 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
   const canStartNextBatch = entries.length > 0 && entries.every((entry) => entry.created) && showResult && !sampleBusy;
 
   function startNextBatch() {
-    if (!canStartNextBatch) return;
+    if (!canStartNextBatch || leave.pending) return;
     const entry = { id: crypto.randomUUID() };
     saveEntries([entry]);
     setActiveId(entry.id);
@@ -123,22 +161,27 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
     setLocked(false);
   }
 
+  const liveEntries = entries.filter((entry) => !entry.done && !entry.recovered);
+  const formVisible = Boolean(active && !(showResult && active.created));
   if (!active) return <p role="status" className="p-4 text-sm text-muted-foreground">正在恢复建单草稿…</p>;
-  return <div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
+  const resultHref = active.created ? `/orders/${active.created.orderId}${active.created.intent === 'fees' ? '#admin-fee-editor' : ''}` : '';
+  return <leave.Provider value={leave.context}><div className="mx-auto w-full min-w-0 max-w-[1440px] space-y-4">
+    {/* 表单（含其页头）隐藏时——完成 / 恢复已保存工单——由工作台给出页面 H1（§8.3）。 */}
+    {!formVisible ? <PageHeader title="新建工单" back={leave.back('/orders', '返回工单列表')} /> : null}
+    {leave.dialog}
     <section aria-label="批量新建工单" className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="outline" disabled={(!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 增加工单</Button>
+        <Button type="button" variant="outline" disabled={leave.pending || (!showResult && navigationLocked) || entries.length >= MAX_BATCH_ORDERS} onClick={addOrder}>＋ 添加工单</Button>
         {entries.length > 1 && !active.created ? <Button type="button" variant="outline" disabled={navigationLocked} onClick={removeCurrent}>移除当前工单</Button> : null}
         {removed ? <Button type="button" variant="outline" disabled={navigationLocked || entries.length >= MAX_BATCH_ORDERS}
           onClick={() => { if (!retainCurrent()) return; saveEntries([...entries, removed]); setActiveId(removed.id); setRemoved(null); }}>撤销移除</Button> : null}
         {canStartNextBatch ? <Button type="button" variant="outline" onClick={startNextBatch}>开始新一批</Button> : null}
         <span className="text-sm text-muted-foreground">已完成 {entries.filter((entry) => entry.done).length} / {entries.length} 张</span>
       </div>
-      <p className="text-xs text-muted-foreground">每张工单独立填写地址、设计款和费用，逐张核对后创建。创建成功后继续下一张。</p>
       <nav aria-label="待建工单" className="flex flex-wrap gap-2">
-        {entries.map((entry, index) => <Button key={entry.id} type="button" variant="outline"
-          disabled={!showResult && navigationLocked && entry.id !== activeId} aria-pressed={entry.id === activeId}
-          onClick={() => { if (entry.id !== activeId && retainCurrent()) { saveEntries(entries); setActiveId(entry.id); setLocked(false); } }}>
+        {entries.map((entry, index) => <Button key={entry.id} type="button" variant={entry.id === activeId ? 'selected' : 'outline'}
+          disabled={(leave.pending || (!showResult && navigationLocked)) && entry.id !== activeId} aria-pressed={entry.id === activeId}
+          onClick={() => { if (entry.id !== activeId && retainCurrent()) { setActiveId(entry.id); setLocked(false); whenIdle(() => saveEntries(entriesRef.current)); } }}>
           工单 {index + 1}{entry.done ? ' · 已完成' : entry.created ? ' · 已保存' : ''}
         </Button>)}
       </nav>
@@ -147,14 +190,41 @@ export function OrderCreationWorkspace(props: OrderFormProps) {
       {canStartNextBatch && entries.some((entry) => !entry.done) ? <p className="text-sm text-muted-foreground">工单均已保存，未完成的上传或提交可从工单详情继续。</p> : null}
     </section>
     {showResult && active.created ? <section className="space-y-3 rounded-xl border bg-card p-5" role="status">
-      <h1 className="text-xl font-semibold">{active.done ? '工单已创建' : '工单已保存，请继续完善'}</h1>
+      <h2 className="text-lg font-semibold">{active.done ? '工单已创建' : '工单已保存，请继续完善'}</h2>
       <p>{active.created.orderNo}</p>
       {!active.done ? <p className="text-sm text-muted-foreground">请到工单详情核对文件、费用和提交状态，继续处理已有工单。</p> : null}
-      <Link className="inline-flex min-h-11 items-center underline" href={`/orders/${active.created.orderId}${active.created.intent === 'fees' ? '#admin-fee-editor' : ''}`}>查看工单{active.created.intent === 'fees' ? '并编辑收费' : ''}</Link>
-    </section> : <OrderForm {...props} key={active.id}
-      draftScope={active.primary ? props.draftScope : `${props.draftScope}:batch:${active.id}`}
-      workbenchTransferId={active.primary ? props.workbenchTransferId : undefined}
-      submissionId={active.id} initialEditor={snapshots[active.id]} registerEditor={registerEditor}
-      lifecycle={{ submissionId: active.id, retainResult: entries.length > 1, onCreated: created, onCompleted: completed, onBusyChange: setSampleBusy }} />}
-  </div>;
+      <PendingLink className="inline-flex min-h-11 items-center underline" href={resultHref} pending={leave.pending} onNavigate={leave.guard(resultHref)}>查看工单{active.created.intent === 'fees' ? '并编辑收费' : ''}</PendingLink>
+    </section> : null}
+    <div ref={setSlot} className="min-w-0" data-slot="order-creation-active-form" />
+    {liveEntries.map((entry) => <KeptAliveOrderForm key={entry.id} id={entry.id} slot={slot} active={formVisible && entry.id === activeId}
+      snapshot={snapshots[entry.id]} render={(active, initialEditor) => <OrderForm {...props}
+        draftScope={entry.primary ? props.draftScope : `${props.draftScope}:batch:${entry.id}`}
+        workbenchTransferId={entry.primary ? props.workbenchTransferId : undefined}
+        submissionId={entry.id} initialEditor={initialEditor} registerEditor={registerEditor} active={active}
+        lifecycle={{ submissionId: entry.id, retainResult: entries.length > 1, onCreated: (result) => created(entry.id, result),
+          onCompleted: (result) => completed(entry.id, result), onBusyChange: (busy) => { if (entry.id === activeId) setSampleBusy(busy); } }} />} />)}
+  </div></leave.Provider>;
+}
+
+/**
+ * 常驻宿主：节点随组件创建一次，只在 active 时挂进工作台的表单槽，否则脱离文档保活。
+ * initialEditor 在首次挂载时冻结——OrderForm 只在挂载时读它，之后的快照不回灌存活实例。
+ */
+function KeptAliveOrderForm({ id, slot, active, snapshot, render }: {
+  id: string; slot: HTMLElement | null; active: boolean; snapshot?: OrderEditorSnapshot;
+  render: (active: boolean, initialEditor?: OrderEditorSnapshot) => ReactNode;
+}) {
+  const [node] = useState(() => {
+    const element = document.createElement('div');
+    element.className = 'min-w-0';
+    element.dataset.orderFormHost = id;
+    return element;
+  });
+  const [initialEditor] = useState(snapshot);
+  useLayoutEffect(() => {
+    if (!active || !slot) return;
+    slot.append(node);
+    return () => node.remove();
+  }, [active, node, slot]);
+  return createPortal(render(active, initialEditor), node);
 }

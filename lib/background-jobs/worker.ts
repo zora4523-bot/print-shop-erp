@@ -28,6 +28,7 @@ export type BackgroundWorkerOptions = {
   pollIntervalMs?: number;
   leaseMs?: number;
   signal?: AbortSignal;
+  excludedTypes?: () => readonly string[];
   onError?: (error: unknown, job?: ClaimedBackgroundJob) => void | Promise<void>;
 };
 
@@ -60,6 +61,7 @@ async function runLane(
         queue: options.queue,
         workerId: laneWorkerId,
         leaseMs,
+        ...(options.excludedTypes ? { excludedTypes: options.excludedTypes() } : {}),
       });
       if (!job) {
         await abortableDelay(pollIntervalMs, options.signal);
@@ -70,7 +72,7 @@ async function runLane(
       // the last await boundary before dispatch so a draining worker never
       // starts new business side effects. The repository keeps the consumed
       // fencing generation as ABANDONED evidence and restores its run budget.
-      if (options.signal?.aborted) {
+      if (options.signal?.aborted || options.excludedTypes?.().includes(job.type)) {
         await releaseUndispatchedBackgroundJobClaim(job);
         continue;
       }

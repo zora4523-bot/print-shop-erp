@@ -130,6 +130,9 @@ describe('RulePriceWorkbench', () => {
     });
 
     expect(html).toContain('data-slot="rule-price-workbench"');
+    // 页面标题经 PageHeader（ui-规范 §8.3），不再手写 h1。
+    expect(html).toContain('data-slot="page-header"');
+    expect(html.match(/<h1\b/g)).toHaveLength(1);
     expect(html).toContain('局部烫金 · 空白封现货单价');
     expect(html).toContain('元 / 个 · 真实价目');
     expect(html).not.toContain('aria-label="客户计价规则类型"');
@@ -271,7 +274,7 @@ describe('RulePriceWorkbench', () => {
 
     expect(html).toContain('aria-label="价格状态"');
     expect(html).toContain('当前生效');
-    expect(html).toContain('用于之后的新工单计价。');
+    expect(html).not.toContain('用于之后的新工单计价。');
     expect(html).toContain('发起调价');
     expect(html).toContain(
       'aria-label="正在查看收费项目：中号专版双面烫金"',
@@ -318,6 +321,10 @@ describe('RulePriceWorkbench', () => {
     expect(filteredHtml).toContain(
       'aria-label="已启用的收费项目筛选"',
     );
+    // 清除条件统一「清除筛选」，筛选表单带 id 供清除时 reset（ui-规范 §8.2）。
+    expect(filteredHtml).toContain('>清除筛选<');
+    expect(filteredHtml).not.toContain('清除全部');
+    expect(filteredHtml).toContain('id="rule-price-filters"');
     expect(filteredHtml).toContain('类目：烫金加工');
     expect(filteredHtml).toContain('类型：附加费');
     expect(filteredHtml).toContain('处理：自动计价');
@@ -461,7 +468,7 @@ describe('RulePriceWorkbench', () => {
     });
     expect(noResultHtml).toContain('data-kind="no-result"');
     expect(noResultHtml).toContain('没有匹配的收费项目');
-    expect(noResultHtml).toContain('清除条件');
+    expect(noResultHtml).toContain('清除筛选');
     expect(noResultHtml).toContain(
       'href="/owner/rules/customer-pricing?purpose=processing"',
     );

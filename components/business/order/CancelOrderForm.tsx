@@ -80,12 +80,9 @@ export function CancelOrderForm({
             id={triggerId}
             type="button"
             size={compact ? 'sm' : 'default'}
-            variant="outline"
+            variant="destructive"
             aria-busy={pending}
-            className={cn(
-              'border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive',
-              compact && 'max-sm:w-full',
-            )}
+            className={cn(compact && 'max-sm:w-full')}
           >
             {pending ? (
               <LoaderCircle aria-hidden className="size-4 animate-spin" />
@@ -93,9 +90,10 @@ export function CancelOrderForm({
             {pending ? '正在取消…' : '取消工单'}
           </Button>
         }
+        cancelLabel="保留工单"
         reasonLabel="取消原因"
         reasonPlaceholder="例如：客户书面确认取消订单">
-        <ConfirmActionDialog action={orderNo ? `取消工单 ${orderNo}？` : '取消这张工单？'} changes={[]} consequences={impactItems} confirmText="取消工单" />
+        <ConfirmActionDialog action={orderNo ? `取消工单 ${orderNo}？` : '取消这张工单？'} changes={[]} consequences={impactItems} confirmText="取消工单" danger />
       </ConfirmActionController>
 
       {impactItems.length === 0 ? (

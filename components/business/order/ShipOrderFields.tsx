@@ -1,8 +1,11 @@
 import type { OrderMutationResult } from '@/actions/order.types';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { NativeSelect } from '@/components/ui/native-select';
 import { ZTO_PROVINCE_OPTIONS } from '@/lib/price/external-order-charges';
 
 import type { ShipmentInput } from '@/lib/order/shipping-fields';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 export type { ShipmentInput } from '@/lib/order/shipping-fields';
 
 export function ShipOrderVersionFields({
@@ -110,7 +113,7 @@ function ShipmentFieldsRow({
           htmlFor={`shipment-${shipment.id}-tracking`}
           className="mb-1 block text-xs font-medium"
         >
-          运单号（选填）
+          运单号
         </label>
         <input type="hidden" name="shipmentId" value={shipment.id} />
         <Input
@@ -137,9 +140,7 @@ function ShipmentFieldsRow({
         >
           {isExternalSales ? '承运商计费重量（kg）' : '快递重量（kg）'}{' '}
           {isExternalSales && !isSfCollect ? (
-            <span aria-hidden="true" className="text-destructive">
-              *
-            </span>
+            <RequiredMark />
           ) : null}
         </label>
         {isSfCollect ? (
@@ -211,7 +212,7 @@ function ExternalSalesShipmentFields({
         >
           中通计费省份
         </label>
-        <select
+        <NativeSelect
           id={`shipment-${shipment.id}-province`}
           name={isSfCollect ? undefined : 'shipmentDestinationProvince'}
           defaultValue={isSfCollect ? '' : shipment.destinationProvince ?? ''}
@@ -222,7 +223,7 @@ function ExternalSalesShipmentFields({
               ? `shipment-${shipment.id}-province-error`
               : `shipment-${shipment.id}-province-hint`
           }
-          className="flex min-h-11 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full"
         >
           <option value="">— 人工确认 —</option>
           {ZTO_PROVINCE_OPTIONS.map((province) => (
@@ -230,7 +231,7 @@ function ExternalSalesShipmentFields({
               {province}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {isSfCollect ? (
           <input type="hidden" name="shipmentDestinationProvince" value="" />
         ) : null}
@@ -256,9 +257,7 @@ function ExternalSalesShipmentFields({
         >
           对客快递费（元）{' '}
           {!isSfCollect ? (
-            <span aria-hidden="true" className="text-destructive">
-              *
-            </span>
+            <RequiredMark />
           ) : null}
         </label>
         {isSfCollect ? (
@@ -302,9 +301,7 @@ function ExternalSalesShipmentFields({
           className="mb-1 block text-xs font-medium"
         >
           打包耗材费（元）{' '}
-          <span aria-hidden="true" className="text-destructive">
-            *
-          </span>
+          <RequiredMark />
         </label>
         <Input
           id={`shipment-${shipment.id}-packing-fee`}
@@ -342,12 +339,12 @@ function ExternalSalesShipmentFields({
         >
           收费调整说明
         </label>
-        <textarea
+        <Textarea
           id={`shipment-${shipment.id}-charge-reason`}
           name="shipmentChargeOverrideReason"
           defaultValue={shipment.customerChargeOverrideReason ?? ''}
           rows={2}
-          className="flex min-h-20 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="w-full"
           placeholder="实际收费与报价建议不同时必填"
           aria-invalid={Boolean(reasonError)}
           aria-describedby={

@@ -1,3 +1,4 @@
+import Form from 'next/form';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -8,9 +9,11 @@ import {
 import { parseStrictYmd } from '@/lib/auth/schemas';
 import { isMockMode } from '@/lib/cdr/zip';
 import { CreateBundleForm } from '@/components/business/cdr/CreateBundleForm';
+import { PendingBundleRefresher } from '@/components/business/cdr/PendingBundleRefresher';
 import { RegenerateBundleForm } from '@/components/business/cdr/RegenerateBundleForm';
 import { RevokeBundleForm } from '@/components/business/cdr/RevokeBundleForm';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { EmptyState, EnvNotice, ErrorBoundary, PageHeader, SectionLoading, StatusBadge, TableScrollArea } from '@/components/ui-business';
 import {
   formatDateInputShanghai,
@@ -58,7 +61,6 @@ export default async function ForemanCdrPage({
     <div className="space-y-6">
       <PageHeader
         title="CDR 汇总下载"
-        subtitle="按日期选择工单，生成 24 小时有效的外协下载链接。"
       />
 
       {mock ? (
@@ -95,13 +97,6 @@ export default async function ForemanCdrPage({
           />
         </Suspense>
       </ErrorBoundary>
-
-      <p className="text-xs text-muted-foreground">
-        提示：生成下载包后请尽快发送外协。链接 24 小时后自动失效，过期需重新生成。{' '}
-        <Link href="/owner" className="underline">
-          ← 返回管理后台
-        </Link>
-      </p>
     </div>
   );
 }
@@ -141,12 +136,17 @@ async function CdrRecentBundlesSection({
   recentBundlesPromise: RecentBundlesPromise;
 }) {
   const recentBundles = await recentBundlesPromise;
+  const pendingSignature = recentBundles
+    .filter((bundle) => bundle.status === DesignBundleStatus.PENDING)
+    .map((bundle) => bundle.id)
+    .join(',');
   // 一次取值；表格遍历时统一与 expiresAt 比较。Server
   // Component 每个 request 只渲染一次，因此这个时间快照在区域内一致。
   const nowMs = new Date().getTime();
 
   return (
     <section className="space-y-3">
+      <PendingBundleRefresher pendingSignature={pendingSignature} />
       <h2 className="text-base font-semibold">最近生成的下载包</h2>
       {recentBundles.length === 0 ? (
         <EmptyState
@@ -297,7 +297,9 @@ function DesignBundleStatusBadge({
 
 function FilterBar({ from, to }: { from: string; to: string }) {
   return (
-    <form
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form
+      key={JSON.stringify([from, to])}
       id="cdr-filter"
       className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm"
       action="/foreman/cdr"
@@ -306,29 +308,29 @@ function FilterBar({ from, to }: { from: string; to: string }) {
         <label htmlFor="cdr-from" className="text-xs text-muted-foreground">
           起始日期
         </label>
-        <input
+        <Input
           id="cdr-from"
           type="date"
           name="from"
           defaultValue={from}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto"
         />
       </div>
       <div className="flex flex-col">
         <label htmlFor="cdr-to" className="text-xs text-muted-foreground">
           终止日期
         </label>
-        <input
+        <Input
           id="cdr-to"
           type="date"
           name="to"
           defaultValue={to}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto"
         />
       </div>
       <Button type="submit" size="sm">
         刷新候选工单
       </Button>
-    </form>
+    </Form>
   );
 }

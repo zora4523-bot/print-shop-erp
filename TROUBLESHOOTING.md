@@ -28,7 +28,7 @@ Next 16.3.4 为每次浏览器 Server Action 建立独立调试请求标识。�
 
 当日志出现 `unstable_catchError is not a function`，先比较
 `package.json` 的 Next.js 版本和 `node -p "require('next/package.json').version"`。
-当前主线锁定 16.3.4，错误边界使用 `catchError` 和 `retry`。
+当前仓库锁定 16.3.6，错误边界使用 `catchError` 和 `retry`。
 旧版 16.2.4 分支使用 `unstable_catchError` 和 `unstable_retry`；
 切换分支后应按目标分支锁文件安装依赖，不能只替换 API 或本地安装版本。
 
@@ -374,3 +374,18 @@ PDF 接口在账号和工单绑定校验通过后检查 HEAVY 心跳，使用与
 ## 生产事实核对与恢复（2026-09-28）
 
 重做未下发、数量申请被旧版取消、工资日期已结算或历史生产不明时，按 [生产事实恢复手册](docs/生产事实恢复手册.md) 先只读扫描，再逐单据证处理。不要通过换日期、改负责人、删除申请或解锁原账绕过守卫。
+
+## PDF 服务未就绪（2026-09-30）
+
+`PDF_WORKER_UNAVAILABLE` 表示 durable 路径没有近期 HEAVY 心跳，不能据此断言图稿损坏。开发使用 `pnpm dev` 启动完整依赖；若使用 `dev:web`，需单独管理 worker。管理员在后台任务页查看在线进程和失败记录，先检查 worker 启动日志，再运行 `pnpm check:pdf`。生产按部署指南使用同一账号、环境、Chromium 版本和共享存储检查，不能用改为 inline 绕过。
+
+字体、浏览器版本、分页和存储错误分别按页面白名单错误码定位；不要把底层异常、签名图片 URL 或凭证粘贴到页面。用户可以进入“网页打印”，其权限和内容检查独立执行。`PDF_BROWSER_REUSE=0` 仅回退性能优化，不放宽任何生成验证或任务授权。
+
+单张默认 direct 时不会因 HEAVY 离线返回 PDF_WORKER_UNAVAILABLE；看到该码应核对是否配置 queued 或仍在访问旧 jobId。PDF_BUSY 表示当前 Web 进程达到单张生成容量，稍后重试或使用网页打印，不要增加自动重试风暴。配置错误 PDF_CONFIGURATION_INVALID 需核对 PDF_ORDER_MODE=direct/queued。打印按钮现在打开 HTML 打印页；内嵌 PDF 查看器不可用时，仍可网页打印或下载后用系统查看器打开。直接模式不能生成时检查 Web 运行账号的 Chromium 和字体配置；生产排障不能关闭权限、内容或分页检查。
+
+### PDF 局部故障
+
+- `PDF_CONFIGURATION_INVALID`：核对生产 PDF_ORDER_MODE 显式为 direct/queued，queued 配合 durable；用候选目录的 `NODE_ENV=production node scripts/check-env.mjs` 检查。
+- HEAVY 在线但后台任务页显示“PDF 暂不可用/状态未知”：检查 `/api/health/jobs` 的 pdf.ready；核对当前 APP_VERSION、Chromium、字体、共享产物存储与前向迁移。PDF 待处理任务保留，CDR/表格继续领取，不通过反复手动重试消耗预算。探针恢复后自动恢复领取；持续积压沿用既有 SLO。
+- direct 失败通过响应 `X-Request-Id` 对应 `[pdf] failure`；日志仅含白名单分类，不要求提供 Cookie、客户地址、签名链接或原始堆栈。direct 没有后台任务行，后台任务列表不能用于判断 direct 请求是否发生。
+- 图稿警告仍存在时检查图稿是否可读取，再重新生成；警告结果不会命中 direct 完成缓存。队列历史产物的保存规则不变。

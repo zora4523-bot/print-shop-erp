@@ -18,7 +18,8 @@ const { dbMock, signDesignReadUrlMock } = vi.hoisted(() => ({
     orderChangeRequest: { findMany: vi.fn() },
     craft: { findMany: vi.fn() },
   },
-  signDesignReadUrlMock: vi.fn((url: string) => `signed:${url}`),
+  signDesignReadUrlMock: vi.fn((url: string, _env?: unknown, options?: { thumbnail?: boolean }) =>
+    options?.thumbnail ? `thumb:${url}` : `signed:${url}`),
 }));
 
 vi.mock('@/lib/db', () => ({ db: dbMock }));
@@ -30,6 +31,7 @@ vi.mock('@/lib/oss/read-url', () => ({
 import { parseOrderListQuery } from '../list-query';
 import {
   buildSalesOrderWhere,
+  parseSalesOrderListQuery,
   getSalesLatestRejectedOrderIds,
   getSalesOrderByOrderNo,
   getSalesOrderListSummary,
@@ -50,6 +52,64 @@ beforeEach(() => {
 });
 
 describe('sales list query boundary', () => {
+  it('validates the month while retaining only visible sales filters', () => {
+    const parsed = parseSalesOrderListQuery({ createdMonth: '2025-01', q: '年款', view: 'done', page: '3', submitterId: 'other-account', createdFrom: '2020-01-01' });
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.query.createdMonth).toBe('2025-01');
+    expect(parsed.query.filters.q).toBe('年款');
+    expect(parsed.query.page).toBe(3);
+    expect(parsed.query.filters.submitterId).toBeUndefined();
+    expect(parsed.query.filters.createdFrom).toBeUndefined();
+    expect(sanitizeSalesOrderListQuery(parsed.query).createdMonth).toBe('2025-01');
+    for (const createdMonth of ['2025-13', '2025-00', '0000-01', '25-01', '2025-01-01']) {
+      const invalid = parseSalesOrderListQuery({ createdMonth });
+      expect(invalid.query.createdMonth).toBeUndefined();
+      expect(invalid.issues).toEqual(['下单月份格式应为 YYYY-MM，请重新选择']);
+    }
+  });
+
+  it.each([
+    ['2025-01', '2024-12-31T16:00:00Z', '2025-01-31T16:00:00Z'],
+    ['2024-02', '2024-01-31T16:00:00Z', '2024-02-29T16:00:00Z'],
+    ['2025-12', '2025-11-30T16:00:00Z', '2025-12-31T16:00:00Z'],
+  ])('keeps %s calendar boundaries and ownership in the same predicate', (createdMonth, start, end) => {
+    const { query } = parseSalesOrderListQuery({ createdMonth, submitterId: 'someone-else' });
+    expect(buildSalesOrderWhere(actor, query)).toEqual({ AND: [
+      { submitterId: actor.id },
+      { createdAt: { gte: new Date(start), lt: new Date(end) } },
+    ] });
+    expect(buildSalesOrderWhere({ ...actor, id: 'sales-2' }, query)).toEqual({ AND: [{ submitterId: 'sales-2' }, { createdAt: { gte: new Date(start), lt: new Date(end) } }] });
+    expect(() => buildSalesOrderWhere({ id: 'admin', role: Role.ADMIN }, query)).toThrow('SALES');
+  });
+
+  it('uses the same month/search scope for all status counts, independent of the selected view', async () => {
+    const { query } = parseSalesOrderListQuery({ createdMonth: '2025-01', q: '年款', view: 'done' });
+    await getSalesOrderListSummary(actor, new Date('2026-09-30T00:00:00Z'), Promise.resolve([]), query);
+    const scope = buildSalesOrderWhere(actor, { ...query, view: undefined });
+    expect(dbMock.order.groupBy).toHaveBeenCalledWith({ by: ['status'], where: scope, _count: { _all: true } });
+    for (const [args] of dbMock.order.count.mock.calls) expect(args.where.AND[0]).toEqual(scope);
+  });
+
+  it('includes actual dates and all recorded tracking numbers without guessing missing dates', async () => {
+    dbMock.order.findFirst.mockResolvedValue(orderRecord({ shipments: [
+      { carrierCode: 'ZTO', expressCode: null, trackingNo: ' 111 ' },
+      { carrierCode: 'SF', expressCode: null, trackingNo: '222' },
+      { carrierCode: 'SF', expressCode: null, trackingNo: ' ' },
+    ] }));
+    const result = await getSalesOrderByOrderNo(actor, 'GD-260827-001');
+    expect(result?.createdAt).toBe('2026-08-26T16:00:00.000Z');
+    expect(result?.shippedAt).toBeNull();
+    expect(result?.shipments).toEqual([{ carrier: '中通', trackingNo: '111' }, { carrier: '顺丰', trackingNo: '222' }]);
+    expect(result?.shipment?.additionalCount).toBe(1);
+  });
+
+  it('returns the owned bill link but never exposes a mismatched account relation', async () => {
+    const bill = { id: 'bill-a', period: '2026-08', status: 'CONFIRMED', agentUserId: actor.id };
+    dbMock.order.findFirst.mockResolvedValue(orderRecord({ submitterId: actor.id, agentMonthlyBillItem: { bill } }));
+    expect((await getSalesOrderByOrderNo(actor, 'GD-260827-001'))?.bill).toEqual({ id: 'bill-a', period: '2026-08', status: 'CONFIRMED' });
+    dbMock.order.findFirst.mockResolvedValue(orderRecord({ submitterId: actor.id, agentMonthlyBillItem: { bill: { ...bill, agentUserId: 'other' } } }));
+    expect((await getSalesOrderByOrderNo(actor, 'GD-260827-001'))?.bill).toBeNull();
+  });
   it('已结算工单纳入销售完结队列，仍限制为本人提交', () => {
     const query = sanitizeSalesOrderListQuery(parseOrderListQuery({ view: 'done' }).query);
     expect(buildSalesOrderWhere(actor, query, [])).toEqual({ AND: [
@@ -57,7 +117,7 @@ describe('sales list query boundary', () => {
     ] });
   });
 
-  it('所有新旧状态恰好归入一个生命周期分类，汇总和筛选口径相同', async () => {
+  it('已发货包含已结算，其他生命周期分类与汇总一致', async () => {
     const statuses = Object.values(OrderStatus);
     dbMock.order.groupBy.mockResolvedValue(statuses.map((status) => ({ status, _count: { _all: 1 } })));
     const summary = await getSalesOrderListSummary(actor);
@@ -70,7 +130,7 @@ describe('sales list query boundary', () => {
       expect(where.AND[0]).toEqual({ submitterId: actor.id });
       const predicate = where.AND[1].status;
       const matched = typeof predicate === 'string' ? [predicate] : predicate.in;
-      classified.push(...matched);
+      if (view !== 'done') classified.push(...matched);
       expect(summary[view]).toBe(matched.length);
       if (view === 'done') expect(matched).toEqual([OrderStatus.SETTLED, OrderStatus.FINISHED]);
       if (view === 'cancelled') expect(matched).toEqual([OrderStatus.CANCELLED]);
@@ -203,8 +263,10 @@ describe('sales list query boundary', () => {
       totalQuantity: 2000,
       craftSummary: '局部烫金 · 触感纸',
       needsAction: true,
+      // 列表小图走 160px 缩略图；放大预览用原图（Codex 2026-09-29：预览不能是缩略图）。
       thumbnail: {
-        url: 'signed:https://files.example.test/design.png',
+        url: 'thumb:https://files.example.test/design.png',
+        previewUrl: 'signed:https://files.example.test/design.png',
         fileName: '设计图.png',
       },
       shipment: {
@@ -368,7 +430,7 @@ describe('sales list query boundary', () => {
       all: 21,
       todo: 2,
       doing: 7,
-      shipped: 5,
+      shipped: 11,
       done: 6,
       cancelled: 1,
       draft: 2,
@@ -411,6 +473,8 @@ function orderRecord(
     packagingAmount: '10.00',
     totalAmount: '141.30',
     promisedDate: new Date('2026-08-30T00:00:00Z'),
+    createdAt: new Date('2026-08-26T16:00:00Z'),
+    shippedAt: null,
     updatedAt: new Date('2026-08-27T08:00:00Z'),
     receiverName: 'Lam',
     receiverPhone: '021-53395199',

@@ -122,12 +122,12 @@ function validateInput(input: ProgressReportInput) {
     );
   }
   const completed = quantity(input.completedQty, '合格完成数');
-  const defect = quantity(input.defectQty, '缺陷数');
+  const defect = quantity(input.defectQty, '不良数');
   const rework = quantity(input.reworkQty, '返工数');
   if (completed.plus(defect).plus(rework).eq(0)) {
     throw new ProgressReportingError(
       'INVALID_INPUT',
-      '合格、缺陷和返工数不能全为 0',
+      '合格、不良和返工数不能全为 0',
     );
   }
   return { idempotencyKey, completed, defect, rework };

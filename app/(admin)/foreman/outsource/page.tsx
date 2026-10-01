@@ -5,33 +5,41 @@ import { buttonVariants } from '@/components/ui/button';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
+  PageHeader,
   StatusBadge as UiStatusBadge,
   TableScrollArea,
 } from '@/components/ui-business';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
 import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { parsePositiveInt } from '@/lib/admin/table';
+import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 
 export const metadata = { title: '外协单' };
 
-export default async function OutsourceListPage() {
+export default async function OutsourceListPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   // Page-level server-side authz (defense-in-depth: layout gate
   // doesn't re-run on soft navigation; lib read is unscoped global data).
   await requirePermission('outsource:manage');
-  const rows = await listOutsourceOrders();
+  const sp = (await searchParams) ?? {};
+  const result = await listOutsourceOrders({
+    page: parsePositiveInt(sp.page, { defaultValue: 1 }),
+  });
+  const rows = result.rows;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">外协单</h1>
-          <p className="text-sm text-muted-foreground">
-            发往 UV / 啤 / 彩印 等外协厂的工艺清单。回货后点&ldquo;已回货&rdquo;。
-          </p>
-        </div>
-        <Link href="/orders" className={buttonVariants()}>
-          从工单创建外协
-        </Link>
-      </div>
+      <PageHeader
+        title="外协单"
+        actions={
+          <Link href="/orders" className={buttonVariants()}>
+            从工单创建外协
+          </Link>
+        }
+      />
 
       {rows.length === 0 ? (
         <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">
@@ -90,6 +98,16 @@ export default async function OutsourceListPage() {
           </table>
         </TableScrollArea>
       )}
+      {result.pageCount > 1 ? (
+        <AdminPagination
+          basePath="/foreman/outsource"
+          page={result.page}
+          pageCount={result.pageCount}
+          total={result.total}
+          pageSize={result.pageSize}
+          queryParams={{}}
+        />
+      ) : null}
     </div>
   );
 }

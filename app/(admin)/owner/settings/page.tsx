@@ -1,4 +1,5 @@
 import { PageHeader } from '@/components/ui-business';
+import { FormPage } from '@/app/_components/FormPage';
 import { SettingsForm } from '@/components/business/setting/SettingsForm';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -29,12 +30,12 @@ export default async function OwnerSettingsPage() {
   ) as Record<SettingKey, string>;
 
   return (
-    <div className="space-y-6">
+    <FormPage>
       <PageHeader title="系统设置" />
       <SettingsForm
         initialValues={initialValues}
         notificationChannels={notificationChannels}
       />
-    </div>
+    </FormPage>
   );
 }

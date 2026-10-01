@@ -12,7 +12,6 @@ import {
   RULE_CENTER_SIDEBAR_ITEMS,
   type RuleCenterEffect,
 } from '@/lib/navigation/rule-center';
-import { RULE_CENTER_EFFECT_REGISTRY } from '@/lib/ui/status-registry';
 
 export const metadata = {
   title: '规则配置中心',
@@ -22,21 +21,21 @@ const RULE_GROUPS = [
   {
     label: '客户计价规则',
     description:
-      '建单收费的唯一价格来源。改价形成新版本，不回算历史工单。',
+      '加工费、包装与快递价格',
     effect: 'versioned',
     icon: Calculator,
   },
   {
     label: '建单主数据',
     description:
-      '维护纸张、产品结构与工艺；空白封在单价表直接录价和启用。',
+      '纸张、产品结构与工艺',
     effect: 'immediate',
     icon: Database,
   },
   {
     label: '员工薪酬规则',
     description:
-      '维护计件工价、标准工时与加班起点',
+      '计件工价、标准工时与加班起点',
     effect: 'effective-dated',
     icon: Users,
   },
@@ -55,7 +54,6 @@ export default async function RuleCenterPage() {
       <RuleCenterPageHeader
         title="规则配置中心"
         effect="mixed"
-        subtitle="按业务边界管理客户计价、建单主数据与员工薪酬。"
       />
 
       <div className="grid min-w-0 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
@@ -99,12 +97,6 @@ export default async function RuleCenterPage() {
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block font-medium">{item.label}</span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {item.impact}
-                      </span>
-                    </span>
-                    <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                      {RULE_CENTER_EFFECT_REGISTRY[item.effect].label}
                     </span>
                     <ArrowRight
                       aria-hidden="true"

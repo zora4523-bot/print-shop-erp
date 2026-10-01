@@ -13,7 +13,7 @@ export class AgentMonthlyBillNotFoundError extends AgentMonthlyBillingError {
 }
 
 export class AgentMonthlyBillFrozenError extends AgentMonthlyBillingError {
-  constructor(message = '账单已确认，成员与金额已冻结') {
+  constructor(message = '账单已确认，不可修改') {
     super(message);
     this.name = 'AgentMonthlyBillFrozenError';
   }

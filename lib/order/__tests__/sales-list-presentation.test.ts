@@ -19,10 +19,10 @@ describe('sales order list presentation', () => {
     for (const status of [
       OrderStatus.SCHEDULING,
       OrderStatus.IN_PRODUCTION,
-      OrderStatus.COMPLETED,
     ]) {
       expect(salesOrderStatusPresentation(status).label).toBe('生产中');
     }
+    expect(salesOrderStatusPresentation(OrderStatus.COMPLETED).label).toBe('待打包发货');
     expect(salesOrderStatusPresentation(OrderStatus.SHIPPED).label).toBe(
       '已发货',
     );

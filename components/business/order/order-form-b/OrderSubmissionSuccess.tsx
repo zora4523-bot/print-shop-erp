@@ -13,7 +13,7 @@ export type OrderSubmissionSuccessProps = {
   orderNumber: string;
   title?: string;
   statusLabel: string;
-  description: string;
+  description?: string;
   manualQuote?: boolean;
   primaryAction: OrderSubmissionSuccessAction;
   secondaryAction?: OrderSubmissionSuccessAction;
@@ -51,15 +51,15 @@ export function OrderSubmissionSuccess({
           className={cn(
             'mt-3 inline-flex rounded-full border px-4 py-1.5 text-xs font-semibold',
             manualQuote
-              ? 'border-destructive bg-destructive/5 text-destructive'
+              ? 'border-primary bg-primary/5 text-primary'
               : 'border-border text-foreground',
           )}
         >
           {statusLabel}
         </p>
-        <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-muted-foreground">
+        {description ? <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-muted-foreground">
           {description}
-        </p>
+        </p> : null}
       </div>
       <div
         className={cn(
@@ -69,7 +69,7 @@ export function OrderSubmissionSuccess({
       >
         <Button
           type="button"
-          className="min-h-11 bg-foreground text-background hover:bg-foreground/90"
+          className="min-h-11"
           disabled={primaryAction.disabled}
           onClick={primaryAction.onClick}
         >

@@ -154,7 +154,7 @@ describe('bill mutation confirmations', () => {
     );
 
     expect(html).toContain('data-risk-level="L2"');
-    expect(html).toContain('核对并录入付款');
+    expect(html).toContain('核对并录入收款');
     expect(html).toContain('inputMode="decimal"');
     expect(html).toContain('data-slot="form-error-summary"');
     expect(html).toContain('本次收款金额：付款金额不能超过剩余应收');
@@ -192,7 +192,7 @@ describe('bill mutation confirmations', () => {
       />,
     );
     expect(html).toContain('data-tone="success"');
-    expect(html).toContain('付款流水已录入');
+    expect(html).toContain('收款流水已录入');
 
     actionState.pending = true;
     html = renderToStaticMarkup(
@@ -203,7 +203,7 @@ describe('bill mutation confirmations', () => {
       />,
     );
     expect(html).toMatch(/<form[^>]*aria-busy="true"/);
-    expect(html).toContain('正在录入…');
-    expect(html).not.toContain('付款流水已录入');
+    expect(html).toContain('正在录入收款…');
+    expect(html).not.toContain('收款流水已录入');
   });
 });

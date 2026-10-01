@@ -1,18 +1,17 @@
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
 import { randomUUID } from 'node:crypto';
 import { getOrderForOutsourceForm } from '@/lib/outsource';
 import { CreateOutsourceForm } from '@/components/business/outsource/CreateOutsourceForm';
 import { requirePermission } from '@/lib/auth/permissions';
 import { outsourceUnavailableReason } from '@/lib/order/outsource-eligibility';
-import { DisabledReason } from '@/components/ui-business';
-import { buttonVariants } from '@/components/ui/button';
+import { DisabledReason, PageHeader } from '@/components/ui-business';
+import { FormPage } from '@/app/_components/FormPage';
 
 type PageProps = {
   searchParams: Promise<{ orderId?: string }>;
 };
 
-export const metadata = { title: '创建外协单' };
+export const metadata = { title: '新建外协单' };
 
 export default async function NewOutsourcePage({ searchParams }: PageProps) {
   // Page-level server-side authz (defense-in-depth: layout gate
@@ -29,19 +28,15 @@ export default async function NewOutsourcePage({ searchParams }: PageProps) {
   const unavailableReason = outsourceUnavailableReason(order);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">创建外协单</h1>
-        {!unavailableReason ? <p className="text-sm text-muted-foreground">
-          选择要外协的款式，填写外协厂信息。保存后状态默认为&ldquo;已发出&rdquo;。
-        </p> : null}
-      </div>
+    <FormPage>
+      <PageHeader
+        // 表单内自带提交中锁定的返回入口（PendingLink）；只有表单不渲染时才由页头提供。
+        back={unavailableReason ? { href: `/orders/${order.id}`, label: '返回工单详情' } : undefined}
+        title="新建外协单"
+      />
 
       {unavailableReason ? (
-        <div className="space-y-3">
-          <DisabledReason cause="status" reason={unavailableReason} />
-          <Link href={`/orders/${order.id}`} className={buttonVariants({ variant: 'outline' })}>返回工单</Link>
-        </div>
+        <DisabledReason cause="status" reason={unavailableReason} />
       ) : (
         <CreateOutsourceForm
           orderId={order.id}
@@ -50,6 +45,6 @@ export default async function NewOutsourcePage({ searchParams }: PageProps) {
           initialIdempotencyKey={randomUUID()}
         />
       )}
-    </div>
+    </FormPage>
   );
 }

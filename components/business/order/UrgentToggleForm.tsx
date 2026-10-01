@@ -33,11 +33,11 @@ export function UrgentToggleForm({ orderId, currentValue }: Props) {
       <Button
         type="submit"
         size="sm"
-        variant={currentValue ? 'outline' : 'destructive'}
+        variant="outline"
         disabled={pending}
       >
         {pending
-          ? '处理中…'
+          ? '正在处理…'
           : currentValue
             ? '取消急单'
             : '标记为急单'}

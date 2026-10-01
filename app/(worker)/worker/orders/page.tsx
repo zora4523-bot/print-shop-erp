@@ -1,11 +1,13 @@
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import Link from 'next/link';
+import Form from 'next/form';
 import { ClipboardList } from 'lucide-react';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listWorkerOrders } from '@/lib/worker-portal';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
-import { EmptyState } from '@/components/ui-business';
+import { EmptyState, FilterClearLink, PageHeader } from '@/components/ui-business';
 import { formatDateShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
 import { parsePositiveInt, firstSearchParam } from '@/lib/admin/table';
@@ -35,19 +37,14 @@ export default async function WorkerOrdersPage({ searchParams }: PageProps) {
 
   return (
     <div className="min-w-0 space-y-4">
-      <header className="worker-wrap-anywhere">
-        <h1 className="text-lg font-semibold">我的工单</h1>
-        <p className="text-xs text-muted-foreground">
-          展示与你固定计件岗位或共享无计件进度相关的工单。
-        </p>
-      </header>
+      <PageHeader size="worker" title="我的工单" className="worker-wrap-anywhere" />
 
-      <form className="flex flex-wrap gap-2 rounded-xl border bg-card p-3"><label className="min-w-0 flex-1"><span className="sr-only">工单号或名称</span><input name="q" defaultValue={sp.q} maxLength={100} placeholder="工单号或名称" className="w-full rounded-md border bg-background px-3 py-2" /></label><Button type="submit">搜索</Button>{sp.q && <Link href="/worker/orders" className="inline-flex min-h-11 items-center underline">清除</Link>}</form>
+      {/* next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。 */}
+      <Form id="worker-order-filters" key={JSON.stringify([sp.q ?? ''])} action="/worker/orders" className="flex flex-wrap gap-2 rounded-xl border bg-card p-3"><label className="min-w-0 flex-1"><span className="sr-only">工单号或名称</span><Input name="q" defaultValue={sp.q} maxLength={100} placeholder="工单号或名称" className="w-full" /></label><Button type="submit">搜索</Button>{sp.q && <FilterClearLink formId="worker-order-filters" href="/worker/orders" className="inline-flex min-h-11 items-center underline">清除筛选</FilterClearLink>}</Form>
       {orders.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
-          title="暂无工序工单"
-          description="价格确认并生成对应工序后，工单会自动显示。"
+          title={sp.q ? '没有匹配的工单' : '暂无工单'}
         />
       ) : (
         <ul className="space-y-3">

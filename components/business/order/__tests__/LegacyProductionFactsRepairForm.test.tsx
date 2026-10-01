@@ -19,7 +19,7 @@ describe('LegacyProductionFactsRepairForm SSR', () => {
   it('已有包装组不提供包装字段，pending 禁用提交', () => {
     hooks.pending = true;
     const html = renderToStaticMarkup(<LegacyProductionFactsRepairForm canRepair facts={{ ...facts, needsPackaging: false }} />);
-    expect(html).not.toContain('name="packagingMode"'); expect(html).not.toContain('name="items.0.unitsPerBag"'); expect(html).toContain('disabled=""'); expect(html).toContain('保存中…');
+    expect(html).not.toContain('name="packagingMode"'); expect(html).not.toContain('name="items.0.unitsPerBag"'); expect(html).toContain('disabled=""'); expect(html).toContain('正在保存…');
   });
   it('服务端未授权展示时不渲染表单', () => {
     expect(renderToStaticMarkup(<LegacyProductionFactsRepairForm canRepair={false} facts={facts} />)).toBe('');

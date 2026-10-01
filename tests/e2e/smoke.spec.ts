@@ -341,19 +341,19 @@ test.describe('automation smoke', () => {
 
     await page.goto('/owner/product-categories');
     await expect(
-      page.getByRole('heading', { name: '产品结构分类 / BOM 分类' }),
+      page.getByRole('heading', { name: '产品结构分类 / 用料清单分类' }),
     ).toBeVisible();
     await expect(page.getByRole('cell', { name: '空白现货' }).first()).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/boms');
-    await expect(page.getByRole('heading', { name: 'BOM/用料' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '用料清单' })).toBeVisible();
     await expect(page.getByText('Codex E2E 标准 BOM')).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/boms/new');
-    await expect(page.getByRole('heading', { name: '新建 BOM' })).toBeVisible();
-    await expect(page.getByLabel('BOM 名称')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '新建用料清单' })).toBeVisible();
+    await expect(page.getByLabel('用料清单名称')).toBeVisible();
     await expect(page.getByRole('combobox', { name: '物料', exact: true }).first()).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
@@ -431,7 +431,7 @@ test.describe('automation smoke', () => {
     await expectNoNextErrorOverlay(page);
 
     await page.goto('/owner/warehouses');
-    await expect(page.getByRole('heading', { name: '仓库作业台' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '仓库/库位' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '采购待收货' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '最近库存流水' })).toBeVisible();
     await expect(page.getByText('库存一致性', { exact: true })).toBeVisible();

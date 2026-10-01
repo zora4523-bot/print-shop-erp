@@ -60,15 +60,19 @@ export function StatCard({
   const DeltaIcon = delta ? DELTA_ICON[delta.direction] : null;
   const dTone = delta ? deltaTone(delta) : 'neutral';
 
+  // 卡片本身是容器：窄于 10rem 内容宽时图标叠到数值上方，把整行宽度留给数值。
+  // 数值不用 break-words——它会在放不下时把「¥ 15,395.29」从数字中间折开
+  // （2026-10-01 在 768 宽的月账单页实测折成三行）；只允许在「¥」后的空格处换行。
   return (
     <div
       data-slot="dashboard-kpi"
       data-tone={tone}
       className={cn(
-        'flex items-start gap-3 rounded-xl border bg-card p-4 shadow-sm',
+        '@container rounded-xl border bg-card p-4 shadow-sm',
         className,
       )}
     >
+      <div className="flex flex-col items-start gap-2 @min-[10rem]:flex-row @min-[10rem]:gap-3">
       {Icon ? (
         <div
           aria-hidden
@@ -82,7 +86,7 @@ export function StatCard({
       ) : null}
       <div className="min-w-0 flex-1">
         <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-1 break-words font-sans tabular-nums text-xl font-semibold tracking-tight">
+        <div className="mt-1 font-sans tabular-nums text-xl font-semibold tracking-tight">
           {value}
         </div>
         {delta && DeltaIcon ? (
@@ -104,6 +108,7 @@ export function StatCard({
         {hint ? (
           <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
         ) : null}
+      </div>
       </div>
     </div>
   );

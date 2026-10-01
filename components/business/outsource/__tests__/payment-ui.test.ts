@@ -32,7 +32,6 @@ describe('outsource payment detail UI contract', () => {
       '已付',
       '未付',
       '付款明细',
-      '不进入销售账单或员工工资',
     ]) {
       expect(detailPage).toContain(label);
     }
@@ -75,7 +74,9 @@ describe('outsource payment detail UI contract', () => {
     expect(paymentForm).toContain('onClick={prepareConfirmation}');
     expect(paymentForm).toContain('onSubmit={handleSubmit}');
     expect(paymentForm).toContain('confirmedRef.current = true');
-    expect(paymentForm).toContain('只记入外协加工付款');
-    expect(paymentForm).toContain('防止重复记账');
+    expect(paymentForm).not.toContain('只记入外协加工付款');
+    expect(paymentForm).toContain('本次付款');
+    expect(paymentForm).toContain('本次付款后预计仍有');
+    expect(paymentForm).toContain('idempotencyKey');
   });
 });

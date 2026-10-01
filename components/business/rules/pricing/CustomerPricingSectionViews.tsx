@@ -1,3 +1,4 @@
+import { RuleCenterPageHeader } from '@/components/business/rules/RuleCenterPageHeader';
 import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -15,8 +16,6 @@ import {
 } from '@/components/ui/table';
 import { TableScrollArea } from '@/components/ui-business';
 import { cn } from '@/lib/utils';
-import { formatMoney } from '@/lib/dashboard/format';
-import { formatUnitPrice } from '@/lib/format/unit-price';
 
 export type PricingNumericValue = number | string | null;
 
@@ -130,7 +129,7 @@ export type CustomerCartonPricingTierRow = {
   fee: PricingNumericFieldState;
 };
 
-export type CustomerCartonPricingFields = {
+type CustomerCartonPricingFields = {
   tiers: readonly CustomerCartonPricingTierRow[];
   segmentLength: PricingNumericFieldState;
   segmentFee: PricingNumericFieldState;
@@ -151,7 +150,7 @@ export type CustomerShippingZoneRow = {
   incrementKilograms: number;
 };
 
-export type CustomerShippingPricingFields = {
+type CustomerShippingPricingFields = {
   unitWeights: readonly CustomerShippingUnitWeightRow[];
   maxQuantity: PricingNumericFieldState;
   zones: readonly CustomerShippingZoneRow[];
@@ -199,37 +198,16 @@ function PricingSectionHeading({
   criticalBasis = false,
   actions,
 }: PricingSectionHeadingProps) {
+  // 分区即页面：标题经 RuleCenterPageHeader / PageHeader（ui-规范 §8.3）。
+  // 计价口径不同于相邻分区时用 primary 强调，不用红色（红色只表示危险 / 失败）。
   return (
-    <header className="min-w-0">
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1
-              id={headingId}
-              className="admin-wrap-anywhere text-lg font-extrabold tracking-tight sm:text-xl"
-            >
-              {title}
-            </h1>
-            {basis ? (
-              <Badge
-                variant="outline"
-                className={cn(
-                  'h-auto rounded-md px-2 py-0.5 font-mono text-xs font-bold tracking-wide',
-                  criticalBasis && 'border-destructive text-destructive',
-                )}
-              >
-                {basis}
-              </Badge>
-            ) : null}
-          </div>
-        </div>
-        {actions ? (
-          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
-            {actions}
-          </div>
-        ) : null}
-      </div>
-    </header>
+    <RuleCenterPageHeader
+      titleId={headingId}
+      title={title}
+      scope={basis}
+      scopeEmphasis={criticalBasis}
+      actions={actions}
+    />
   );
 }
 
@@ -307,17 +285,9 @@ function PricingNumericInput({
   );
 }
 
-function FormulaNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-lg bg-muted/70 px-3.5 py-2.5 text-xs font-semibold leading-5 sm:text-sm">
-      {children}
-    </div>
-  );
-}
-
 function CardSectionLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="border-b pb-2 text-xs font-extrabold tracking-[0.14em] text-muted-foreground">
+    <div className="border-b pb-2 text-xs font-semibold tracking-widest text-muted-foreground">
       {children}
     </div>
   );
@@ -345,14 +315,6 @@ function decimalLabel(value: number, maximumFractionDigits = 3): string {
     minimumFractionDigits: 0,
     maximumFractionDigits,
   });
-}
-
-function currencyLabel(value: number | null, fractionDigits = 2): string {
-  return value === null || !Number.isFinite(value)
-    ? '待定'
-    : fractionDigits === 4
-      ? formatUnitPrice(value)
-      : formatMoney(value);
 }
 
 function matrixCell(
@@ -396,13 +358,13 @@ export function CustomerBlankPricingSectionView({
           <Table label="局部烫金空白封现货单价矩阵" style={{ minWidth: minimumWidth }}>
             <TableHeader>
               <TableRow className="border-b-2 border-foreground hover:bg-transparent">
-                <TableHead className="w-44 px-4 text-xs font-extrabold tracking-wide text-muted-foreground">
+                <TableHead className="w-44 px-4 text-xs font-semibold tracking-wide text-muted-foreground">
                   纸张 · 克重
                 </TableHead>
                 {columns.map((column) => (
                   <TableHead
                     key={column.key}
-                    className="min-w-28 px-2 text-right text-xs font-extrabold tracking-wide text-muted-foreground"
+                    className="min-w-28 px-2 text-right text-xs font-semibold tracking-wide text-muted-foreground"
                   >
                     {column.label}
                   </TableHead>
@@ -486,7 +448,7 @@ function ParameterRow({
         step={step}
         className="w-[110px] shrink-0"
       />
-      <span className="w-12 shrink-0 text-xs font-extrabold text-muted-foreground">
+      <span className="w-12 shrink-0 text-xs font-semibold text-muted-foreground">
         {unit}
       </span>
     </div>
@@ -503,22 +465,6 @@ export function CustomerMachinePricingSectionView({
   className,
   headingId = 'customer-machine-pricing-heading',
 }: CustomerMachinePricingSectionViewProps) {
-  const rateNumber = finiteNumber(rate.value);
-  const flatNumber = finiteNumber(flatFee.value);
-  const jumpNumber = finiteNumber(jumpQuantity.value);
-  const exampleAtJump =
-    rateNumber === null || flatNumber === null || jumpNumber === null
-      ? null
-      : 1_000 < jumpNumber
-        ? 2 * flatNumber
-        : 1_000 * 2 * rateNumber;
-  const exampleBelowJump =
-    rateNumber === null || flatNumber === null || jumpNumber === null
-      ? null
-      : 999 < jumpNumber
-        ? 3 * flatNumber
-        : 999 * 3 * rateNumber;
-  const platePolicyDescriptionId = `${plateFee.id}-manual-only-description`;
 
   return (
     <section
@@ -553,21 +499,6 @@ export function CustomerMachinePricingSectionView({
             field={jumpQuantity}
             unit="个"
           />
-          <div className="py-3">
-            <FormulaNote>
-              当前参数试算：1,000 个双面 = 2,000 次 ×{' '}
-              {rateNumber === null ? '待定' : decimalLabel(rateNumber)} ={' '}
-              <strong className="text-destructive">
-                {currencyLabel(exampleAtJump)}
-              </strong>
-              <span aria-hidden="true">　·　</span>
-              999 个三色 = 3 次过版 ×{' '}
-              {flatNumber === null ? '待定' : decimalLabel(flatNumber)} ={' '}
-              <strong className="text-destructive">
-                {currencyLabel(exampleBelowJump)}
-              </strong>
-            </FormulaNote>
-          </div>
         </CardContent>
       </Card>
 
@@ -576,21 +507,14 @@ export function CustomerMachinePricingSectionView({
           <div
             id={plateFee.id}
             role="note"
-            aria-describedby={platePolicyDescriptionId}
             className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
           >
             <div className="min-w-0">
               <div className="text-sm font-bold">制烫金版费</div>
-              <p
-                id={platePolicyDescriptionId}
-                className="mt-0.5 text-xs font-medium leading-4 text-muted-foreground"
-              >
-                版费默认 0 元；需要收费时，管理员可在工单中添加制版明细，录入金额和依据。
-              </p>
             </div>
             <Badge
               variant="outline"
-              className="h-auto w-fit shrink-0 rounded-md px-2 py-0.5 text-xs font-bold text-destructive"
+              className="h-auto w-fit shrink-0 rounded-md border-primary/40 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary"
             >
               默认 0 元 · 可人工添加
             </Badge>
@@ -648,7 +572,7 @@ export function CustomerTiersPricingSectionView({
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-semibold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档位</span>
                   <span role="columnheader">数量范围</span>
@@ -673,7 +597,7 @@ export function CustomerTiersPricingSectionView({
                       key={row.key}
                       className="grid grid-cols-[86px_minmax(18rem,1fr)_110px_100px_100px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                     >
-                      <span role="cell" className="font-extrabold">
+                      <span role="cell" className="font-semibold">
                         {row.name}
                       </span>
                       <span
@@ -731,7 +655,7 @@ function AdjustmentRows({
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-bold">
               <span className="admin-wrap-anywhere">{row.label}</span>
               {row.isNew ? (
-                <Badge className="h-auto rounded-md border border-warning/40 bg-warning/10 px-1.5 py-0 text-xs font-extrabold text-warning-foreground">
+                <Badge className="h-auto rounded-md border border-warning/40 bg-warning/10 px-1.5 py-0 text-xs font-semibold text-warning-foreground">
                   新增 · 未发布
                 </Badge>
               ) : null}
@@ -748,7 +672,7 @@ function AdjustmentRows({
             step={row.unit === '元/个' ? '0.005' : undefined}
             className="w-[110px] shrink-0"
           />
-          <span className="w-12 shrink-0 text-xs font-extrabold text-muted-foreground">
+          <span className="w-12 shrink-0 text-xs font-semibold text-muted-foreground">
             {row.unit}
           </span>
         </div>
@@ -825,13 +749,13 @@ export function CustomerPrintPricingSectionView({
           <Table label="彩印阶梯整单总价矩阵" style={{ minWidth: minimumWidth }}>
             <TableHeader>
               <TableRow className="border-b-2 border-foreground hover:bg-transparent">
-                <TableHead className="w-40 px-4 text-xs font-extrabold tracking-wide text-muted-foreground">
+                <TableHead className="w-40 px-4 text-xs font-semibold tracking-wide text-muted-foreground">
                   纸张 规格
                 </TableHead>
                 {columns.map((column) => (
                   <TableHead
                     key={column.key}
-                    className="w-16 px-1 text-right text-xs font-extrabold tracking-wide text-muted-foreground"
+                    className="w-16 px-1 text-right text-xs font-semibold tracking-wide text-muted-foreground"
                   >
                     {column.label}
                   </TableHead>
@@ -911,63 +835,6 @@ function cartonRanges(tiers: readonly CustomerCartonPricingTierRow[]) {
   });
 }
 
-function calculateCartonFee(
-  carton: CustomerCartonPricingFields,
-  quantity: number,
-): number | null {
-  const segmentLength = finiteNumber(carton.segmentLength.value);
-  const segmentFee = finiteNumber(carton.segmentFee.value);
-  if (
-    segmentLength === null ||
-    segmentLength <= 0 ||
-    segmentFee === null
-  ) {
-    return null;
-  }
-
-  let rest = quantity;
-  let total = 0;
-  while (rest > segmentLength) {
-    total += segmentFee;
-    rest -= segmentLength;
-  }
-  const matchedTier = carton.tiers.find((tier) => {
-    const max = finiteNumber(tier.maxQuantity.value);
-    return max !== null && rest <= max;
-  });
-  const remainderFee = matchedTier
-    ? finiteNumber(matchedTier.fee.value)
-    : segmentFee;
-  return remainderFee === null ? null : total + remainderFee;
-}
-
-function calculateShippingExample(
-  shipping: CustomerShippingPricingFields,
-  province: string,
-): number | null {
-  const maxQuantity = finiteNumber(shipping.maxQuantity.value);
-  const unitWeight = shipping.unitWeights.find((row) => row.key === '160');
-  const grams = finiteNumber(unitWeight?.value.value ?? null);
-  const zone = shipping.zones.find((row) => row.provinces.includes(province));
-  if (!zone || grams === null || maxQuantity === null || 2_000 > maxQuantity) {
-    return null;
-  }
-  const first = finiteNumber(zone.firstWeightFee.value);
-  const increment = finiteNumber(zone.incrementFee.value);
-  if (
-    first === null ||
-    increment === null ||
-    zone.incrementKilograms <= 0
-  ) {
-    return null;
-  }
-  const kilograms = Math.max(1, Math.ceil((2_000 * grams) / 1_000));
-  return zone.incrementKilograms === 1
-    ? first + (kilograms - 1) * increment
-    : first +
-        Math.ceil((kilograms - 1) / zone.incrementKilograms) * increment;
-}
-
 export function CustomerShipPricingSectionView({
   box,
   bag,
@@ -979,10 +846,6 @@ export function CustomerShipPricingSectionView({
   headingId = 'customer-ship-pricing-heading',
 }: CustomerShipPricingSectionViewProps) {
   const ranges = cartonRanges(carton.tiers);
-  const carton8k = calculateCartonFee(carton, 8_000);
-  const carton10k = calculateCartonFee(carton, 10_000);
-  const shanghai = calculateShippingExample(shipping, '上海');
-  const gansu = calculateShippingExample(shipping, '甘肃');
 
   return (
     <section
@@ -1028,7 +891,7 @@ export function CustomerShipPricingSectionView({
         <CardContent className="min-w-0 p-0">
           <div className="px-4 pt-4 sm:px-5">
             <CardSectionLabel>
-              纸箱档位 · 超出后分段累加 · 订单级
+              纸箱档位 · 元/工单
             </CardSectionLabel>
           </div>
           <TableScrollArea label="纸箱费用阶梯">
@@ -1040,7 +903,7 @@ export function CustomerShipPricingSectionView({
               <div role="rowgroup">
                 <div
                   role="row"
-                  className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-extrabold tracking-wide text-muted-foreground"
+                  className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b-2 border-foreground py-2 text-xs font-semibold tracking-wide text-muted-foreground"
                 >
                   <span role="columnheader">档</span>
                   <span role="columnheader">范围（推导）</span>
@@ -1060,7 +923,7 @@ export function CustomerShipPricingSectionView({
                     key={tier.key}
                     className="grid grid-cols-[86px_minmax(16rem,1fr)_110px_110px_34px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                   >
-                    <span role="cell" className="font-extrabold">
+                    <span role="cell" className="font-semibold">
                       {tier.name ?? `第${index + 1}档`}
                     </span>
                     <span
@@ -1089,8 +952,7 @@ export function CustomerShipPricingSectionView({
           </TableScrollArea>
           <div className="divide-y px-4 sm:px-5">
             <ParameterRow
-              label="分段长度"
-              description="超末档后每扣一段计段费，余量回查上表"
+              label="超出末档分段数量"
               field={carton.segmentLength}
               unit="个"
             />
@@ -1099,19 +961,6 @@ export function CustomerShipPricingSectionView({
               field={carton.segmentFee}
               unit="元"
             />
-          </div>
-          <div className="px-4 pb-4 pt-1 sm:px-5">
-            <FormulaNote>
-              当前参数：8,000 = 分段 + 查余量 ={' '}
-              <strong className="text-destructive">
-                {currencyLabel(carton8k, 0)}
-              </strong>
-              <span aria-hidden="true">　·　</span>
-              10,000 ={' '}
-              <strong className="text-destructive">
-                {currencyLabel(carton10k, 0)}
-              </strong>
-            </FormulaNote>
           </div>
         </CardContent>
       </Card>
@@ -1143,7 +992,7 @@ export function CustomerShipPricingSectionView({
         <CardContent className="min-w-0 p-0">
           <div className="px-4 pt-4 sm:px-5">
             <CardSectionLabel>
-              中通省份档 · 不足 1kg 收首重，计费重量向上取整
+              中通省份档 · 首重 1kg · 计费重量向上取整
             </CardSectionLabel>
           </div>
           <TableScrollArea label="中通快递省份档">
@@ -1168,7 +1017,7 @@ export function CustomerShipPricingSectionView({
                     key={zone.key}
                     className="grid grid-cols-[34px_minmax(19rem,1fr)_100px_100px_70px] items-center gap-2 border-b py-1.5 text-sm last:border-b-0"
                   >
-                    <span role="cell" className="font-extrabold">
+                    <span role="cell" className="font-semibold">
                       {zone.name}
                     </span>
                     <span
@@ -1202,18 +1051,6 @@ export function CustomerShipPricingSectionView({
               </div>
             </div>
           </TableScrollArea>
-          <div className="px-4 pb-4 pt-2 sm:px-5">
-            <FormulaNote>
-              试算：2,000个 160g → 上海{' '}
-              <strong className="text-destructive">
-                {currencyLabel(shanghai, 1)}
-              </strong>{' '}
-              · 甘肃{' '}
-              <strong className="text-destructive">
-                {currencyLabel(gansu, 1)}
-              </strong>
-            </FormulaNote>
-          </div>
         </CardContent>
       </Card>
     </section>

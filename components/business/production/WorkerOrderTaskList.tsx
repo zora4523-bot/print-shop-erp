@@ -35,9 +35,6 @@ export function WorkerOrderTaskList({
       <div className="rounded-xl border bg-card p-4">
         <h2 className="font-semibold">选择本次报工工序</h2>
         <p className="worker-wrap-anywhere mt-2 text-sm">{reporterName} · {laneLabel}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          按实际完成数量提交，计件工资归当前登录账号。
-        </p>
       </div>
       <TaskGroup title="本岗位计件工序" tasks={operations} paid />
       {progressSteps.length > 0 ? (
@@ -62,7 +59,7 @@ function TaskGroup({ title, tasks, paid }: {
   return (
     <section className="min-w-0 space-y-3" aria-label={title}>
       <h3 className="text-sm font-semibold">{title}</h3>
-      {!paid ? <p className="text-xs text-muted-foreground">仅推进生产进度，不计入工资。</p> : null}
+      {!paid ? <p className="text-xs text-muted-foreground">不计薪</p> : null}
       {unfinished.map((task) => <TaskCard key={task.id} task={task} paid={paid} />)}
       {unfinished.length === 0 ? (
         <p role="status" className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">

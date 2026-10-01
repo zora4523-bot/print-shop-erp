@@ -38,7 +38,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         aria-label={`用户菜单：${displayName}`}
         className={buttonVariants({
           variant: 'ghost',
-          className: 'h-11 min-w-11 gap-2 px-2',
+          className: 'min-h-11 min-w-11 gap-2 px-2',
         })}
       >
         <Avatar className="size-7 after:border-0">
@@ -86,7 +86,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
             type="submit"
             variant="ghost"
             data-slot="user-menu-logout"
-            className="min-h-11 w-full cursor-default justify-start rounded-sm px-2 text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 active:translate-y-0"
+            className="min-h-11 w-full cursor-default justify-start rounded-sm px-2 hover:bg-muted focus-visible:bg-muted active:translate-y-0"
           >
             <LogOut aria-hidden className="size-4" />
             <span>退出登录</span>

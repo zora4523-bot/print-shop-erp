@@ -8,7 +8,7 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ActionNotice, PendingButton } from '@/components/ui-business';
+import { ActionNotice, DisabledReason, PendingButton } from '@/components/ui-business';
 
 export function CancelPieceworkPlan({ workerId, targetId, hasDraft = false, onSuccess }: { workerId: string | null; targetId: string; hasDraft?: boolean; onSuccess?: (message: string) => void }) {
   const id = useId();
@@ -44,7 +44,8 @@ export function CancelPieceworkPlan({ workerId, targetId, hasDraft = false, onSu
       <Textarea id={`${id}-reason`} name="reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength={2} maxLength={500} required disabled={pending} />
       {currentError ? <ActionNotice tone="error" title="取消未完成" description={currentError} /> : null}
       <div className="flex flex-wrap gap-3">
-        <PendingButton pending={pending} pendingLabel="正在取消…" variant="destructive" className="bg-primary text-primary-foreground hover:bg-primary/90 dark:bg-primary dark:hover:bg-primary/90" disabled={reason.trim().length < 2}>取消调价计划</PendingButton>
+        {reason.trim().length < 2 && !pending ? <DisabledReason cause="prerequisite" reason="取消原因至少 2 个字。"><PendingButton pending={false} variant="destructive" disabled>取消调价计划</PendingButton></DisabledReason>
+          : <PendingButton pending={pending} pendingLabel="正在取消调价计划…" variant="destructive">取消调价计划</PendingButton>}
         <Button type="button" variant="outline" disabled={pending} onClick={() => setReview(null)}>返回</Button>
         {currentError ? <Button type="button" variant="outline" disabled={pending || loading} onClick={prepare}>重新核对计划</Button> : null}
       </div>

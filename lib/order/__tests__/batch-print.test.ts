@@ -12,7 +12,8 @@ vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: m.order }));
 vi.mock('@/lib/order/print-html', () => ({ buildPrintHtml: m.html }));
 vi.mock('@/lib/settings', () => ({ getSetting: async () => ({ name: 'Factory' }) }));
 vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: m.render }));
-vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifact: m.write, cleanupOldPdfArtifacts: vi.fn() }));
+vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifact: m.write, cleanupOldPdfArtifacts: vi.fn(),
+  PdfArtifactStorageError: class extends Error { constructor() { super('PDF artifact storage unavailable'); this.name = 'PdfArtifactStorageError'; } } }));
 vi.mock('@/lib/pdf/order-snapshot', () => ({ orderPdfSnapshotKey: (order: { id: string; version: number }) => `${order.id}:${order.version}` }));
 import { BatchPrintAccessError, BatchPrintSelectionError, requestBatchPrint, handleBatchPrintJob, batchPrintStatus, downloadBatchPrint } from '../batch-print';
 const payload = { actorId: 'admin', baseUrl: 'https://example.test', orders: [{ id: 'a', key: 'a:1' }, { id: 'b', key: 'b:1' }] };
@@ -93,6 +94,13 @@ describe('batch PDF invariants', () => {
     m.worker.mockResolvedValue({ workerId: 'w' });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending' });
   });
+  it('only counts HEAVY workers that can currently render PDFs, unless the job is already running', async () => {
+    await batchPrintStatus('admin', 'j');
+    expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', pdfReady: true, version: process.env.APP_VERSION || 'dev' });
+    m.worker.mockResolvedValue(null);
+    m.find.mockResolvedValue({ ...job, status: 'RUNNING', result: { completed: 1, issues: [] } });
+    expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending', phase: 'rendering' });
+  });
   it('rechecks contents even after reading the finished artifact', async () => {
     m.find.mockResolvedValue({ ...job, status: 'SUCCEEDED', result: { completed: 2, issues: [], artifactName: 'j.pdf' } });
     m.order.mockResolvedValueOnce({ id: 'a', version: 1 }).mockResolvedValueOnce({ id: 'b', version: 1 }).mockResolvedValue({ id: 'a', version: 2 });
@@ -139,4 +147,18 @@ it('does not cache or publish a PDF whose uploaded artwork failed', async () => 
   m.render.mockRejectedValue(Object.assign(new Error('private URL'), { name: 'PrintArtworkUnavailableError' }));
   expect(await handleBatchPrintJob(job)).toMatchObject({ issues: [{ position: 1, message: '图稿加载失败，请检查图稿后重试' }] });
   expect(m.write).not.toHaveBeenCalled();
+});
+
+it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError', 'TargetCloseError'])(
+  'rethrows PDF infrastructure failures (%s) so the durable job retries instead of reporting the order',
+  async (name) => {
+    m.render.mockRejectedValueOnce(Object.assign(new Error('infra'), { name }));
+    await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name });
+    expect(m.write).not.toHaveBeenCalled();
+  },
+);
+
+it('classifies a raw cache write failure (ENOSPC) as storage infrastructure and rethrows it', async () => {
+  m.write.mockRejectedValueOnce(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }));
+  await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name: 'PdfArtifactStorageError' });
 });

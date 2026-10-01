@@ -17,6 +17,7 @@ import {
   notificationChannelSelectionIssueMessage,
   type NotificationChannelSelectionIssue,
 } from '@/lib/notification/channel-selection';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type Props = {
   // 由 Server Component 读好当前值传进来（页面层不直连 Prisma 之外的东西，
@@ -75,7 +76,7 @@ export function SettingsForm({
         ) : null}
 
         <Button type="submit" disabled={pending}>
-          {pending ? '保存中…' : '保存设置'}
+          {pending ? '正在保存…' : '保存设置'}
         </Button>
       </fieldset>
     </form>
@@ -118,30 +119,30 @@ function SettingField({
       <Label htmlFor={settingKey} className="text-sm font-medium">
         {definition.label}
       </Label>
-      <p id={helpId} className="text-xs text-muted-foreground">
+      {definition.help ? <p id={helpId} className="text-xs text-muted-foreground">
         {definition.help}
-      </p>
+      </p> : null}
       <div className="flex items-center gap-2">
         {field.kind === 'boolean' ? (
-          <select
+          <NativeSelect
+            className="w-auto"
             id={settingKey}
             name={settingKey}
             defaultValue={defaultValue}
             aria-invalid={hasError}
-            aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
-            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            aria-describedby={[hasError ? errorId : '', definition.help ? helpId : ''].filter(Boolean).join(' ') || undefined}
           >
             <option value="true">开启</option>
             <option value="false">关闭</option>
-          </select>
+          </NativeSelect>
         ) : field.kind === 'int' ? (
           <Input
             id={settingKey}
             name={settingKey}
             defaultValue={defaultValue}
             aria-invalid={hasError}
-            // 说明文字始终关联，出错时把错误排在前面先读
-            aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
+            // 仅关联实际存在的说明，出错时先读错误。
+            aria-describedby={[hasError ? errorId : '', definition.help ? helpId : ''].filter(Boolean).join(' ') || undefined}
             type="number"
             inputMode="numeric"
             min={field.min}
@@ -155,7 +156,7 @@ function SettingField({
             name={settingKey}
             defaultValue={defaultValue}
             aria-invalid={hasError}
-            aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
+            aria-describedby={[hasError ? errorId : '', definition.help ? helpId : ''].filter(Boolean).join(' ') || undefined}
             type="text"
             maxLength={field.maxLength}
             className="max-w-md"
@@ -251,13 +252,13 @@ function ManagementNotificationRoutingField({
   return (
     <div className="grid gap-2">
       <div className="text-sm font-medium">{definition.label}</div>
-      <p id={helpId} className="text-xs text-muted-foreground">
+      {definition.help ? <p id={helpId} className="text-xs text-muted-foreground">
         {definition.help}
-      </p>
+      </p> : null}
       <div
         className="grid gap-3 lg:grid-cols-2"
         aria-invalid={hasError}
-        aria-describedby={hasError ? `${errorId} ${helpId}` : helpId}
+        aria-describedby={[hasError ? errorId : '', definition.help ? helpId : ''].filter(Boolean).join(' ') || undefined}
       >
         {roles.map((role) => {
           const current = routing[role.key];
@@ -282,15 +283,15 @@ function ManagementNotificationRoutingField({
                 <Label htmlFor={`${prefix}.enabled`} className="text-xs">
                   角色开关
                 </Label>
-                <select
+                <NativeSelect
+                  className="w-auto"
                   id={`${prefix}.enabled`}
                   name={`${prefix}.enabled`}
                   defaultValue={String(current.enabled)}
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
                   <option value="true">开启</option>
                   <option value="false">关闭</option>
-                </select>
+                </NativeSelect>
               </div>
               {visibleChannels.length === 0 ? (
                 <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
@@ -313,7 +314,7 @@ function ManagementNotificationRoutingField({
                       : null;
                     const option = (
                       <label
-                        className="flex min-h-10 cursor-pointer items-center gap-1 rounded-md pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+                        className="flex min-h-11 cursor-pointer items-start gap-1 rounded-md pr-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
                       >
                         <Checkbox
                           name={`${prefix}.channelIds`}
@@ -322,7 +323,7 @@ function ManagementNotificationRoutingField({
                           disabled={disabled}
                           aria-label={`${role.label}：${channel.channelName}`}
                         />
-                        <span className="admin-wrap-anywhere min-w-0 py-2">
+                        <span className="admin-wrap-anywhere min-w-0 py-3">
                           {channel.channelName}
                           <span className="ml-1 font-mono text-xs text-muted-foreground">
                             {channel.channelKey}

@@ -8,7 +8,7 @@ export const ORDER_FORM_QUOTE_STATUS_LABELS: Record<
   string
 > = {
   missing: '待核价',
-  loading: '核价中…',
+  loading: '正在核价…',
   stale: '待重新核价',
   error: '核价失败',
   incomplete: '待工厂核价',

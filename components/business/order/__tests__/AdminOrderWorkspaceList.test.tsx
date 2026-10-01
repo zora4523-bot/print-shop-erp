@@ -55,7 +55,8 @@ describe('AdminOrderWorkspaceList', () => {
     expect(filtered).toContain('href="/orders?queue=all"');
     expect(filtered).toContain('清除筛选');
     const emptyQueue = renderToStaticMarkup(<AdminOrderWorkspaceList {...props} />);
-    expect(emptyQueue).toContain('这个队列清空了');
+    expect(emptyQueue).toContain('暂无工单');
+    expect(emptyQueue).not.toContain('这个队列清空了');
     expect(emptyQueue).toContain('查看全部工单');
     expect(emptyQueue).not.toContain('清除筛选');
   });
@@ -159,7 +160,7 @@ describe('AdminOrderWorkspaceList', () => {
       />,
     );
 
-    expect(html).toContain('>查看处理</a>');
+    expect(html).toContain('>下发前检查</a>');
   });
 
   it('shows rejected incomplete fees as excluded without exposing pricing actions', () => {
@@ -356,7 +357,7 @@ describe('AdminOrderBatchActions partial failure feedback', () => {
           items: [],
         },
       }),
-    ).toContain('成功 2 张，业务跳过 1 张，结果未知 1 张，未执行 3 张');
+    ).toContain('成功 2 张，跳过 1 张，结果未知 1 张，未执行 3 张');
   });
 });
 
@@ -413,7 +414,7 @@ function row(): AdminOrderWorkspaceRow {
       settle: false,
       createPrint: false,
       markPrinted: false,
-      reviewChange: false,
+      reviewChange: false, completeProduction: false,
     },
     billing: null,
     pendingChangeRequest: null,

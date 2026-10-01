@@ -19,12 +19,14 @@ export function EditorTabs({ id, label, tabs, value, disabled, onChange, ref, va
     className={cn('flex min-w-0 flex-wrap', variant === 'folder' ? 'flex-1 gap-1 border-b border-border' : 'gap-2')}>
     {tabs.map((tab, index) => <Button
       key={tab.value} id={`${id}-tab-${tab.value}`} type="button" role="tab"
-      variant="ghost"
+      // 两种形态的选中都用 Button 的标准选中变体（§8.2 选中态只有一种）；folder 只保留
+      // 「上圆角、底边并入面板」的形状差异，不再手写品牌色顶线。
+      variant={tab.value === value ? 'selected' : variant === 'outline' ? 'outline' : 'ghost'}
       className={cn(
         'h-auto min-h-11 min-w-11 max-w-full whitespace-normal break-words active:not-aria-[haspopup]:translate-y-0',
         variant === 'folder'
-          ? '-mb-px rounded-b-none rounded-t-lg border border-t-2 border-border bg-muted px-4 py-3 aria-selected:border-b-card aria-selected:border-t-primary aria-selected:bg-card aria-selected:text-primary aria-selected:font-semibold aria-selected:hover:bg-card'
-          : 'rounded-lg border-2 border-border bg-card px-3 py-2 aria-selected:border-primary aria-selected:bg-primary/5 aria-selected:text-primary aria-selected:font-semibold aria-selected:hover:bg-primary/5',
+          ? cn('-mb-px rounded-b-none rounded-t-lg border px-4 py-3', tab.value === value ? 'border-b-transparent' : 'border-border bg-muted')
+          : 'px-3 py-2',
       )}
       aria-selected={tab.value === value} aria-controls={`${id}-panel`}
       tabIndex={tab.value === value ? 0 : -1} disabled={disabled}

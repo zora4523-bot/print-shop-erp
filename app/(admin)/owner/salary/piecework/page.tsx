@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import Form from 'next/form';
 import Link from 'next/link';
 import { Calculator, Download, FileText } from 'lucide-react';
 import {
@@ -12,14 +13,16 @@ import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { formatMoney } from '@/lib/dashboard/format';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { EmptyState, PageHeader, StatCard, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard, TableScrollArea, ReceiptNotice, FilterClearLink } from '@/components/ui-business';
 import { readReceipt } from '@/lib/admin/receipt';
 import {
   LockPieceworkSettlementDayForm,
   LockPieceworkSettlementForm,
   MarkPieceworkSettlementPaidForm,
 } from '@/components/business/salary/PieceworkSettlementActions';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '工序计件结算' };
 
@@ -85,16 +88,17 @@ export default async function PieceworkSettlementPage({
 
       <PageHeader
         title="工序计件结算"
-        subtitle="按员工和日期查看计件工资。"
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link
+            <a
               href={`/api/salary/piecework-settlements/export?from=${workDate}&to=${workDate}`}
               className={buttonVariants({ variant: 'outline' })}
+
+              download
             >
               <Download className="mr-2 size-4" />
-              导出新账本
-            </Link>
+              导出计件结算
+            </a>
             <Link
               href="/owner/salary/daily"
               className={buttonVariants({ variant: 'ghost' })}
@@ -110,7 +114,7 @@ export default async function PieceworkSettlementPage({
           label="已锁定记录"
           value={`${data.settlements.length} 条`}
           icon={FileText}
-          tone="info"
+          tone="neutral"
           hint={`合计 ${formatMoney(lockedTotal)}`}
         />
         <StatCard
@@ -123,7 +127,7 @@ export default async function PieceworkSettlementPage({
           label="待锁定报工人"
           value={`${data.candidates.length} 人`}
           icon={Calculator}
-          tone={data.candidates.length > 0 ? 'primary' : 'neutral'}
+          tone={data.candidates.length > 0 ? 'warning' : 'neutral'}
         />
       </div>
 
@@ -134,9 +138,6 @@ export default async function PieceworkSettlementPage({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-semibold">待锁定报工</h2>
-              <p className="text-sm text-muted-foreground">
-                先核对数量和历史生产，再锁定当日已登记工资。
-              </p>
             </div>
             <LockPieceworkSettlementDayForm
               workDate={workDate}
@@ -148,7 +149,6 @@ export default async function PieceworkSettlementPage({
             <EmptyState
               icon={FileText}
               title={`${workDate} 没有待锁定报工`}
-              description="无需操作，或当日报工已全部锁定。"
             />
           ) : (
             <TableScrollArea label="待锁定报工明细" className="rounded-xl border bg-card shadow-sm">
@@ -212,7 +212,6 @@ export default async function PieceworkSettlementPage({
           <EmptyState
             icon={FileText}
             title={`${workDate} 暂无符合筛选的结算`}
-            description="锁定报工后，记录会显示在这里。"
           />
         ) : (
           <TableScrollArea label="已锁定计件结算" className="rounded-xl border bg-card shadow-sm">
@@ -301,38 +300,39 @@ function FilterBar({
   status?: PieceworkSettlementStatus;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form id="salary-piecework-filters" key={JSON.stringify([workDate, status ?? ''])} action="/owner/salary/piecework" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="space-y-1">
         <span className="block text-xs text-muted-foreground">结算日期</span>
-        <input
+        <Input
           type="date"
           name="date"
           defaultValue={workDate}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="block w-auto"
         />
       </label>
       <label className="space-y-1">
         <span className="block text-xs text-muted-foreground">状态</span>
-        <select
+        <NativeSelect
+          className="w-auto"
           name="status"
           defaultValue={status ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
         >
           <option value="">全部</option>
           <option value={PieceworkSettlementStatus.LOCKED}>已锁定未发</option>
           <option value={PieceworkSettlementStatus.PAID}>已发放</option>
-        </select>
+        </NativeSelect>
       </label>
       <Button type="submit" size="sm">
         筛选
       </Button>
-      <Link
+      <FilterClearLink formId="salary-piecework-filters"
         href="/owner/salary/piecework"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
-        清除
-      </Link>
-    </form>
+        清除筛选
+      </FilterClearLink>
+    </Form>
   );
 }
 

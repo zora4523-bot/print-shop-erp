@@ -130,7 +130,7 @@ test.describe('创建工单 — golden path', () => {
 
     await page.getByRole('textbox', { name: '工单名称' }).fill(customName);
     // 业主 2026-09-24：管理员建单必须选择一个外部销售。
-    const recipient = page.getByLabel('关联外部销售（必填）');
+    const recipient = page.getByLabel('关联外部销售');
     await expect(recipient).toHaveValue('');
     await recipient.selectOption({ label: 'E2E 销售 · e2e-sales' });
     await expect(page.locator('input[name="customerRef"]')).toHaveCount(0);
@@ -140,7 +140,7 @@ test.describe('创建工单 — golden path', () => {
     // 暴露给建单端。所有选择都 scope 到对应 fieldset，避免同名
     // 工艺按钮造成假阳性。
     await openFirstOrderItemEditor(page);
-    await page.getByLabel('包装补充说明（选填）').fill('创建时贴客户标签');
+    await page.getByLabel('包装补充说明', { exact: true }).fill('创建时贴客户标签');
     const form = page.locator('[data-slot="order-form-b"]');
     const routes = form.getByRole('group', { name: '工单类型' });
     for (const route of ['局部烫金', '专版烫金', '彩印']) {
@@ -296,7 +296,7 @@ test.describe('创建工单 — golden path', () => {
     await expect(stalePage.getByRole('textbox', { name: '工单名称', exact: true })).toHaveValue(
       customName,
     );
-    await page.getByLabel('包装补充说明（选填）').fill('封口后贴客户标签');
+    await page.getByLabel('包装补充说明', { exact: true }).fill('封口后贴客户标签');
     await page.getByRole('textbox', { name: '收件人', exact: true }).fill('修改后的收件人');
     await page.getByRole('textbox', { name: '收货电话', exact: true }).fill('13900139000');
     await page.getByRole('button', { name: '保存修改…', exact: true }).click();
@@ -513,7 +513,7 @@ test('管理员新增空白封正确提交目标规格，缺分袋资料仍拒�
     await db.query(`INSERT INTO "OrderShipmentLine" (id,"shipmentId","orderItemId",quantity) VALUES ($1,$2,$3,1000)`,
       [`${orderId}-line`, `${orderId}-shipment`, `${orderId}-item`]);
     await login(page, { from: `/orders/${orderId}/edit`, username: owner.username, password: E2E_PASSWORD });
-    await page.getByRole('button', { name: '新增款式（沿用第 1 款工艺和纸张）', exact: true }).click();
+    await page.getByRole('button', { name: '添加款式（沿用第 1 款工艺和纸张）', exact: true }).click();
     await page.getByLabel('第 2 款名称', { exact: true }).fill('新增大号款');
     await page.getByLabel('规格', { exact: true }).nth(1).selectOption({ label: '大号封90×165' });
     const requests: string[] = [];

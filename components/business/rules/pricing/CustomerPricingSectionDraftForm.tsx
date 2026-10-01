@@ -1,7 +1,6 @@
 'use client';
 
 import { useActionState, useCallback, useState, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
 import { Check, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { CustomerPriceBookMutationResult } from '@/actions/customer-price-books.types';
@@ -53,7 +52,6 @@ export function CustomerPricingSectionDraftForm({
   children,
   saveAction,
 }: CustomerPricingSectionDraftFormProps) {
-  const router = useRouter();
   const [dirty, setDirty] = useState(false);
   const clearUnsavedChanges = usePriceWorkspaceUnsavedTierChanges(dirty ? 1 : 0);
   const submitAction = useCallback(
@@ -63,11 +61,10 @@ export function CustomerPricingSectionDraftForm({
       if (result.status === 'success') {
         setDirty(false);
         clearUnsavedChanges();
-        router.refresh();
       }
       return result;
     },
-    [clearUnsavedChanges, router, saveAction],
+    [clearUnsavedChanges, saveAction],
   );
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     submitAction,
@@ -84,7 +81,7 @@ export function CustomerPricingSectionDraftForm({
       onChange={() => setDirty(true)}
     >
       {children}
-      <div className="sticky bottom-3 z-20 mt-4 flex min-w-0 flex-col gap-3 rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+      <div className="sticky bottom-3 z-10 mt-4 flex min-w-0 flex-col gap-3 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <MutationFeedback state={state} />
         <Button
           type="submit"

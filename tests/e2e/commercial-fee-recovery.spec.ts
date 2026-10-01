@@ -35,7 +35,10 @@ async function openFees(page: Page, id: string) {
 }
 async function fillManual(page: Page) {
   const fee = page.locator('#commercial-fees');
-  await fee.getByRole('textbox', { name: '订单级费用金额', exact: true }).fill('25');
+  // 业主 2026-10-01：「添加整单费用」默认收起（仍挂载）；重新加载后会再次收起，按需展开。
+  const add = fee.locator('details').filter({ has: page.locator('summary', { hasText: '添加整单费用' }) }).first();
+  if (!(await add.evaluate((details) => (details as HTMLDetailsElement).open))) await add.locator(':scope > summary').click();
+  await fee.getByRole('textbox', { name: '整单费用金额', exact: true }).fill('25');
   await fee.getByRole('textbox', { name: '收费说明', exact: true }).fill('网络恢复打样费');
   await fee.getByRole('textbox', { name: '原因', exact: true }).fill('客户确认');
 }

@@ -69,7 +69,9 @@ export default async function CustomerPricingWorkspacePage({
         title="价格业务板块暂时无法加载"
         description="规则中心版本栏与发布入口仍可使用；请重试当前板块。"
       >
-        <Suspense fallback={<DedicatedSectionSkeleton />}>
+        {/* 按板块 key（审查 #42）：切换板块时新边界立即显示骨架，而不是让上一板块
+            内容滞留到新数据返回。 */}
+        <Suspense key={section} fallback={<DedicatedSectionSkeleton />}>
           <DedicatedCustomerPricingSectionContent
             workspacePromise={workspacePromise}
             createDraftPurpose={createDraftPurpose(

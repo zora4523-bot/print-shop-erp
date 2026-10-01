@@ -82,3 +82,21 @@ export async function cleanupOldPdfArtifacts(): Promise<void> {
     if (info && info.mtimeMs <= Date.now() - PDF_ARTIFACT_TTL_MS) await unlink(path).catch(() => undefined);
   }));
 }
+
+/** Probe only its own unique private artifact; never removes business output. */
+export async function checkPdfArtifactStorage(pdf: Buffer): Promise<void> {
+  const name = `probe-${randomUUID()}.pdf`;
+  try {
+    await writePdfArtifact(name, pdf);
+    if (!(await readPdfArtifact(name)).equals(pdf)) throw new Error('PDF_ARTIFACT_MISMATCH');
+  } finally {
+    if (storage() === 'oss') await client().delete(PREFIX + name);
+    else await unlink(join(directory(), name)).catch((error: unknown) => {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    });
+  }
+}
+
+export class PdfArtifactStorageError extends Error {
+  constructor() { super('PDF artifact storage unavailable'); this.name = 'PdfArtifactStorageError'; }
+}

@@ -92,13 +92,13 @@ async function createAndSubmitSalesOrder(browser: Browser, paperName: string, or
 
 async function openHistoricalPriceEditor(page: Page, orderId: string) {
   await page.goto(`/orders/${orderId}`);
-  const summary = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价$/ });
+  const summary = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价/ });
   await summary.click();
   return summary.locator('..');
 }
 
 async function confirmHistoricalPrice(page: Page, value: string, reason: string) {
-  const editor = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价$/ }).locator('..');
+  const editor = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价/ }).locator('..');
   await editor.getByRole('textbox').fill(value);
   await editor.getByRole('button', { name: '确认材料单价', exact: true }).click();
   const dialog = page.getByRole('alertdialog', { name: '确认材料单价', exact: true });
@@ -285,7 +285,7 @@ test('单价直接启用：真实建单用料、停售重试、历史材料核�
   try {
     const draft = await createDraft(); draftIds.push(draft.id);
     await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/owner/rules/customer-pricing?section=blank' });
-    await page.getByRole('link', { name: '新增纸张 / 规格', exact: true }).click();
+    await page.getByRole('link', { name: '新建纸张 / 规格', exact: true }).click();
     await page.getByRole('radio', { name: '新建纸张' }).check();
     await page.getByLabel('纸张名称', { exact: true }).fill(paperName);
     await page.getByLabel('克重（g）', { exact: true }).fill('160');
@@ -310,13 +310,13 @@ test('单价直接启用：真实建单用料、停售重试、历史材料核�
     // BOM has an independent production target, selected without a Product.
     await page.goto('/owner/boms/new');
     await page.getByLabel('适用对象', { exact: true }).selectOption('BLANK');
-    await page.getByLabel('BOM 名称', { exact: true }).fill(`纸张用料${suffix}`);
+    await page.getByLabel('用料清单名称', { exact: true }).fill(`纸张用料${suffix}`);
     await page.getByLabel('纸张', { exact: true }).selectOption(paper.id);
     await page.getByLabel('规格', { exact: true }).selectOption('mid');
     await page.getByLabel('基准产量', { exact: true }).fill('1000');
     await page.getByRole('combobox', { name: '物料', exact: true }).selectOption(paper.id);
     await page.getByLabel('用量', { exact: true }).fill('500.1250');
-    await page.getByRole('button', { name: '创建 BOM', exact: true }).click();
+    await page.getByRole('button', { name: '创建用料清单', exact: true }).click();
     await expect(page).toHaveURL((url) => /^\/owner\/boms\/(?!new$)[^/]+$/.test(url.pathname));
     await expect(page.getByRole('heading', { name: `纸张用料${suffix}`, exact: true })).toBeVisible();
     const bom = await fixture<{ productId: string | null; blankPaperMaterialId: string; blankSpecificationKey: string }>(`

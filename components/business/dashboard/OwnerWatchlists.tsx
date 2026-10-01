@@ -3,13 +3,13 @@ import { StatusBadge } from '@/components/ui-business';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { OrderStatusBadge } from '@/components/business/order/OrderStatusBadge';
 import { UrgentBadge } from '@/components/business/order/UrgentBadge';
-import { OUTSOURCE_STATUS_REGISTRY } from '@/lib/ui/status-registry';
+import { OUTSOURCE_STATUS_REGISTRY, PROMISED_DATE_ALERT_STATUS, promisedDateAlertDefinition } from '@/lib/ui/status-registry';
 import { formatDateShanghai, formatDateTimeShanghai } from '@/lib/format/dates';
 import {
   DASHBOARD_PREVIEW_LIMIT,
   completedWaitingLabel,
 } from '@/lib/dashboard/attention';
-import { promisedDaysLeft } from '@/lib/order/promised-date';
+import { DUE_SOON_DAYS, promisedDaysLeft } from '@/lib/order/promised-date';
 import type {
   PendingShipmentsResult,
   DueOrdersResult,
@@ -60,14 +60,16 @@ function OrderIdentity({
 }
 
 export function DueDate({ date, daysLeft }: { date: Date; daysLeft: number }) {
+  // 逾期 / 临期的文案与色调统一取自 lib/ui/status-registry（§6），不在本地写 tone。
+  const alert = daysLeft < 0
+    ? promisedDateAlertDefinition(PROMISED_DATE_ALERT_STATUS.OVERDUE, -daysLeft)
+    : daysLeft <= DUE_SOON_DAYS
+      ? promisedDateAlertDefinition(PROMISED_DATE_ALERT_STATUS.DUE_SOON, daysLeft)
+      : null;
   return (
     <div className="space-y-1">
-      <StatusBadge tone={daysLeft <= 0 ? 'warning' : 'neutral'}>
-        {daysLeft < 0
-          ? `逾期 ${-daysLeft} 天`
-          : daysLeft === 0
-            ? '今日到期'
-            : `${daysLeft} 天后到期`}
+      <StatusBadge tone={alert?.tone ?? 'neutral'}>
+        {alert?.label ?? `${daysLeft} 天后到期`}
       </StatusBadge>
       <p className="font-sans text-xs tabular-nums text-muted-foreground">
         {formatDateShanghai(date)}

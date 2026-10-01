@@ -250,9 +250,19 @@ export async function runAdminOrderBatchAction(
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: fieldErrors(parsed.error) };
   }
+  // Completing production records wages; it needs the production permission too.
+  if (parsed.data.command === 'COMPLETE_PRODUCTION') await requirePermission('production:manage');
   try {
     const result = await runAdminOrderBatch(parsed.data, actor);
     revalidatePath('/orders');
+    if (parsed.data.command === 'COMPLETE_PRODUCTION') {
+      revalidatePath('/orders/production');
+      revalidatePath('/worker/tasks');
+      revalidatePath('/worker/orders');
+      revalidatePath('/worker/salary');
+      revalidatePath('/owner/salary/piecework');
+      for (const item of result.items) if (item.status === 'success') revalidatePath(`/orders/${item.orderId}`);
+    }
     if (parsed.data.command === 'SETTLE') {
       revalidatePath('/owner/bills');
       revalidatePath('/owner/agent-bills');

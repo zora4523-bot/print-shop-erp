@@ -17,7 +17,8 @@ export { HeroBanner } from './HeroBanner';
 export type { HeroBannerProps } from './HeroBanner';
 
 export { PageHeader } from './PageHeader';
-export type { PageHeaderProps } from './PageHeader';
+export { FORM_PAGE_WIDTH_CLASS, FormPageContainer } from './FormPageContainer';
+export type { PageHeaderBack, PageHeaderProps } from './PageHeader';
 
 export { EmptyState } from './EmptyState';
 export type { EmptyStateKind, EmptyStateProps } from './EmptyState';
@@ -48,6 +49,8 @@ export type { DisabledReasonCause, DisabledReasonProps } from './DisabledReason'
 export { PendingButton } from './PendingButton';
 export type { PendingButtonProps } from './PendingButton';
 export { PendingLink } from './PendingLink';
+export { FilterClearLink } from './FilterClearLink';
+export { LinkPendingHint } from './LinkPendingHint';
 export type { PendingLinkProps } from './PendingLink';
 
 export { EnvNotice } from './EnvNotice';
@@ -83,6 +86,8 @@ export {
 } from './FormMessage';
 export type { FormMessageProps, FormMessageTone } from './FormMessage';
 
+export { RequiredMark } from './RequiredMark';
+
 export { FormErrorSummary } from './FormErrorSummary';
 export type {
   FormErrorSummaryItem,
@@ -108,6 +113,8 @@ export type { TableEmptyStateProps } from './TableEmptyState';
 export {
   ConfirmActionController,
   ConfirmActionDialog,
+  confirmationActionVariant,
+  confirmationCancelLabel,
   confirmationCanSubmit,
 } from './ConfirmActionDialog';
 export type {

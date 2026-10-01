@@ -18,7 +18,7 @@ import {
 } from '@/lib/product';
 
 export const metadata = {
-  title: 'BOM/用料',
+  title: '用料清单',
 };
 
 type PageProps = {
@@ -55,18 +55,17 @@ export default async function OwnerBomsPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="BOM/用料"
-        subtitle="产品或产品结构的物料用量；不会自动扣减库存。"
+        title="用料清单"
         actions={
           <Link href="/owner/boms/new" className={buttonVariants()}>
-            新建 BOM
+            新建用料清单
           </Link>
         }
       />
 
       <AdminTableCard
         isEmpty={bomPage.rows.length === 0}
-        emptyTitle="暂无 BOM"
+        emptyTitle="暂无用料清单"
         footer={
           <AdminPagination
             basePath={OWNER_BOMS_PATH}

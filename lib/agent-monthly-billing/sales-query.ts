@@ -1,11 +1,17 @@
 import 'server-only';
-import { AgentMonthlyBillStatus, Role } from '@/generated/prisma/enums';
+import { Role } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
+import Decimal from 'decimal.js';
+
+import { paginationWindow, paginatedResult } from '@/lib/admin/table';
+import { agentBillWhere, parseAgentBillFilters, type AgentBillSearchParams } from './list-filter';
+import { summarizeAgentBills } from './list-summary';
 
 type Actor = { id: string; role: Role };
 const select = {
   id: true, period: true, status: true, memberSubtotal: true,
   adjustmentAmount: true, totalAmount: true, confirmedAt: true, paidAt: true,
+  _count: { select: { items: true } },
 } as const;
 
 function scope(actor: Actor) {
@@ -13,13 +19,30 @@ function scope(actor: Actor) {
   return { agentUserId: actor.id };
 }
 
-export async function listSalesMonthlyBills(actor: Actor, filter: { period?: string; status?: string } = {}) {
-  const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(filter.period ?? '') ? filter.period : undefined;
-  const status = Object.values(AgentMonthlyBillStatus).find((value) => value === filter.status);
-  return db.agentMonthlyBill.findMany({
-    where: { ...scope(actor), ...(period ? { period } : {}), ...(status ? { status } : {}) },
-    select, orderBy: [{ period: 'desc' }, { id: 'desc' }],
-  });
+export async function listSalesMonthlyBills(actor: Actor, filter: AgentBillSearchParams = {}) {
+  const parsed = parseAgentBillFilters(filter);
+  // Ownership always comes from the authenticated actor, never from query parameters.
+  const where = agentBillWhere({ ...parsed, ...scope(actor) });
+  return db.$transaction(async (tx) => {
+    const total = await tx.agentMonthlyBill.count({ where });
+    const window = paginationWindow(total, parsed.page, 30);
+    const rows = await tx.agentMonthlyBill.findMany({
+      where, select, orderBy: [{ period: 'desc' }, { id: 'desc' }],
+      skip: window.skip, take: window.take,
+    });
+    const summary = await summarizeAgentBills(tx, where);
+    const periods = await tx.agentMonthlyBill.findMany({
+      where: scope(actor), select: { period: true }, distinct: ['period'], orderBy: { period: 'desc' }, take: 12,
+    });
+    const groups = periods.length ? await tx.agentMonthlyBill.groupBy({
+      by: ['period', 'status'], where: { ...scope(actor), period: { in: periods.map((row) => row.period) } }, _sum: { totalAmount: true },
+    }) : [];
+    const trend = periods.map(({ period }) => {
+      const amount = (status: string) => new Decimal(groups.find((group) => group.period === period && group.status === status)?._sum.totalAmount?.toString() ?? 0).toFixed(2);
+      return { period, draft: amount('DRAFT'), confirmed: amount('CONFIRMED'), paid: amount('PAID') };
+    }).reverse();
+    return { ...paginatedResult(rows, total, window), summary, trend };
+  }, { isolationLevel: 'RepeatableRead' });
 }
 
 export async function getSalesMonthlyBill(actor: Actor, id: string) {
@@ -29,12 +52,19 @@ export async function getSalesMonthlyBill(actor: Actor, id: string) {
       receipt: { select: { amount: true, receivedAt: true, paymentMethod: true, referenceNo: true } },
       items: { orderBy: [{ settledAtSnapshot: 'asc' }, { id: 'asc' }], select: {
         id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true, orderStatusSnapshot: true,
-        settledFeeSnapshot: true, settledAtSnapshot: true,
+        settledFeeSnapshot: true, settledAtSnapshot: true, settlementDetailSnapshot: true,
         // 只取工单名称作明细标签；当前价格等工单事实仍不出现在销售账单投影里。
         order: { select: { customName: true } },
+        credits: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
+          id: true, requestedAmount: true, createdAt: true,
+          allocations: { where: { bill: scope(actor) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
+            // 目标账单状态：草稿上的分摊只算“暂计抵扣”，不能与已确认抵扣合并展示。
+            id: true, amount: true, bill: { select: { id: true, period: true, status: true } },
+          } },
+        } },
       } },
       adjustments: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
-        id: true, amount: true, credit: { select: { sourceItem: { select: { orderNoSnapshot: true } } } },
+        id: true, amount: true, credit: { select: { sourceItem: { select: { orderNoSnapshot: true, bill: { select: { id: true, period: true } } } } } },
       } },
     },
   });

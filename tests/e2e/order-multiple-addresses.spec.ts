@@ -173,10 +173,10 @@ test('外部销售建单页添加地址并纳入报价和提交复核', async ({
     .fill(`E2E 多地址建单 ${randomUUID()}`);
   const form = page.locator('[data-slot="order-form-b"]');
   const note = '先核对样稿\n再安排生产';
-  await form.getByRole('textbox', { name: '工单备注（选填）', exact: true }).fill(note);
+  await form.getByRole('textbox', { name: '工单备注', exact: true }).fill(note);
   await expect.poll(() => page.evaluate(() => Object.values(localStorage).some((value) => typeof value === 'string' && value.includes('先核对样稿')))).toBe(true);
   await page.reload();
-  await expect(form.getByRole('textbox', { name: '工单备注（选填）', exact: true })).toHaveValue(note);
+  await expect(form.getByRole('textbox', { name: '工单备注', exact: true })).toHaveValue(note);
 
   await form
     .getByRole('group', { name: '工单类型' })

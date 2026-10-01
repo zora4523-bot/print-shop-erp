@@ -1,11 +1,17 @@
 'use client';
 
+import { AMOUNT_PAYLOAD_FIELD, payloadFieldLabel } from './payload-field-labels';
 import Link from 'next/link';
 import { useActionState } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { DisabledReason, PendingButton } from '@/components/ui-business';
+import {
+  DisabledReason,
+  FormMessage,
+  formMessageA11yProps,
+  PendingButton,
+} from '@/components/ui-business';
 import type { NotificationMutationResult } from '@/actions/owner-notifications.types';
 import { notificationEventLabel } from '@/lib/notification/event-labels';
 import { managementNotificationRoleForEvent } from '@/lib/notification/events';
@@ -13,6 +19,7 @@ import {
   notificationChannelSelectionIssueMessage,
   type NotificationChannelSelectionIssue,
 } from '@/lib/notification/channel-selection';
+import { Textarea } from '@/components/ui/textarea';
 
 type ChannelOption = {
   id: string;
@@ -64,33 +71,33 @@ export function RuleForm({
         <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
           {notificationEventLabel(eventType)}
         </div>
-        <p className="text-xs text-muted-foreground">
-          事件类型固定，不可修改。
-        </p>
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="messageTemplate">消息模板（Markdown）</Label>
-        <textarea
+        <Textarea
           id="messageTemplate"
           name="messageTemplate"
           defaultValue={initial.messageTemplate}
           rows={8}
           required
-          aria-invalid={!!fieldErrors?.messageTemplate}
-          className="w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm shadow-xs focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          {...(fieldErrors?.messageTemplate?.length
+            ? formMessageA11yProps('messageTemplate', 'error')
+            : {})}
+          className="w-full font-mono"
         />
-        {fieldErrors?.messageTemplate?.map((m, i) => (
-          <p key={i} className="text-sm text-destructive">
-            {m}
-          </p>
-        ))}
+        {fieldErrors?.messageTemplate?.length ? (
+          <FormMessage fieldId="messageTemplate" tone="error">
+            {fieldErrors.messageTemplate.join('；')}
+          </FormMessage>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           可用占位符：
           {payloadFields.map((f, i) => (
             <span key={f}>
               {i > 0 ? '、' : ' '}
               <code className="rounded-md bg-muted px-1">{`{${f}}`}</code>
+              {payloadFieldLabel(f) ? `（${payloadFieldLabel(f)}）` : null}
             </span>
           ))}
         </p>
@@ -99,33 +106,37 @@ export function RuleForm({
             （如默认 `金额：¥{totalAmount}` →&ldquo;金额：¥1,234.56&rdquo;）。
             避免 owner 误以为占位符已含 ¥。 */}
         {payloadFields.some((f) =>
-          /^totalAmount$/.test(f),
+          f === AMOUNT_PAYLOAD_FIELD,
         ) ? (
           <p className="text-xs text-muted-foreground">
-            金额类占位符（<code className="rounded-md bg-muted px-1">totalAmount</code>
-            ）只是千分位数字，<strong>不含</strong>货币符号。需要 ¥ 请在模板里手写。
+            金额类占位符（<code className="rounded-md bg-muted px-1">{`{${AMOUNT_PAYLOAD_FIELD}}`}</code>
+            总金额）只是千分位数字，<strong>不含</strong>货币符号。需要 ¥ 请在模板里手写。
           </p>
         ) : null}
       </div>
 
-      <fieldset className="space-y-2">
+      <fieldset
+        className="space-y-2"
+        {...(fieldErrors?.channelIds?.length
+          ? formMessageA11yProps('channelIds', 'error')
+          : {})}
+      >
         <legend className="text-sm font-medium">
           {managementRole ? '收件角色（固定）' : '推送到群（多选）'}
         </legend>
         {managementRole ? (
           <div className="rounded-md border bg-muted/20 px-3 py-3 text-sm">
             <p>
-              此事件固定路由到
+              接收人：
               <strong>
                 {managementRole === 'factoryConfirmer'
                   ? '工厂确认人'
                   : '老板'}
               </strong>
-              ，不使用本规则的群绑定。请到{' '}
+              {' · '}
               <Link href="/owner/settings" className="font-medium underline">
-                系统设置
-              </Link>{' '}
-              配置该角色的开关和接收群。
+                管理接收群
+              </Link>
             </p>
             {/* Preserve legacy bindings for rollback compatibility. Runtime
                 routing ignores them for managed events, and direct form
@@ -163,7 +174,7 @@ export function RuleForm({
                 ? notificationChannelSelectionIssueMessage(c.selectionIssue)
                 : null;
               const option = (
-                <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
                   <Checkbox
                     name="channelIds"
                     value={c.id}
@@ -174,8 +185,8 @@ export function RuleForm({
                   <span
                     className={
                       issueMessage
-                        ? 'min-w-0 py-2 text-muted-foreground'
-                        : 'min-w-0 py-2'
+                        ? 'min-w-0 py-3 text-muted-foreground'
+                        : 'min-w-0 py-3'
                     }
                   >
                     {c.channelName}
@@ -205,14 +216,14 @@ export function RuleForm({
             })}
           </div>
         )}
-        {fieldErrors?.channelIds?.map((m, i) => (
-          <p key={i} className="text-sm text-destructive">
-            {m}
-          </p>
-        ))}
+        {fieldErrors?.channelIds?.length ? (
+          <FormMessage fieldId="channelIds" tone="error">
+            {fieldErrors.channelIds.join('；')}
+          </FormMessage>
+        ) : null}
       </fieldset>
 
-      <label className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+      <label className="flex min-h-11 cursor-pointer items-start gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
         <Checkbox
           id="isActive"
           name="isActive"
@@ -220,8 +231,8 @@ export function RuleForm({
           disabled={pending}
           aria-label="启用此规则"
         />
-        <span className="min-w-0 py-2">
-          启用此规则（关闭后此事件不再触发推送）
+        <span className="min-w-0 py-3">
+          启用此规则
         </span>
       </label>
 
@@ -232,7 +243,7 @@ export function RuleForm({
       ) : null}
 
       <div className="flex items-center gap-2">
-        <PendingButton pending={pending} pendingLabel="保存中…">
+        <PendingButton pending={pending} pendingLabel="正在保存…">
           保存修改
         </PendingButton>
         <Link

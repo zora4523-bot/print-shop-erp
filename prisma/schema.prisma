@@ -499,6 +499,8 @@ model Order {
   exportSelections            OrderExportSelection[]
 
   @@index([submitterId])
+  // 代理商账单的代理人筛选逐用户探测「是否有外部销售工单」（lib/agent-monthly-billing/query.ts）。
+  @@index([submitterId, settlementType])
   @@index([customerPartyId])
   @@index([sourceOrderId])
   @@index([kind])
@@ -613,6 +615,8 @@ model OrderItem {
   @@index([orderId])
   @@index([craft])
   @@index([quoteDisposition])
+  // 产品目录的「被多少工单引用」逐行计数按 productId 探测（lib/product.ts）。
+  @@index([productId, orderId])
 }
 
 // 每款可有多行制版明细。plateGroupId/specification 是生产与复核事实，
@@ -1418,6 +1422,8 @@ model OutsourceOrder {
   @@index([createdById])
   @@index([status])
   @@index([expectedDate])
+  // 外协单列表按 (createdAt, id) 倒序分页（lib/outsource.ts listOutsourceOrders）。
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
 }
 
 // 外协单创建时的逐款式数量快照。orderItemIds 继续作为兼容的款式列表，
@@ -2633,6 +2639,8 @@ model AgentMonthlyBillItem {
   orderStatusSnapshot      String   @db.VarChar(32)
   customerRefSnapshot      String?
   settledFeeSnapshot       Decimal  @db.Decimal(12, 2)
+  // Forward-only public settlement evidence; null on historical frozen bills.
+  settlementDetailSnapshot Json?
   settledAtSnapshot        DateTime @db.Timestamptz(3)
   createdAt                DateTime @default(now()) @db.Timestamptz(3)
   updatedAt                DateTime @updatedAt @db.Timestamptz(3)
@@ -2927,6 +2935,8 @@ model BackgroundJob {
 
   @@index([queue, status, priority, availableAt])
   @@index([status, createdAt])
+  // 运维页「最近任务」按 createdAt 倒序取前 N 条（lib/background-jobs/repository.ts listBackgroundJobs）。
+  @@index([createdAt(sort: Desc)])
   @@index([lockedAt])
 }
 
@@ -2953,6 +2963,7 @@ model BackgroundWorkerHeartbeat {
   version           String
   smartBotStatus    SmartBotConnectionStatus?
   smartBotBotDigest String?                   @db.Char(64)
+  pdfReady          Boolean?
   startedAt         DateTime
   lastSeenAt        DateTime
 

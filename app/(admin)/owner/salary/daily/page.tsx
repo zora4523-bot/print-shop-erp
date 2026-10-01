@@ -1,5 +1,6 @@
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Decimal from 'decimal.js';
+import Form from 'next/form';
 import Link from 'next/link';
 import { Archive, Calculator, Download, FileText } from 'lucide-react';
 import { MachineType } from '@/generated/prisma/enums';
@@ -15,9 +16,11 @@ import {
 } from '@/lib/salary/daily';
 import { getAttendanceSummaries } from '@/lib/attendance';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { SalaryFloorBadge } from '@/components/business/salary/SalaryFloorBadge';
-import { EmptyState, PageHeader, StatCard, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard, TableScrollArea, FilterClearLink } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = { title: '历史日薪档案' };
 
@@ -62,7 +65,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="历史开机师傅日薪档案"
+        title="历史日薪档案"
         subtitle="历史日薪记录"
         actions={
           <div className="flex flex-wrap gap-2">
@@ -71,15 +74,16 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
               className={buttonVariants({ variant: 'outline' })}
             >
               <Archive className="mr-2 size-4" />
-              新工序计件
+              工序计件结算
             </Link>
-            <Link
+            <a
               href={`/api/salary/piecework/export?date=${selectedDate}${sp.workerId ? `&workerId=${encodeURIComponent(sp.workerId)}` : ''}`}
               className={buttonVariants({ variant: 'outline' })}
+              download
             >
               <Download className="mr-2 size-4" />
               导出历史记录
-            </Link>
+            </a>
           </div>
         }
       />
@@ -101,7 +105,7 @@ export default async function DailySalaryPage({ searchParams }: PageProps) {
           label="历史未发合计"
           value={formatMoney(unpaidActual)}
           icon={Calculator}
-          tone="neutral"
+          tone="warning"
         />
       </div>
 
@@ -214,34 +218,35 @@ function FilterBar({
   workers: Array<{ id: string; displayName: string; username: string }>;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form id="salary-daily-filters" key={JSON.stringify([selectedDate, paid ?? '', workerId ?? ''])} action="/owner/salary/daily" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">日期</span>
-        <input
+        <Input
           type="date"
           name="date"
           defaultValue={selectedDate}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="block w-auto min-w-0 max-w-full"
         />
       </label>
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">历史发放状态</span>
-        <select
+        <NativeSelect
           name="paid"
           defaultValue={paid ?? ''}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         >
           <option value="">全部</option>
           <option value="unpaid">仅未发</option>
           <option value="paid">仅已发</option>
-        </select>
+        </NativeSelect>
       </label>
       <label className="min-w-0 max-w-full space-y-1">
         <span className="block text-xs text-muted-foreground">师傅</span>
-        <select
+        <NativeSelect
           name="workerId"
           defaultValue={workerId ?? ''}
-          className="min-w-0 max-w-full rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto min-w-0 max-w-full"
         >
           <option value="">全部师傅</option>
           {workers.map((worker) => (
@@ -249,17 +254,17 @@ function FilterBar({
               {worker.displayName}（{worker.username}）
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <Button type="submit" size="sm">
         筛选
       </Button>
-      <Link
+      <FilterClearLink formId="salary-daily-filters"
         href="/owner/salary/daily"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
-        清除
-      </Link>
-    </form>
+        清除筛选
+      </FilterClearLink>
+    </Form>
   );
 }

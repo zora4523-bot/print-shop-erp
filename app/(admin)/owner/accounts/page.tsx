@@ -16,7 +16,7 @@ import {
 import { requirePermission } from '@/lib/auth/permissions';
 
 export const metadata = {
-  title: '账号管理',
+  title: '用户管理',
 };
 
 type PageProps = {
@@ -51,10 +51,10 @@ export default async function AccountsListPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="账号管理"
+        title="用户管理"
         actions={
           <Link href="/owner/accounts/new" className={buttonVariants()}>
-            新建账号
+            新建用户
           </Link>
         }
       />

@@ -5,6 +5,7 @@ import { type SampleOrderFormState, type SampleOrderContext, SampleOrderForm } f
 import { OrderPurposePicker } from '@/components/business/order/OrderPurposePicker';
 import { useSampleWorkbenchDraft } from './useSampleWorkbenchDraft';
 import { useId, useRef, useState } from 'react';
+import { OrderCreationLeaveBoundary } from '@/components/business/order/order-creation-leave';
 import { useRouter } from 'next/navigation';
 import type { ExternalCreateOrderOptions } from '@/lib/order/create-order-options';
 import type { PricingCraftIdentity } from '@/lib/order/pricing-route';
@@ -63,14 +64,9 @@ function selectWorkbenchItem(
   });
 }
 
-export function WorkbenchCalculator({
-  options,
-  crafts = [],
-  draftScope = '',
-  createEntry,
-  externalSalesAccounts,
-}: {
+type WorkbenchCalculatorProps = {
   createEntry?: {
+    purposeStorageKey?: string;
     editorSnapshot?: SampleOrderEditorSnapshot;
     onEditorSnapshot?: (snapshot: SampleOrderEditorSnapshot) => void;
     lifecycle?: OrderCreationLifecycle;
@@ -89,7 +85,19 @@ export function WorkbenchCalculator({
   options: ExternalCreateOrderOptions;
   crafts?: readonly PricingCraftIdentity[];
   draftScope?: string;
-}) {
+};
+
+export function WorkbenchCalculator(props: WorkbenchCalculatorProps) {
+  return <OrderCreationLeaveBoundary><WorkbenchCalculatorEditor {...props} /></OrderCreationLeaveBoundary>;
+}
+
+function WorkbenchCalculatorEditor({
+  options,
+  crafts = [],
+  draftScope = '',
+  createEntry,
+  externalSalesAccounts,
+}: WorkbenchCalculatorProps) {
   const uid = useId().replaceAll(':', '');
   const router = useRouter();
   const [item, setItem] = useState(() =>
@@ -349,7 +357,7 @@ export function WorkbenchCalculator({
               disabled={!!inputIssue || pending}
               onClick={createOrder}
             >
-              按此款式创建工单
+              按此款式新建工单
             </Button>
             {transferError ? (
               <ActionNotice tone="error" title={transferError} />

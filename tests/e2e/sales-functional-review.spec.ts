@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
+import { selectBillTheme, waitForBillPaint } from './_bill-ui';
 import { E2E_PASSWORD, E2E_USERS, getUserIdByUsername, login, seedSettledExternalSalesOrder } from './_helpers';
 
 test.use({ hasTouch: true });
@@ -114,8 +115,8 @@ test('销售搜索、分类、抽屉、详情和草稿编辑回显', async ({ pa
   const errors = trackErrors(page);
   await salesLogin(page, '/orders');
   await page.getByRole('searchbox').fill(id);
-  await page.getByRole('button', { name: '搜索', exact: true }).click();
-  const card = page.locator(`[data-order-id="${id}"]`);
+  await page.getByRole('button', { name: '应用筛选', exact: true }).click();
+  const card = page.locator(`[data-order-id="${id}"]:visible`);
   await expect(card).toBeVisible();
   await page.getByRole('navigation', { name: '销售工单视图' }).getByRole('link', { name: /^草稿/ }).click();
   await expect(card).toBeVisible();
@@ -150,7 +151,7 @@ test('管理员保存后，已打开的销售详情可刷新看到名称、备�
     await login(adminPage, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: `/orders/${id}/edit` });
     await adminPage.getByRole('textbox', { name: '工单名称', exact: true }).fill('管理员更新可见工单');
     await adminPage.getByRole('textbox', { name: /工单备注/ }).fill('管理员修改备注\n请核对后发货');
-    await adminPage.getByLabel('包装补充说明（选填）').fill('贴客户标签后封口');
+    await adminPage.getByLabel('包装补充说明', { exact: true }).fill('贴客户标签后封口');
     await adminPage.getByRole('textbox', { name: '收件人', exact: true }).fill('更新收件人');
     await adminPage.getByRole('button', { name: '保存修改…', exact: true }).click();
     const confirm = adminPage.getByRole('button', { name: '保存修改', exact: true });
@@ -187,7 +188,7 @@ test('销售交期修改与取消申请可提交撤回，原工单不提前变�
   await expect(page.getByRole('button', { name: '撤回申请', exact: true })).toBeVisible();
   expect((await readOrder(id)).status).toBe('CONFIRMED');
   await page.goto(`/orders?q=${id}`);
-  const card = page.locator(`[data-order-id="${id}"]`);
+  const card = page.locator(`[data-order-id="${id}"]:visible`);
   await expect(card.getByText('取消申请中', { exact: true })).toBeVisible();
   await expect(card.getByText('修改申请中', { exact: true })).toHaveCount(0);
   await card.getByRole('link', { name: '查看详情', exact: true }).click();
@@ -206,23 +207,23 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
   const batch = `e2e-sales-status-${randomUUID()}`;
   const groups = {
     doing: ['PENDING_FACTORY', 'REJECTED', 'CONFIRMED', 'ON_HOLD', 'RELEASED', 'FOILING', 'PACKING', 'SUBMITTED', 'SCHEDULING', 'IN_PRODUCTION', 'COMPLETED'],
-    shipped: ['SHIPPED'], done: ['SETTLED', 'FINISHED'], cancelled: ['CANCELLED'], draft: ['DRAFT'],
+    shipped: ['SHIPPED', 'SETTLED', 'FINISHED'], done: ['SETTLED', 'FINISHED'], cancelled: ['CANCELLED'], draft: ['DRAFT'],
   };
   const ids = new Map<string, string>();
-  for (const status of Object.values(groups).flat()) ids.set(status, await seed(status, E2E_USERS.sales.username, batch));
+  for (const status of new Set(Object.values(groups).flat())) ids.set(status, await seed(status, E2E_USERS.sales.username, batch));
   const errors = trackErrors(page);
   await salesLogin(page, `/orders?q=${batch}`);
-  const cards = page.locator('[data-sales-order-card]');
+  const cards = page.locator('[data-sales-order-card]:visible, [data-sales-order-row]:visible');
   await expect(cards).toHaveCount(16);
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   const counts = new Map<string, number>();
   try {
     const salesId = await getUserIdByUsername(E2E_USERS.sales.username);
-    const { rows } = await db.query('SELECT status, COUNT(*)::int AS count FROM "Order" WHERE "submitterId"=$1 GROUP BY status', [salesId]);
+    const { rows } = await db.query('SELECT status, COUNT(*)::int AS count FROM "Order" WHERE "submitterId"=$1 AND "orderNo" ILIKE $2 GROUP BY status', [salesId, `%${batch}%`]);
     for (const row of rows) counts.set(row.status, row.count);
   } finally { await db.end(); }
-  const labels = { doing: '进行中', shipped: '已发货', done: '已完成', cancelled: '已取消', draft: '草稿' };
+  const labels = { doing: '进行中', shipped: '已发货', done: '已结算', cancelled: '已取消', draft: '草稿' };
   for (const [view, statuses] of Object.entries(groups)) {
     const tab = page.getByRole('navigation', { name: '销售工单视图' }).getByRole('link', { name: new RegExp(`^${labels[view as keyof typeof labels]}`) });
     await expect(tab).toHaveText(`${labels[view as keyof typeof labels]}${statuses.reduce((sum, status) => sum + (counts.get(status) ?? 0), 0)}`);
@@ -232,7 +233,7 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
     await expect.poll(async () => (await cards.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-order-id')))).sort()).toEqual(statuses.map((status) => ids.get(status)).sort());
     for (const status of statuses) {
       const id = ids.get(status)!;
-      const card = page.locator(`[data-order-id="${id}"]`);
+      const card = page.locator(`[data-order-id="${id}"]:visible`);
       await expect(card.getByRole('link', { name: /查看详情|查看草稿|查看原因/ })).toHaveAttribute('href', `/orders/${id}`);
       await card.getByRole('button', { name: /销售回归工单/, exact: false }).click();
       const drawer = page.getByRole('dialog');
@@ -289,37 +290,38 @@ test('销售列表、详情和编辑页在六视口及明暗主题下可用', as
     await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light', reducedMotion: 'reduce' });
     for (const path of [`/orders?q=${id}`, `/orders/${id}`, `/orders/${id}/edit`]) {
       await page.goto(path);
-      await page.evaluate(async (enabled) => {
-        const theme = enabled ? 'dark' : 'light';
-        localStorage.setItem('erp-theme', theme);
-        document.documentElement.classList.toggle('dark', enabled);
-        document.documentElement.dataset.theme = theme;
-        document.documentElement.style.colorScheme = theme;
-        // Sample the settled palette, not a frame midway through theme transitions.
-        for (let paint = 0; paint < 3; paint += 1) {
-          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          await Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
-        }
-      }, dark);
+      await selectBillTheme(page, dark ? 'dark' : 'light');
       await healthy(page);
       await expect(page.locator('h1:visible')).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: initial ${width} dark=${dark}`).toBeLessThanOrEqual(width);
       if (path.startsWith('/orders?')) {
         await expect(page.locator(`[data-order-id="${id}"]:visible`)).toBeVisible();
+        const views = page.getByRole('navigation', { name: '销售工单视图' });
+        for (const tab of await views.getByRole('link').all()) {
+          const box = await tab.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+        }
       } else if (path.endsWith('/edit')) {
         await expect(page.getByRole('textbox', { name: /工单备注/ })).toBeVisible();
       } else {
         await expect(page.locator('[data-slot="sales-order-detail"]:visible')).toBeVisible();
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth), `${path}: loaded ${width} dark=${dark}`).toBeLessThanOrEqual(width);
+      await waitForBillPaint(page);
       const result = await new AxeBuilder({ page }).include('#admin-main').analyze();
       expect(result.violations.map(({ id: rule, nodes }) => ({ rule, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) })), `${path}: ${width} dark=${dark}`).toEqual([]);
       if (width <= 393 && path.startsWith('/orders?')) {
-        await page.locator(`[data-order-id="${id}"]`).getByRole('button', { name: /销售回归工单/, exact: false }).tap();
+        await page.locator(`[data-order-id="${id}"]:visible`).getByRole('button', { name: /销售回归工单/, exact: false }).tap();
         await expect(page.getByRole('dialog'), `touch: ${width} dark=${dark}, url=${page.url()}`).toBeVisible();
         await page.getByRole('button', { name: '关闭', exact: true }).tap();
         await expect(page.getByRole('dialog')).toHaveCount(0);
-        await expect(page).toHaveURL(new RegExp(`/orders\\?q=${id}$`));
+        await expect(page).toHaveURL((url) => url.pathname === '/orders'
+          && url.searchParams.get('q') === id
+          && !url.searchParams.has('selected')
+          && !url.hash
+          && (!url.searchParams.has('scroll') || /^\d+$/.test(url.searchParams.get('scroll')!)));
       }
     }
   }
@@ -409,7 +411,7 @@ test('驳回展示补正原因和图稿入口，暂停可申请取消，包装�
   await expect(page.locator('input[type=file]').first()).toBeAttached();
   await page.goto(`/orders/${held}#change-request`);
   await expect(page.getByText('请修正第1款文字', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('本次申请需要新增一款')).toHaveCount(0);
+  await expect(page.getByLabel('本次申请需要添加一款')).toHaveCount(0);
   await page.locator('#change-request').getByLabel('取消原因').fill('客户申请暂停后取消');
   await page.getByRole('button', { name: '提交取消申请', exact: true }).click();
   await expect(page.getByRole('button', { name: '撤回申请', exact: true })).toBeVisible();
@@ -430,8 +432,8 @@ test('管理员确认月账单后销售查看同一金额和冻结明细，其�
   await expect(page.getByRole('button', { name: '标记已收' })).toBeVisible();
   await page.context().clearCookies();
   await login(page, { from: '/sales/bills', username: fixture.agentUsername, password: E2E_PASSWORD });
-  await page.getByRole('link', { name: '查看详情', exact: true }).click();
-  await expect(page).toHaveURL(`/sales/bills/${billId}`, { timeout: 20_000 });
+  await page.getByRole('link', { name: `查看 ${fixture.period} 账单详情`, exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === `/sales/bills/${billId}` && url.searchParams.get('returnTo') === '/sales/bills?page=1', { timeout: 20_000 });
   await expect(page.getByText(fixture.orderNo, { exact: true })).toBeVisible();
   await expect(page.getByText(/¥\s*123\.45/).first()).toBeVisible();
   await healthy(page);
@@ -544,7 +546,7 @@ test('销售文字字段直接保存且统一保护拦截开关刷新路由和�
   await page.getByRole('button', { name: '取消工单', exact: true }).click();
   await page.getByRole('textbox', { name: /取消原因/ }).fill('未保存的取消原因');
   await page.keyboard.press('Escape');
-  await expect(page.locator('[data-sales-edit-notice]')).toContainText('请先保存当前修改');
+  await expect(page.locator('.sales-edit-notice')).toContainText('请先保存当前修改');
   await page.getByRole('button', { name: '继续编辑', exact: true }).click();
   await expect(page.getByRole('textbox', { name: /取消原因/ })).toHaveValue('未保存的取消原因');
   const after = await readOrder(id);

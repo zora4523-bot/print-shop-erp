@@ -454,7 +454,7 @@ describe('claim and lease lifecycle', () => {
     expect(sql).toContain('now() AS "claimedAt"');
 
     const leaseCutoff = values.find(
-      (value): value is Prisma.Sql => value instanceof Prisma.Sql,
+      (value): value is Prisma.Sql => value instanceof Prisma.Sql && value.sql.includes("interval '1 millisecond'"),
     );
     expect(leaseCutoff?.sql).toContain("interval '1 millisecond'");
     // leaseMs 是绑定参数，不是拼进 SQL 的字符串。

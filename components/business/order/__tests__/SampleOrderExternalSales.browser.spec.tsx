@@ -68,7 +68,7 @@ for (const purpose of ['寄样品', '打样'] as const) {
   it(`workbench ${purpose}: administrator must choose an external salesperson before saving`, async () => {
     renderWorkbench(accounts);
     await page.getByRole('button', { name: purpose, exact: true }).click();
-    const select = page.getByLabelText('关联外部销售（必填）', { exact: true });
+    const select = page.getByRole('combobox', { name: '关联外部销售', exact: true });
     await expect.element(select).toBeVisible();
     await expect.element(select).toHaveValue('');
     if (purpose === '寄样品') await page.getByLabelText('样品名称').fill('工作台寄样');
@@ -99,7 +99,7 @@ it('external salespeople never see the salesperson selector', async () => {
   renderWorkbench();
   await page.getByRole('button', { name: '寄样品', exact: true }).click();
   await expect.element(page.getByLabelText('收货人', { exact: true })).toBeVisible();
-  await expect.element(page.getByLabelText('关联外部销售（必填）', { exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByRole('combobox', { name: '关联外部销售', exact: true })).not.toBeInTheDocument();
 });
 
 it('new-order sample entry renders the selector when no salesperson was chosen and writes it back to the order form', async () => {
@@ -111,14 +111,14 @@ it('new-order sample entry renders the selector when no salesperson was chosen a
       externalSalesUserId: null, items: [createBlankItem([])],
     } as unknown as CreateOrderInput });
     values = form.getValues();
-    return <OrderSampleEntry form={form} purpose="SAMPLE_SHIPMENT" options={WORKBENCH_CATALOG} crafts={WORKBENCH_CRAFTS}
+    return <OrderSampleEntry orderKey="sample-fixture" active form={form} purpose="SAMPLE_SHIPMENT" options={WORKBENCH_CATALOG} crafts={WORKBENCH_CRAFTS}
       draftScope="admin" itemIndex={0} initialItem={form.getValues('items.0')} canEditFees
       externalSalesAccounts={accounts}
       onExternalSalesChange={(id) => { form.setValue('externalSalesUserId', id); values = form.getValues(); }}
       choosePurpose={() => {}} onRouteChange={() => {}} />;
   }
   flushSync(() => root.render(<Fixture />));
-  const select = page.getByLabelText('关联外部销售（必填）', { exact: true });
+  const select = page.getByRole('combobox', { name: '关联外部销售', exact: true });
   await expect.element(select).toBeVisible();
   await select.selectOptions('sales-1');
   await expect.poll(() => values?.externalSalesUserId).toBe('sales-1');

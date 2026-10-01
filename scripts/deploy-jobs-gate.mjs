@@ -136,6 +136,9 @@ export function assessDeployJobsGate(body, options = {}) {
       required: smartBot.required,
     };
   }
+  if (!optionalInline && body?.pdf?.ready !== true) {
+    return { ok: false, ready: false, reason: 'pdf-worker-unavailable', status, required: smartBot.required };
+  }
   const ready =
     !smartBot.required ||
     (status === 'CONNECTED' && smartBot.operational === true);
@@ -149,6 +152,7 @@ export function assessDeployJobsGate(body, options = {}) {
 }
 
 export function deployJobsGateFailureMessage(assessment) {
+  if (assessment.reason === 'pdf-worker-unavailable') return 'current-release PDF worker capability is unavailable';
   if (assessment.reason === 'worker-unavailable') {
     return 'a required background worker is missing or running a different release';
   }
@@ -248,7 +252,7 @@ export async function waitForDeployJobsGate(options) {
       runtimeEnvironment: options.runtimeEnvironment,
     });
     lastAssessment = assessment;
-    if (!assessment.ok && !['smart-bot-status-unavailable', 'worker-unavailable'].includes(assessment.reason)) {
+    if (!assessment.ok && !['smart-bot-status-unavailable', 'worker-unavailable', 'pdf-worker-unavailable'].includes(assessment.reason)) {
       return finish(false, assessment.reason);
     }
     if (assessment.ok && assessment.ready) {

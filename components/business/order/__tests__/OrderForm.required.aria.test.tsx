@@ -90,7 +90,7 @@ describe('OrderForm 必填字段的 required 语义', () => {
     const select = tagWithIdSuffix(html, 'externalSalesUserId');
     expect(select).toContain('required');
     expect(select).toContain('aria-required="true"');
-    expect(html).toContain('关联外部销售（必填）');
+    expect(html).toContain('关联外部销售');
     expect(html).toContain('请选择外部销售');
     expect(html).toContain('外部销售甲 · sales-a');
     expect(html).not.toContain('工厂直接业务');
@@ -216,7 +216,11 @@ describe('OrderForm 必填字段的 required 语义', () => {
     expect(label, '工单名称应有关联的 <label>').not.toBeNull();
     const labelInner = label![1]!;
     expect(labelInner).toContain('工单名称');
-    expect(labelInner).toMatch(/<span aria-hidden="true"[^>]*>\s*\*/);
+    // 星号是 aria-hidden 元素上的 CSS 生成内容：既不进无障碍名称，也不进 label 文本。
+    expect(labelInner).toMatch(
+      /<span aria-hidden="true" data-slot="required-mark"[^>]*after:content-\[&#x27;\*&#x27;\][^>]*><\/span>/,
+    );
+    expect(labelInner.replace(/<[^>]*>/g, '')).toBe('工单名称');
   });
 
   it('加了 required 不等于换回浏览器原生气泡：form 仍是 noValidate', () => {
@@ -284,7 +288,9 @@ describe('OrderForm 必填字段的 required 语义', () => {
 it.each([true, false])('shows one optional order note after shipping for external=%s', (external) => {
   const html = render(external);
   expect(html.match(/id="remark"/g)).toHaveLength(1);
-  expect(html).toContain('工单备注（选填）');
+  // 表单只标必填，不再混用「（选填）」（§8.1）。
+  expect(html).toContain('>工单备注</label>');
+  expect(html).not.toContain('（选填）');
   expect(html).toMatch(/<textarea[^>]*id="remark"[^>]*maxLength="1000"/i);
   expect(html.indexOf('id="remark"')).toBeGreaterThan(html.indexOf('多地址发货'));
 });

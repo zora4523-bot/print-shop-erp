@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { Role } from '../../../generated/prisma/enums';
 import { buttonVariants } from '@/components/ui/button';
-import { requireSession } from '@/lib/auth/session';
+import { getSession, requireSession } from '@/lib/auth/session';
 import type { OrderListSearchParams } from '@/lib/order/list-query';
 import { ErrorBoundary, PageHeader } from '@/components/ui-business';
 import { OrdersListContent } from './_components/OrdersListContent';
@@ -11,9 +11,11 @@ import {
   SalesOrdersListContentSkeleton,
 } from './_components/OrdersListContentSkeleton';
 
-export const metadata = {
-  title: '工单列表',
-};
+// 业主 2026-10-01：外部销售侧统一叫「我的工单」（侧栏、面包屑、H1、<title> 同源，§8.3）。
+export async function generateMetadata() {
+  const session = await getSession();
+  return { title: session?.user.role === Role.SALES ? '我的工单' : '工单列表' };
+}
 
 type PageProps = {
   searchParams: Promise<OrderListSearchParams>;
@@ -26,7 +28,7 @@ export default async function OrdersListPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       {user.role !== Role.ADMIN ? (
         <PageHeader
-          title="工单"
+          title={user.role === Role.SALES ? '我的工单' : '工单列表'}
           actions={
             canCreate ? (
               <Link href="/orders/new" className={buttonVariants()}>

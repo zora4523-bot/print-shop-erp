@@ -1,16 +1,13 @@
 'use client';
 
 import type { SupplementContext } from '@/lib/form-drafts/model';
-import { supplementReturnHref } from '@/lib/form-drafts/return-context';
 import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
 
-import Link from 'next/link';
 import { useActionState, useState, type ChangeEvent } from 'react';
 import { ReceiverAddressPasteField } from '@/components/business/order/ReceiverAddressPasteField';
 import { applyParsedReceiverFact, stripProvincePrefix } from '@/lib/order/receiver-address-paste';
 import { PartyType } from '../../../generated/prisma/enums';
 import type { PartyMutationResult } from '@/actions/owner-parties.types';
-import { buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,6 +19,7 @@ import {
   formMessageA11yProps,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type PartyFormInitial = {
   type: PartyType;
@@ -66,8 +64,6 @@ const PARTY_TYPE_OPTIONS = [
   { value: PartyType.BOTH, label: '客户/供应商' },
 ] as const;
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const PARTY_FIELD_LABELS: Record<string, string> = {
   type: '类型',
@@ -113,10 +109,6 @@ export function PartyForm(props: Props) {
       ? (props.initialType ?? PartyType.CUSTOMER)
       : props.initial.type;
   const supplement = props.supplement;
-  const backHref = supplement ? supplementReturnHref(supplement) :
-    props.mode === 'create' && props.returnTo
-      ? props.returnTo
-      : '/owner/parties';
   const visibleState = pending ? null : state;
   const errs = visibleState?.status === 'invalid' ? visibleState.fieldErrors : {};
   const generalError = visibleState?.status === 'error' ? visibleState.message : null;
@@ -142,13 +134,12 @@ export function PartyForm(props: Props) {
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="type">类型</Label>
-            <select
+            <NativeSelect
               id="type"
               name="type"
               {...(errs.type?.[0]
                 ? formMessageA11yProps('type', 'error')
                 : {})}
-              className={selectClass}
               defaultValue={initialType}
               disabled={pending}
             >
@@ -157,7 +148,7 @@ export function PartyForm(props: Props) {
                   {option.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {errs.type?.[0] ? (
               <FormMessage fieldId="type" tone="error">
                 {errs.type[0]}
@@ -187,7 +178,7 @@ export function PartyForm(props: Props) {
             <TextField
               id="code"
               label="编码"
-              hint="大小写不敏感；修改前请确认外部对接影响。"
+              hint="大小写不敏感。"
               required
               disabled={pending}
               error={errs.code?.[0]}
@@ -328,9 +319,6 @@ export function PartyForm(props: Props) {
         <PendingButton pending={pending} pendingLabel="正在保存客户/供应商…">
           {props.mode === 'create' ? '创建客户/供应商' : '保存修改'}
         </PendingButton>
-        <Link href={backHref} className={buttonVariants({ variant: 'outline' })}>
-          {supplement ? '返回原录入' : props.mode === 'create' && props.returnTo ? '返回采购单' : '返回列表'}
-        </Link>
       </div>
     </form>
   );

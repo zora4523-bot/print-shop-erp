@@ -27,6 +27,10 @@ describe('EmptyState kind contract', () => {
     expect(missing).toContain('min-h-11');
     expect(missing).toContain('min-w-11');
     expect(visibleText(missing)).toBe(visibleText(forbidden));
+    // 整页无权限的 H1 与 PageHeader 同档，不再是 text-sm 小字。
+    const h1 = missing.match(/<h1 class="([^"]*)"/)?.[1] ?? '';
+    expect(h1.split(' ')).toEqual(expect.arrayContaining(['text-2xl', 'font-semibold']));
+    expect(h1).not.toContain('text-sm');
   });
 
   it('fills no-data and no-result templates from noun', () => {

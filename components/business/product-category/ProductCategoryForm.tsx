@@ -1,18 +1,18 @@
 'use client';
 
 import type { SupplementContext } from '@/lib/form-drafts/model';
-import { supplementReturnHref } from '@/lib/form-drafts/return-context';
 import { SupplementFields } from '@/components/business/form-drafts/FormDraftControls';
 
 import { useActionState } from 'react';
 import { ProductCategory } from '../../../generated/prisma/enums';
 import type { ProductCategoryNodeMutationResult } from '@/actions/owner-product-categories.types';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { PendingLink } from '@/components/ui-business';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PRODUCT_CATEGORY_LABELS } from '@/lib/auth/role-labels';
 import { RULE_CENTER_HREFS } from '@/lib/navigation/rule-center';
+import { NativeSelect } from '@/components/ui/native-select';
+import { useReportFormPending } from '@/components/business/form/FormPendingScope';
 
 type CategoryInitial = {
   name: string;
@@ -50,8 +50,6 @@ type Props = {
       }
   );
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 const RETIRED_PRODUCT_CATEGORIES: ReadonlySet<ProductCategory> = new Set([
   ProductCategory.GENERIC_STOCK,
@@ -64,12 +62,12 @@ export function ProductCategoryForm(props: Props) {
     ProductCategoryNodeMutationResult | null,
     FormData
   >(props.action, null);
+  useReportFormPending(pending);
 
   const initial = props.mode === 'edit' ? props.initial : undefined;
   const errs = state?.status === 'invalid' ? state.fieldErrors : {};
   const generalError = state?.status === 'error' ? state.message : null;
   const success = state?.status === 'success';
-  const routeBase = props.routeBase ?? RULE_CENTER_HREFS.productCategories;
   const categoryOptions = Object.values(ProductCategory).filter(
     (category) =>
       !RETIRED_PRODUCT_CATEGORIES.has(category) ||
@@ -83,10 +81,9 @@ export function ProductCategoryForm(props: Props) {
       {props.mode === 'create' ? (
         <div className="space-y-2">
           <Label htmlFor="parentId">上级分类</Label>
-          <select
+          <NativeSelect
             id="parentId"
             name="parentId"
-            className={selectClass}
             defaultValue=""
             disabled={pending}
           >
@@ -96,7 +93,7 @@ export function ProductCategoryForm(props: Props) {
                 {o.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           <p className="text-xs text-muted-foreground">
             不选则创建为顶级分类；层级创建后不可移动。
           </p>
@@ -117,10 +114,9 @@ export function ProductCategoryForm(props: Props) {
 
       <div className="space-y-2">
         <Label htmlFor="legacyCategory">适用计价方式</Label>
-        <select
+        <NativeSelect
           id="legacyCategory"
           name="legacyCategory"
-          className={selectClass}
           defaultValue={initial?.legacyCategory ?? ProductCategory.BLANK_STOCK}
           disabled={pending}
         >
@@ -129,7 +125,7 @@ export function ProductCategoryForm(props: Props) {
               {PRODUCT_CATEGORY_LABELS[category]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {errs.legacyCategory?.[0] ? (
           <p className="text-sm text-destructive">{errs.legacyCategory[0]}</p>
         ) : null}
@@ -161,15 +157,8 @@ export function ProductCategoryForm(props: Props) {
 
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? '提交中…' : props.mode === 'create' ? '创建分类' : '保存修改'}
+          {pending ? '正在提交…' : props.mode === 'create' ? '创建分类' : '保存修改'}
         </Button>
-        <PendingLink
-          href={props.supplement ? supplementReturnHref(props.supplement) : routeBase}
-          pending={pending}
-          className={buttonVariants({ variant: 'outline' })}
-        >
-          {props.supplement ? '返回原录入' : '返回列表'}
-        </PendingLink>
       </div>
     </form>
   );

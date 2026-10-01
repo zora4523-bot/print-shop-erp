@@ -14,6 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import type { WarehouseLocationOption } from '@/lib/warehouse';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 
 type Props = {
   action: (
@@ -50,8 +52,6 @@ export function purchaseReceiptImpactItems(
   ];
 }
 
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function PurchaseReceiptForm({
   action,
@@ -153,10 +153,9 @@ export function PurchaseReceiptForm({
       <input type="hidden" name="purchaseOrderItemId" value={purchaseOrderItemId} />
       <div className="space-y-2">
         <Label htmlFor={`location-${purchaseOrderItemId}`}>收货库位</Label>
-        <select
+        <NativeSelect
           id={`location-${purchaseOrderItemId}`}
           name="locationId"
-          className={selectClass}
           value={locationId}
           onChange={(event) => setLocationId(event.target.value)}
           disabled={pending}
@@ -169,7 +168,7 @@ export function PurchaseReceiptForm({
               {option.isDefault ? '（默认）' : ''}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {errs.locationId?.[0] ? (
           <p className="text-sm text-destructive">{errs.locationId[0]}</p>
         ) : null}
@@ -199,14 +198,14 @@ export function PurchaseReceiptForm({
       </div>
       <div className="space-y-2">
         <Label htmlFor={`receipt-remark-${purchaseOrderItemId}`}>备注（选填）</Label>
-        <textarea
+        <Textarea
           id={`receipt-remark-${purchaseOrderItemId}`}
           name="remark"
           rows={2}
           maxLength={500}
           disabled={pending}
           aria-invalid={Boolean(errs.remark?.[0])}
-          className="min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-16 w-full"
         />
         {errs.remark?.[0] ? (
           <p className="text-sm text-destructive">{errs.remark[0]}</p>
@@ -229,7 +228,7 @@ export function PurchaseReceiptForm({
         aria-busy={pending}
         className="min-h-11"
       >
-        {pending ? '提交中…' : '核对并确认收货过账'}
+        {pending ? '正在提交…' : '核对并确认收货过账'}
       </Button>
       <ConfirmActionController level="L2"
         formId={formId}

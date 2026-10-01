@@ -167,6 +167,7 @@ export async function claimNextBackgroundJob(input: {
   queue: BackgroundJobQueue;
   workerId: string;
   leaseMs: number;
+  excludedTypes?: readonly string[];
 }): Promise<ClaimedBackgroundJob | null> {
   // 租约判定只用数据库时钟。终态回收由 queue-local lease
   // reaper 独立调度；claim 热路径只领取一条任务并开启 attempt。
@@ -179,6 +180,7 @@ export async function claimNextBackgroundJob(input: {
           FROM "BackgroundJob"
          WHERE "queue" = ${input.queue}::"BackgroundJobQueue"
            AND "attempts" < "maxAttempts"
+           ${input.excludedTypes?.length ? Prisma.sql`AND "type" NOT IN (${Prisma.join(input.excludedTypes)})` : Prisma.empty}
            AND (
              (
                "status" = 'PENDING'::"BackgroundJobStatus"

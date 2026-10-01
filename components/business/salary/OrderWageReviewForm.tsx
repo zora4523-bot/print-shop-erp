@@ -20,7 +20,6 @@ export function OrderWageReviewForm({ wage }: { wage: Wage }) {
   return <form action={action} aria-label={`${names[wage.type]}提成核定`} aria-busy={pending} className="space-y-3 rounded-lg border p-4">
     <div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{names[wage.type]}</h3>{wage.reviewRequired && <Badge variant="outline">需人工核定</Badge>}</div>
     {wage.reviewRequired && <p className="text-sm text-muted-foreground">多人接手或计薪条件有变化，请核对各师傅提成。</p>}
-    {wage.groups.some((g) => g.voided) && <p className="text-sm text-muted-foreground">已冲正的报工整笔作废、不可改价；确认核定时会自动抵消此前对它做过的人工调整。</p>}
     <input type="hidden" name="operationId" value={wage.id} /><input type="hidden" name="revision" value={wage.revision} />
     <fieldset disabled={pending} className="space-y-3" onChange={() => setReview(false)}>
       {wage.groups.map((group, i) => <div key={group.anchorId} className="grid items-center gap-2 sm:grid-cols-[1fr_160px]">
@@ -30,7 +29,10 @@ export function OrderWageReviewForm({ wage }: { wage: Wage }) {
       </div>)}
       <div className="space-y-1"><label className="text-sm" htmlFor={`wage-reason-${wage.id}`}>核定原因</label><Input id={`wage-reason-${wage.id}`} name="reason" minLength={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} /></div>
     </fieldset>
-    {review ? <div className="space-y-3 rounded-lg border p-3 text-sm"><h4 className="font-medium">核定工单提成</h4>{wage.groups.map((g, i) => <p key={g.anchorId}>{g.name} · {g.date}：{formatMoney(g.amount)} → {formatMoney(amounts[i]!)}（差额 {formatMoneyDelta(new Decimal(amounts[i]!).minus(g.amount))}）</p>)}<p>核定金额计入对应师傅的工资，已有报工记录保留。</p><div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>保存核定</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(false)}>返回修改</Button></div></div> : <Button type="button" variant="outline" disabled={pending || !valid} onClick={() => setReview(true)}>核对提成</Button>}
+    {review ? <div className="space-y-3 rounded-lg border p-3 text-sm"><h4 className="font-medium">核定工单提成</h4>{wage.groups.map((group, i) => {
+      const delta = group.voided ? new Decimal(group.voidedAdjustmentDelta) : new Decimal(amounts[i]!).minus(group.amount);
+      return <p key={group.anchorId}>{group.name} · {group.date}：{formatMoney(group.amount)} → {formatMoney(new Decimal(group.amount).plus(delta))}（差额 {formatMoneyDelta(delta)}）{group.voided && !delta.isZero() ? ' · 抵消已作废报工的人工调整' : ''}</p>;
+    })}<p>核定金额计入对应师傅的工资，已有报工记录保留。</p><div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>保存核定</Button><Button type="button" variant="outline" disabled={pending} onClick={() => setReview(false)}>返回修改</Button></div></div> : <Button type="button" variant="outline" disabled={pending || !valid} onClick={() => setReview(true)}>核对提成</Button>}
     {state && <div role={state.status === 'error' ? 'alert' : 'status'}><FormMessage fieldId={`wage-result-${wage.id}`} tone={state.status}>{state.message}</FormMessage></div>}
   </form>;
 }

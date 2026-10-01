@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/ui-business';
 import { WorkerProductionJobs } from '@/components/business/production/WorkerProductionJobs';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
@@ -59,25 +60,21 @@ export default async function WorkerOrderDetailPage({ params, searchParams }: Pa
 
   return (
     <div className="min-w-0 space-y-5">
-      <header className="worker-wrap-anywhere min-w-0 space-y-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="font-sans text-sm tabular-nums">
-            {order.orderNo} · v{order.workOrderVersion}
+      <PageHeader
+        size="worker"
+        className="worker-wrap-anywhere"
+        back={{ href: '/worker/orders', label: '返回我的工单' }}
+        eyebrow={<span className="font-sans tabular-nums">{order.orderNo} · 第 {order.workOrderVersion} 版</span>}
+        title="工序工单"
+        status={<><Badge variant="outline">{orderStatusZh(order.status)}</Badge>{order.isUrgent ? <UrgentBadge /> : null}</>}
+        subtitle={<>
+          {order.customName ? <span className="block text-sm font-semibold text-foreground">{order.customName}</span> : null}
+          <span className="block">
+            外部销售：{order.externalSalesName ?? '未填'}
+            {order.promisedDate ? ` · 交期 ${formatDateShanghai(order.promisedDate)}` : ''}
           </span>
-          <Badge variant="outline">{orderStatusZh(order.status)}</Badge>
-          {order.isUrgent ? <UrgentBadge /> : null}
-        </div>
-        <h1 className="text-lg font-semibold">工序工单</h1>
-        {order.customName ? (
-          <p className="text-sm font-semibold">{order.customName}</p>
-        ) : null}
-        <p className="text-xs text-muted-foreground">
-          外部销售：{order.externalSalesName ?? '未填'}
-          {order.promisedDate
-            ? ` · 交期 ${formatDateShanghai(order.promisedDate)}`
-            : ''}
-        </p>
-      </header>
+        </>}
+      />
 
       {order.packageRequirement || order.remark ? (
         <section className="worker-wrap-anywhere min-w-0 rounded-xl border bg-card p-4 text-sm shadow-sm">
@@ -183,6 +180,7 @@ export default async function WorkerOrderDetailPage({ params, searchParams }: Pa
               images={item.designs.map((design) => ({
                 ...design,
                 fileUrl: signDesignReadUrl(design.fileUrl),
+                previewUrl: signDesignReadUrl(design.fileUrl, process.env, { gallery: true }),
               }))}
             />
           </section>

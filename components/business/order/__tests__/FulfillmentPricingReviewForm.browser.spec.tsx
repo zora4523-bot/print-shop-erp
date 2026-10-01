@@ -388,15 +388,16 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
 
       completion.resolve({ status: 'success', result: {}, orderId: 'order-1' });
       await vi.waitFor(() => {
-        expect(host.textContent).toContain('物流费用已确认，工单已刷新。');
-        expect(refreshMock).toHaveBeenCalledTimes(1);
+        expect(host.textContent).toContain('物流费用已确认。');
       });
+      // The finalize action revalidates; no extra router.refresh() (DECISIONS 2026-08-27).
+      expect(refreshMock).not.toHaveBeenCalled();
     } finally {
       unmount(root, host);
     }
   });
 
-  it('确认遇到网络异常后保留同一幂等键重试，成功后只刷新一次', async () => {
+  it('确认遇到网络异常后保留同一幂等键重试，成功后依赖 action 重新验证而不追加刷新', async () => {
     previewActionMock.mockResolvedValue({
       status: 'success',
       preview: pricingPreview(),
@@ -420,8 +421,9 @@ describe('FulfillmentPricingReviewForm browser contract', () => {
 
       await vi.waitFor(() => {
         expect(finalizeActionMock).toHaveBeenCalledTimes(2);
-        expect(refreshMock).toHaveBeenCalledTimes(1);
+        expect(host.textContent).toContain('物流费用已确认。');
       });
+      expect(refreshMock).not.toHaveBeenCalled();
       expect(finalizeActionMock.mock.calls[1]![1]).toEqual(firstPayload);
     } finally {
       unmount(root, host);

@@ -1,5 +1,4 @@
-import Link from 'next/link';
-import { buttonVariants } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listProductSpecificationFacts } from '@/lib/product';
 import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
@@ -21,7 +20,7 @@ export default async function SpecificationsPage() {
   const print = [...new Set(products.filter((product) => product.category === 'COLOR_PRINT')
     .map((product) => externalPriceBusinessText(product.specification ?? '')).filter(Boolean))];
   return <div className="space-y-6">
-    <RuleCenterPageHeader title="规格目录" actions={<Link href="/owner/rules/papers" className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}>返回纸张</Link>} />
+    <RuleCenterPageHeader title="规格目录" back={{ href: '/owner/rules/papers', label: '返回纸张' }} />
     <section className="space-y-3 rounded-xl border bg-card p-4"><h2 className="font-semibold">空白封</h2>
       <ul className="grid gap-3 sm:grid-cols-2">{BLANK_SPECIFICATIONS.map((spec) => <li key={spec.key}>{spec.specification} mm</li>)}</ul>
     </section>
@@ -29,8 +28,7 @@ export default async function SpecificationsPage() {
       <ul className="space-y-2">{full.map((spec) => <li key={spec.label}>{spec.label}：{spec.values.join('、') || '暂无产品尺寸'}</li>)}</ul>
     </section>
     <section className="space-y-3 rounded-xl border bg-card p-4"><h2 className="font-semibold">彩印</h2>
-      <p className="text-sm text-muted-foreground">按现有彩印产品展示，尚未建立统一规格目录。</p>
-      <ul className="space-y-2">{print.map((spec) => <li key={spec}>{spec}</li>)}</ul>
+      {print.length > 0 ? <ul className="space-y-2">{print.map((spec) => <li key={spec}>{spec}</li>)}</ul> : <EmptyState title="暂无彩印规格" />}
     </section>
   </div>;
 }

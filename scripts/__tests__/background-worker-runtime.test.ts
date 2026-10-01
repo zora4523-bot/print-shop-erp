@@ -20,6 +20,10 @@ const {
   stopSmartBotMock: vi.fn(async () => undefined),
 }));
 
+const pdfMocks = vi.hoisted(() => ({ check: vi.fn(), enable: vi.fn(), close: vi.fn() }));
+vi.mock('@/lib/pdf/preflight', () => ({ checkPdfRuntime: pdfMocks.check }));
+vi.mock('@/lib/pdf/render', () => ({ enableWorkerPdfBrowserReuse: pdfMocks.enable, closeWorkerPdfBrowser: pdfMocks.close }));
+vi.mock('@/lib/background-jobs/handlers-heavy', () => ({ heavyBackgroundJobHandlers: {} }));
 vi.mock('@/lib/db', () => ({
   db: { $disconnect: dbDisconnectMock },
 }));
@@ -73,6 +77,8 @@ let signalHandlers: Map<string, SignalHandler>;
 let initialExitCode: typeof process.exitCode;
 
 beforeEach(() => {
+  pdfMocks.enable.mockClear();
+  pdfMocks.close.mockClear();
   initialExitCode = process.exitCode;
   process.exitCode = undefined;
   vi.stubEnv('BACKGROUND_JOB_QUEUE', 'LIGHT');
@@ -207,4 +213,45 @@ describe('worker Sentry scrubbing', () => {
       }),
     );
   });
+});
+
+it('keeps HEAVY online but excludes PDF before a failed capability probe', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  pdfMocks.check.mockRejectedValueOnce(new Error('preflight'));
+  runBackgroundWorkerMock.mockImplementationOnce(async (input) => {
+    const options = input as { excludedTypes: () => string[] };
+    expect(options.excludedTypes()).toEqual(['ORDER_PDF', 'ORDER_BATCH_PDF']);
+  });
+  await runBackgroundWorkerProcess();
+  expect(process.exitCode).not.toBe(1);
+  expect(startWorkerHeartbeatMock).toHaveBeenCalledOnce();
+  expect(runBackgroundWorkerMock).toHaveBeenCalledOnce();
+});
+it('closes the reused browser after draining without blocking startup on the probe', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  pdfMocks.check.mockResolvedValueOnce({ bytes: 1234 });
+  await runBackgroundWorkerProcess();
+  expect(pdfMocks.enable).toHaveBeenCalledOnce();
+  expect(pdfMocks.close).toHaveBeenCalledAfter(runBackgroundWorkerMock);
+});
+
+it('clamps HEAVY concurrency to 1 while the serial PDF browser is reused', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  vi.stubEnv('HEAVY_WORKER_CONCURRENCY', '4');
+  vi.stubEnv('DATABASE_POOL_MAX', '20');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  pdfMocks.check.mockResolvedValueOnce({ bytes: 1234 });
+  await runBackgroundWorkerProcess();
+  expect(runBackgroundWorkerMock).toHaveBeenCalledWith(expect.objectContaining({ concurrency: 1 }));
+  expect(warn.mock.calls.flat().join('')).toContain('clamped to 1');
+});
+it('keeps the configured HEAVY concurrency when PDF browser reuse is disabled', async () => {
+  vi.stubEnv('BACKGROUND_JOB_QUEUE', 'HEAVY');
+  vi.stubEnv('HEAVY_WORKER_CONCURRENCY', '4');
+  vi.stubEnv('DATABASE_POOL_MAX', '20');
+  vi.stubEnv('PDF_BROWSER_REUSE', '0');
+  pdfMocks.check.mockResolvedValueOnce({ bytes: 1234 });
+  await runBackgroundWorkerProcess();
+  expect(pdfMocks.enable).not.toHaveBeenCalled();
+  expect(runBackgroundWorkerMock).toHaveBeenCalledWith(expect.objectContaining({ concurrency: 4 }));
 });

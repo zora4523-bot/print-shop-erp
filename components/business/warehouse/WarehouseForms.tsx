@@ -17,6 +17,7 @@ import {
   formMessageA11yProps,
   type FormErrorSummaryItem,
 } from '@/components/ui-business';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export type WarehouseFormOption = {
   id: string;
@@ -28,8 +29,6 @@ export type WarehouseFormOption = {
 type Props = {
   warehouses: WarehouseFormOption[];
 };
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function WarehouseForms({ warehouses }: Props) {
   return (
@@ -68,7 +67,7 @@ function WarehouseCreateForm() {
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
-      <h2 className="text-base font-semibold">新增仓库</h2>
+      <h2 className="text-base font-semibold">新建仓库</h2>
       <FormErrorSummary errors={summaryErrors} />
       <TextField
         id="warehouse-name"
@@ -141,17 +140,16 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
       aria-busy={pending}
       className="space-y-4 rounded-xl border bg-card p-6 shadow-sm"
     >
-      <h2 className="text-base font-semibold">新增库位</h2>
+      <h2 className="text-base font-semibold">新建库位</h2>
       <FormErrorSummary errors={summaryErrors} />
       <div className="space-y-2">
         <Label htmlFor="location-warehouse">所属仓库</Label>
-        <select
+        <NativeSelect
           id="location-warehouse"
           name="warehouseId"
           {...(errs.warehouseId?.[0]
             ? formMessageA11yProps('location-warehouse', 'error')
             : {})}
-          className={selectClass}
           disabled={pending || missingWarehouses}
           value={warehouseId}
           onChange={(event) => setWarehouseId(event.target.value)}
@@ -163,7 +161,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
               {warehouse.code} · {warehouse.name}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {errs.warehouseId?.[0] ? (
           <FormMessage fieldId="location-warehouse" tone="error">
             {errs.warehouseId[0]}
@@ -173,7 +171,7 @@ function LocationCreateForm({ warehouses }: { warehouses: WarehouseFormOption[] 
           <ActionNotice
             tone="warning"
             title="缺少启用仓库"
-            description="请先在左侧创建仓库，再新增库位。"
+            description="请先在左侧创建仓库，再新建库位。"
           />
         ) : null}
       </div>

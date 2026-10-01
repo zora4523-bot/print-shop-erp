@@ -483,6 +483,7 @@ describe('结算成员表：客户名称/简称停用后的工单名称列', () 
       {
         orderNoSnapshot: 'GD-260815-001',
         orderNameSnapshot: '中秋礼盒',
+        orderNameAtSettlement: false,
         orderStatusSnapshot: 'SETTLED',
         workOrderVersionSnapshot: 2,
         settledFeeSnapshot: '100.00',
@@ -491,11 +492,11 @@ describe('结算成员表：客户名称/简称停用后的工单名称列', () 
     ]);
 
     const sheets = await processStoredPayload(persisted);
-    expect(sheets.get('结算成员')).toEqual([
-      ['账期', '代理商', '工单号', '工单名称', '工单状态', '纸单版本', '结算费', '结算时间'],
+    expect(sheets.get('工单明细')).toEqual([
+      ['账期', '外部销售', '工单号', '工单名称', '工单状态', '纸单版本', '工单金额', '结算时间', '名称依据', '销售账号'],
       [
-        '2026-08', '代理商 A', 'GD-260815-001', '中秋礼盒', 'SETTLED', 2,
-        { kind: 'xlsx-decimal', value: '100.00' }, '2026/09/02 11:00',
+        '2026-08', '代理商 A', 'GD-260815-001', '中秋礼盒', '已结算', 2,
+        { kind: 'xlsx-decimal', value: '100.00' }, '2026/09/02 11:00', '导出时名称', 'agent-a',
       ],
     ]);
   });
@@ -506,7 +507,7 @@ describe('结算成员表：客户名称/简称停用后的工单名称列', () 
       // 停用前写入的快照形状：带 customerRefSnapshot，没有 orderNameSnapshot。
       items: [snapshotItem({ customerRefSnapshot: '客户甲' })],
     }));
-    const members = sheets.get('结算成员');
+    const members = sheets.get('工单明细');
     expect(members?.[0]?.[3]).toBe('工单名称');
     expect(members?.[1]?.slice(2, 4)).toEqual(['GD-260815-001', null]);
     for (const rows of sheets.values()) expect(JSON.stringify(rows)).not.toContain('客户');
@@ -519,7 +520,7 @@ describe('结算成员表：客户名称/简称停用后的工单名称列', () 
         snapshotItem({ orderNoSnapshot: 'GD-260815-002', orderNameSnapshot: null }),
       ],
     }));
-    expect(sheets.get('结算成员')?.slice(1).map((row) => row[3])).toEqual([null, null]);
+    expect(sheets.get('工单明细')?.slice(1).map((row) => row[3])).toEqual([null, null]);
   });
 
   it('keeps rejecting unknown snapshot keys', async () => {
@@ -561,4 +562,19 @@ describe('prepareAgentMonthlyBillExportDownload', () => {
       }),
     );
   });
+});
+
+
+it.each(['dabiaoge-a', 'dabiaoge-b'])('exports the frozen account %s on every detail sheet even for identical names', async (username) => {
+  const sheets = await processStoredPayload(snapshotPayload({
+    bill: { ...snapshotPayload().bill as Record<string, unknown>, agentDisplayNameSnapshot: '大表哥', agentUsernameSnapshot: username },
+    items: [snapshotItem()],
+    adjustments: [{ targetPeriod: '2026-08', targetAgentDisplayNameSnapshot: '大表哥', sourcePeriod: '2026-07', sourceOrderNoSnapshot: 'OLD-001', amount: '-5.00', reason: '质量调整', createdByDisplayName: '管理员', createdAt: NOW.toISOString() }],
+    receipts: [{ period: '2026-08', agentDisplayNameSnapshot: '大表哥', amount: '95.00', receivedAt: NOW.toISOString(), paymentMethod: '转账', referenceNo: null, recordedByDisplayName: '管理员' }],
+  }));
+  for (const name of ['工单明细', '跨月抵扣', '收款回执']) {
+    expect(sheets.get(name)?.[0]?.at(-1)).toBe('销售账号');
+    expect(sheets.get(name)?.[1]?.at(-1)).toBe(username);
+  }
+  expect(dbMock.agentMonthlyBill.findMany).not.toHaveBeenCalled();
 });

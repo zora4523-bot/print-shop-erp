@@ -22,10 +22,10 @@ describe('PDF download navigation', () => {
     'components/business/order/AdminOrderDetailView.tsx',
     'app/(admin)/orders/[id]/page.tsx',
   ])('%s must not route or prefetch a download through next/link', (file) => {
-    expect(hrefTags(file, (href) => href.includes('/api/orders/') && href.includes('/pdf'))).toEqual(['a', 'a']);
+    expect(hrefTags(file, (href) => href.includes('/api/orders/') && href.includes('/pdf'))).toEqual(['a']);
   });
 
-  it('uses a native PDF link in batch results', () => {
-    expect(hrefTags('components/business/order/AdminOrderBatchResultProvider.tsx', (href) => href.includes('/pdf'))).toEqual(['a']);
+  it('uses the prepared web-print route for printing batch results', () => {
+    expect(hrefTags('components/business/order/AdminOrderBatchResultProvider.tsx', (href) => href.includes('/print/orders/') && href.includes('autoprint=1'))).toEqual(['a']);
   });
 });

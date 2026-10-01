@@ -11,7 +11,6 @@ import { OrderListScrollState } from '@/components/business/order/OrderListNavig
 import { ErrorBoundary } from '@/components/ui-business';
 import {
   getOrderListFilterOptions,
-  parseOrderListQuery,
   serializeOrderListQuery,
   type OrderListSearchParams,
 } from '@/lib/order/list-query';
@@ -28,6 +27,7 @@ import {
   getSalesLatestRejectedOrderIds,
   listSalesOrdersPage,
   sanitizeSalesOrderListQuery,
+  parseSalesOrderListQuery,
 } from '@/lib/order/sales-list-query';
 import { listRecentOrderExports } from '@/lib/order/export';
 import {
@@ -75,7 +75,7 @@ export async function OrdersListContent({
       />
     );
   }
-  const parsed = parseOrderListQuery(rawSearchParams);
+  const parsed = parseSalesOrderListQuery(rawSearchParams);
   if (user.role === Role.SALES) {
     return (
       <SalesOrdersListContent
@@ -170,7 +170,7 @@ export async function SalesOrdersListContent({
   parsed,
 }: {
   actor: OrdersActor;
-  parsed: ReturnType<typeof parseOrderListQuery>;
+  parsed: ReturnType<typeof parseSalesOrderListQuery>;
 }) {
   const query = sanitizeSalesOrderListQuery(parsed.query);
   const latestRejectedOrderIdsPromise =
@@ -185,6 +185,7 @@ export async function SalesOrdersListContent({
     actor,
     new Date(),
     latestRejectedOrderIdsPromise,
+    query,
   );
 
   return (
@@ -250,7 +251,7 @@ export async function SalesOrdersListSection({
 }) {
   const page = await pagePromise;
   const displayedQuery = { ...query, page: page.page };
-  const queryParams = serializeOrderListQuery(displayedQuery);
+  const queryParams = { ...serializeOrderListQuery(displayedQuery), createdMonth: query.createdMonth };
   return (
     <SalesOrdersList
       orders={page.rows}

@@ -93,7 +93,9 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 | 目的 | 命令 |
 |---|---|
-| 开发服务器 | `pnpm dev` |
+| 开发服务器（含后台依赖检查） | `pnpm dev` |
+| 仅 Web（worker 由外部管理时） | `pnpm dev:web` |
+| PDF 字体、渲染及产物存储检查 | `pnpm check:pdf` |
 | 生产构建 | `pnpm build` |
 | 启动构建产物 | `pnpm start` |
 | 类型检查 | `pnpm typecheck` |
@@ -225,7 +227,7 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 新增 `tests/e2e/shipment-registration.spec.ts` 必须配置与日常数据库不同的 `E2E_DATABASE_URL`，由现有隔离门禁控制。测试保留带随机前缀的测试记录供审查，不重置数据库。执行 `pnpm exec playwright test tests/e2e/shipment-registration.spec.ts --project=chromium --workers=1`。同一工作区运行 Next 开发服务与隔离 E2E 时需依次启动，避免 `.next/dev` 锁冲突。
 
-Next、`@next/env`、`eslint-config-next` 锁定到本地已验证的 16.3.4，保持之前已采用的 `catchError/retry` API 可复现；新增直接依赖 sharp 0.35.4，用于服务端解码、限像素、移除图片元数据并转 JPEG。
+Next、`@next/env`、`eslint-config-next` 锁定到已验证的安全补丁版 16.3.6，保持之前已采用的 `catchError/retry` API 可复现；新增直接依赖 sharp 0.35.4，用于服务端解码、限像素、移除图片元数据并转 JPEG。
 
 ## 旧导入纸张资料修复
 
@@ -261,3 +263,72 @@ OrderLog 与 BusinessAuditLog 的 before。生产执行步骤（dry-run → 业�
 ## 生产事实核对与恢复（2026-09-28）
 
 重做未下发、数量申请被旧版取消、工资日期已结算或历史生产不明时，按 [生产事实恢复手册](docs/生产事实恢复手册.md) 先只读扫描，再逐单据证处理。不要通过换日期、改负责人、删除申请或解锁原账绕过守卫。
+
+### PDF 开发与回归（2026-09-30）
+
+`pnpm dev` 使用 `scripts/dev-stack.mjs`。未设置后台模式时默认 durable，先启动 LIGHT/HEAVY；HEAVY 必须完成真实中文 PDF 与私有产物读写检查，两类 worker 的本次启动心跳均就绪后才启动 Web。默认监听 127.0.0.1:3000，支持 `--port`、`--hostname`。端口冲突在 worker 启动前拒绝；任一子进程异常退出会停止整组，Ctrl-C 统一收尾。此开发入口固定模拟通知，不用于生产。显式 `BACKGROUND_JOBS_MODE=inline` 只启动 Web，但仍先检查 PDF 运行时。
+
+`pnpm dev:web` 保留仅 Web 入口，适用于外部进程管理或手动控制 worker 的测试；它本身不保证 durable PDF 可用。`pnpm check:pdf` 使用当前环境、当前 Chromium 与内嵌字体，实际生成一页中文 PDF，并验证存储往返；只操作自己的随机探针产物。
+
+PDF 恢复验收：满足本文件 E2E 隔离前置后运行 `pnpm exec playwright test --config=playwright.pdf.config.ts`。测试使用真实 Next 开发服务及独立 HEAVY worker，覆盖服务离线、六视口双主题、触控、axe、就地状态查询、生成和重复下载；不代表生产构建、真实 OSS 图稿或通知验收。
+
+开发单张下载默认 `PDF_ORDER_MODE=direct`；生产必须显式配置，queued 必须使用 durable。direct 模式，不依赖后台 worker；`pnpm dev` 仍管理其他业务需要的 LIGHT/HEAVY。直接路径验收使用 `E2E_PDF_ORDER_MODE=direct pnpm exec playwright test --config=playwright.pdf.config.ts`：仅启动 Web，覆盖多页下载、缓存、匿名拒绝、不入队及 HTML 打印准备。未指定该测试变量时验证 queued 恢复路径，`playwright.durable.config.ts` 也显式固定 queued 以保留原任务链验收。两种模式都保留下载协议与授权检查。
+
+PDF 补强验证：`node --import tsx scripts/pdf-lifecycle-check.ts` 在本机启动独立 Chromium，验证冻结/强杀后的恢复并断言本次进程组清空（POSIX）。真实 Next + PM2 信号验证：先在临时工具目录安装 PM2，再指定 `PDF_TEST_PM2_CLI=/绝对路径/pm2/bin/pm2 node scripts/pdf-shutdown-check.mjs`。它创建临时 Next 夹具、独立 PM2_HOME 和随机本机端口，不连接业务库、不操作已有 PM2 应用，验证在途 PDF、普通请求、reload 和子进程退出；不能代替生产资源容量验收。
+
+两条 PDF 浏览器用例均支持 `E2E_PDF_RELEASE=1`，此时执行真实 production build/start；direct 再加 `E2E_PDF_ORDER_MODE=direct`。必须先按现有隔离约束设置 E2E_DATABASE_URL/确认库名、SEED_ADMIN_USERNAME、测试管理员密码，完成 migrate/seed 和 `pnpm test:e2e:prepare`；缺前置的失败不得计为用例通过。
+
+### 外部销售月账单优化（2026-09-30）
+
+任务按以下顺序实施，每项完成后尝试 Claude Code 对抗审查；未取得实际结果不得标记审查通过。
+
+1. 查询基础：两端账期、状态筛选共用解析与查询条件，管理员列表和导出共用条件；销售所有权来自登录账号。分页及按状态金额汇总在同一 RepeatableRead 事务中读取，汇总覆盖全部筛选记录，草稿不计入应收。已实现，定向 24 项测试和类型检查通过；Claude Code 返回 429 周额度限制，外部审查待完成。
+2. 月账单列表及操作：统一业务文案、按剩余金额录入抵扣的独立页面、保留筛选返回路径，生成/确认/收款/抵扣刷新两端页面。已实现并通过定向测试和类型检查；Claude Code 再次返回 429，审查待完成。
+3. 关联明细：工单结算事实、抵扣来源及分配使用只读 Sheet，收款事实直接展示，销售查询显式排除内部原因和人员。已实现，22 项定向测试与类型检查通过；Claude Code 返回 429，审查待完成。
+4. 历史依据：新增可空 settlementDetailSnapshot，后续生成/确认保存出账时名称、加工费及对客收费分项；旧账单不回填，缺依据提示按原结算总额核对。导出保留名称依据，新字段兼容旧任务。隔离 PostgreSQL 迁移及 84 项领域/页面/并发测试通过；Claude Code 429，审查待完成。
+5. 可视化：最近 12 个上海账期的当前金额、前 10 位外部销售待收分布、待确认及未出账定位入口。图表链接与列表/导出共用账期、状态和账号条件，附账期数据表；筛选后折叠概览，优先展示列表。7 项定向测试和类型检查通过；Claude Code 返回 429，审查待完成。
+6. 综合验收：已验证两端权限、账务边界、响应式与浏览器交互。修复生成月份随筛选变化、抵扣页面包屑中间路径、空操作表头，并统一使用 Disclosure；导出明确名称是在出账时采集。最终 Claude Code 调用仍为 429，外部审查待完成。
+
+参考项目为本地 `历史订单/finance-dashboard`（f2c96d8）；仅借鉴列表、关联浏览和筛选联动，不导入其历史数据或混用其收支口径。保留整单收款、零元自动结清、不可变账单及跨月抵扣规则；历史归档独立展示。
+
+
+本批验收基线为 `90e7ead6`，功能提交 `4e3c0ba0`、`1e623659`、`37b90c48`、`c99c79ff`、`b9f06dc8`，加本节所在验收提交；工作树 `codex/order-leave-recovery`，未推送、未部署生产。
+
+- `DATABASE_URL=<隔离测试库> pnpm exec vitest run --maxWorkers=2`：733 文件、7972 用例通过；原有 7 文件、133 用例跳过，不计通过。最后的导出文案、面包屑和页面回归定向重跑 4 文件、107 用例通过。
+- `pnpm typecheck`、`pnpm lint`、`pnpm check:architecture` 通过。lint 保留 global-error.tsx 与 OrderCreatedSuccessView.tsx 的 2 条既有导航警告，0 错误；UI 文案/令牌均 0 违例。
+- 按本文件隔离前置准备 `erp_e2e_pdf_ready_0930` 后，`pnpm exec playwright test tests/e2e/bill-flow.spec.ts tests/e2e/bill-workspace.spec.ts --config=playwright.release.config.ts --project=chromium`：真实 production build/start，4 条用例通过。覆盖原生无 JS、脚本延迟、生成/冻结/整单收款/重放、跨月抵扣、零元自动结清、历史费用与名称保护、越权拒绝、内部原因隔离、未出账定位和筛选返回。
+- 综合用例在 375、393、768、1024、1280、1920 宽度及明暗主题检查管理员概览/数据表/列表和销售明细 Sheet 的 root overflow、axe、44px 关闭目标与焦点返回。通过真实主题菜单切换并等待动画结束，避免中途取色；另以触控 tap 打开/关闭 Sheet 重跑综合用例，1 条通过。未将桌面模拟声明为真机或 WebKit 验收。
+- `pnpm test:migrations:fresh` 在显式隔离空库 `erp_billing_fresh_20260930_175727` 通过全部 181 个迁移及后置条件。本地开发库先备份，再应用待执行的账单依据及 PDF 能力两个可空新增字段迁移；没有覆写旧业务数据。
+- 本次日志在 `/tmp/erp-billing-0930/`（全量 `full-unit-db.log`、最终 `final-typecheck.log` / `final-lint.log`、浏览器 `e2e-acceptance.log` / `e2e-touch.log`、空库 `fresh-migrations.log`）。浏览器图片与 trace 由 Playwright 写入忽略目录 `test-results/release/`。
+- 每项任务后均调用 Claude Code（`--model opus --effort high --permission-mode plan`），任务 6 最终再次调用仍返回 `api_error_status: 429`、周额度耗尽，未实际开始模型审查。`claude-task1.json` 至 `claude-task6-final.json` 留存调用结果；不能将自主复核与自动化测试写作 Claude 审查通过。
+
+### 外部销售账号辨识与隔离补强（2026-09-30）
+
+本次基线 `3379a700`，工作树 `codex/order-leave-recovery` 起始无改动。修复同名销售在待收排行、未出账工单、抵扣录入及导出明细中无法明确区分的问题：页面补充账号，导出使用已有冻结账号快照；未出账工单的账单链接同时传递账号 ID 和账期。生成草稿旁说明其覆盖所选月份全部外部销售，不受列表筛选影响。未改变授权、金额及历史快照规则，无数据库迁移。
+
+- 自查销售列表、详情、关联明细、元数据和管理端导出入口，保留登录账号 ID 强制限定及越权拒绝。浏览器新建两个同名“大表哥”、不同登录账号的模拟工单，验证独立出账、金额、账号跳转、导出筛选、抵扣页身份，以及伪造他人账号参数和账单 ID 无法读取对方数据；夹具仅写入隔离库，不导入真实客户数据、不操作生产库。
+- 全量 Vitest：733 文件、7974 用例通过，既有 7 文件、133 用例跳过；查询/历史导出定向 19 用例通过。`pnpm typecheck`、`pnpm lint`、`pnpm check:architecture` 通过；lint 0 错误、2 条既有导航警告，UI 文案与令牌 0 违例。
+- 真实 production build/start 的原账单流程及综合浏览器用例 4 条通过；新增同名账号用例最终 1 条通过。初轮新用例因 combobox 的测试定位方式失败，改用可访问角色定位后通过。375、393、768、1024、1280、1920 宽度及明暗主题检查未出账和待收排行的 root overflow、axe；人工看图补发现手机账号列被挤成逐字换行，增加表格/账号列最小宽度及列宽断言，重新构建并通过新用例。排行夹具金额高于隔离库已有待收，避免重复运行时被旧夹具挤出前十。
+- 日志：`/tmp/erp-billing-0930/identity-full-unit.log`、`identity-targeted.log`、`identity-e2e.log`、`identity-e2e-final.log`、`identity-final-lint.log`、`identity-final-typecheck.log`、`identity-architecture.log`；截图位于忽略目录 `test-results/release/`。
+- Claude Code 对抗审查再次调用，`identity-review` 返回周额度耗尽（429，结果 `claude-identity-review.json`），未完成外部审查。自主复核和自动化验收不替代该待办。本批仅本地提交，未推送或部署。
+
+
+### 历史数据本地回放（2026-09-30）
+
+基线 `21a90b4c`，独立工作树 `codex/order-leave-recovery`，起始干净；主目录已有未跟踪文件未处理。来源为本机 `历史订单` 的两份大表哥工作簿及已经提取的 JSON，原文件只读。输入不进 Git；708 行原总费用逐行核对工作簿无差异。
+
+`node --conditions=react-server --import tsx scripts/seed-sales-history-preview.ts /绝对路径/已核对源数据.json --generate-bills` 要求先按本文件 E2E 前置准备测试库与测试用户，显式配置 `E2E_DATABASE_URL`、`E2E_DATABASE_CONFIRM_DATABASE`；普通 `DATABASE_URL` 必须是不同的参考库，并限制 localhost。源字段契约见 `scripts/lib/sales-history-preview.ts`。事务仅追加独立 `history-dabiaoge-<输入哈希>` 测试账号和 `HIST-` 工单；相同输入再次运行只复用完整批次，部分批次拒绝，修改转换规则需使用新的隔离库。`--generate-bills` 调用原按月全账号生成命令，因此会处理该隔离库同月份其他测试账号的合资格工单；不用于生产导入。
+
+本次最终验收库 `erp_e2e_dabiaoge_final_0930` 从已准备的隔离模板复制，708 行中 638 行分项合计与总费用一致，模拟结算金额 197402.60 元；69 行缺总额、1 行总额与分项相差 60 元，共 70 行保持草稿。已结束的 11 个月覆盖 636 行，生成草稿 197275.80 元；2026-09 的两行不提前出账。最多一个月 303 条。源日期含 2025 与 2026 年，按原值保留，没有根据工作簿名修改年份。
+
+每行备注明确“历史回放测试”，测试发货／结算日期借用原日期，不代表真实履约；未导入收款，所有账单保持草稿。缺失设计图、原表多款的分配关系和真实运单不能从现有字段还原，本次不伪造这些事实；工单项只按整行聚合，款数不能作为原多款迁移结果。临时输入、核对结果、运行日志与浏览器截图在 `/tmp/erp-dabiaoge-0930/`，不提交客户源数据或账号密码。
+
+
+本批验证与交付：
+
+- 全量 Vitest：735 文件、7982 用例通过，原有 7 文件／133 用例跳过；后续缺失数量提示及金额精度校验分别通过 29 项 UI/状态定向用例与 4 项导入解析用例。生产构建（含 TypeScript）、独立类型检查、完整 lint、UI 文案／令牌及架构门禁通过；lint 0 错误、2 条既有导航警告。无数据库迁移。
+- 真实 production build/start 的管理员代销售建单、账单完整流转、两端明细／跨月抵扣和销售功能共 21 条独立浏览器用例最终通过。包括新建后只在所选账号列表出现、另一账号查询为空、越权账单拒绝访问，以及工单与所属月账单链接。初轮缺测试管理员密码为环境前置失败，补齐后执行；旧账单 URL 断言补充实际返回参数。主题测试曾在继承色尚未完成绘制时取色，改走真实主题菜单并等待实际动画结束，未关闭 axe 规则；失败日志与最终复测均保留。
+- 六视口（375×667、393×852、768×1024、1024×768、1280×800、1920×1080）与明暗主题验证销售列表、详情、编辑；账单两端在六宽度验证概览、列表和弹窗。覆盖 root overflow、axe、触控打开/关闭、焦点返回。手机筛选改为换行，并断言七个入口均完整处于横向可视范围。人工查看历史数据下的手机账单、费用弹窗、工单卡片和管理员概览。
+- 真实历史回放：11 张账单与原行核对，303 条大账单逐页走完 11 页，成员数与唯一工单号均为 303，末页 3 条；搜索末项只显示该项，顶部 128006.60 元整账金额保持不变。管理员按回放账号筛选同为 11 张、197275.80 元草稿。销售账号隔离预览保留在 `http://127.0.0.1:3336/sales/bills`；端口 3000 与原开发库没有切换。
+- 证据：`/tmp/erp-dabiaoge-0930/unit.log`、`targeted-final.log`、`ui-final-unit.log`、`import-unit.log`、`build-final.log`、`typecheck-last.log`、`lint-last.log`、`architecture-last.log`、`e2e-final.log`、`e2e-recheck.log`、`responsive-tabs-final.log`、`real-pagination.log`；截图和来源核对仅留本机临时目录。代码及测试不携带客户源数据。
+- Claude Code 本次使用 Opus 只读对抗审查命令，但返回周额度耗尽 `429`，模型未执行，记录在 `claude-review.json`；外部审查仍待完成。仅本地提交，不推送或部署。

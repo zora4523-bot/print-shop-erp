@@ -1,13 +1,14 @@
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
-import Link from 'next/link';
+import Form from 'next/form';
 import { Calculator, FileText } from 'lucide-react';
 import { listHourlyPayrolls, listHourlyPayrollWorkerIds } from '@/lib/salary/hourly-aggregate';
 import { listUsers } from '@/lib/account';
 import { WORKER_TYPE_LABELS } from '@/lib/auth/role-labels';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { PaymentStatusBadge } from '@/components/business/salary/SalaryStatusBadge';
 import { requirePermission } from '@/lib/auth/permissions';
-import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea } from '@/components/ui-business';
+import { EmptyState, PageHeader, StatCard as UiStatCard, TableScrollArea, FilterClearLink } from '@/components/ui-business';
 import {
   getAttendanceSummaries,
   parseShanghaiMonth,
@@ -15,6 +16,7 @@ import {
 import { currentShanghaiMonth } from '@/lib/dashboard/shanghai-clock';
 
 import { formatMoney } from '@/lib/dashboard/format';
+import { NativeSelect } from '@/components/ui/native-select';
 export const metadata = { title: '历史时薪档案' };
 
 type PageProps = {
@@ -75,13 +77,13 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
           label="记录数"
           value={`${salaryPage.total} 条`}
           icon={FileText}
-          tone="info"
+          tone="neutral"
         />
         <UiStatCard
           label="实发合计"
           value={formatMoney(totalSalary)}
           icon={Calculator}
-          tone="primary"
+          tone="neutral"
         />
         <UiStatCard
           label="未发合计"
@@ -195,37 +197,38 @@ function FilterBar({
   }>;
 }) {
   return (
-    <form className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
+    // next/form 软导航不重建非受控字段：key 取已应用查询，提交 / 清除 / 后退时按 URL 重建。
+    <Form id="salary-hourly-filters" key={JSON.stringify([selectedMonth, paid ?? '', workerId ?? ''])} action="/owner/salary/hourly" className="flex flex-wrap items-end gap-3 rounded-xl border bg-card p-3 text-sm shadow-sm">
       <div className="flex flex-col">
         <label htmlFor="hourly-month" className="text-xs text-muted-foreground">月份</label>
-        <input
+        <Input
           id="hourly-month"
           type="month"
           name="month"
           defaultValue={selectedMonth}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-auto"
         />
       </div>
       <div className="flex flex-col">
         <label htmlFor="hourly-paid" className="text-xs text-muted-foreground">状态</label>
-        <select
+        <NativeSelect
+          className="w-auto"
           id="hourly-paid"
           name="paid"
           defaultValue={paid ?? ''}
-          className="rounded-md border bg-background px-3 py-1 text-sm"
         >
           <option value="">全部</option>
           <option value="unpaid">仅未发</option>
           <option value="paid">仅已发</option>
-        </select>
+        </NativeSelect>
       </div>
       <div className="flex min-w-0 max-w-full flex-col">
         <label htmlFor="hourly-workerId" className="text-xs text-muted-foreground">师傅</label>
-        <select
+        <NativeSelect
           id="hourly-workerId"
           name="workerId"
           defaultValue={workerId ?? ''}
-          className="w-full min-w-0 rounded-md border bg-background px-3 py-1 text-sm"
+          className="w-full min-w-0"
         >
           <option value="">全部师傅</option>
           {workers.map((worker) => (
@@ -234,17 +237,17 @@ function FilterBar({
               {worker.isActive ? '' : ' · 已停用'}）
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <Button type="submit" size="sm">
         筛选
       </Button>
-      <Link
+      <FilterClearLink formId="salary-hourly-filters"
         href="/owner/salary/hourly"
         className={buttonVariants({ size: 'sm', variant: 'ghost' })}
       >
-        清除
-      </Link>
-    </form>
+        清除筛选
+      </FilterClearLink>
+    </Form>
   );
 }

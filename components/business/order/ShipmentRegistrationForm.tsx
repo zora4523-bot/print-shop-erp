@@ -1,19 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { registerShipmentAction } from '@/actions/shipment-registration';
-import { Button } from '@/components/ui/button';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { cn } from '@/lib/utils';
 
 export type ShipmentRegistrationProps = {
   orderId: string; shipmentId: string; version: number;
   revision: number; editVersion: number; workOrderVersion: number; priceRevision: number;
   trackingNo: string | null; carrierCode: string | null; carrierName: string | null;
   shipped: boolean; canConfirm: boolean; disabledReason: string | null;
+  /** Pending single-owner jobs this confirmation registers at plan (DECISIONS 2026-10-01). */
+  autoCompletion?: string[] | null;
   chargeable?: boolean;
   lastPending: boolean; amount: string; labels: { id: string; createdAt: string }[];
 };
@@ -39,7 +41,6 @@ async function preparePhoto(file: File): Promise<File> {
 }
 
 export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
-  const router = useRouter();
   const [tracking, setTracking] = useState(props.trackingNo ?? '');
   const [carrier, setCarrier] = useState(props.carrierCode ?? '');
   const [name, setName] = useState(props.carrierName ?? '');
@@ -75,23 +76,33 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
       try {
         const result = await registerShipmentAction(form);
         setMessage(result.message); setFailed(!result.ok);
-        if (result.ok) { setSaved(true); router.refresh(); }
+        if (result.ok) setSaved(true);
       } catch { setFailed(true); setMessage('保存失败，请重试；若提示内容已更新，请刷新查看'); }
     });
   }
   const ready = Boolean(tracking.trim() && carrier && (carrier !== 'OTHER' || name.trim()));
   const imageUrl = preview ?? (props.labels[0] ? `/api/orders/${props.orderId}/shipments/${props.shipmentId}/labels/${props.labels[0].id}` : null);
-  return <div className="@container/shipment-form space-y-4 border-t pt-4" onPaste={(event) => {
-    const file = [...event.clipboardData.items].find((item) => item.type.startsWith('image/'))?.getAsFile();
-    if (file && !busy) { event.preventDefault(); void choose(file); }
-  }}>
+  // 还不能发货、也没保存过物流资料时默认收起（业主 2026-10-01：先下发生产，生产后才处理物流；
+  // 缩短详情页）。收起仍挂载，未提交输入不丢；不能发货的原因留在折叠块外。
+  const foldable = !props.shipped && !props.canConfirm && !props.trackingNo && props.labels.length === 0;
+  const fields = <>
     <fieldset disabled={busy} className="grid min-w-0 grid-cols-1 gap-3 @[28rem]/shipment-form:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <label className="min-w-0 space-y-1 text-sm">运单号<Input value={tracking} maxLength={64} onChange={(event) => setTracking(event.target.value)} /></label>
       <label className="min-w-0 space-y-1 text-sm">物流公司<NativeSelect value={carrier} onChange={(event) => setCarrier(event.target.value)}>
         <option value="">请选择</option><option value="ZTO">中通</option><option value="SF">顺丰</option><option value="OTHER">其他</option>
       </NativeSelect></label>
       {carrier === 'OTHER' ? <label className="col-span-full min-w-0 space-y-1 text-sm">物流公司名称<Input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label> : null}
-      <label className="col-span-full min-w-0 space-y-1 text-sm">面单照片（选填，可粘贴截图）<Input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} /></label>
+      {/* 原生文件框会按浏览器语言显示「Choose File / No file chosen」，改为站内按钮样式。 */}
+      <div className="col-span-full min-w-0 space-y-1 text-sm">
+        <p>面单照片（选填，可粘贴截图）</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className={cn(buttonVariants({ variant: 'outline' }), 'min-h-11 cursor-pointer has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50 has-[:focus-visible]:ring-3 has-[:focus-visible]:ring-ring')}>
+            选择图片
+            <input type="file" aria-label="选择面单照片" className="sr-only" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
+          </label>
+          <span className="text-xs text-muted-foreground">{photo ? '已选择 1 张图片' : '支持 JPG、PNG、WebP'}</span>
+        </div>
+      </div>
     </fieldset>
     {processing ? <p role="status">正在处理图片…</p> : null}
     {imageUrl ? <a href={imageUrl} target="_blank" rel="noreferrer" className="block" aria-label="查看面单照片">
@@ -102,15 +113,28 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
     {props.labels.length > 1 ? <Disclosure><DisclosureSummary className="cursor-pointer py-3 text-sm">历史面单照片（{props.labels.length - 1}）</DisclosureSummary><ul>{props.labels.slice(1).map((label) => <li key={label.id}><a className="block py-3 text-primary underline" target="_blank" rel="noreferrer" href={`/api/orders/${props.orderId}/shipments/${props.shipmentId}/labels/${label.id}`}>{label.createdAt}</a></li>)}</ul></Disclosure> : null}
     {message ? <p role={failed ? 'alert' : 'status'} className={failed ? 'text-sm text-destructive' : 'text-sm'}>{message}</p> : null}
     <div className="flex flex-col gap-2 @[28rem]/shipment-form:flex-row @[28rem]/shipment-form:flex-wrap">
-      <Button type="button" variant="outline" disabled={busy} onClick={() => submit(false)}>{pending ? '保存中…' : '保存物流资料'}</Button>
+      <Button type="button" variant="outline" disabled={busy} onClick={() => submit(false)}>{pending ? '正在保存…' : '保存物流资料'}</Button>
       {!props.shipped ? <ConfirmActionController level="L2" disabled={busy || !ready || !props.canConfirm}
         trigger={<Button type="button" disabled={busy || !ready || !props.canConfirm}>确认该地址已发货</Button>}
         onConfirm={() => submit(true)}>
         <ConfirmActionDialog action="确认该地址已发货" changes={[{ label: '运单号', old: props.trackingNo || '未填', new: tracking }]}
-          consequences={props.lastPending ? props.chargeable === false ? ['全部地址将标记已发货，工单自动结算；结算后不可再编辑，本单免收费'] : [`全部地址将标记已发货，工单自动结算，应收 ${props.amount} 元进入账单；结算后不可再编辑，尚未收款`] : ['该地址标记已发货，其他地址继续待发货']}
+          consequences={[
+            ...(props.autoCompletion?.length ? [`将按计划数量代师傅登记生产完成并计提成：${props.autoCompletion.join('、')}`] : []),
+            ...(props.lastPending ? props.chargeable === false ? ['全部地址将标记已发货，工单自动结算；结算后不可再编辑，本单免收费'] : [`全部地址将标记已发货，工单自动结算，应收 ${props.amount} 元进入账单；结算后不可再编辑，尚未收款`] : ['该地址标记已发货，其他地址继续待发货']),
+          ]}
           confirmText="确认发货" />
       </ConfirmActionController> : null}
     </div>
+  </>;
+  return <div className="@container/shipment-form space-y-4 border-t pt-4" onPaste={(event) => {
+    const file = [...event.clipboardData.items].find((item) => item.type.startsWith('image/'))?.getAsFile();
+    if (file && !busy) { event.preventDefault(); void choose(file); }
+  }}>
+    {foldable ? <Disclosure className="space-y-4">
+      <DisclosureSummary className="gap-2">登记物流资料<DisclosureIndicator /></DisclosureSummary>
+      {fields}
+    </Disclosure> : fields}
     {!props.shipped && !props.canConfirm && props.disabledReason ? <p className="text-xs text-muted-foreground">{props.disabledReason}</p> : null}
+    {!props.shipped && props.canConfirm && props.autoCompletion?.length ? <p className="text-xs text-muted-foreground">生产尚未登记完成；确认发货时将按计划数量代师傅登记并计提成。</p> : null}
   </div>;
 }

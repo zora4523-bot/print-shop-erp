@@ -25,7 +25,7 @@ export function OrderChangeWithdrawButton({ requestId }: { requestId: string }) 
     <form action={action} aria-busy={pending} className="mt-3 border-t pt-3">
       <input type="hidden" name="requestId" value={requestId} />
       <Button type="submit" size="sm" variant="outline" disabled={pending}>
-        {pending ? '撤回中…' : '撤回申请'}
+        {pending ? '正在撤回…' : '撤回申请'}
       </Button>
       {error ? (
         <p role="alert" className="mt-2 text-xs text-destructive">

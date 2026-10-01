@@ -24,6 +24,7 @@ import {
   orderListOrderBy,
   parseOrderListQuery,
   type OrderListQuery,
+  type OrderListSearchParams,
   type OrderListViewKey,
 } from './list-query';
 import { selectOrderCustomerFee } from './customer-fee';
@@ -36,6 +37,29 @@ export const SALES_ORDER_LIST_VIEWS = [
   'cancelled',
   'draft',
 ] as const satisfies readonly OrderListViewKey[];
+
+export type SalesOrderListQuery = OrderListQuery & { createdMonth?: string };
+
+/** Sales filters are explicit; hidden administrator parameters never affect this workspace. */
+export function parseSalesOrderListQuery(params: OrderListSearchParams) {
+  const parsed = parseOrderListQuery({
+    q: params.q,
+    view: params.view,
+    page: params.page,
+    pageSize: params.pageSize,
+    selected: params.selected,
+    scroll: params.scroll,
+  });
+  const rawMonth = Array.isArray(params.createdMonth) ? params.createdMonth[0] : params.createdMonth;
+  const createdMonth = validCreatedMonth(rawMonth);
+  if (rawMonth?.trim() && !createdMonth) parsed.issues.push('下单月份格式应为 YYYY-MM，请重新选择');
+  return { ...parsed, query: sanitizeSalesOrderListQuery({ ...parsed.query, createdMonth }) };
+}
+
+function validCreatedMonth(value: string | undefined): string | undefined {
+  const month = value?.trim();
+  return month && /^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/.test(month) ? month : undefined;
+}
 
 export type SalesOrderListView = (typeof SALES_ORDER_LIST_VIEWS)[number];
 
@@ -62,7 +86,10 @@ export type SalesOrderListRow = {
   totalAmount: string;
   promisedDate: string | null;
   dueAlert: { kind: 'overdue' | 'due-soon'; days: number } | null;
+  createdAt: string;
+  shippedAt: string | null;
   updatedAt: string;
+  bill?: { id: string; period: string; status: 'DRAFT' | 'CONFIRMED' | 'PAID' } | null;
   receiver: {
     name: string | null;
     phone: string | null;
@@ -71,7 +98,8 @@ export type SalesOrderListRow = {
   itemCount: number;
   totalQuantity: number;
   craftSummary: string;
-  thumbnail: { url: string; fileName: string } | null;
+  /** url 为 160px 缩略图（列表小图）；previewUrl 为原图（放大预览）。两者都按签名时间桶稳定。 */
+  thumbnail: { url: string; previewUrl: string; fileName: string } | null;
   items: Array<{
     id: string;
     sequence: number;
@@ -80,7 +108,7 @@ export type SalesOrderListRow = {
     specification: string | null;
     paper: string | null;
     crafts: string[];
-    thumbnail: { url: string; fileName: string } | null;
+    thumbnail: { url: string; previewUrl: string; fileName: string } | null;
   }>;
   feeLines: Array<{
     id: string;
@@ -102,6 +130,7 @@ export type SalesOrderListRow = {
     reviewRemark: string | null;
     reviewedAt: string;
   } | null;
+  shipments: Array<{ carrier: string; trackingNo: string }>;
   shipment: {
     carrier: string;
     trackingNo: string;
@@ -167,7 +196,11 @@ const salesOrderSelect = {
   confirmedFee: true,
   settledFee: true,
   promisedDate: true,
+  createdAt: true,
+  shippedAt: true,
   updatedAt: true,
+  agentMonthlyBillItem: { select: { bill: { select: { id: true, period: true, status: true, agentUserId: true } } } },
+  submitterId: true,
   receiverName: true,
   receiverPhone: true,
   receiverAddress: true,
@@ -236,8 +269,8 @@ type SalesOrderRecord = Prisma.OrderGetPayload<{
  * switches to the compact sales surface.
  */
 export function sanitizeSalesOrderListQuery(
-  query: OrderListQuery,
-): OrderListQuery {
+  query: SalesOrderListQuery,
+): SalesOrderListQuery {
   const view = SALES_ORDER_LIST_VIEWS.includes(query.view as SalesOrderListView)
     ? query.view
     : undefined;
@@ -249,6 +282,7 @@ export function sanitizeSalesOrderListQuery(
   }).query;
   return {
     ...normalized,
+    createdMonth: validCreatedMonth(query.createdMonth),
     selectedOrderId: query.selectedOrderId,
     scrollY: query.scrollY,
   };
@@ -260,7 +294,7 @@ function salesViewWhere(
 ): Prisma.OrderWhereInput | null {
   if (view === 'todo') return salesNeedsActionWhere(latestRejectedOrderIds);
   if (view === 'doing') return { status: { in: [...ACTIVE_SALES_STATUSES] } };
-  if (view === 'shipped') return { status: OrderStatus.SHIPPED };
+  if (view === 'shipped') return { status: { in: [OrderStatus.SHIPPED, ...FINISHED_SALES_STATUSES] } };
   if (view === 'done') {
     return {
       status: { in: [...FINISHED_SALES_STATUSES] },
@@ -273,13 +307,25 @@ function salesViewWhere(
 
 export function buildSalesOrderWhere(
   actor: { id: string; role: Role },
-  query: OrderListQuery,
+  query: SalesOrderListQuery,
   latestRejectedOrderIds: readonly string[] = [],
 ): Prisma.OrderWhereInput {
   if (actor.role !== Role.SALES) {
     throw new Error('销售工单列表只接受 SALES 角色');
   }
   const conditions: Prisma.OrderWhereInput[] = [getOrderScopeFilter(actor)];
+  const createdMonth = validCreatedMonth(query.createdMonth);
+  if (createdMonth) {
+    const year = Number(createdMonth.slice(0, 4));
+    const month = Number(createdMonth.slice(5));
+    const offset = 8 * 60 * 60 * 1000;
+    conditions.push({
+      createdAt: {
+        gte: new Date(Date.UTC(year, month - 1, 1) - offset),
+        lt: new Date(Date.UTC(year, month, 1) - offset),
+      },
+    });
+  }
   const q = query.filters.q?.trim();
   if (q) {
     const contains = { contains: q, mode: Prisma.QueryMode.insensitive };
@@ -341,7 +387,7 @@ export async function getSalesLatestRejectedOrderIds(actor: {
 
 export async function getSalesOrderListPageWindow(
   actor: { id: string; role: Role },
-  query: OrderListQuery,
+  query: SalesOrderListQuery,
   latestRejectedOrderIdsPromise: Promise<readonly string[]> =
     getSalesLatestRejectedOrderIds(actor),
 ): Promise<SalesOrderPageWindow> {
@@ -358,7 +404,7 @@ export async function getSalesOrderListPageWindow(
 
 export async function listSalesOrdersPage(
   actor: { id: string; role: Role },
-  query: OrderListQuery,
+  query: SalesOrderListQuery,
   windowPromise: Promise<SalesOrderPageWindow> =
     getSalesOrderListPageWindow(actor, query),
 ): Promise<PaginatedResult<SalesOrderListRow>> {
@@ -488,11 +534,14 @@ export async function getSalesOrderListSummary(
   now: Date = new Date(),
   latestRejectedOrderIdsPromise: Promise<readonly string[]> =
     getSalesLatestRejectedOrderIds(actor),
+  query?: SalesOrderListQuery,
 ): Promise<SalesOrderListSummary> {
   if (actor.role !== Role.SALES) {
     throw new Error('销售工单汇总只接受 SALES 角色');
   }
-  const scope = getOrderScopeFilter(actor);
+  const scope = query
+    ? buildSalesOrderWhere(actor, { ...sanitizeSalesOrderListQuery(query), view: undefined })
+    : getOrderScopeFilter(actor);
   const { start, end } = shanghaiMonthRange(now);
   const todoPromise = latestRejectedOrderIdsPromise.then(
     (latestRejectedOrderIds) =>
@@ -530,7 +579,7 @@ export async function getSalesOrderListSummary(
     all: [...counts.values()].reduce((sum, value) => sum + value, 0),
     todo,
     doing: count(...ACTIVE_SALES_STATUSES),
-    shipped: count(OrderStatus.SHIPPED),
+    shipped: count(OrderStatus.SHIPPED, ...FINISHED_SALES_STATUSES),
     done: count(...FINISHED_SALES_STATUSES),
     cancelled: count(OrderStatus.CANCELLED),
     draft: count(OrderStatus.DRAFT),
@@ -551,7 +600,7 @@ function mapSalesOrderRow(
   const pricingAttentionReason =
     row.status !== OrderStatus.DRAFT &&
     row.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION
-      ? '价格待管理员确认'
+      ? '价格待工厂确认'
       : null;
   const items = row.items.map((item) => {
     const design = item.designs[0];
@@ -567,7 +616,8 @@ function mapSalesOrderRow(
         .filter((name): name is string => Boolean(name)),
       thumbnail: design
         ? {
-            url: signDesignReadUrl(design.fileUrl),
+            url: signDesignReadUrl(design.fileUrl, process.env, { thumbnail: true }),
+            previewUrl: signDesignReadUrl(design.fileUrl, process.env),
             fileName: design.fileName,
           }
         : null,
@@ -591,7 +641,12 @@ function mapSalesOrderRow(
     totalAmount: selectOrderCustomerFee(row).amount,
     promisedDate: row.promisedDate?.toISOString().slice(0, 10) ?? null,
     dueAlert,
+    createdAt: row.createdAt.toISOString(),
+    shippedAt: row.shippedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
+    bill: row.agentMonthlyBillItem && row.agentMonthlyBillItem.bill.agentUserId === row.submitterId ? {
+      id: row.agentMonthlyBillItem.bill.id, period: row.agentMonthlyBillItem.bill.period, status: row.agentMonthlyBillItem.bill.status,
+    } : null,
     receiver: {
       name: row.receiverName,
       phone: row.receiverPhone,
@@ -623,6 +678,10 @@ function mapSalesOrderRow(
           ).toISOString(),
         }
       : null,
+    shipments: trackingShipments.map((shipment) => ({
+      carrier: carrierLabel(shipment.carrierCode, shipment.expressCode),
+      trackingNo: shipment.trackingNo!.trim(),
+    })),
     shipment: primaryShipment
       ? {
           carrier: carrierLabel(

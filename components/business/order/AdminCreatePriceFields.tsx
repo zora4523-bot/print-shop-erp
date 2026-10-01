@@ -47,7 +47,7 @@ export function AdminCreatePriceFields({
         <Button
           className="min-h-11"
           type="button"
-          variant={value ? 'outline' : 'default'}
+          variant={value ? 'outline' : 'selected'}
           aria-pressed={!value}
           onClick={() => onChange(undefined)}
         >
@@ -56,7 +56,7 @@ export function AdminCreatePriceFields({
         <Button
           className="min-h-11"
           type="button"
-          variant={value ? 'default' : 'outline'}
+          variant={value ? 'selected' : 'outline'}
           aria-pressed={Boolean(value)}
           onClick={() =>
             onChange(

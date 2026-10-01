@@ -37,7 +37,7 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
     unknown: rows.filter((row) => row.outcome === 'unknown').length,
     notAttempted: rows.filter((row) => row.outcome === 'not-attempted').length,
   };
-  const summary = `成功 ${counts.success} 张，业务跳过 ${counts.skipped} 张，结果未知 ${counts.unknown} 张，未执行 ${counts.notAttempted} 张${counts.excluded > 0 ? `，未纳入处理 ${counts.excluded} 张` : ''}`;
+  const summary = `成功 ${counts.success} 张，跳过 ${counts.skipped} 张，结果未知 ${counts.unknown} 张，未执行 ${counts.notAttempted} 张${counts.excluded > 0 ? `，未纳入处理 ${counts.excluded} 张` : ''}`;
 
   return (
     <BatchResultContext.Provider value={{
@@ -94,7 +94,7 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
                     <span className="text-xs font-normal text-muted-foreground">{row.label}</span>
                     {row.outcome === 'success' && (receipt.command === 'RELEASE_AND_CREATE_PRINT' || receipt.command === 'CREATE_PRINT') ? (
                       <a
-                        href={`/api/orders/${encodeURIComponent(row.order.id)}/pdf?view=inline`}
+                        href={`/print/orders/${encodeURIComponent(row.order.id)}?autoprint=1`}
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={`去打印工单 ${row.order.orderNo}`}

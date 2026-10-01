@@ -107,7 +107,7 @@ test('ADMIN smart-only configuration, legacy read-only history, routes and mock 
     return id;
   });
   await page.goto(`/owner/notifications/channels/${channelId}`);
-  await expect(page.getByText('已绑定群聊：')).toBeVisible();
+  await expect(page.getByRole('status', { name: '已绑定企业微信群', exact: true })).toBeVisible();
   await setCheckbox(page.getByRole('checkbox', { name: /^启用/ }), true);
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
@@ -121,7 +121,8 @@ test('ADMIN smart-only configuration, legacy read-only history, routes and mock 
   await expect(page.getByRole('status')).toContainText('设置已保存');
 
   await page.goto('/owner/notifications/rules/ORDER_SUBMITTED');
-  await expect(page.getByText('此事件固定路由到')).toBeVisible();
+  await expect(page.getByText('接收人：', { exact: false })).toContainText('工厂确认人');
+  await expect(page.getByRole('link', { name: '管理接收群', exact: true })).toHaveAttribute('href', '/owner/settings');
   await expect(page.getByRole('checkbox', { name: channelName })).toHaveCount(0);
   await setCheckbox(page.getByRole('checkbox', { name: '启用此规则' }), true);
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
@@ -153,7 +154,7 @@ test('ADMIN smart-only configuration, legacy read-only history, routes and mock 
   await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await expect(page).toHaveURL(/\/owner\/notifications($|\?)/);
   await row().getByRole('button', { name: '删除', exact: true }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: '删除', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '永久删除', exact: true }).click();
   await expect(row().getByRole('alert', { name: '删除失败', exact: true })).toContainText('历史推送记录');
   await expectNoNextErrorOverlay(page);
 });

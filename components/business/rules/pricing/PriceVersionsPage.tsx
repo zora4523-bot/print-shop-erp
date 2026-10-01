@@ -67,12 +67,10 @@ const GAP_PURPOSES = [
 const GAP_PURPOSE_META = {
   [CustomerPriceBookPurpose.PROCESSING]: {
     label: '加工费',
-    code: 'PROCESSING',
     editHref: customerPricingHref('processing'),
   },
   [CustomerPriceBookPurpose.LOGISTICS]: {
     label: '物流费',
-    code: 'LOGISTICS',
     editHref: customerPricingHref('logistics'),
   },
 } as const;
@@ -98,11 +96,6 @@ export default async function PriceVersionsPage({
     <div className="min-w-0 space-y-6">
       <RuleCenterPageHeader
         title={isGapWorkspace ? '缺口清单与版本历史' : '价格版本'}
-        subtitle={
-          isGapWorkspace
-            ? '把会阻断自动报价或发布的真实问题先处理；加工费与物流费保持独立版本流。'
-            : undefined
-        }
         actions={rawDraftId ? undefined : (
           <Link
             href={customerPricingHref(selectedPurpose === CustomerPriceBookPurpose.LOGISTICS ? 'logistics' : 'processing')}
@@ -283,10 +276,7 @@ function PurposeGapCard({
     <article className="min-w-0 rounded-xl border bg-background p-4">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-sans text-xs font-semibold tracking-[0.16em] text-muted-foreground">
-            {meta.code}
-          </p>
-          <h3 className="mt-1 font-semibold">{meta.label}独立版本流</h3>
+          <h3 className="mt-1 font-semibold">{meta.label}</h3>
         </div>
         <StatusBadge tone={status.tone} dot>
           {status.label}
@@ -318,7 +308,7 @@ function PurposeGapCard({
         <div className="mt-4 space-y-3">
           <dl className="grid grid-cols-2 gap-2 text-sm">
             <div className="rounded-lg border p-3">
-              <dt className="text-xs text-muted-foreground">真实草稿差异</dt>
+              <dt className="text-xs text-muted-foreground">本次变更</dt>
               <dd className="mt-1 font-sans font-semibold tabular-nums">
                 {preview.changedItemCount} 个收费项 ·{' '}
                 {preview.changedRuleCount} 条规则
@@ -350,13 +340,13 @@ function PurposeGapCard({
             </div>
           ) : (
             <p className="rounded-lg border border-success/30 bg-success/10 p-3 text-sm leading-6 text-success-foreground">
-              真实规则校验已通过；进入发布面板后仍需确认生效时间和发布说明。
+              校验通过
             </p>
           )}
         </div>
       ) : listedDraft ? (
         <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          草稿已列出，但完整预览数据不可用，当前不应发布。
+          费用预览未加载，暂不可发布，请重新打开此草稿。
         </p>
       ) : (
         <p className="mt-4 text-sm leading-6 text-muted-foreground">
@@ -427,7 +417,7 @@ function RulePriceGapWorkspace({
     >
       <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b bg-muted/30 px-4 py-4 sm:px-5">
         <div className="min-w-0">
-          <p className="font-sans text-xs font-semibold tracking-[0.16em] text-muted-foreground">
+          <p className="font-sans text-xs font-semibold tracking-widest text-muted-foreground">
             PENDING WORKSPACE
           </p>
           <h2
@@ -436,9 +426,6 @@ function RulePriceGapWorkspace({
           >
             待处理工作队列
           </h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-            这里只汇总真实草稿差异、发布校验和版本影响。加工费与物流费必须分别审阅、分别发布，版本号互不绑定。
-          </p>
         </div>
         <StatusBadge
           tone={
@@ -466,7 +453,7 @@ function RulePriceGapWorkspace({
           </p>
         </div>
         <div className="flex items-baseline justify-between gap-3 sm:block sm:border-l sm:pl-4">
-          <p className="text-xs text-muted-foreground">真实变更</p>
+          <p className="text-xs text-muted-foreground">本次变更</p>
           <p className="mt-1 font-sans text-lg font-semibold tabular-nums">
             {changedItemCount} 项 · {changedRuleCount} 条
           </p>

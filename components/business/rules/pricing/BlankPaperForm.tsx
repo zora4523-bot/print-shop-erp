@@ -10,8 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-const selectClass =
-  'h-11 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export function BlankPaperForm({
   priceBookId,
@@ -49,14 +48,14 @@ export function BlankPaperForm({
   );
   useEffect(() => {
     if (result?.status === 'success') {
+      // addBlankPaperAction revalidated this path; push alone renders it fresh.
       router.push('/owner/rules/customer-pricing?section=blank');
-      router.refresh();
     }
   }, [result, router]);
   return (
     <form
       action={action}
-      aria-label="新增纸张与规格价格"
+      aria-label="新建纸张与规格价格"
       aria-busy={pending}
       className="space-y-6 rounded-xl border bg-card p-5"
     >
@@ -96,10 +95,9 @@ export function BlankPaperForm({
         {mode === 'existing' ? (
           <div className="space-y-2">
             <Label htmlFor="paperId">纸张</Label>
-            <select
+            <NativeSelect
               id="paperId"
               name="paperId"
-              className={selectClass}
               required
               defaultValue=""
             >
@@ -111,7 +109,7 @@ export function BlankPaperForm({
                   {paper.name}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
@@ -139,7 +137,7 @@ export function BlankPaperForm({
           规格单价（元 / 个）
         </legend>
         <p className="text-sm text-muted-foreground">
-          单价最多四位小数；发布后正价可用于新单，0 或留空为未启用。
+          单价最多四位小数。
         </p>
         {BLANK_SPECIFICATIONS.map((spec) => (
           <div

@@ -9,7 +9,7 @@ import type { OrderCreationEditor } from '../order-creation-editor';
 import { localOrderFormDraftStorageKey, serializeLocalOrderFormDraft } from '../order-form-local-draft';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }) }));
-vi.mock('next/link', () => ({ default: (props: ComponentProps<'a'>) => <a {...props} /> }));
+vi.mock('next/link', () => ({ __esModule: true, default: (props: ComponentProps<'a'>) => <a {...props} /> }));
 vi.mock('next/image', () => ({ default: ({ alt }: { alt: string }) => <span>{alt}</span> }));
 vi.mock('@/actions/order', () => ({ createOrderAction: vi.fn(), submitOrderAction: vi.fn() }));
 vi.mock('@/actions/create-order-quote', () => ({
@@ -55,7 +55,7 @@ const orderName = () => page.getByRole('textbox', { name: '工单名称', exact:
 async function reopenWithStoredDraft(actor: Actor) {
   mount(actor);
   await expect.element(orderName()).toBeEnabled();
-  const values = { ...editor!.save().values, customName: DRAFT_NAME };
+  const values = { ...editor!.capture().values, customName: DRAFT_NAME };
   unmount();
   localStorage.clear();
   const externalSales = actor === 'external-sales';

@@ -35,15 +35,15 @@ const ADJUSTMENT_LABELS: Record<SalaryAdjustmentType, string> = {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const session = await getSession();
   if (!session || !hasPermission('salary:view:all', session.user.role)) {
-    return { title: '计件工资' };
+    return { title: '历史日薪档案' };
   }
 
   const { id } = await params;
   const salary = await getDailySalaryPageData(id);
   return {
     title: salary
-      ? `${salary.worker.displayName} ${formatDateShanghai(salary.date)} · 计件工资`
-      : '计件工资记录不存在',
+      ? `${salary.worker.displayName} ${formatDateShanghai(salary.date)} · 历史日薪档案`
+      : '历史日薪记录不存在',
   };
 }
 
@@ -59,20 +59,18 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
       <PageHeader
         title={`${salary.worker.displayName} · ${formatDateShanghai(salary.date)}`}
         subtitle="历史日薪明细"
+        back={{ href: '/owner/salary/daily', label: '返回历史日薪档案' }}
+        status={<PaymentStatusBadge isPaid={salary.isPaid} />}
         actions={
           <div className="flex gap-2">
-            <Link
+            <a
               href={`/api/salary/piecework/export?date=${salaryDateKey}&workerId=${salary.workerId}`}
               className={buttonVariants({ variant: 'outline' })}
+
+              download
             >
               导出 Excel
-            </Link>
-            <Link
-              href="/owner/salary/daily"
-              className={buttonVariants({ variant: 'ghost' })}
-            >
-              返回列表
-            </Link>
+            </a>
           </div>
         }
       />
@@ -94,12 +92,8 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
         </div>
       </section>
 
-      <section className="rounded-xl border bg-card p-5 shadow-sm">
+      {salary.adjustments.length > 0 ? <section className="rounded-xl border bg-card p-5 shadow-sm">
         <h2 className="font-semibold">历史人工调整</h2>
-        <p className="mb-4 text-xs text-muted-foreground">
-          仅展示旧账本已保存的奖金、扣款或差错修正；不再提供新增或改写入口。
-        </p>
-        {salary.adjustments.length > 0 ? (
           <ul className="divide-y border-t text-sm">
             {salary.adjustments.map((entry) => (
               <li key={entry.id} className="grid gap-2 py-3 sm:grid-cols-[100px_100px_1fr_220px]">
@@ -114,17 +108,11 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">无历史人工调整。</p>
-        )}
-      </section>
+      </section> : null}
 
       <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
         <div className="p-5">
           <h2 className="font-semibold">计件任务明细（{salary.items.length}）</h2>
-          <p className="text-xs text-muted-foreground">
-            金额来自任务完工时锁定的规则，后续改价不会篡改历史。
-          </p>
         </div>
         {salary.items.length === 0 ? (
           <p className="px-5 pb-5 text-sm text-muted-foreground">
@@ -137,8 +125,8 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
               <tr>
                 <th className="px-4 py-2 text-left">工单 / 款式</th>
                 <th className="px-4 py-2 text-left">工艺</th>
-                <th className="px-4 py-2 text-right">良品</th>
-                <th className="px-4 py-2 text-right">次品</th>
+                <th className="px-4 py-2 text-right">合格</th>
+                <th className="px-4 py-2 text-right">不良</th>
                 <th className="px-4 py-2 text-right">返工</th>
                 <th className="px-4 py-2 text-right">板数</th>
                 <th className="px-4 py-2 text-right">下数</th>

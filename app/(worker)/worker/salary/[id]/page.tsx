@@ -1,9 +1,9 @@
+import { PageHeader } from '@/components/ui-business';
 import { SettledProductionWages } from '@/components/business/salary/ProductionWageRecords';
 import { formatRate } from '@/lib/format/unit-price';
 import { reportWageLines } from '@/lib/salary/report-display';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { buttonVariants } from '@/components/ui/button';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import {
@@ -171,11 +171,12 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
 
   return (
     <div className="min-w-0 space-y-5">
-      <header className="worker-wrap-anywhere min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
-            {formatDateShanghai(salary.date)} 工资明细
-          </h1>
+      <PageHeader
+        size="worker"
+        className="worker-wrap-anywhere"
+        back={{ href: '/worker/salary?view=history', label: '返回历史日薪档案' }}
+        title={`${formatDateShanghai(salary.date)} 工资明细`}
+        status={<>
           <PaymentStatusBadge isPaid={salary.isPaid} />
           <SalaryFloorBadge
             piecework={salary.totalPieceworkAmount as Decimal.Value}
@@ -183,11 +184,9 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
           />
           <Badge variant="outline">上班 {attendance.workUnits} 天</Badge>
           <Badge variant="outline">请假 {attendance.leaveUnits} 天</Badge>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {MACHINE_TYPE_LABELS[salary.machineType]}
-        </p>
-      </header>
+        </>}
+        subtitle={MACHINE_TYPE_LABELS[salary.machineType]}
+      />
 
       <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
         <Money label="计件合计" value={salary.totalPieceworkAmount} />
@@ -242,7 +241,7 @@ export default async function WorkerSalaryDetailPage({ params }: PageProps) {
                     {item.orderItemName} · {item.craftName}
                   </p>
                   <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                    良品 {item.completedQty} · 次品 {item.defectQty} · 返工{' '}
+                    合格 {item.completedQty} · 不良 {item.defectQty} · 返工{' '}
                     {item.reworkQty} · 板 {item.boardCount} · 下{' '}
                     {item.pressCount}
                   </p>
@@ -292,24 +291,17 @@ function OperationSettlementDetail({
 }) {
   return (
     <div className="min-w-0 space-y-5">
-      <header className="worker-wrap-anywhere min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
-            {formatDateShanghai(settlement.workDate)} 工序计件明细
-          </h1>
-          <PaymentStatusBadge
-            isPaid={settlement.status === PieceworkSettlementStatus.PAID}
-          />
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          按报工和调整记录查看本人工资。
-        </p>
-        {settlement.paidAt ? (
-          <p className="mt-1 text-xs text-muted-foreground">
-            发放时间：{formatDateTimeShanghai(settlement.paidAt)}
-          </p>
-        ) : null}
-      </header>
+      <PageHeader
+        size="worker"
+        className="worker-wrap-anywhere"
+        back={{ href: '/worker/salary', label: '返回我的工资' }}
+        title={`${formatDateShanghai(settlement.workDate)} 工序计件明细`}
+        status={<PaymentStatusBadge isPaid={settlement.status === PieceworkSettlementStatus.PAID} />}
+        subtitle={<>
+          <span className="block">按报工和调整记录查看本人工资。</span>
+          {settlement.paidAt ? <span className="block">发放时间：{formatDateTimeShanghai(settlement.paidAt)}</span> : null}
+        </>}
+      />
 
       <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
         <Money label="报工金额" value={settlement.reportAmount} />
@@ -339,7 +331,7 @@ function OperationSettlementDetail({
                       : ''}
                   </p>
                   <p className="worker-wrap-anywhere mt-1 text-xs text-muted-foreground">
-                    合格 {String(report.reportedCompletedQty)} · 缺陷{' '}
+                    合格 {String(report.reportedCompletedQty)} · 不良{' '}
                     {String(report.defectQty)} · 返工 {String(report.reworkQty)}
                   </p>
                   {reportWageLines({ ...report, operationType: report.operation.operationType, chargeableQty: String(report.chargeableQty), rate: String(report.rate), amount: String(report.amount) }).map((line, index) => <p key={index} className="mt-1 text-sm">{line}</p>)}
@@ -358,13 +350,6 @@ function OperationSettlementDetail({
           ))}
         </ul>
       </section>
-
-      <Link
-        href="/worker/salary"
-        className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}
-      >
-        返回我的工资
-      </Link>
     </div>
   );
 }
@@ -383,22 +368,17 @@ function HourlySalaryDetail({
 
   return (
     <div className="min-w-0 space-y-5">
-      <header className="worker-wrap-anywhere min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h1 className="worker-wrap-anywhere min-w-0 text-lg font-semibold">
-            {payroll.month} 工资明细
-          </h1>
-          <PaymentStatusBadge isPaid={payroll.isPaid} />
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'}
-        </p>
-        {payroll.isPaid && payroll.paidAt ? (
-          <p className="mt-1 text-xs text-muted-foreground">
-            发放时间：{formatDateTimeShanghai(payroll.paidAt)}
-          </p>
-        ) : null}
-      </header>
+      <PageHeader
+        size="worker"
+        className="worker-wrap-anywhere"
+        back={{ href: '/worker/salary?view=history', label: '返回历史打包时薪档案' }}
+        title={`${payroll.month} 工资明细`}
+        status={<PaymentStatusBadge isPaid={payroll.isPaid} />}
+        subtitle={<>
+          <span className="block">{workerType ? WORKER_TYPE_LABELS[workerType] : '历史岗位未知'}</span>
+          {payroll.isPaid && payroll.paidAt ? <span className="block">发放时间：{formatDateTimeShanghai(payroll.paidAt)}</span> : null}
+        </>}
+      />
 
       <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
         <Metric label="正常工时" value={`${String(payroll.totalWorkHours)} 小时`} />
@@ -443,13 +423,6 @@ function HourlySalaryDetail({
           </ul>
         )}
       </section>
-
-      <Link
-        href="/worker/salary"
-        className={buttonVariants({ variant: 'outline', className: 'min-h-11' })}
-      >
-        返回我的工资
-      </Link>
     </div>
   );
 }

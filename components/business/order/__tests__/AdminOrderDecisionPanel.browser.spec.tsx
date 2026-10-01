@@ -108,7 +108,10 @@ describe('admin order decisions require review before mutation', () => {
     await expect.element(dialog).toBeVisible();
     await expect.element(dialog.getByText('核实已产数量 100 个，最终结算金额 ¥ 120.00。', { exact: true })).toBeVisible();
     expect(actions.review).not.toHaveBeenCalled();
-    await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    // 危险裁决：确认层确认按钮走 danger 配色，关闭按钮写清后果而不是「取消」（§8.2）。
+    expect(dialog.getByRole('button', { name: '确认取消并结算工单', exact: true }).element().className).toContain('text-destructive');
+    await expect.element(dialog.getByRole('button', { name: '取消', exact: true })).not.toBeInTheDocument();
+    await dialog.getByRole('button', { name: '保留工单', exact: true }).click();
     await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
     expect(actions.review).not.toHaveBeenCalled();
     await submit.click();
@@ -158,7 +161,7 @@ describe('admin order decisions require review before mutation', () => {
     await expect.element(page.getByRole('spinbutton', { name: '已产数量' })).toBeDisabled();
     await expect.element(page.getByRole('button', { name: '计算参考价', exact: true })).toBeDisabled();
     await expect.element(page.getByRole('textbox', { name: '裁决说明' })).toBeDisabled();
-    await expect.element(page.getByRole('button', { name: '提交中…', exact: true })).toBeDisabled();
+    await expect.element(page.getByRole('button', { name: '正在提交…', exact: true })).toBeDisabled();
 
     const updated = cancellationOrder();
     updated.workOrderVersion += 1;
@@ -335,7 +338,7 @@ function baseOrder(): AdminOrderWorkspaceRow {
       quoteToken: `create-order-quote-v2:${'a'.repeat(64)}`, hasVersionDiff: false,
     },
     priceComparisonError: null, confirmationPreflight: { ok: true, issues: [] },
-    capabilities: { confirm: false, reject: false, hold: false, resume: false, release: false, ship: false, settle: false, createPrint: false, markPrinted: false, reviewChange: false },
+    capabilities: { confirm: false, reject: false, hold: false, resume: false, release: false, ship: false, settle: false, createPrint: false, markPrinted: false, reviewChange: false, completeProduction: false },
     billing: null, pendingChangeRequest: null, printPending: false, pendingPrintJobId: null, trackingNo: null,
     progress: { orderTotal: '1000', foilingProgress: '0', packingProgress: '0', foilingOverLimit: false, packingOverLimit: false, packingAhead: false, stagnant: false, stagnationDays: 0, firstClaimedAt: null },
     logs: [],

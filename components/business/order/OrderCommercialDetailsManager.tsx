@@ -11,9 +11,11 @@ import {
 } from '@/actions/order';
 import type { OrderCommercialDetailMutationResult } from '@/actions/order.types';
 import { Badge } from '@/components/ui/badge';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { OrderEditorAuxiliaryContext, useOrderEditorAuxiliary } from './use-order-editor-auxiliary';
 import { CommercialFeeRecoveryNotice, useCommercialFeeRecovery, type CommercialFeeRecovery } from './use-commercial-fee-recovery';
@@ -146,16 +148,15 @@ function ManualChargeEditor({
   return (
     <div className="@container/fee-row min-w-0 space-y-3 py-5 first:pt-0 last:pb-0">
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium">
-          {charge ? charge.category.name : '新增订单级费用'}
-        </p>
-        {charge ? (
+      {/* 新增表单的标题由外层折叠摘要「添加整单费用」承担，不再重复。 */}
+      {charge ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium">{charge.category.name}</p>
           <Badge variant={removed ? 'outline' : 'secondary'}>
             {removed ? '已移除（保留历史）' : '管理员已确认'}
           </Badge>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {removed ? (
         <dl className="grid gap-2 text-xs sm:grid-cols-2">
@@ -173,8 +174,8 @@ function ManualChargeEditor({
           <div className="grid min-w-0 gap-3 @min-[400px]/fee-row:grid-cols-2">
             <label className="space-y-1 text-xs">
               <span>费用类型</span>
-              <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              <NativeSelect
+                className="w-full"
                 value={categoryCode}
                 onChange={(event) =>
                   setCategoryCode(event.target.value as ManualChargeCode)
@@ -185,7 +186,7 @@ function ManualChargeEditor({
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label className="space-y-1 text-xs">
               <span>
@@ -199,7 +200,7 @@ function ManualChargeEditor({
                 inputMode="decimal"
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}
-                aria-label="订单级费用金额"
+                aria-label="整单费用金额"
               />
             </label>
           </div>
@@ -265,7 +266,7 @@ function ManualChargeEditor({
               )
             }
           >
-            {savePending ? '保存中…' : charge ? '保存修改' : '添加费用'}
+            {savePending ? '正在保存…' : charge ? '保存修改' : '添加费用'}
           </Button>
           {charge ? (
             <div className="space-y-2 pt-2">
@@ -291,7 +292,7 @@ function ManualChargeEditor({
                         variant="outline"
                         disabled={!removeReason.trim() || disabled}
                       >
-                        {deletePending ? '移除中…' : '移除并保留历史'}
+                        {deletePending ? '正在移除…' : '移除并保留历史'}
                       </Button>
                     }
                     onConfirm={() =>
@@ -304,10 +305,10 @@ function ManualChargeEditor({
                         }),
                       )
                     }>
-                    <ConfirmActionDialog action="确认移除这项对客费用" changes={[]} consequences={[
+                    <ConfirmActionDialog action="移除这项对客费用" changes={[]} consequences={[
                       '对客应收总额将立即重算',
                       '原金额、确认人和移除原因继续保留',
-                    ]} confirmText="确认移除" />
+                    ]} confirmText="移除对客费用" />
                   </ConfirmActionController>
             </div>
           ) : null}
@@ -372,7 +373,6 @@ function PlateDetailEditor({
           </span>
           <Badge variant="outline">已移除（保留历史）</Badge>
         </div>
-        <p className="mt-1">移除操作人和原因已记录在工单价格修订与日志中。</p>
       </div>
     );
   }
@@ -389,7 +389,7 @@ function PlateDetailEditor({
       <fieldset disabled={disabled} className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium">
-          {detail ? `制版明细 #${detail.sequence}` : '新增制版明细'}
+          {detail ? `制版明细 #${detail.sequence}` : null}
         </p>
         {Number.isFinite(calculatedAmount) ? (
           <span className="font-sans text-xs tabular-nums">
@@ -455,7 +455,7 @@ function PlateDetailEditor({
           )
         }
       >
-        {savePending ? '保存中…' : detail ? '保存制版修改' : '添加制版明细'}
+        {savePending ? '正在保存…' : detail ? '保存制版修改' : '添加制版明细'}
       </Button>
       {detail ? (
         <div className="space-y-2 pt-2">
@@ -481,7 +481,7 @@ function PlateDetailEditor({
                   variant="outline"
                   disabled={!removeReason.trim() || disabled}
                 >
-                  {deletePending ? '移除中…' : '移除并保留历史'}
+                  {deletePending ? '正在移除…' : '移除并保留历史'}
                 </Button>
               }
               onConfirm={() =>
@@ -495,10 +495,10 @@ function PlateDetailEditor({
                   }),
                 )
               }>
-              <ConfirmActionDialog action="确认移除这条制版明细" changes={[]} consequences={[
+              <ConfirmActionDialog action="移除这条制版明细" changes={[]} consequences={[
                 '对应制版费归零并重算工单总额',
                 '制版明细保留为已移除历史记录',
-              ]} confirmText="确认移除" />
+              ]} confirmText="移除制版明细" />
             </ConfirmActionController>
         </div>
       ) : null}
@@ -527,6 +527,7 @@ export function OrderCommercialDetailsManager({
   const recovery = useCommercialFeeRecovery();
   useOrderEditorAuxiliary({ dirty: recovery.hasUnknownResult, pending: recovery.isPending });
   const scope = useContext(OrderEditorAuxiliaryContext);
+  const plateItems = items.filter((item) => item.independentPlateEligible || item.plateDetails.length > 0);
   const hasActiveEditor = scope?.mainBlocked || Object.values(scope?.entries ?? {}).some((entry) => entry.dirty || entry.pending);
   return (
     <section id="commercial-fees" aria-label="制版明细与其他费用" className={cn(
@@ -538,7 +539,7 @@ export function OrderCommercialDetailsManager({
       {!recovery.hasUnknownResult && hasActiveEditor ? <p className="text-xs text-muted-foreground">请先保存或还原当前输入，再编辑其他工单资料或费用。</p> : null}
 
       <div className="grid min-w-0 gap-4 @min-[640px]/fees:grid-cols-[136px_minmax(0,1fr)] @min-[640px]/fees:gap-6">
-        <Subheading className="text-sm font-semibold">订单级其他费用</Subheading>
+        <Subheading className="text-sm font-semibold">整单其他费用</Subheading>
         <div className="min-w-0 divide-y">
           {manualCharges.map((charge) => (
             <ManualChargeEditor
@@ -549,21 +550,25 @@ export function OrderCommercialDetailsManager({
               charge={charge}
             />
           ))}
-          <ManualChargeEditor
-            key={`new-manual-${priceRevision}`}
-            recovery={recovery}
-            orderId={orderId}
-            priceRevision={priceRevision}
-            charge={null}
-          />
+          {/* 业主 2026-10-01：缩短详情页。新增表单默认收起，仍挂载在 details 内，未提交输入不丢。 */}
+          <Disclosure className="min-w-0 py-3 first:pt-0 last:pb-0">
+            <DisclosureSummary className="gap-2">添加整单费用<DisclosureIndicator /></DisclosureSummary>
+            <ManualChargeEditor
+              key={`new-manual-${priceRevision}`}
+              recovery={recovery}
+              orderId={orderId}
+              priceRevision={priceRevision}
+              charge={null}
+            />
+          </Disclosure>
         </div>
       </div>
 
-      <div className="grid min-w-0 gap-4 border-t pt-6 @min-[640px]/fees:grid-cols-[136px_minmax(0,1fr)] @min-[640px]/fees:gap-6">
+      {!allowPlateDetailMaintenance || plateItems.length > 0 ? <div className="grid min-w-0 gap-4 border-t pt-6 @min-[640px]/fees:grid-cols-[136px_minmax(0,1fr)] @min-[640px]/fees:gap-6">
         <Subheading className="text-sm font-semibold">按款式制版明细</Subheading>
         {allowPlateDetailMaintenance ? (
           <ol className="min-w-0 divide-y">
-            {items.map((item) => (
+            {plateItems.map((item) => (
               <li key={item.id} className="min-w-0 space-y-4 py-6 first:pt-0 last:pb-0">
                 <ItemHeading className="break-words text-sm font-medium [overflow-wrap:anywhere]">
                   #{item.sequence} · {item.name}
@@ -580,29 +585,29 @@ export function OrderCommercialDetailsManager({
                     />
                   ))}
                   {item.independentPlateEligible ? (
-                    <PlateDetailEditor
-                      key={`new-plate-${item.id}-${priceRevision}`}
-                      recovery={recovery}
-                      orderId={orderId}
-                      orderItemId={item.id}
-                      priceRevision={priceRevision}
-                      detail={null}
-                    />
-                  ) : (
-                    <p className="py-5 text-xs text-muted-foreground first:pt-0 last:pb-0">
-                      该款式没有独立制版费：无烫金款不能录入；彩印烫金已包含在整款价中。
-                    </p>
-                  )}
+                    <Disclosure className="min-w-0 py-3 first:pt-0 last:pb-0">
+                      <DisclosureSummary className="gap-2 text-xs">添加制版明细<DisclosureIndicator /></DisclosureSummary>
+                      <PlateDetailEditor
+                        key={`new-plate-${item.id}-${priceRevision}`}
+                        recovery={recovery}
+                        orderId={orderId}
+                        orderItemId={item.id}
+                        priceRevision={priceRevision}
+                        detail={null}
+                      />
+                    </Disclosure>
+                  ) : null}
                 </div>
               </li>
             ))}
           </ol>
         ) : (
           <p className="text-xs text-muted-foreground">
-            当前价格待管理员确认，请在上方“工厂核价确认”中直接填写制烫金版费；确认后才能维护逐款明细。
+            {/* 不写「上方“工厂核价确认”」：物流待核对时页面没有这张表，桌面端它也在右侧而非上方。 */}
+            工单价格确认后才能维护逐款制版明细；核价时可直接填写制烫金版费。
           </p>
         )}
-      </div>
+      </div> : null}
     </section>
   );
 }

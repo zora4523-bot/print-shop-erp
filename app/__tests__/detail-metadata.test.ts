@@ -37,6 +37,7 @@ vi.mock('@/lib/worker-portal', () => ({
   getWorkerPieceworkSettlementDetail: getWorkerPieceworkSettlementMock,
   getWorkerHourlyPayrollDetail: getWorkerHourlySalaryMock,
 }));
+vi.mock('@/components/business/production/WorkerProductionJobs', () => ({ WorkerProductionJobs: () => null }));
 vi.mock('@/lib/attendance', () => ({
   getAttendanceSummaries: vi.fn(),
 }));
@@ -77,7 +78,7 @@ describe('missing detail-page metadata', () => {
       generateDailySalaryMetadata({
         params: Promise.resolve({ id: 'daily-private' }),
       }),
-    ).resolves.toEqual({ title: '计件工资' });
+    ).resolves.toEqual({ title: '历史日薪档案' });
     await expect(
       generateWorkerOrderMetadata({
         params: Promise.resolve({ id: 'order-private' }),
@@ -102,7 +103,7 @@ describe('missing detail-page metadata', () => {
       generateDailySalaryMetadata({
         params: Promise.resolve({ id: 'daily-private' }),
       }),
-    ).resolves.toEqual({ title: '计件工资' });
+    ).resolves.toEqual({ title: '历史日薪档案' });
     expect(getDailySalaryMock).not.toHaveBeenCalled();
   });
 
@@ -117,7 +118,7 @@ describe('missing detail-page metadata', () => {
       generateDailySalaryMetadata({
         params: Promise.resolve({ id: 'daily-1' }),
       }),
-    ).resolves.toEqual({ title: '张师傅 2026/08/24 · 计件工资' });
+    ).resolves.toEqual({ title: '张师傅 2026/08/24 · 历史日薪档案' });
     expect(getDailySalaryMock).toHaveBeenCalledWith('daily-1');
 
     getDailySalaryMock.mockResolvedValueOnce(null);
@@ -125,7 +126,7 @@ describe('missing detail-page metadata', () => {
       generateDailySalaryMetadata({
         params: Promise.resolve({ id: 'daily-missing' }),
       }),
-    ).resolves.toEqual({ title: '计件工资记录不存在' });
+    ).resolves.toEqual({ title: '历史日薪记录不存在' });
   });
 
   it('uses the same ownership-scoped worker-order read as the page', async () => {

@@ -59,7 +59,7 @@ describe('EditOrderForm 字段错误的 aria 连线', () => {
       const html = renderToStaticMarkup(<EditOrderForm orderId="order-1" expectedEditVersion={7} fieldset="FULL" initial={initial}
         externalSalesAssociation={{ current: { id: 'sales-1', displayName: '渠道张先生', username: 'sales-one' }, options: [], blockedReason: null }} />);
       expect(html).toMatch(/id="externalSalesUserId"[^>]*aria-invalid="true"/);
-      expect(html).toContain('aria-describedby="external-sales-hint external-sales-error"');
+      expect(html).toContain('aria-describedby="external-sales-error"');
       expect(html).toContain('id="external-sales-error"');
       expect(html).not.toContain('name="customerPartyId"');
     } finally {

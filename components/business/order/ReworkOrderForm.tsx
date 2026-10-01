@@ -14,6 +14,8 @@ import { createReworkOrderAction } from '@/actions/order';
 import type { CreateReworkOrderMutationResult } from '@/actions/order.types';
 import { ReworkCause } from '@/generated/prisma/enums';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { NativeSelect } from '@/components/ui/native-select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
@@ -160,29 +162,29 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-sm">
           <span className="font-medium">重做原因类型</span>
-          <select
+          <NativeSelect
             value={cause}
             disabled={pending}
             onChange={(event) => setCause(event.target.value as ReworkCause)}
-            className="min-h-11 w-full rounded-md border bg-background px-3 py-2"
+            className="w-full"
           >
             {Object.entries(REWORK_CAUSE_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="space-y-1 text-sm">
           <span className="font-medium">详细原因</span>
-          <textarea
+          <Textarea
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             rows={2}
             maxLength={500}
             required
             disabled={pending}
-            className="w-full rounded-md border bg-background px-3 py-2"
+            className="w-full"
             placeholder="例如：运输途中受潮，重做第 1 款 500 个"
           />
         </label>
@@ -200,8 +202,9 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
             const selected = selectedItems.has(item.id);
             return (
               <li key={item.id} className="min-w-0 rounded-lg border p-3">
-                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+                <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-1 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
                   <Checkbox
+                    className="-ml-3"
                     checked={selected}
                     disabled={pending}
                     aria-label={`选择重做款式 ${item.sequence}：${item.name}`}
@@ -249,7 +252,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                           }
                         />
                         <span className="block text-xs text-muted-foreground">
-                          该值只用于原单缺失包装事实的这一款，不会覆盖已有包装组。
+                          仅补填本款每袋数量。
                         </span>
                       </label>
                     ) : null}
@@ -261,7 +264,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                         {item.crafts.map((craft) => (
                           <label
                             key={craft.id}
-                            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60"
+                            className="flex min-h-11 cursor-pointer items-center gap-1 rounded-md border pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground"
                           >
                             <Checkbox
                               checked={
@@ -307,13 +310,13 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button ref={submitButtonRef} type="submit" disabled={pending || !canSubmit}>
-          {pending ? '创建中…' : `创建重做单（${selectedCount} 款）`}
+          {pending ? '正在创建…' : `创建重做单（${selectedCount} 款）`}
         </Button>
         <ConfirmActionController level="L2" focusReturnRef={submitButtonRef} open={confirmOpen} onOpenChange={setConfirmOpen} disabled={pending || !canSubmit} onConfirm={submitRework}>
           <ConfirmActionDialog action="创建重做单"
             changes={items.filter((item) => selectedItems.has(item.id)).map((item) => ({ label: `第 ${item.sequence} 款重做数量`, old: '未创建', new: `${quantities[item.id]} 个` }))}
             consequences={['创建关联重做工单，不新增客户应收，生产任务正常记录师傅工资。', '原工单状态、应收账单和历史工资保持不变。']}
-            confirmText="确认创建" />
+            confirmText="创建重做单" />
         </ConfirmActionController>
       </div>
     </form>

@@ -59,7 +59,7 @@ function choiceType(choice: RowChoice): [PackagingType, PackagingBoxType] {
 const ROW_GRID = '@min-[640px]:grid-cols-[minmax(0,1fr)_5.5rem_11rem_9rem]';
 // Narrow containers show a caption per cell; wide ones rely on the header row. The
 // accessible label stays a plain sr-only <label> (the clipping gate exempts only that).
-const CELL_CAPTION = 'mb-1.5 block text-xs font-bold tracking-[0.16em] text-muted-foreground @min-[640px]:hidden';
+const CELL_CAPTION = 'mb-1.5 block text-xs font-bold tracking-widest text-muted-foreground @min-[640px]:hidden';
 
 function CellLabel({ htmlFor, children }: { htmlFor: string; children: string }) {
   return (

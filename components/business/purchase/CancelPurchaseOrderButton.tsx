@@ -77,12 +77,13 @@ export function CancelPurchaseOrderButton({
           </Button>
         }
         formId={formId}
+        cancelLabel="保留采购单"
         disabled={pending}>
         <ConfirmActionDialog action={`取消采购单 ${purchaseNo}？`} changes={[]} consequences={purchaseOrderCancelImpactItems({
           purchaseNo,
           supplierName,
           items,
-        })} confirmText="取消采购单" />
+        })} confirmText="取消采购单" danger />
       </ConfirmActionController>
       {error ? (
         <ActionNotice

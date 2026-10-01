@@ -8,7 +8,8 @@ import { buildPrintHtml } from '@/lib/order/print-html';
 import { getSetting } from '@/lib/settings';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
-import { readPdfArtifact, writePdfArtifact, cleanupOldPdfArtifacts } from '@/lib/pdf/artifacts';
+import { readPdfArtifact, writePdfArtifact, cleanupOldPdfArtifacts, PdfArtifactStorageError } from '@/lib/pdf/artifacts';
+import { isPdfInfrastructureFailure } from '@/lib/pdf/capability';
 import { databaseNow } from '@/lib/background-jobs/clock';
 import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from '@/lib/background-jobs/heartbeat-policy';
 import { enqueueBackgroundJob, BackgroundJobLeaseLostError } from '@/lib/background-jobs/repository';
@@ -131,7 +132,9 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
         await loadCurrent(payload, index);
         job.signal?.throwIfAborted();
         await job.assertLease?.();
-        await writePdfArtifact(cacheName, pdf);
+        // Storage failures are infrastructure: classify them so the job is retried (§15.4).
+        try { await writePdfArtifact(cacheName, pdf); }
+        catch { throw new PdfArtifactStorageError(); }
       }
       bytes += pdf.length;
       if (bytes > BATCH_PRINT_MAX_BYTES) {
@@ -144,6 +147,9 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
       await job.assertLease?.();
       if (error instanceof BatchPrintSelectionError) return { completed: index, issues: error.issues };
       if (error instanceof BatchPrintAccessError || error instanceof BackgroundJobLeaseLostError) throw error;
+      // Infrastructure failures are not the order's fault: rethrow so the worker
+      // invalidates PDF capability and the durable job retries (CLAUDE.md §15.4).
+      if (isPdfInfrastructureFailure(error)) throw error;
       return { completed: index, issues: [{ position: index + 1, message: error instanceof Error && error.name === 'PrintArtworkUnavailableError'
         ? '图稿加载失败，请检查图稿后重试' : '工单生成失败，请检查打印内容后重试' }] };
     }
@@ -158,7 +164,8 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
   const pdf = Buffer.from(await merged.save());
   job.signal?.throwIfAborted();
   await job.assertLease?.();
-  await writePdfArtifact(artifactName, pdf);
+  try { await writePdfArtifact(artifactName, pdf); }
+  catch { throw new PdfArtifactStorageError(); }
   await job.assertLease?.();
   await cleanupOldPdfArtifacts();
   return { completed: payload.orders.length, issues: [], artifactName };
@@ -181,8 +188,12 @@ export async function batchPrintStatus(actorId: string, jobId: string): Promise<
   if (result.issues.length || job.status === 'DEAD' || job.status === 'CANCELLED') return { ...base, status: 'failed' };
   if (job.status === 'SUCCEEDED') return { ...base, status: result.artifactName ? 'ready' : 'failed' };
   const at = await databaseNow();
-  const worker = await db.backgroundWorkerHeartbeat.findFirst({
-    where: { queue: BackgroundJobQueue.HEAVY, lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
+  // Same capability rule as single-order PDFs: a live HEAVY worker that cannot
+  // render (pdfReady=false) or runs another version will not claim this job.
+  // A RUNNING job is already owned by a worker.
+  const worker = job.status === 'RUNNING' ? true : await db.backgroundWorkerHeartbeat.findFirst({
+    where: { queue: BackgroundJobQueue.HEAVY, pdfReady: true, version: process.env.APP_VERSION || 'dev',
+      lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
     select: { workerId: true },
   });
   return { ...base, status: worker ? 'pending' : 'unavailable',

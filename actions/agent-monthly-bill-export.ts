@@ -5,6 +5,10 @@ import { AgentMonthlyBillStatus } from '@/generated/prisma/enums';
 import { requirePermission } from '@/lib/auth/permissions';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import {
+  AgentMonthlyBillExportActorInvalidError,
+  AgentMonthlyBillExportExpiredError,
+  AgentMonthlyBillExportNotFoundError,
+  AgentMonthlyBillExportNotPendingError,
   InvalidAgentMonthlyBillExportRequestError,
   processAgentMonthlyBillExportInline,
   requestAgentMonthlyBillExport,
@@ -69,8 +73,30 @@ export async function requestAgentMonthlyBillExportAction(
     if (error instanceof InvalidAgentMonthlyBillExportRequestError) {
       return { status: 'invalid', message: error.message };
     }
-    throw error;
+    // 内联处理失败时导出记录已落为 FAILED，先让记录列表失效再决定如何返回。
+    revalidatePath('/owner/agent-bills');
+    const message = knownFailureMessage(error);
+    // 未知错误（数据库、存储等）必须继续抛出，交给错误边界与 Sentry（CLAUDE.md §15.3）。
+    if (!message) throw error;
+    return { status: 'error', message };
   }
+}
+
+/** Expected, user-recoverable failures of request/inline processing. */
+function knownFailureMessage(error: unknown): string | null {
+  if (error instanceof AgentMonthlyBillExportExpiredError) {
+    return '这次导出请求已过期，请重新导出。';
+  }
+  if (error instanceof AgentMonthlyBillExportNotPendingError) {
+    return '这次导出已在处理，请刷新导出记录查看结果。';
+  }
+  if (error instanceof AgentMonthlyBillExportNotFoundError) {
+    return '这次导出请求已失效，请刷新后重新导出。';
+  }
+  if (error instanceof AgentMonthlyBillExportActorInvalidError) {
+    return '当前账号已无权导出月账单，请重新登录后重试。';
+  }
+  return null;
 }
 
 function stringEntry(value: FormDataEntryValue | null): string {

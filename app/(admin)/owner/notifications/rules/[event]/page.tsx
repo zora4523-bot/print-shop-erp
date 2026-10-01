@@ -1,3 +1,5 @@
+import { PageHeader } from '@/components/ui-business';
+import { FormPage } from '@/app/_components/FormPage';
 import { notFound } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { RuleForm } from '@/components/business/notification/RuleForm';
@@ -11,7 +13,6 @@ import {
   NOTIFICATION_PAYLOAD_FIELDS,
   RETIRED_NOTIFICATION_PAYLOAD_FIELDS,
 } from '@/lib/notification/payload-fields';
-import { managementNotificationRoleForEvent } from '@/lib/notification/events';
 
 export const metadata = { title: '编辑事件规则 · 推送配置' };
 
@@ -46,18 +47,13 @@ export default async function EditRulePage({
   ).filter((field) => !RETIRED_NOTIFICATION_PAYLOAD_FIELDS.has(field));
 
   const action = updateRuleAction.bind(null, event);
-  const managementRole = managementNotificationRoleForEvent(event);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">编辑事件规则</h1>
-        <p className="text-sm text-muted-foreground">
-          {managementRole
-            ? '模板和事件开关在此配置；接收群由系统设置中的固定角色路由决定。'
-            : '模板支持 Markdown 和列出的占位符；至少选择一个群并启用后才会推送。'}
-        </p>
-      </div>
+    <FormPage>
+      <PageHeader
+        title="编辑事件规则"
+        back={{ href: '/owner/notifications', label: '返回推送配置' }}
+      />
       <RuleForm
         eventType={event}
         initial={{
@@ -74,6 +70,6 @@ export default async function EditRulePage({
         payloadFields={payloadFields}
         action={action}
       />
-    </div>
+    </FormPage>
   );
 }

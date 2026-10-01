@@ -1,12 +1,11 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { confirmHistoricalBlankPriceAction } from '@/actions/historical-blank-price';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
-import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
+import { ConfirmActionController, ConfirmActionDialog, DisabledReason } from '@/components/ui-business';
 
 type Props = {
   orderId: string;
@@ -17,12 +16,11 @@ type Props = {
 };
 
 export function HistoricalBlankPriceEditor(props: Props) {
-  const router = useRouter();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   return <Disclosure className="space-y-3 border-t pt-3">
-    <DisclosureSummary className="min-h-11 cursor-pointer py-3 text-sm font-medium">历史材料单价</DisclosureSummary>
+    <DisclosureSummary className="min-h-11 cursor-pointer gap-2 py-3 text-sm font-medium">历史材料单价<DisclosureIndicator /></DisclosureSummary>
     {message ? <p role="status" className="text-sm">{message}</p> : null}
     {props.items.map((item) => {
       const value = drafts[item.id] ?? item.unitPrice ?? '';
@@ -32,20 +30,21 @@ export function HistoricalBlankPriceEditor(props: Props) {
           <Input inputMode="decimal" value={value} placeholder="待核价" disabled={pending}
             onChange={(event) => setDrafts((previous) => ({ ...previous, [item.id]: event.target.value }))} />
         </label>
-        <ConfirmActionController level="L3" reasonLabel="定价依据" disabled={pending || !value.trim()}
+        {!value.trim() && !pending ? <DisabledReason cause="prerequisite" reason="先填写材料单价。">
+          <Button variant="outline" disabled>确认材料单价</Button>
+        </DisabledReason> : <ConfirmActionController level="L3" reasonLabel="定价依据" disabled={pending}
           trigger={<Button variant="outline">确认材料单价</Button>}
           onConfirm={(reason) => startTransition(async () => {
             const result = await confirmHistoricalBlankPriceAction({ orderId: props.orderId, itemId: item.id,
               expectedOrderRevision: props.orderRevision, expectedPriceRevision: props.priceRevision,
               unitPrice: value, reason });
             setMessage(result.status === 'success' ? '材料单价已确认' : result.message);
-            if (result.status === 'success') router.refresh();
           })}>
           <ConfirmActionDialog action="确认材料单价"
             changes={[{ label: item.label, old: item.unitPrice ? `${item.unitPrice} 元 / 个` : '待核价', new: `${value} 元 / 个` }]}
             consequences={['当前单价未启用时，原款式重算使用此材料单价；本次不改变已确认工单金额。']}
             confirmText="确认材料单价" />
-        </ConfirmActionController>
+        </ConfirmActionController>}
       </div>;
     })}
   </Disclosure>;

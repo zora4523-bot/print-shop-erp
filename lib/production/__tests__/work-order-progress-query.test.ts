@@ -308,13 +308,38 @@ describe('loadProductionAlertFacts', () => {
     expect(dbMock.order.findMany).toHaveBeenCalledWith(expect.objectContaining({
       select: expect.objectContaining({
         purpose: true,
-        productionOperations: { where: unfinished, select: { workOrderVersion: true } },
+        productionOperations: { where: unfinished, select: { workOrderVersion: true, operationType: true } },
         productionProgressSteps: { where: unfinished, select: { workOrderVersion: true } },
       }),
     }));
     expect(dbMock.productionWorkOrderProgress.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { orderId: { in: ['sample', 'carried-done', 'old-only', 'progress-open', 'sample-with-step'] } },
     }));
+  });
+
+  // 新流程（simpleProduction）打包无需扫码，完工登记后工单停在 PACKING、打包工序仍为 PENDING，
+  // 且不写扫码认领；与 order-state / production-completion 同口径排除 PACKING 工序（DECISIONS 2026-09-28）。
+  it('新流程只剩无需登记的打包工序时不进入停滞候选，旧流程的待打包工序照常判定', async () => {
+    const scheduledAt = new Date('2026-08-31T08:00:00.000Z');
+    const base = { scheduledAt, workOrderVersion: 2, purpose: 'STANDARD', productionProgressSteps: [] };
+    dbMock.order.findMany.mockResolvedValue([
+      { ...base, id: 'simple-done', orderNo: 'GD-SD', simpleProduction: true,
+        productionOperations: [{ workOrderVersion: 2, operationType: 'PACKING' }] },
+      { ...base, id: 'simple-open', orderNo: 'GD-SO', simpleProduction: true,
+        productionOperations: [{ workOrderVersion: 2, operationType: 'PACKING' }, { workOrderVersion: 2, operationType: 'FOILING' }] },
+      { ...base, id: 'legacy-packing', orderNo: 'GD-LP', simpleProduction: false,
+        productionOperations: [{ workOrderVersion: 2, operationType: 'PACKING' }] },
+    ]);
+    const facts = await loadProductionAlertFacts({ orderLimit: 50 });
+    expect(facts.releasedOrders.map((row) => row.orderId)).toEqual(['simple-open', 'legacy-packing']);
+  });
+
+  it('SQL 停滞扫描同样排除新流程的打包工序', async () => {
+    await scanStagnantProductionOrders({ thresholdDays: 2, batchSize: 200 });
+    const [segments, ...parameters] = dbMock.$queryRaw.mock.calls[0]!;
+    const sql = Array.from(segments as TemplateStringsArray).join('?');
+    expect(sql).toContain('NOT (orders."simpleProduction" AND unit."operationType" = ?::"PieceworkOperationType")');
+    expect(parameters).toContain('PACKING');
   });
 
   it('用 scheduledAt + id 键集游标翻过已提醒的最旧页，不让后续工单饥饿', async () => {

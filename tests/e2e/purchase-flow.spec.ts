@@ -89,6 +89,8 @@ test('采购创建 → 部分收货 → 幂等重试 → 拒绝非法取消 → 
       await page.getByRole('alertdialog').getByRole('button', { name: '取消采购单', exact: true }).click();
       const cancelRequest = await submitted;
       await expect(page.getByRole('button', { name: '取消采购单', exact: true })).toHaveCount(0);
+      // 确认层关闭不等于 Server Action 已提交事务；等到库里状态真正落定再读其余事实。
+      await expect.poll(async () => (await readPurchaseState(purchaseOrderId, fixture.materialId)).order?.status).toBe('CANCELLED');
       const cancelled = await readPurchaseState(purchaseOrderId, fixture.materialId);
       expect(cancelled.order?.status).toBe('CANCELLED');
       expect(cancelled.receipts).toHaveLength(1);

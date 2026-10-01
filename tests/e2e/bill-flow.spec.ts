@@ -35,7 +35,7 @@ async function readBill(agentUserId: string, period: string) {
     expect(bills.rows).toHaveLength(1);
     const bill = bills.rows[0]!;
     const items = await db.query(
-      'SELECT "orderId", "settledFeeSnapshot"::text, "orderNoSnapshot", "settledAtSnapshot", "workOrderVersionSnapshot" FROM "AgentMonthlyBillItem" WHERE "billId"=$1 ORDER BY id',
+      'SELECT "orderId", "settledFeeSnapshot"::text, "orderNoSnapshot", "settledAtSnapshot", "workOrderVersionSnapshot", "settlementDetailSnapshot" FROM "AgentMonthlyBillItem" WHERE "billId"=$1 ORDER BY id',
       [bill.id],
     );
     const receipts = await db.query(
@@ -79,7 +79,7 @@ for (const mode of ['hydrated', 'native'] as const) {
       await test.step('旧入口切换到月账单，验证真实页面已可交互', async () => {
         await login(page, { from: '/owner/bills', username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
         await page.waitForURL(/\/owner\/agent-bills(?:\?.*)?$/);
-        await expect(page.getByRole('heading', { name: '代理商月度账单', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: '外部销售月账单', exact: true })).toBeVisible();
         if (mode === 'hydrated') {
           // Opening the real client dropdown proves hydration before submitting.
           await page.locator('button[aria-label^="用户菜单"]').click();
@@ -97,20 +97,20 @@ for (const mode of ['hydrated', 'native'] as const) {
         expect(state.bill.status).toBe('DRAFT');
         expect(state.bill.totalAmount).toBe('5000.00');
         expect(state.items).toHaveLength(1);
-        expect(state.items[0]).toMatchObject({ orderId: fixture.orderId, settledFeeSnapshot: '5000.00' });
+        expect(state.items[0]).toMatchObject({ orderId: fixture.orderId, settledFeeSnapshot: '5000.00', settlementDetailSnapshot: { schemaVersion: 1, processingAmount: '5000.00' } });
         expect(state.receipts).toHaveLength(0);
         await page.goto(`/owner/agent-bills?period=${fixture.period}&agentUserId=${fixture.agentUserId}`);
         await expect(page.getByRole('button', { name: /导出当前结果/u })).toBeVisible();
         const row = page.locator('table tbody tr').filter({ hasText: fixture.agentDisplayName });
         await expect(row).toContainText('草稿');
         await row.getByRole('link', { name: '详情', exact: true }).click();
-        await page.waitForURL(`/owner/agent-bills/${state.bill.id}`);
+        await page.waitForURL((url) => url.pathname === `/owner/agent-bills/${state.bill.id}`);
         await expect(page.getByRole('heading', { name: '账单明细', exact: true })).toBeVisible();
         await expect(page.locator('table tbody').getByText(fixture.orderNo, { exact: true })).toBeVisible();
       });
 
       await test.step('确认冻结后记录数据库成员和总额', async () => {
-        await page.getByRole('button', { name: '确认并冻结账单', exact: true }).click();
+        await page.getByRole('button', { name: '确认账单', exact: true }).click();
         await expect(page.locator('[data-slot="badge"]').filter({ hasText: /^已确认·待收$/ })).toBeVisible();
         const state = await readBill(fixture.agentUserId, fixture.period);
         expect(state.bill.status).toBe('CONFIRMED');
@@ -146,7 +146,7 @@ for (const mode of ['hydrated', 'native'] as const) {
         await page.getByRole('button', { name: '标记已收', exact: true }).click();
         const receiptRequest = await requestPromise;
         await expect(page.locator('[data-slot="badge"]').filter({ hasText: /^已收$/ })).toBeVisible();
-        const receiptSection = page.locator('section').filter({ has: page.getByRole('heading', { name: '不可变收款回执', exact: true }) });
+        const receiptSection = page.locator('section').filter({ has: page.getByRole('heading', { name: '收款记录', exact: true }) });
         await expect(receiptSection).toContainText('5,000.00');
         await expect(receiptSection).toContainText(referenceNo);
         const paid = await readBill(fixture.agentUserId, fixture.period);
@@ -164,10 +164,11 @@ for (const mode of ['hydrated', 'native'] as const) {
       });
 
       await test.step('记录负项通过同一协议，不重写已收金额和历史成员', async () => {
-        await page.getByLabel(/^负项金额/).fill('10.00');
+        await page.getByRole('link', { name: '录入抵扣', exact: true }).click();
+        await page.getByLabel(/^抵扣金额/).fill('10.00');
         await page.getByLabel('原因', { exact: true }).fill('质量调整');
-        await page.getByRole('button', { name: '记录负项', exact: true }).click();
-        await expect(page.getByText('已记录负项，余额将在后续草稿账单中抵扣', { exact: true })).toBeVisible();
+        await page.getByRole('button', { name: '录入抵扣', exact: true }).click();
+        await expect(page.getByText('抵扣已记录，余额待抵扣', { exact: true })).toBeVisible();
         const state = await readBill(fixture.agentUserId, fixture.period);
         expect(state.credits).toHaveLength(1);
         expect(state.credits[0]).toMatchObject({ requestedAmount: '-10.00', reason: '质量调整' });
@@ -178,8 +179,8 @@ for (const mode of ['hydrated', 'native'] as const) {
 
       await test.step('历史入口保持归档且没有财务写入表单', async () => {
         await page.goto('/owner/bills/archive');
-        await expect(page.getByRole('heading', { name: '历史账单', exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: /生成月账单|发单|录入付款/u })).toHaveCount(0);
+        await expect(page.getByRole('heading', { name: '历史账单归档', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: /生成月账单|发单|录入收款|录入付款/u })).toHaveCount(0);
         await expect(page.locator('input[name="amount"]')).toHaveCount(0);
       });
       expect(pageErrors).toEqual([]);

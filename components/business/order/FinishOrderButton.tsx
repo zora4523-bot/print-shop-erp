@@ -44,7 +44,7 @@ export function FinishOrderButton({ orderId }: { orderId: string }) {
         aria-haspopup="dialog"
         aria-expanded={confirmationOpen}
       >
-        {pending ? '处理中…' : '确认完工'}
+        {pending ? '正在处理…' : '确认完工'}
       </Button>
       <ConfirmActionController level="L2"
         open={confirmationOpen}

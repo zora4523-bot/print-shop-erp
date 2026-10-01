@@ -1,16 +1,16 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
-const { findMany, findFirst } = vi.hoisted(() => ({ findMany: vi.fn(), findFirst: vi.fn() }));
+const { findMany, findFirst, count, groupBy } = vi.hoisted(() => ({ findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn(), groupBy: vi.fn() }));
 vi.mock('server-only', () => ({}));
-vi.mock('@/lib/db', () => ({ db: { agentMonthlyBill: { findMany, findFirst } } }));
+vi.mock('@/lib/db', () => { const db = { agentMonthlyBill: { findMany, findFirst, count, groupBy } }; return { db: { ...db, $transaction: (callback: (tx: typeof db) => unknown) => callback(db) } }; });
 import { getSalesMonthlyBill, listSalesMonthlyBills } from '../sales-query';
 const actor = { id: 'sales-a', role: Role.SALES };
-beforeEach(() => { findMany.mockReset().mockResolvedValue([]); findFirst.mockReset().mockResolvedValue(null); });
+beforeEach(() => { count.mockReset().mockResolvedValue(0); groupBy.mockReset().mockResolvedValue([]); findMany.mockReset().mockResolvedValue([]); findFirst.mockReset().mockResolvedValue(null); });
 it('uses monthly bills, constrains ownership and ignores malformed filters', async () => {
   await listSalesMonthlyBills(actor, { period: '2026-99', status: 'ISSUED' });
   expect(findMany.mock.calls[0][0].where).toEqual({ agentUserId: actor.id });
   await listSalesMonthlyBills(actor, { period: '2026-09', status: 'PAID' });
-  expect(findMany.mock.calls[1][0].where).toEqual({ agentUserId: actor.id, period: '2026-09', status: 'PAID' });
+  expect(findMany.mock.calls[2][0].where).toEqual({ agentUserId: actor.id, period: '2026-09', status: 'PAID' });
 });
 it('never loads another sales bill or current order prices and internal credit reasons', async () => {
   expect(await getSalesMonthlyBill(actor, 'foreign')).toBeNull();
@@ -35,9 +35,55 @@ it('selects only customer-facing receipt facts and frozen item identity/status',
   expect(query.select.receipt).toEqual({ select: {
     amount: true, receivedAt: true, paymentMethod: true, referenceNo: true,
   } });
-  expect(query.select.items.select).toEqual({
+  expect(query.select.items.select).toMatchObject({
     id: true, orderId: true, orderNoSnapshot: true, workOrderVersionSnapshot: true,
-    orderStatusSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true,
+    orderStatusSnapshot: true, settledFeeSnapshot: true, settledAtSnapshot: true, settlementDetailSnapshot: true,
     order: { select: { customName: true } },
   });
+});
+
+it('bounds pages and summarizes the complete owned result, not just the visible page', async () => {
+  count.mockResolvedValue(61);
+  groupBy.mockResolvedValue([{ status: 'CONFIRMED', _sum: { totalAmount: { toFixed: () => '100.10' } }, _count: { _all: 61 } }]);
+  const result = await listSalesMonthlyBills(actor, { page: '999999', agentUserId: 'foreign' });
+  expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { agentUserId: actor.id }, skip: 60, take: 30 }));
+  expect(groupBy).toHaveBeenCalledWith(expect.objectContaining({ where: { agentUserId: actor.id }, by: ['status'] }));
+  expect(result).toMatchObject({ page: 3, pageCount: 3, total: 61, summary: { CONFIRMED: { amount: '100.10', count: 61 }, PAID: { amount: '0.00', count: 0 } } });
+});
+it('denies a non-sales list before reading aggregates', async () => {
+  await expect(listSalesMonthlyBills({ id: 'admin', role: Role.ADMIN })).rejects.toThrow();
+  expect(count).not.toHaveBeenCalled();
+});
+it('limits linked allocations to the same sales account and omits internal credit reasons', async () => {
+  await getSalesMonthlyBill(actor, 'bill-a');
+  const credits = findFirst.mock.calls[0][0].select.items.select.credits;
+  expect(credits.select.allocations.where).toEqual({ bill: { agentUserId: actor.id } });
+  // 目标账单状态用于区分已确认抵扣与草稿上的暂计抵扣。
+  expect(credits.select.allocations.select.bill).toEqual({ select: { id: true, period: true, status: true } });
+  expect(credits.select).not.toHaveProperty('reason');
+  expect(credits.select).not.toHaveProperty('createdBy');
+});
+
+it('scopes the twelve-period overview to the actor even when filters request another account', async () => {
+  findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ period: '2026-08' }, { period: '2025-01' }]);
+  groupBy.mockResolvedValueOnce([]).mockResolvedValueOnce([
+    { period: '2025-01', status: 'DRAFT', _sum: { totalAmount: '0.10' } },
+    { period: '2026-08', status: 'CONFIRMED', _sum: { totalAmount: '123.45' } },
+  ]);
+  const result = await listSalesMonthlyBills(actor, { agentUserId: 'other', period: '2026-08', status: 'PAID' });
+  expect(findMany.mock.calls[1][0]).toEqual({ where: { agentUserId: actor.id }, select: { period: true }, distinct: ['period'], orderBy: { period: 'desc' }, take: 12 });
+  expect(groupBy.mock.calls[1][0].where).toEqual({ agentUserId: actor.id, period: { in: ['2026-08', '2025-01'] } });
+  expect(result.trend).toEqual([
+    { period: '2025-01', draft: '0.10', confirmed: '0.00', paid: '0.00' },
+    { period: '2026-08', draft: '0.00', confirmed: '123.45', paid: '0.00' },
+  ]);
+});
+
+it('summarizes with exactly the actor-scoped filter used for the visible page', async () => {
+  count.mockResolvedValue(3);
+  await listSalesMonthlyBills(actor, { period: '2026-08', status: 'CONFIRMED', agentUserId: 'foreign', page: '2' });
+  const listWhere = findMany.mock.calls[0][0].where;
+  expect(listWhere).toEqual({ period: '2026-08', status: 'CONFIRMED', agentUserId: actor.id });
+  expect(groupBy.mock.calls[0][0]).toEqual({ by: ['status'], where: listWhere, _sum: { totalAmount: true }, _count: { _all: true } });
+  expect(count.mock.calls[0][0].where).toEqual(listWhere);
 });

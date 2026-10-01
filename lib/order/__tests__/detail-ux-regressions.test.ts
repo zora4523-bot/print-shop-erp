@@ -4,7 +4,7 @@ vi.mock('@/lib/order/production-readiness', () => ({}));
 import { describe, expect, it, vi } from 'vitest';
 import { actionLabel } from '../log-format';
 import { orderPricingSourceLabel } from '../pricing-source';
-import { orderShippingAvailability, orderShippingRecoveryHref } from '../shipping-availability';
+import { orderShippingAvailability, orderShippingRecoveryHref, shipmentCompletesPlannedProduction } from '../shipping-availability';
 import { resolveAdminOrderShipDisabledReason } from '../admin-workspace';
 import { OrderStatus } from '@/generated/prisma/enums';
 
@@ -78,4 +78,24 @@ it('does not offer address recovery when the order cannot be edited', () => {
     isPricingPending: false, hasLiveOutsource: false, incompleteProductionCount: 0, hasShipment: false };
   expect(orderShippingRecoveryHref(input)).toBeNull();
   expect(orderShippingRecoveryHref({ ...input, status: OrderStatus.PACKING })).toBe('#shipment-registration');
+});
+
+it('blocks shipping when required outsourcing is missing or does not cover the order', () => {
+  const input = { status: OrderStatus.PACKING, isAdministrator: true, hasPendingChange: false,
+    isPricingPending: false, hasLiveOutsource: false, hasOutsourceGap: true, incompleteProductionCount: 0, hasShipment: true };
+  expect(orderShippingAvailability(input)).toEqual({ canShip: false, disabledReason: '外协单缺失或数量未覆盖工单，请先补齐外协' });
+  expect(orderShippingRecoveryHref(input)).toBe('/foreman/outsource');
+  expect(orderShippingAvailability({ ...input, hasOutsourceGap: false }).canShip).toBe(true);
+});
+
+it('lets a released single-owner order ship when confirming shipment completes its pending jobs at plan', () => {
+  const input = { status: OrderStatus.RELEASED, isAdministrator: true, hasPendingChange: false, isPricingPending: false, hasLiveOutsource: false,
+    incompleteProductionCount: 1, hasShipment: true, plannedCompletion: { pendingJobs: 1, requestedJobs: 0, unassignedUnits: 0 } };
+  expect(orderShippingAvailability(input)).toEqual({ canShip: true, disabledReason: null });
+  expect(shipmentCompletesPlannedProduction(input)).toBe(true);
+  expect(orderShippingAvailability({ ...input, plannedCompletion: null })).toEqual({ canShip: false, disabledReason: '生产完工后才可发货' });
+  expect(orderShippingAvailability({ ...input, status: OrderStatus.ON_HOLD }).canShip).toBe(false);
+  expect(orderShippingAvailability({ ...input, hasOutsourceGap: true }).disabledReason).toBe('外协单缺失或数量未覆盖工单，请先补齐外协');
+  expect(orderShippingRecoveryHref({ ...input, plannedCompletion: { pendingJobs: 1, requestedJobs: 1, unassignedUnits: 0 } })).toBe('#detail-business-records');
+  expect(shipmentCompletesPlannedProduction({ status: OrderStatus.PACKING, plannedCompletion: { pendingJobs: 0, requestedJobs: 0, unassignedUnits: 0 } })).toBe(false);
 });

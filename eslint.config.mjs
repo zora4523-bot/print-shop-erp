@@ -24,6 +24,19 @@ const NATIVE_CONFIRM_GUARD_MESSAGE =
 const NATIVE_CHECKBOX_GUARD_MESSAGE =
   "Use the shared Checkbox component so the 44px target, 20px indicator, keyboard states, and mixed-state semantics stay consistent.";
 
+// next/link 会在生产环境对视口内链接做预取；指向 /api/ 导出接口时每次打开页面
+// 都会打一次导出请求（2026-09-29 薪资页 400 即此）。下载用原生 <a href download>。
+const API_LINK_GUARD_MESSAGE =
+  "Use a native <a href download> for /api/ download routes; next/link prefetches them in production.";
+
+const NATIVE_SELECT_GUARD_MESSAGE =
+  "Use NativeSelect from @/components/ui/native-select instead of a raw <select> (ui-规范 §3.2).";
+const NATIVE_TEXTAREA_GUARD_MESSAGE =
+  "Use Textarea from @/components/ui/textarea instead of a raw <textarea> (ui-规范 §3.2).";
+
+const BUTTON_OVERRIDE_GUARD_MESSAGE =
+  "Do not override Button colour or height via className; use variant=\"selected\" / \"destructive\" (ui-规范 §8.2).";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -80,7 +93,59 @@ const eslintConfig = defineConfig([
             "JSXOpeningElement[name.name='input'] > JSXAttribute[name.name='type'] > JSXExpressionContainer > Literal[value='checkbox']",
           message: NATIVE_CHECKBOX_GUARD_MESSAGE,
         },
+        {
+          // ui-规范 §8.1：可见输入统一走 Input 原子件（隐藏值、勾选、单选、文件除外）。
+          selector:
+            "JSXOpeningElement[name.name='input']:not(:has(JSXAttribute[name.name='type'][value.value=/^(hidden|checkbox|radio|file)$/]))",
+          message: "Use Input from @/components/ui/input instead of a raw visible <input> (ui-规范 §8.1).",
+        },
+        {
+          // ui-规范 §8.2：选中用 variant="selected"、危险用 destructive，高度由原子件与 44px 兜底决定。
+          selector:
+            "JSXOpeningElement[name.name=/^(Button|PendingButton)$/] > JSXAttribute[name.name='className'] Literal[value=/(^|\\s)(bg-(primary|foreground|destructive)|h-\\d|min-h-0!|!min-h-)/]",
+          message: BUTTON_OVERRIDE_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "CallExpression[callee.name='buttonVariants'] Property[key.name='className'] Literal[value=/(^|\\s)(bg-(primary|foreground|destructive)|h-\\d|min-h-0!|!min-h-)/]",
+          message: BUTTON_OVERRIDE_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='Link'] > JSXAttribute[name.name='href'] Literal[value=/^\\/api\\//]",
+          message: API_LINK_GUARD_MESSAGE,
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='Link'] > JSXAttribute[name.name='href'] TemplateLiteral > TemplateElement:first-child[value.cooked=/^\\/api\\//]",
+          message: API_LINK_GUARD_MESSAGE,
+        },
+        {
+          selector: "JSXOpeningElement[name.name='select']",
+          message: NATIVE_SELECT_GUARD_MESSAGE,
+        },
+        {
+          selector: "JSXOpeningElement[name.name='textarea']",
+          message: NATIVE_TEXTAREA_GUARD_MESSAGE,
+        },
       ],
+    },
+  },
+  {
+    // ui-规范 §8.3：页面标题一律经 PageHeader（含 RuleCenterPageHeader）。只有不挂在
+    // 后台 / 师傅端外壳里的独立页面、以及标题原子件本身可以直接写 <h1>。
+    files: ["app/**/*.tsx", "components/business/**/*.tsx", "components/ui-business/**/*.tsx"],
+    ignores: [
+      "**/__tests__/**",
+      "app/global-error.tsx",
+      "app/(auth)/login/page.tsx",
+      "app/account/password/page.tsx",
+      "app/wo/[[]orderNo]/page.tsx",
+      "components/ui-business/PageHeader.tsx",
+      "components/ui-business/EmptyState.tsx",
+    ],
+    rules: {
+      "react/forbid-elements": ["error", { forbid: [{ element: "h1", message: "Use PageHeader for page titles (ui-规范 §8.3)." }] }],
     },
   },
   // Override default ignores of eslint-config-next.

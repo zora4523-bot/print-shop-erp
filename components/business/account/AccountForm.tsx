@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useActionState, useState } from 'react';
 // Browser-safe enum imports — /client pulls @prisma/client runtime (needs
 // `node:module`) which Turbopack refuses to bundle for the client graph.
@@ -11,7 +10,6 @@ import {
   MachineType,
   EmploymentType,
 } from '../../../generated/prisma/enums';
-import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -29,6 +27,7 @@ import {
   MACHINE_TYPE_LABELS,
 } from '@/lib/auth/role-labels';
 import { formatDateInputShanghai } from '@/lib/format/dates';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type EditInitial = {
   username: string;
@@ -60,10 +59,8 @@ type Props =
       initial: EditInitial;
     };
 
-// Simple native <select> styled to match shadcn Input — keeps the bundle
-// small and works without JS hydration for the non-cascading selects.
-const selectClass =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50';
+// Selects use the shared NativeSelect (a styled native select) — small bundle
+// and submits without JS hydration for the non-cascading fields.
 
 const ROLE_OPTIONS = [
   Role.ADMIN,
@@ -201,11 +198,10 @@ export function AccountForm(props: Props) {
 
       <div className="space-y-2">
         <Label htmlFor="role">角色</Label>
-        <select
+        <NativeSelect
           id="role"
           name="role"
           {...(errs.role?.[0] ? formMessageA11yProps('role', 'error') : {})}
-          className={selectClass}
           value={role}
           onChange={(e) => onRoleChange(e.target.value as Role)}
           disabled={pending}
@@ -215,7 +211,7 @@ export function AccountForm(props: Props) {
               {ROLE_LABELS[r]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
         {errs.role?.[0] ? (
           <FormMessage fieldId="role" tone="error">
             {errs.role[0]}
@@ -226,13 +222,12 @@ export function AccountForm(props: Props) {
       {role === Role.WORKER ? (
         <div className="space-y-2">
           <Label htmlFor="workerType">岗位类型</Label>
-          <select
+          <NativeSelect
             id="workerType"
             name="workerType"
             {...(errs.workerType?.[0]
               ? formMessageA11yProps('workerType', 'error')
               : {})}
-            className={selectClass}
             value={workerType}
             onChange={(e) => onWorkerTypeChange(e.target.value as WorkerType | '')}
             disabled={pending}
@@ -243,7 +238,7 @@ export function AccountForm(props: Props) {
                 {WORKER_TYPE_LABELS[w]}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.workerType?.[0] ? (
             <FormMessage fieldId="workerType" tone="error">
               {errs.workerType[0]}
@@ -255,14 +250,13 @@ export function AccountForm(props: Props) {
       {role === Role.WORKER && workerType === WorkerType.MACHINE ? (
         <div className="space-y-2">
           <Label htmlFor="machineType">主机型</Label>
-          <select
+          <NativeSelect
             id="machineType"
             name="machineType"
             {...formMessageA11yProps(
               'machineType',
               errs.machineType?.[0] ? 'error' : 'hint',
             )}
-            className={selectClass}
             value={machineType}
             onChange={(e) =>
               setMachineType(e.target.value as MachineType | '')
@@ -275,7 +269,7 @@ export function AccountForm(props: Props) {
                 {MACHINE_TYPE_LABELS[m]}
               </option>
             ))}
-          </select>
+          </NativeSelect>
           {errs.machineType?.[0] ? (
             <FormMessage fieldId="machineType" tone="error">
               {errs.machineType[0]}
@@ -292,13 +286,12 @@ export function AccountForm(props: Props) {
         <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="employmentType">用工类型</Label>
-            <select
+            <NativeSelect
               id="employmentType"
               name="employmentType"
               {...(errs.employmentType?.[0]
                 ? formMessageA11yProps('employmentType', 'error')
                 : {})}
-              className={selectClass}
               value={employmentType}
               onChange={(event) =>
                 setEmploymentType(event.target.value as EmploymentType)
@@ -310,7 +303,7 @@ export function AccountForm(props: Props) {
                   {label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {errs.employmentType?.[0] ? (
               <FormMessage fieldId="employmentType" tone="error">
                 {errs.employmentType[0]}
@@ -359,9 +352,6 @@ export function AccountForm(props: Props) {
         <PendingButton pending={pending} pendingLabel="正在保存账号…">
           {isCreate ? '创建账号' : '保存修改'}
         </PendingButton>
-        <Link href="/owner/accounts" className={buttonVariants({ variant: 'outline' })}>
-          返回列表
-        </Link>
       </div>
     </form>
   );

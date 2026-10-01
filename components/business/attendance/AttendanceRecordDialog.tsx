@@ -8,6 +8,7 @@ import {
 } from '@/actions/foreman-attendance';
 import type { AttendanceMutationResult } from '@/actions/foreman-attendance.types';
 import { WorkerType } from '@/generated/prisma/enums';
+import { NativeSelect } from '@/components/ui/native-select';
 
 type Props = {
   workerId: string;
@@ -31,7 +32,17 @@ type Props = {
   };
 };
 
-export function AttendanceRecordDialog({
+/**
+ * 录入值只在 useState 初始化时取自 `existing`。同一位置换了员工或日期
+ * （员工筛选走 next/form 软导航，页面按位置复用组件）必须整体重建，
+ * 否则面板里是上一位员工的数值、保存时却用新的 workerId —— 覆盖别人的考勤。
+ * 这里自带 key，调用方忘记加 key 也不会串写。
+ */
+export function AttendanceRecordDialog(props: Props) {
+  return <AttendanceRecordEditor key={`${props.workerId}|${props.date}`} {...props} />;
+}
+
+function AttendanceRecordEditor({
   workerId,
   workerName,
   workerType,
@@ -55,7 +66,7 @@ export function AttendanceRecordDialog({
   // useActionState 在新一轮 action 完成前会保留上一轮 state。
   // 如果上次也是 success，新一轮成功后文字完全相同，live region
   // 没有 DOM 变化就不会再播报。pending 时卸载旧 outcome，完成后
-  // 重新挂载，同时避免在「保存中…」旁还显示过期的「已保存」。
+  // 重新挂载，同时避免在「正在保存…」旁还显示过期的「已保存」。
   const state = pending ? null : recordState;
 
   const usesHourlyFields = workerType === WorkerType.PACKER;
@@ -121,29 +132,29 @@ export function AttendanceRecordDialog({
       <div className="grid grid-cols-2 gap-3">
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">实际上班</span>
-          <select
+          <NativeSelect
             aria-label="实际上班"
             value={workUnits}
             onChange={(event) => setWorkUnits(event.target.value)}
-            className="min-h-11 w-full rounded-md border bg-background px-3"
+            className="w-full"
           >
             <option value="1">1 天</option>
             <option value="0.5">0.5 天</option>
             <option value="0">0 天</option>
-          </select>
+          </NativeSelect>
         </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">请假</span>
-          <select
+          <NativeSelect
             aria-label="请假"
             value={leaveUnits}
             onChange={(event) => setLeaveUnits(event.target.value)}
-            className="min-h-11 w-full rounded-md border bg-background px-3"
+            className="w-full"
           >
             <option value="0">0 天</option>
             <option value="0.5">0.5 天</option>
             <option value="1">1 天</option>
-          </select>
+          </NativeSelect>
         </label>
       </div>
 
@@ -188,7 +199,7 @@ export function AttendanceRecordDialog({
         />
       </label>
 
-      {/* 保存成功此前没有任何回执：按钮从「保存中…」变回「保存」就完了。
+      {/* 保存成功此前没有任何回执：按钮从「正在保存…」变回「保存」就完了。
 
           注意这里**不需要** router.refresh()。Server Action 里的
           revalidatePath('/foreman/attendance') 会让服务端在 action 响应上
@@ -223,7 +234,7 @@ export function AttendanceRecordDialog({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" onClick={onSave} disabled={pending}>
-          {pending ? '保存中…' : '保存'}
+          {pending ? '正在保存…' : '保存'}
         </Button>
         <Button
           type="button"

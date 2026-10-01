@@ -2,6 +2,7 @@ import { useId } from 'react';
 import {
   CircleAlert,
   CircleCheck,
+  Clock,
   Info,
   TriangleAlert,
   type LucideIcon,
@@ -9,7 +10,11 @@ import {
 import { cn } from '@/lib/utils';
 import { TONE_BADGE_SOFT, TONE_TEXT, type Tone } from './_tones';
 
-export type ActionNoticeTone = 'success' | 'info' | 'warning' | 'error';
+/**
+ * `primary`：需要关注但不是风险也不是失败的业务状态，例如「待工厂核价」
+ * （ui-规范 §4.3：primary，不是 warning 也不是 destructive）。
+ */
+export type ActionNoticeTone = 'success' | 'info' | 'primary' | 'warning' | 'error';
 
 export type ActionNoticeProps = {
   tone: ActionNoticeTone;
@@ -37,6 +42,12 @@ const NOTICE_CONFIG: Record<
   info: {
     icon: Info,
     semanticTone: 'info',
+    role: 'status',
+    live: 'polite',
+  },
+  primary: {
+    icon: Clock,
+    semanticTone: 'primary',
     role: 'status',
     live: 'polite',
   },

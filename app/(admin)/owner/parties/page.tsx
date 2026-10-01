@@ -24,6 +24,7 @@ import {
   PARTY_LIST_SORT_KEYS,
   PARTY_TYPE_LABELS,
 } from '@/lib/party';
+import { NativeSelect } from '@/components/ui/native-select';
 
 export const metadata = {
   title: '客户/供应商',
@@ -80,9 +81,9 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
   return (
     <div className="space-y-6">
       <SupplementOwnership actorId={actor.id} context={supplement} />
-      {supplement ? <Link href={supplementReturnHref(supplement)} className={buttonVariants({ variant: 'outline' })}>返回原录入</Link> : null}
       <PageHeader
         title="客户/供应商"
+        back={supplement ? { href: supplementReturnHref(supplement), label: '返回原录入' } : undefined}
         actions={
           <Link href={supplement ? supplementCreateHref(supplement) : '/owner/parties/new'} className={buttonVariants()}>
             新建客户/供应商
@@ -95,6 +96,7 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
         query={q}
         placeholder="搜索编码、名称、联系人、电话、地址、拼音"
         clearHref={buildTableHref(OWNER_PARTIES_PATH, { type, ...contextParams }, {})}
+        filterValues={{ type }}
         hiddenParams={{
           ...contextParams,
           pageSize,
@@ -104,10 +106,10 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
         filters={
           <label className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">类型</span>
-            <select
+            <NativeSelect
+              className="w-auto"
               name="type"
               defaultValue={type ?? ''}
-              className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
             >
               <option value="">全部</option>
               <option value="suppliers">供应商（含客户/供应商）</option>
@@ -116,7 +118,7 @@ export default async function OwnerPartiesPage({ searchParams }: PageProps) {
                   {PARTY_TYPE_LABELS[option]}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
         }
       />

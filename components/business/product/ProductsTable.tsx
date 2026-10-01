@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import type { ProductListRow } from '@/lib/product';
 import { isRetiredProductCategory } from '@/lib/rules/retired-catalog';
 import {
@@ -29,10 +30,6 @@ export function ProductsTable({
   label?: string;
   categoryHeading?: string;
 }) {
-  if (products.length === 0) {
-    return null;
-  }
-
   return (
     <Table label={label}>
       <TableHeader>
@@ -92,7 +89,7 @@ export function ProductsTable({
               <Link
                 href={`${editBase}/${p.id}`}
                 prefetch={false}
-                className="text-sm text-primary underline hover:no-underline"
+                className={buttonVariants({ variant: 'ghost', size: 'sm' })}
               >
                 编辑
               </Link>

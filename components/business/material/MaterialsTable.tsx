@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonVariants } from '@/components/ui/button';
 import {
   AdminRowActions,
   AdminSortLink,
@@ -167,7 +168,7 @@ export function MaterialsTable({
                 <Link
                   href={`${editBase}/${m.id}`}
                   prefetch={false}
-                  className="text-sm text-primary underline hover:no-underline"
+                  className={buttonVariants({ variant: 'ghost', size: 'sm' })}
                 >
                   编辑
                 </Link>

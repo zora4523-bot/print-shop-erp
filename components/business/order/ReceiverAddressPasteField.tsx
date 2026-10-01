@@ -10,6 +10,7 @@ import {
   type ParsedReceiverAddress,
   type ReceiverFactSource,
 } from '@/lib/order/receiver-address-paste';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 export const RECEIVER_ADDRESS_PASTE_PLACEHOLDER = '粘贴电商后台地址串，自动拆分';
 
@@ -82,9 +83,7 @@ export function ReceiverAddressPasteField({
         <Label htmlFor={id} className="mb-2 block">
           {label}
           {required ? (
-            <span aria-hidden="true" className="text-destructive">
-              *
-            </span>
+            <RequiredMark />
           ) : null}
         </Label>
       )}
@@ -128,7 +127,7 @@ export function ReceiverAddressPasteField({
         <div className="mt-3 overflow-hidden rounded-xl border">
           {children ? <div className="border-b p-3">{children}</div> : null}
           <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center px-3 py-2.5">
-            <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
+            <span className="text-xs font-bold tracking-widest text-muted-foreground">
               地址
             </span>
             <p className="min-w-0 break-words text-sm font-semibold">
@@ -137,7 +136,7 @@ export function ReceiverAddressPasteField({
           </div>
           {parsed.platformCode ? (
             <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center border-t px-3 py-2.5">
-              <span className="text-xs font-bold tracking-[0.14em] text-muted-foreground">
+              <span className="text-xs font-bold tracking-widest text-muted-foreground">
                 平台码
               </span>
               <p className="min-w-0 break-words font-mono text-sm font-semibold">

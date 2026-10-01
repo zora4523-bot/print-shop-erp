@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { setBomActiveAction } from '@/actions/owner-boms';
 import type { BomMutationResult } from '@/actions/owner-boms.types';
 import { ActionNotice } from '@/components/ui-business';
@@ -20,9 +21,9 @@ export function ToggleBomActiveButton({
   const formId = useId();
   const nextActive = !currentlyActive;
   const [state, formAction, pending] = useActionState<
-    BomMutationResult | null,
+    AppliedActiveState<BomMutationResult> | null,
     FormData
-  >(async () => setBomActiveAction(bomId, nextActive), null);
+  >(async () => withAppliedActive(await setBomActiveAction(bomId, nextActive), nextActive), null);
 
   // Surface BOTH the invariant/error message AND any invalid field
   // errors — setBomActiveAction can return either shape, and a toggle
@@ -40,28 +41,28 @@ export function ToggleBomActiveButton({
     <div className="space-y-2">
       <form id={formId} action={formAction} aria-busy={pending} />
       <ActiveStateConfirmButton
-        entityLabel="BOM"
+        entityLabel="用料清单"
         currentlyActive={currentlyActive}
         pending={pending}
         formId={formId}
         deactivateImpactItems={[
-          '该 BOM 不再用于新的物料需求和生产计算',
-          '历史工单与物料记录中的 BOM 引用会继续保留',
-          'BOM 明细保留',
+          '该用料清单不再用于新的物料需求和生产计算',
+          '历史工单与物料记录中的用料清单引用会继续保留',
+          '用料清单明细保留',
         ]}
         activateImpactItems={[
-          '该 BOM 会重新参与新的物料需求和生产计算',
+          '该用料清单会重新参与新的物料需求和生产计算',
           '关联产品或分类必须处于启用状态',
-          '同一产品或分类不能同时存在另一份启用 BOM',
+          '同一产品或分类不能同时存在另一份启用的用料清单',
         ]}
       />
       {error ? (
-        <ActionNotice tone="error" title="BOM 状态更新失败" description={error} />
+        <ActionNotice tone="error" title="用料清单状态更新失败" description={error} />
       ) : null}
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? 'BOM 已停用' : 'BOM 已启用'}
+          title={visibleState?.appliedActive ? '用料清单已启用' : '用料清单已停用'}
         />
       ) : null}
     </div>

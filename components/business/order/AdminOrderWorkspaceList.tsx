@@ -2,6 +2,7 @@
 
 import { OrderPurposeBadge } from './OrderPurposeBadge';
 import { OrderRemark } from './OrderRemark';
+import { OrderFilterClearLink } from './OrderFilterClearLink';
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -109,8 +110,17 @@ function AdminOrderWorkspaceListInner({
     >
       {orders.length > 0 ? (
         <>
-          <div className="flex min-h-8 items-center gap-2 px-3 text-xs font-medium text-muted-foreground">
-            <OrderListPageSelection />
+          {/* 与行同一套列模板 / 内边距 / 紧凑勾选尺寸，「选择本页」和行勾选框同列同尺寸（审查 #17）。 */}
+          <div
+            data-slot="admin-order-selection-header"
+            className={cn(
+              styles.selectionHeader,
+              'grid min-h-8 min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-x-3 border border-transparent px-3.5 text-xs font-medium text-muted-foreground @min-[960px]:grid-cols-[1.75rem_minmax(0,1fr)]',
+            )}
+          >
+            <div className="flex flex-col items-center">
+              <OrderListPageSelection />
+            </div>
             <span>选择本页</span>
           </div>
           <ul aria-label="管理端工单列表" className="space-y-2">
@@ -131,10 +141,15 @@ function AdminOrderWorkspaceListInner({
         <div className="p-4">
           <TableEmptyState
             variant="compact"
-            title={hasFilters ? '没有符合筛选条件的工单' : '这个队列清空了'}
-            action={<Link href={hasFilters ? clearFiltersHref : '/orders?queue=all'} prefetch={false} className={buttonVariants({ variant: 'outline' })}>
-              {hasFilters ? '清除筛选' : '查看全部工单'}
-            </Link>}
+            title={hasFilters ? '没有符合筛选条件的工单' : '暂无工单'}
+            action={hasFilters ? (
+              // 与筛选栏同一个清除入口：显式 reset 筛选表单，避免未提交输入残留。
+              <OrderFilterClearLink href={clearFiltersHref} scroll pendingHint={false} className={buttonVariants({ variant: 'outline' })} />
+            ) : (
+              <Link href="/orders?queue=all" prefetch={false} className={buttonVariants({ variant: 'outline' })}>
+                查看全部工单
+              </Link>
+            )}
           />
         </div>
       )}
@@ -175,7 +190,9 @@ function AdminOrderRow({
       }}
       className={cn(
         styles.row,
-        'grid min-w-0 cursor-pointer grid-cols-[2.75rem_2.125rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border bg-card px-3.5 py-3 transition-colors hover:border-foreground/60 motion-reduce:transition-none @min-[960px]:grid-cols-[1.75rem_2.125rem_minmax(160px,1.35fr)_minmax(110px,1fr)_5.5rem_7rem_6rem_7rem] @min-[960px]:items-center @min-[960px]:py-1.5',
+        // 窄容器（<960px）四列：右列放数量与行动作，「交期 · 数量」「金额 · 按钮」各占一行，
+        // 手机上每张卡从 8–9 行压到 5–6 行（审查 L-8）。宽容器仍是原 8 列。
+        'grid min-w-0 cursor-pointer grid-cols-[2.75rem_2.125rem_minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-xl border bg-card px-3.5 py-3 transition-colors hover:border-foreground/60 motion-reduce:transition-none @min-[960px]:grid-cols-[1.75rem_2.125rem_minmax(160px,1.35fr)_minmax(110px,1fr)_5.5rem_7rem_6rem_7rem] @min-[960px]:items-center @min-[960px]:py-1.5',
         'border border-border hover:border-muted-foreground/50 hover:bg-card has-[[data-batch-checkbox][aria-checked=true]]:bg-muted/50',
       )}
     >
@@ -185,7 +202,7 @@ function AdminOrderRow({
       </div>
       <OrderThumbnail order={order} />
 
-      <div className="min-w-0">
+      <div className="col-span-2 min-w-0 @min-[960px]:col-span-1">
         <div className={cn(styles.identity, 'flex min-w-0 flex-col items-start gap-1')}>
           {/* 工作台页头是 h1，行标题是其下唯一层级：用 h2 才不跳级（axe heading-order）。
               Tailwind preflight 把标题字号/字重重置为 inherit，改层级不改观感。 */}
@@ -219,7 +236,7 @@ function AdminOrderRow({
         <OrderRemark remark={order.remark} compact />
       </div>
 
-      <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto">
+      <div className="col-span-2 col-start-3 min-w-0 @min-[960px]:col-span-1 @min-[960px]:col-start-auto">
         <AdminWorkspaceStatusBadge status={order.status} />
         {!!order.productionOwners?.length && <p className="mt-1 text-xs">生产师傅：{order.productionOwners.join('、')}</p>}
         {!!order.productionReviews?.length && <div className="mt-1 flex flex-wrap gap-2">{order.productionReviews.map(job => <Link key={job.id} href={`/orders/${order.id}#production-job-${job.id}`} className="inline-flex min-h-11 items-center text-xs underline">核对 v{job.version} · {job.workerName} · {job.label}</Link>)}</div>}
@@ -239,7 +256,11 @@ function AdminOrderRow({
 
       <DueCell order={order} />
 
-      <div className="col-start-3 min-w-0 text-xs @min-[960px]:col-start-auto">
+      <div className={cn(
+        'min-w-0 text-xs @min-[960px]:col-span-1 @min-[960px]:col-start-auto @min-[960px]:text-left',
+        // 有进度条时需要整行宽度；否则与交期同一行、靠右。
+        !order.simpleProduction && showOrderProgress(order) ? 'col-span-2 col-start-3' : 'col-start-4 text-right',
+      )}>
         <p className="font-semibold tabular-nums">
           {order.itemCount} 款 · {order.totalQuantity.toLocaleString('zh-CN')}
         </p>
@@ -252,7 +273,10 @@ function AdminOrderRow({
         <p
           className={cn(
             'font-sans text-sm font-semibold tabular-nums',
-            feeAmount.pending && 'text-xs text-warning-foreground',
+            // 待工厂核价 / 金额不完整 = 主强调（§4.3），未报价草稿保持中性。
+            feeAmount.pending && 'text-xs',
+            feeAmount.pending && order.status !== 'DRAFT' && 'text-primary',
+            feeAmount.pending && order.status === 'DRAFT' && 'text-muted-foreground',
           )}
         >
           {feeAmount.label}
@@ -270,7 +294,7 @@ function AdminOrderRow({
         ) : null}
       </div>
 
-      <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto @min-[960px]:text-right">
+      <div className="col-start-4 min-w-0 self-center text-right @min-[960px]:col-start-auto">
         {order.status === 'DRAFT' ? (
           <Link href={`/orders/${order.id}/edit`} prefetch={false} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
             编辑草稿
@@ -279,7 +303,7 @@ function AdminOrderRow({
           <Link
             href={`/orders/${encodeURIComponent(order.id)}`}
             prefetch={false}
-            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), styles.action, rowActionClassName(order))}
+            className={cn(buttonVariants({ variant: rowActionVariant(order), size: 'sm' }), styles.action)}
           >
             {rowActionLabel(order)}
           </Link>
@@ -290,7 +314,6 @@ function AdminOrderRow({
 }
 
 function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow; onFeedback: (feedback: OrderRowFeedback) => void }) {
-  const router = useRouter();
   const [starred, setStarred] = useState(order.isStarred);
   const [pending, startTransition] = useTransition();
   const inFlightRef = useRef(false);
@@ -312,7 +335,6 @@ function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow;
           return;
         }
         onFeedback({ tone: 'success', message: `${order.customName?.trim() || '未命名工单'} ${next ? '已添加星标' : '已取消星标'}` });
-        router.refresh();
       } catch {
         setStarred(!next);
         onFeedback({ tone: 'error', message: '星标更新失败，请重试' });
@@ -347,6 +369,10 @@ function OrderThumbnail({ order }: { order: AdminOrderWorkspaceRow }) {
         <img
           src={order.thumbnail.url}
           alt={order.thumbnail.fileName}
+          width={34}
+          height={46}
+          loading="lazy"
+          decoding="async"
           className="size-full rounded-md object-cover"
         />
       ) : (
@@ -396,41 +422,47 @@ export function showOrderProgress(order: AdminOrderWorkspaceRow): boolean {
 
 function rowSummaryClassName(order: AdminOrderWorkspaceRow): string {
   if (order.status === 'REJECTED' || order.progress.foilingOverLimit || order.progress.packingOverLimit) return 'text-destructive';
-  if (order.fee.source === 'PENDING' || order.status === 'ON_HOLD' || order.statusSummary?.startsWith('⚠')) return 'text-warning-foreground';
+  if (order.status === 'ON_HOLD' || order.statusSummary?.startsWith('⚠')) return 'text-warning-foreground';
+  // 待工厂核价不是风险也不是失败（§4.3）。
+  if (order.fee.source === 'PENDING' && order.status !== 'DRAFT') return 'text-primary';
   return 'text-muted-foreground';
 }
 
-function rowActionClassName(order: AdminOrderWorkspaceRow): string {
+/** 需要处理的工单行给主按钮，其余次要按钮；不再用 className 覆写成墨色（§8.2）。 */
+function rowActionVariant(order: AdminOrderWorkspaceRow): 'default' | 'outline' {
   const actionable = order.pendingChangeRequest || order.fee.source === 'PENDING' ||
     ['PENDING_FACTORY', 'SUBMITTED'].includes(order.status) ||
     order.capabilities.confirm || order.capabilities.release || order.capabilities.ship || order.printPending;
-  return actionable
-    ? 'border-foreground bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'
-    : '';
+  return actionable ? 'default' : 'outline';
 }
 
+/**
+ * 行尾动作按真实待办命名（UI-SYSTEM「管理端工单列表」），与详情「当前待办」标题同词：
+ * 不再用「查看处理」「处理」这类不说明要做什么的词。
+ */
 function rowActionLabel(order: AdminOrderWorkspaceRow): string {
   if (order.pendingChangeRequest) return '裁决变更';
   if (order.fee.source === 'PENDING') return '录价';
   if (order.printPending) return '处理打印';
   if (order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED') {
-    return '查看处理';
+    return '下发前检查';
   }
-  if (order.status === 'ON_HOLD') return '处理';
-  if (order.capabilities.release) return '查看处理';
+  if (order.status === 'ON_HOLD') return '处理暂停';
+  if (order.capabilities.release) return '下发生产';
   if (order.capabilities.settle) return '结算';
   if (order.capabilities.ship) return '录运单发货';
   return '详情';
 }
 
+/** 金额下方的口径与详情「费用记录」三个阶段同名，避免「¥ 130.00 估 / 确认」读成已确认。 */
 function feeSourceLabel(source: AdminOrderWorkspaceRow['fee']['source']) {
   switch (source) {
     case 'SETTLED':
-      return '结算';
+      return '结算金额';
     case 'CONFIRMED':
-      return '确认';
+      return '确认金额';
     case 'QUOTED':
-      return '报价';
+      return '提交报价';
     case 'LEGACY':
       return '历史金额';
     case 'PENDING':

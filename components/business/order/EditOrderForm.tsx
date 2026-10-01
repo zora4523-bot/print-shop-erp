@@ -13,12 +13,14 @@ import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { ActionNotice } from '@/components/ui-business';
 import Link from 'next/link';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { updateOrderAction } from '@/actions/order';
 import type { OrderMutationResult } from '@/actions/order.types';
+import { RequiredMark } from '@/components/business/form/RequiredMark';
 
 export type EditableFieldset = 'FULL' | 'SHIPPING_ONLY';
 
@@ -188,7 +190,7 @@ export function EditOrderForm({
       {isShippingOnly && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning-foreground">
           {designLayout
-            ? '已确认资料中的工单名称与外部销售归属保持锁定；款式与交期变更将更新工单版本。'
+            ? '工单名称和外部销售不可修改。'
             : '工单已确认，仅可修改配送信息、包装补充说明与工单备注。'}
         </div>
       )}
@@ -224,7 +226,7 @@ export function EditOrderForm({
           )}
           <Field
             name="packageRequirement"
-            label="包装补充说明（选填）"
+            label="包装补充说明"
             initial={initial.packageRequirement}
             errors={fieldErrors(state, 'packageRequirement')}
             disabled={pendingLocked}
@@ -244,7 +246,7 @@ export function EditOrderForm({
       {!designLayout ? (
         <div className="flex items-center gap-3">
           <Button type="submit" className="min-h-11" disabled={pendingLocked}>
-            {pending ? '保存中…' : '保存'}
+            {pending ? '正在保存…' : '保存'}
           </Button>
           <Link
             href={`/orders/${orderId}`}
@@ -360,8 +362,9 @@ function OrderDeliveryFieldsSection({
               </div>
               {addressChanged && !isSfCollect ? (
                 <div className="rounded-md border border-warning/40 p-3">
-                  <label className="flex min-h-11 items-center gap-2 text-sm">
+                  <label className="flex min-h-11 items-center gap-1 text-sm">
                     <Checkbox
+                      className="-ml-3"
                       checked={row.sameDestination}
                       disabled={pendingLocked || disabled || !row.destinationProvince}
                       onCheckedChange={(checked) =>
@@ -536,8 +539,9 @@ function OrderBasicFieldsSection({
           />
         )}
         {!isShippingOnly && (
-          <label className="flex min-h-11 cursor-pointer items-center gap-2 sm:col-span-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:opacity-60">
+          <label className="flex min-h-11 cursor-pointer items-center gap-1 sm:col-span-2 has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
             <Checkbox
+              className="-ml-3"
               id="isUrgent"
               name="isUrgent"
               value="on"
@@ -600,13 +604,11 @@ function Field({
       <Label htmlFor={name} className="text-sm text-muted-foreground">
         {label}
         {required ? (
-          <span aria-hidden="true" className="ml-0.5 text-destructive">
-            *
-          </span>
+          <RequiredMark />
         ) : null}
       </Label>
       {multiline ? (
-        <textarea
+        <Textarea
           id={name}
           name={name}
           disabled={disabled}
@@ -617,7 +619,7 @@ function Field({
           onChange={(event) => setValue(event.target.value)}
           aria-invalid={hasError}
           aria-describedby={describedBy}
-          className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
+          className="mt-1 w-full"
           rows={3}
         />
       ) : (

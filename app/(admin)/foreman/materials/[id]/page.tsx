@@ -7,7 +7,9 @@ import {
 import { MaterialForm } from '@/components/business/material/MaterialForm';
 import { StockTransactionForm } from '@/components/business/material/StockTransactionForm';
 import { ToggleMaterialActiveButton } from '@/components/business/material/ToggleMaterialActiveButton';
-import { PageHeader, StatusBadge, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { PageHeader, TableEmptyState, TableScrollArea, ReceiptNotice } from '@/components/ui-business';
+import { ActiveStatusBadge } from '@/components/business/master-data/ActiveStatusBadge';
+import { FormPage } from '@/app/_components/FormPage';
 import { readReceipt } from '@/lib/admin/receipt';
 import { requirePermission } from '@/lib/auth/permissions';
 import {
@@ -38,7 +40,7 @@ export async function generateMetadata({ params }: PageProps) {
   const material = await getMaterialSummary(id);
   return {
     title: material
-      ? `编辑 ${externalPriceBusinessText(material.name)} · 物料库存`
+      ? `编辑 ${externalPriceBusinessText(material.name)} · 车间用料`
       : '物料不存在',
   };
 }
@@ -68,16 +70,13 @@ export default async function EditForemanMaterialPage({ params, searchParams }: 
   const receipt = readReceipt(await searchParams);
 
   return (
-    <div className="space-y-6">
+    <FormPage>
       <ReceiptNotice receipt={receipt} noun="物料" />
       <PageHeader
+        back={{ href: '/foreman/materials', label: '返回车间用料' }}
         title={`编辑物料：${externalPriceBusinessText(material.name)}`}
         subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
-        actions={
-          <StatusBadge tone={material.isActive ? 'success' : 'neutral'}>
-            {material.isActive ? '启用' : '停用'}
-          </StatusBadge>
-        }
+        status={<ActiveStatusBadge active={material.isActive} />}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -152,6 +151,6 @@ export default async function EditForemanMaterialPage({ params, searchParams }: 
           currentlyActive={material.isActive}
         />
       </section>
-    </div>
+    </FormPage>
   );
 }
