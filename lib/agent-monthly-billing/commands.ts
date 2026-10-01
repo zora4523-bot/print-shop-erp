@@ -20,6 +20,7 @@ import {
   lockAgentBill,
   lockAgentBillRequest,
   lockAgentPeriod,
+  lockAgentSurcharges,
 } from './locks';
 import type { AgentMonthlyBillActor } from './types';
 
@@ -425,24 +426,45 @@ export async function createAgentMonthlyBillCredit(
       throw new AgentMonthlyBillingError('累计抵扣不能超过来源工单的结算金额（含已补收）');
     }
     if (input.direction === 'SURCHARGE') {
-      // 补收一经写入不可改：先确认它和最早的草稿账单合计都在金额字段的存储范围内，
-      // 否则根记录留下却永远分摊不出去。
-      const earliestDraft = await tx.agentMonthlyBill.findFirst({
-        where: {
-          agentUserId: source.bill.agentUserId,
-          status: AgentMonthlyBillStatus.DRAFT,
-          period: { gt: source.bill.period },
-        },
-        orderBy: [{ period: 'asc' }, { id: 'asc' }],
-        select: { totalAmount: true, adjustmentAmount: true },
-      });
-      const draftTotalAfter = earliestDraft
-        ? Decimal.max(
-            new Decimal(earliestDraft.totalAmount.toString()),
-            new Decimal(earliestDraft.adjustmentAmount.toString()),
-          ).plus(signed)
-        : signed;
-      if (netAfter.gt(MONEY_MAX) || draftTotalAfter.gt(MONEY_MAX)) {
+      // 补收一经写入不可改，必须保证它一定分摊得出去：按最坏情况——该销售所有尚未
+      // 进入已确认账单的补收都落进同一张草稿——校验工单合计加补收不超过金额字段上限。
+      // 同一销售的补收录入在此串行，避免并发请求读到同一个旧累计值。
+      await lockAgentSurcharges(tx, source.bill.agentUserId);
+      const [pendingCredits, earliestDraft] = await Promise.all([
+        tx.agentMonthlyBillCredit.findMany({
+          where: {
+            requestedAmount: { gt: 0 },
+            sourceItem: { bill: { agentUserId: source.bill.agentUserId } },
+          },
+          select: {
+            requestedAmount: true,
+            allocations: {
+              where: { bill: { status: { not: AgentMonthlyBillStatus.DRAFT } } },
+              select: { amount: true },
+            },
+          },
+        }),
+        tx.agentMonthlyBill.findFirst({
+          where: {
+            agentUserId: source.bill.agentUserId,
+            status: AgentMonthlyBillStatus.DRAFT,
+            period: { gt: source.bill.period },
+          },
+          orderBy: [{ period: 'asc' }, { id: 'asc' }],
+          select: { memberSubtotal: true },
+        }),
+      ]);
+      const pendingSurcharge = pendingCredits.reduce(
+        (sum, credit) => credit.allocations.reduce(
+          (left, allocation) => left.minus(allocation.amount.toString()),
+          sum.plus(credit.requestedAmount.toString()),
+        ),
+        new Decimal(0),
+      );
+      const worstDraftTotal = new Decimal(earliestDraft?.memberSubtotal.toString() ?? '0')
+        .plus(pendingSurcharge)
+        .plus(signed);
+      if (netAfter.gt(MONEY_MAX) || worstDraftTotal.gt(MONEY_MAX)) {
         throw new AgentMonthlyBillingError('补收金额过大，超出账单金额上限，请核对后重新录入');
       }
     }

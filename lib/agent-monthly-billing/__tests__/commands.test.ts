@@ -12,7 +12,7 @@ const { tx, dbMock, events, synchronizeMock, clockMock } = vi.hoisted(() => {
     },
     agentMonthlyBillReceipt: { create: vi.fn() },
     agentMonthlyBillItem: { findUnique: vi.fn() },
-    agentMonthlyBillCredit: { findUnique: vi.fn(), create: vi.fn() },
+    agentMonthlyBillCredit: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn() },
     agentMonthlyBillAdjustment: { deleteMany: vi.fn() },
   };
   return {
@@ -36,6 +36,7 @@ vi.mock('../locks', () => ({
   lockAgentPeriod: vi.fn(async () => events.push('period')),
   lockAgentBill: vi.fn(async () => events.push('bill')),
   lockAgentBillRequest: vi.fn(async () => events.push('request')),
+  lockAgentSurcharges: vi.fn(async () => events.push('surcharge-agent')),
 }));
 vi.mock('../generation', () => ({
   synchronizeDraftBillInTx: synchronizeMock,
@@ -276,6 +277,7 @@ describe('agent monthly bill commands', () => {
     tx.agentMonthlyBillCredit.findUnique.mockResolvedValue(null);
     tx.agentMonthlyBill.findMany.mockResolvedValue([]);
     tx.agentMonthlyBill.findFirst.mockResolvedValue(null);
+    tx.agentMonthlyBillCredit.findMany.mockResolvedValue([]);
     tx.agentMonthlyBillCredit.create.mockImplementation(async ({ data }: { data: { requestedAmount: string } }) => ({ id: 'credit-new', requestedAmount: data.requestedAmount }));
   }
   const request = (direction: 'CREDIT' | 'SURCHARGE', amount: string) => createAgentMonthlyBillCredit(
@@ -302,16 +304,25 @@ describe('agent monthly bill commands', () => {
   });
 
   // Codex 审查 P2：补收根记录不可改，写入前确认来源净额与最早草稿账单合计都在存储范围内。
-  it('refuses a surcharge that would overflow the earliest draft total or the source net', async () => {
+  // 按最坏情况——该销售所有未进入已确认账单的补收都落进同一张草稿——校验，包括其他来源工单的补收。
+  it('refuses a surcharge that could overflow a draft together with every other pending surcharge of the agent', async () => {
     frozenSource([]);
-    tx.agentMonthlyBill.findFirst.mockResolvedValue({ totalAmount: '9999999999.00', adjustmentAmount: '0.00' });
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ memberSubtotal: '9999999999.00' });
     await expect(request('SURCHARGE', '1.00')).rejects.toThrow('补收金额过大');
     expect(tx.agentMonthlyBillCredit.create).not.toHaveBeenCalled();
+    // 另一张来源工单已录 60 亿补收、尚未入已确认账单；本笔 40 亿加上 100 元工单合计超限。
+    frozenSource([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ memberSubtotal: '100.00' });
+    tx.agentMonthlyBillCredit.findMany.mockResolvedValue([{ requestedAmount: '6000000000.00', allocations: [] }]);
+    await expect(request('SURCHARGE', '4000000000.00')).rejects.toThrow('补收金额过大');
+    // 已分摊进已确认账单的部分不再计入待分摊。
+    frozenSource([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ memberSubtotal: '100.00' });
+    tx.agentMonthlyBillCredit.findMany.mockResolvedValue([{ requestedAmount: '6000000000.00', allocations: [{ amount: '6000000000.00' }] }]);
+    await expect(request('SURCHARGE', '4000000000.00')).resolves.toMatchObject({ requestedAmount: '4000000000.00' });
+    expect(events).toContain('surcharge-agent');
     frozenSource([{ requestedAmount: '9999999990.00' }]);
     await expect(request('SURCHARGE', '10.00')).rejects.toThrow('补收金额过大');
-    frozenSource([]);
-    tx.agentMonthlyBill.findFirst.mockResolvedValue({ totalAmount: '9999999998.99', adjustmentAmount: '0.00' });
-    await expect(request('SURCHARGE', '1.00')).resolves.toMatchObject({ requestedAmount: '1.00' });
   });
 
   it('refuses a replayed key whose direction changed', async () => {
