@@ -16,6 +16,8 @@
 
 ## 当前任务
 
+2026-10-01（合并）：**今天三个分支已按业主要求合并为一个分支 `claude/combined-2026-10-01`**（`fd5e0084`，未推送，比 `origin/main` 多 79 个提交、落后 7 个）：`claude/ticket-list-ui-ux-review-4abcab`（工单审查两轮 + 收费状态注册表 + 「创建时估算」改 info）、`claude/dreamy-noyce-b08cd0`（师傅一键完成 / 批量完成 / 发货即完工 / 六视口修复）、`claude/loving-lehmann-6dfe03`（手机端列表看板压缩 L-8）。代码均自动合并，只有 HANDOFF / DECISIONS 冲突，两侧内容全部保留。lint / typecheck / architecture / backup、Vitest 全量（8079 通过）、Browser Mode 996 通过；**E2E 与六视口页面门禁未跑**，也尚未并入 `main` 最新 7 个提交（与 `OrderCommercialDetailsManager.tsx`、`PlateDetailEditor.browser.spec.tsx` 有代码冲突）。原三个分支保留未动，后续工作应在合并分支上继续，避免再次分叉。已知抖动：`ReworkOrderForm.browser.spec.tsx` 1920 dark 偶发触控高度 41.8（对话框缩放动画中测量），单独重跑通过。
+
 2026-10-01（L-8 第二部分）：**工单列表上方的看板 / 队列 / 快捷筛选在窄容器改为单行条内横向滚动**（分支 `claude/loving-lehmann-6dfe03`，先合入 `claude/ticket-list-ui-ux-review-4abcab` 再改，未推送）。新增 `AdminOrderScrollStrip`（选中项不在可见范围时只滚动条自身把它移入）；看板 <56rem、队列与筛选区 <960px 生效，宽容器不变。375 实屏首张工单 914 → 590px，1280 整页截图与改前逐字节相同。浏览器门禁：`AdminOrderListLayout` 新增窄屏单行 / 高度上限 / 选中项移入用例，`AdminOrderWorkspaceSizing` 的看板断言改为任何宽度单行，`AdminOrderWorkspaceColors` 的可滚动容器豁免从队列 nav 扩到滚动条。未跑：`tests/visual` 六视口页面门禁（需 E2E 隔离库），其 viewport-x 规则本已豁免横向滚动容器。截图用的一次性库 `erp_e2e_l8chrome_1001`（复制自 `erp_e2e_uxreview_1001`）确认无需复查后可 `DROP DATABASE`。
 
 2026-10-01（第二轮）：**业主对审查的答复已全部落地并本地提交**（同分支，`33a0c87a..` 起，未推送）。先下发后物流（可下发时当前待办只给「下发生产」）、去掉「费用记录」改「当前金额」、详情低频表单默认收起（1280 宽缩短 18–21%）、销售端「我的工单」（面包屑按角色取名）、「待处理」改「待下发检查」、列表主按钮「新建工单」、手机工单卡压缩（约 325 → 248px）、对客收费状态进注册表、「订单级」→「整单」、面单照片站内按钮。决定见 DECISIONS 2026-10-01「五项界面决定」；评分列表 8.4、详情 8.2、销售 7.9。**未做**：`lib/` 核价错误文案里的「订单级」约 10 处；销售侧「返回工单列表」链接文字；手机端看板 / 队列区（约 900px）；E2E 与六视口页面门禁未在本机跑。已建议的两个独立任务被业主另开会话启动：收费状态注册表那边已放弃重复实现（以本分支 c22178ac 为准）；手机列表那边在本分支之上继续做看板 / 队列 / 筛选区（分支 `claude/loving-lehmann-6dfe03`），本分支不再改 `AdminOrderWorkspace.tsx`。
@@ -667,3 +669,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-10-01：按业主决定实现师傅一键完成（不输数量）、工单列表批量完成生产、单人流程确认发货即按计划数量代登记完成并计提成（逐单整体回滚；数量待审批/未排单/离职拦下）。
 - 2026-10-01：六视口管理端门禁发现 ffc69b04（面包屑）与 ebe73633（销售列表）截断元素缺 title，47 条 hidden-clipping 失败，已修（c74a355b）；销售抽屉用例流式揭示期间严格模式误报在改动前基线同样复现，已改为只取可见列表（0f1c9822）。已知：`test:admin-ui` 4 worker 并发时「critical routes … dark tokens › orders」搜索回车后 URL 断言偶发超时，单 worker 重跑 4/4 通过。
 - 2026-10-01：审查 L-8 第二部分：工单列表看板、队列与快捷筛选在窄容器改为单行横向滚动，375 首张工单 914 → 590px，宽容器不变。
+- 2026-10-01：按业主要求把今天三个分支（工单审查、师傅一键完成、手机端列表）合并为 `claude/combined-2026-10-01`；「创建时估算」徽章改 info。
