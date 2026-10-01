@@ -48,6 +48,15 @@ describe('sample first-weight default marker', () => {
     expect(reconcileSampleWeightBasis({ source: 'SF' }, restored, null)).toEqual({ source: 'RESTORED' });
   });
 
+  it('reads the default from verified evidence before the next snapshot (manual fee after an SF round trip)', () => {
+    const evidence = { source: 'SAMPLE_ORDER_QUOTE', ...sampleFirstWeightDefaultMarker('1') };
+    expect(reconcileSampleWeightBasis({ source: 'SF' }, { source: 'MANUAL' }, '1', undefined, evidence)).toEqual({
+      source: 'MANUAL', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT, defaultWeightKg: '1',
+    });
+    expect(reconcileSampleWeightBasis({ source: 'SF' }, { source: 'MANUAL' }, '2', evidence)).toEqual({ source: 'MANUAL' });
+    expect(reconcileSampleWeightBasis({ source: 'SF' }, { source: 'MANUAL' }, null, evidence)).toEqual({ source: 'MANUAL' });
+  });
+
   it('strips a marker that records no usable default weight', () => {
     expect(reconcileSampleWeightBasis({ source: 'X' }, { source: 'Y', weightBasis: SAMPLE_FIRST_WEIGHT_DEFAULT }, '1'))
       .toEqual({ source: 'Y' });

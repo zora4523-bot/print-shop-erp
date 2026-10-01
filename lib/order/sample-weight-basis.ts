@@ -51,19 +51,23 @@ export function sampleFirstWeightDefaultMarker(weightKg: Decimal.Value) {
 }
 
 /**
- * 重写 `next` 上的标记：最终重量等于默认首重则保留，否则去掉。默认首重先取
- * `previous`；`previous` 没有时取 `next` 自带的——寄付切到付再恢复寄付时，恢复的
- * 是原寄付快照，到付那一版已没有标记。到付（最终重量 null）一律去掉。
+ * 重写 `next` 上的标记：最终重量等于默认首重则保留，否则去掉。默认首重依次取
+ * `previous`、调用方已核对身份的 `evidence`（到付期间保存的原寄付快照）、`next`
+ * 自带的——寄付切到付再恢复寄付时，到付那一版已没有标记，不论恢复原运费还是手填
+ * 运费，都要从原寄付证据认回默认首重。到付（最终重量 null）一律去掉。
  */
 export function reconcileSampleWeightBasis<T extends SnapshotObject>(
   previous: unknown,
   next: T,
   finalWeightKg: Decimal.Value | null | undefined,
+  ...evidence: unknown[]
 ): T {
   const { weightBasis, defaultWeightKg, ...rest } = next;
   void weightBasis;
   void defaultWeightKg;
-  const defaultWeight = sampleDefaultWeightKg(previous) ?? sampleDefaultWeightKg(next);
+  const defaultWeight = [previous, ...evidence, next]
+    .map(sampleDefaultWeightKg)
+    .find((weight) => weight !== null) ?? null;
   const finalWeight = asDecimal(finalWeightKg);
   if (defaultWeight && finalWeight?.equals(defaultWeight)) {
     return { ...rest, ...sampleFirstWeightDefaultMarker(defaultWeight) } as unknown as T;

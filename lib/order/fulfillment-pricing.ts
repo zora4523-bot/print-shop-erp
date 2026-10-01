@@ -520,7 +520,8 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
           correctedAt: now.toISOString(), actorId: actor.id,
         };
     // 寄样首重默认（DECISIONS 2026-09-30）：手填运费时新快照沿用旧快照，会把默认标记
-    // 一并带过来；重量已更正就必须去掉，仍是默认首重才保留。
+    // 一并带过来；重量已更正就必须去掉，仍是默认首重才保留。到付往返后当前快照已无
+    // 标记，从 buildPlan 核过身份的原寄付证据认回默认首重。
     const snapshot = reconcileSampleWeightBasis(row.previous.pricingSnapshot, {
       ...pricingSnapshot,
       ...(row.prepaidEvidence ? { preservedPrepaidShipping: row.prepaidEvidence } : {}),
@@ -528,7 +529,7 @@ async function persistPlan(tx: Prisma.TransactionClient, order: FulfillmentOrder
         orderId: order.id, priceRevision: order.priceRevision + 1,
         destinationProvince: row.destinationProvince, billableWeightKg: row.weightKg,
       } } : {}),
-    } as Record<string, unknown>, input.isSfCollect ? null : row.weightKg);
+    } as Record<string, unknown>, input.isSfCollect ? null : row.weightKg, row.prepaidEvidence?.pricingSnapshot);
     await tx.orderCustomerCharge.update({
       where: { id: row.previous.id },
       data: { status, amount, suggestedAmount: row.suggestedAmount, sourceRuleId: row.sourceRuleId,
