@@ -443,7 +443,7 @@ function rowActionVariant(order: AdminOrderWorkspaceRow): 'default' | 'outline' 
 function rowActionLabel(order: AdminOrderWorkspaceRow): string {
   if (order.pendingChangeRequest) return '裁决变更';
   if (order.fee.source === 'PENDING') return '录价';
-  if (order.printPending) return '处理打印';
+  if (order.printPending) return '打印';
   if (order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED') {
     return '下发前检查';
   }

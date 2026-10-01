@@ -178,13 +178,17 @@ export function waitForPrintReady(
 //      cleanly.
 //
 // Gating on the flag keeps the two callers from colliding.
-export function AutoPrint({ enabled }: { enabled: boolean }) {
+export function AutoPrint({ enabled, recordPrinted }: {
+  enabled: boolean;
+  /** 业主 2026-10-02：打印对话框关闭后把本版本记为已打印（仅管理员的浏览器打印入口传入）。 */
+  recordPrinted?: () => Promise<unknown>;
+}) {
   const printedRef = useRef(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const stopPreparing = preparePrintDocument(document, window);
-    const onAfterPrint = () => {
+    const closeTab = () => {
       // Best-effort tab close. Browsers only honor window.close() on
       // windows that scripts opened, so fall back to leaving the tab
       // open silently rather than throwing.
@@ -193,6 +197,14 @@ export function AutoPrint({ enabled }: { enabled: boolean }) {
       } catch {
         // no-op
       }
+    };
+    const onAfterPrint = () => {
+      // 只在真正弹出过打印对话框后记录；先等记录请求结束再关页，避免请求随页面关闭中断。
+      if (!printedRef.current || !recordPrinted) {
+        closeTab();
+        return;
+      }
+      void recordPrinted().catch(() => undefined).finally(closeTab);
     };
     if (enabled) window.addEventListener('afterprint', onAfterPrint);
     const stopWaiting = waitForPrintReady(document, window, () => {
@@ -206,7 +218,7 @@ export function AutoPrint({ enabled }: { enabled: boolean }) {
       stopWaiting();
       window.removeEventListener('afterprint', onAfterPrint);
     };
-  }, [enabled]);
+  }, [enabled, recordPrinted]);
   return failed ? <p role="alert" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
     padding: '1rem', background: 'var(--card)', color: 'var(--primary)', textAlign: 'center' }}>
     打印字体或排版未能加载完成，已停止自动打印。请刷新重试，或返回工单下载 PDF。

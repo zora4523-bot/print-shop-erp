@@ -184,7 +184,7 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       // Current controls list eligible commands only; assert the capability
       // boundary rather than an obsolete disabled-reason wrapper.
       await expect.element(page.getByRole('button', { name: '下发生产（20）', exact: true })).toBeEnabled();
-      for (const unavailable of ['加入待打印', '确认已打印', '批量结算']) {
+      for (const unavailable of ['加入待打印', '批量结算']) {
         await expect.element(page.getByRole('button', { name: new RegExp(unavailable) })).not.toBeInTheDocument();
       }
       expect(await commands.checkShellAccessibility('[data-testid="order-sizing-fixture"]')).toEqual([]);

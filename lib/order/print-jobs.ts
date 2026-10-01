@@ -362,22 +362,39 @@ export async function supersedeOlderOrderPrintRequestsInTx(
   return { requestJobIds: unresolved.map((request) => request.id) };
 }
 
-export async function markOrderPrintRequestPrinted(
-  input: { requestJobId: string; idempotencyKey: string },
+/**
+ * 点「打印」即记已打印（业主 2026-10-02）。管理员在打印页关闭浏览器打印对话框、或下载
+ * 批量打印文件时调用：指定版本若仍是当前版本且有未处理的待打印任务，就记为已打印；
+ * 没有（已打过、版本已变、工单不在生产中）则什么都不做。取消对话框也会记为已打印——
+ * 纸在管理员手上，看得见，重打即可。
+ */
+export async function markCurrentVersionPrinted(
+  input: { orderId: string; workOrderVersion: number },
   actor: OrderPrintActor,
-) {
+): Promise<{ marked: boolean }> {
+  assertAdmin(actor);
   return db.$transaction(async (tx) => {
-    const locator = await tx.orderPrintJob.findUnique({
-      where: { id: input.requestJobId },
-      select: { orderId: true },
-    });
-    if (!locator) {
-      throw new OrderPrintJobError('PRINT_REQUEST_NOT_FOUND', '待打印任务不存在');
-    }
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
-      locator.orderId,
+      input.orderId,
     )}))`;
-    return markOrderPrintRequestPrintedInTx(tx, input, actor);
+    const request = await tx.orderPrintJob.findFirst({
+      where: {
+        orderId: input.orderId,
+        workOrderVersion: input.workOrderVersion,
+        state: OrderPrintJobState.PENDING,
+        resolution: { is: null },
+        order: { is: { workOrderVersion: input.workOrderVersion } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, order: { select: { status: true } } },
+    });
+    if (!request || !canConfirmOrderPrinted(request.order.status)) return { marked: false };
+    await markOrderPrintRequestPrintedInTx(
+      tx,
+      { requestJobId: request.id, idempotencyKey: `auto-print:${request.id}` },
+      actor,
+    );
+    return { marked: true };
   });
 }
 

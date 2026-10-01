@@ -3,7 +3,7 @@ import { PDFDocument } from 'pdf-lib';
 import type { ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 const m = vi.hoisted(() => ({
   active: vi.fn(), user: vi.fn(), find: vi.fn(), update: vi.fn(), worker: vi.fn(), order: vi.fn(),
-  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(),
+  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), markPrinted: vi.fn(),
 }));
 vi.mock('@/lib/db', () => ({ db: { user: { findUnique: m.user }, backgroundJob: { findFirst: m.active, findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
 vi.mock('@/lib/background-jobs/repository', () => ({ enqueueBackgroundJob: m.enqueue, BackgroundJobLeaseLostError: class extends Error {} }));
@@ -15,6 +15,13 @@ vi.mock('@/lib/pdf/render', () => ({ renderHtmlToPdf: m.render }));
 vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifact: m.write, cleanupOldPdfArtifacts: vi.fn(),
   PdfArtifactStorageError: class extends Error { constructor() { super('PDF artifact storage unavailable'); this.name = 'PdfArtifactStorageError'; } } }));
 vi.mock('@/lib/pdf/order-snapshot', () => ({ orderPdfSnapshotKey: (order: { id: string; version: number }) => `${order.id}:${order.version}` }));
+vi.mock('@/lib/order/print-jobs', () => ({
+  markCurrentVersionPrinted: m.markPrinted,
+  OrderPrintJobError: class OrderPrintJobError extends Error {
+    constructor(readonly code: string, message: string) { super(message); }
+  },
+}));
+import { OrderPrintJobError } from '@/lib/order/print-jobs';
 import { BatchPrintAccessError, BatchPrintSelectionError, requestBatchPrint, handleBatchPrintJob, batchPrintStatus, downloadBatchPrint } from '../batch-print';
 const payload = { actorId: 'admin', baseUrl: 'https://example.test', orders: [{ id: 'a', key: 'a:1' }, { id: 'b', key: 'b:1' }] };
 const job = { id: 'j', type: 'ORDER_BATCH_PDF', payload, workerId: 'worker', attempts: 1, assertLease: vi.fn() } as unknown as ClaimedBackgroundJob;
@@ -23,7 +30,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   m.active.mockResolvedValue(null);
   m.user.mockResolvedValue({ isActive: true, role: 'ADMIN' });
-  m.order.mockImplementation(async (id: string) => ({ id, version: 1 }));
+  m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: 1 }));
+  m.markPrinted.mockResolvedValue({ marked: true });
   m.enqueue.mockResolvedValue({ job: { id: 'j' } });
   m.update.mockResolvedValue({ count: 1 });
   m.worker.mockResolvedValue({ workerId: 'w' });
@@ -106,11 +114,31 @@ describe('batch PDF invariants', () => {
     m.order.mockResolvedValueOnce({ id: 'a', version: 1 }).mockResolvedValueOnce({ id: 'b', version: 1 }).mockResolvedValue({ id: 'a', version: 2 });
     await expect(downloadBatchPrint('admin', 'j')).rejects.toBeInstanceOf(BatchPrintSelectionError);
     expect(m.read).toHaveBeenCalledOnce();
+    expect(m.markPrinted).not.toHaveBeenCalled();
+  });
+  // 业主 2026-10-02：下载批量打印文件即记已打印，记的是文件里那一版。
+  it('records each order at the version validated against the downloaded file', async () => {
+    m.find.mockResolvedValue({ ...job, status: 'SUCCEEDED', result: { completed: 2, issues: [], artifactName: 'j.pdf' } });
+    m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: id === 'a' ? 3 : 1 }));
+    expect(await downloadBatchPrint('admin', 'j')).toEqual(Buffer.from('pdf'));
+    expect(m.markPrinted.mock.calls).toEqual([
+      [{ orderId: 'a', workOrderVersion: 3 }, { id: 'admin', role: 'ADMIN' }],
+      [{ orderId: 'b', workOrderVersion: 1 }, { id: 'admin', role: 'ADMIN' }],
+    ]);
+  });
+  it('a print-record conflict does not withhold the file, but unexpected failures still surface', async () => {
+    m.find.mockResolvedValue({ ...job, status: 'SUCCEEDED', result: { completed: 2, issues: [], artifactName: 'j.pdf' } });
+    m.markPrinted.mockRejectedValueOnce(new OrderPrintJobError('IDEMPOTENCY_CONFLICT', 'conflict'));
+    expect(await downloadBatchPrint('admin', 'j')).toEqual(Buffer.from('pdf'));
+    expect(m.markPrinted).toHaveBeenCalledTimes(2);
+    m.markPrinted.mockRejectedValueOnce(new Error('database down'));
+    await expect(downloadBatchPrint('admin', 'j')).rejects.toThrow('database down');
   });
   it('never downloads a partially failed result', async () => {
     m.find.mockResolvedValue({ ...job, status: 'SUCCEEDED', result: { completed: 1, issues: [{ position: 2, message: 'failed' }], artifactName: 'j.pdf' } });
     expect(await downloadBatchPrint('admin', 'j')).toBeNull();
     expect(m.read).not.toHaveBeenCalled();
+    expect(m.markPrinted).not.toHaveBeenCalled();
   });
 });
 

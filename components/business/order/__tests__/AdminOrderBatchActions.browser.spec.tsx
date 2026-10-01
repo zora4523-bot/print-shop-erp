@@ -99,15 +99,15 @@ describe('admin order batch review', () => {
 
     mount([{ ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-1',
       capabilities: { ...order.capabilities, release: false, markPrinted: true } }]);
-    await expect.element(toolbar.getByRole('button', { name: '确认已打印（1）', exact: true })).toBeVisible();
-    await expect.element(toolbar.getByRole('button', { name: /下发生产|批量结算|更多操作/ })).not.toBeInTheDocument();
+    // 业主 2026-10-02：打印即记已打印——待打印的工单只剩「打印所选」，没有单独的确认已打印。
+    expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['打印所选（1）', '导出所选', '取消选择']);
 
     mount([{ ...order, status: OrderStatus.SHIPPED,
       capabilities: { ...order.capabilities, release: false, settle: true } }]);
     await expect.element(toolbar.getByRole('button', { name: '批量结算（1）', exact: true })).toBeVisible();
-    await expect.element(toolbar.getByRole('button', { name: /下发生产|确认已打印|更多操作/ })).not.toBeInTheDocument();
+    await expect.element(toolbar.getByRole('button', { name: /下发生产|更多操作/ })).not.toBeInTheDocument();
 
-    // Incomplete print identity and missing confirmed money cannot create a shortcut.
+    // Missing confirmed money cannot create a settlement shortcut.
     mount([{ ...order, capabilities: { ...order.capabilities, release: false, markPrinted: true, settle: true },
       feeStages: { ...order.feeStages, confirmed: null } }]);
     expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['打印所选（1）', '导出所选', '取消选择']);
@@ -143,27 +143,6 @@ describe('admin order batch review', () => {
     await expect.poll(() => batchAction.mock.calls.length).toBe(1);
     expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'CREATE_PRINT', items: [
       { orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2 },
-    ] });
-  });
-
-  it('confirms printing only for selected orders with a current pending print request', async () => {
-    const order = batchOrder();
-    const printable = { ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-current',
-      capabilities: { ...order.capabilities, release: false, markPrinted: true } };
-    mount([printable, { ...printable, id: 'no-print-request', pendingPrintJobId: null }]);
-    await page.getByRole('button', { name: '确认已打印（1）', exact: true }).click();
-    const dialog = page.getByRole('alertdialog', { name: '确认已打印', exact: true });
-    await expect.element(dialog).toBeVisible();
-    await expect.element(dialog.getByText(/请确认纸质工单已实际打印/)).toBeVisible();
-    expect(batchAction).not.toHaveBeenCalled();
-    batchAction.mockResolvedValue({ status: 'success', result: {
-      command: 'MARK_PRINTED', successCount: 1, skippedCount: 0, failedCount: 0, notAttemptedCount: 0,
-      items: [{ orderId: order.id, status: 'success', code: 'OK' }],
-    } });
-    await dialog.getByRole('button', { name: '确认已打印', exact: true }).click();
-    await expect.poll(() => batchAction.mock.calls.length).toBe(1);
-    expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'MARK_PRINTED', items: [
-      { orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2, requestJobId: 'print-current' },
     ] });
   });
 

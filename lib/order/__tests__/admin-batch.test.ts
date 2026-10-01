@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   release: vi.fn(),
   settle: vi.fn(),
   createPrint: vi.fn(),
-  markPrinted: vi.fn(),
   completeProduction: vi.fn(),
 }));
 
@@ -31,7 +30,6 @@ vi.mock('../print-jobs', () => {
   return {
     OrderPrintJobError,
     createNextOrderPrintRequest: mocks.createPrint,
-    markOrderPrintRequestPrinted: mocks.markPrinted,
   };
 });
 
@@ -77,14 +75,12 @@ describe('admin order batch whitelist', () => {
     mocks.release.mockResolvedValue({ status: OrderStatus.RELEASED });
     mocks.settle.mockResolvedValue({ status: OrderStatus.SETTLED });
     mocks.createPrint.mockResolvedValue({ jobId: 'print-1' });
-    mocks.markPrinted.mockResolvedValue({ receiptId: 'receipt-1' });
   });
 
   it('never exposes confirm or reject as batch commands', () => {
     expect(ADMIN_ORDER_BATCH_COMMANDS).toEqual([
       'RELEASE_AND_CREATE_PRINT',
       'CREATE_PRINT',
-      'MARK_PRINTED',
       'SETTLE',
       'COMPLETE_PRODUCTION',
     ]);
@@ -157,22 +153,6 @@ describe('admin order batch whitelist', () => {
       },
       admin,
     );
-  });
-
-  it('skips mark-printed rows with no current request instead of aborting the batch', async () => {
-    const result = await runAdminOrderBatch(
-      {
-        requestId: 'batch-print-20260902',
-        command: 'MARK_PRINTED',
-        items: [{ ...item('order-1'), requestJobId: undefined }],
-      },
-      admin,
-    );
-    expect(result.items[0]).toMatchObject({
-      status: 'skipped',
-      code: 'INVALID_INPUT',
-    });
-    expect(mocks.markPrinted).not.toHaveBeenCalled();
   });
 
   it('delegates print kind selection to the lock-protected history reader', async () => {

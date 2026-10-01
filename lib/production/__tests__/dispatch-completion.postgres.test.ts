@@ -15,7 +15,7 @@ import { registerProductionCompletion } from '../completion-registration';
 import { allocateProductionWages } from '@/lib/salary/production-wages';
 import { lockPieceworkSettlement } from '@/lib/salary/piecework-settlement';
 import { activateProductionOperationsInTx } from '../operation-materialization-service';
-import { markOrderPrintRequestPrinted } from '@/lib/order/print-jobs';
+import { markCurrentVersionPrinted } from '@/lib/order/print-jobs';
 import { registerShipment } from '@/lib/order/shipment-registration';
 import { assertShipOrderReadinessInTx } from '@/lib/order';
 import { reportProductionOperation } from '../operation-reporting';
@@ -268,7 +268,7 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
   it('creates a reprint task when a printed but unproduced order changes owner', async () => {
     const f = await assigned();
     const print = await db.orderPrintJob.findFirstOrThrow({ where: { orderId: f.order.id, state: 'PENDING' } });
-    await markOrderPrintRequestPrinted({ requestJobId: print.id, idempotencyKey: randomUUID() }, admin);
+    await expect(markCurrentVersionPrinted({ orderId: f.order.id, workOrderVersion: print.workOrderVersion }, admin)).resolves.toEqual({ marked: true });
     const current = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
     const newOwner = await newWorker();
     const request = { requestKey: randomUUID(), orders: [{ ...f.request.orders[0], revision: current.revision, assignments: Object.fromEntries(Object.keys(f.request.orders[0].assignments).map(key => [key, newOwner.id])) }] };

@@ -359,7 +359,7 @@ describe('admin order workspace predicates', () => {
     OrderStatus.SHIPPED,
     OrderStatus.SETTLED,
     OrderStatus.CONFIRMED,
-  ])('%s 工单即使留有当前版待打印任务也不再提供确认已打印', (status) => {
+  ])('%s 工单即使留有当前版待打印任务也不再有打印待办', (status) => {
     expect(
       resolveAdminPrintFacts({
         status,
@@ -369,7 +369,7 @@ describe('admin order workspace predicates', () => {
     ).toMatchObject({ printPending: false, canCreatePrint: false, canMarkPrinted: false });
   });
 
-  it('暂停期间批准改单生成的补打任务仍可确认已打印', () => {
+  it('暂停期间批准改单生成的补打任务仍可打印并记已打印', () => {
     expect(
       resolveAdminPrintFacts({
         status: OrderStatus.ON_HOLD,

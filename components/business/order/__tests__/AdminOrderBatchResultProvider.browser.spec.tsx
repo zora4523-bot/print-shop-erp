@@ -121,7 +121,7 @@ describe('batch receipt print handoff', () => {
     await expect.element(page.getByRole('link', { name: '去打印工单 GD-260910-001', exact: true })).toBeVisible();
   });
 
-  it.each(['MARK_PRINTED', 'SETTLE'] as const)('%s does not offer printing from its successful receipt', async (command) => {
+  it.each(['SETTLE'] as const)('%s does not offer printing from its successful receipt', async (command) => {
     mount();
     finish(command);
     await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
