@@ -259,13 +259,18 @@ export async function finalizeSampleOrderInTx(
     throw new SampleQuoteChangedError(result);
   // The first-weight default stays the billable weight until an administrator
   // records another one, so shipping repricing and fulfilment start from it.
+  // Every address is synced to the freshly derived weight, including clearing
+  // it: a rejected sample moved to a province without a tariff must not keep
+  // the earlier default as if it were a billable weight (Codex review P2).
   const firstWeightDefaults = new Set<string>();
   for (const shipment of order.shipments) {
     const key = String(shipment.sequence);
-    const weightKg = priced.shipments.find((row) => row.shipmentKey === key)?.weightKg;
-    if (!weightKg) continue;
-    firstWeightDefaults.add(key);
-    if (shipment.weightKg?.equals(weightKg)) continue;
+    const weightKg = priced.shipments.find((row) => row.shipmentKey === key)?.weightKg ?? null;
+    if (weightKg) firstWeightDefaults.add(key);
+    const unchanged = weightKg
+      ? shipment.weightKg?.equals(weightKg) === true
+      : shipment.weightKg === null;
+    if (unchanged) continue;
     await tx.orderShipment.update({ where: { id: shipment.id }, data: { weightKg } });
   }
   // All production facts remain, but their customer price is included in the

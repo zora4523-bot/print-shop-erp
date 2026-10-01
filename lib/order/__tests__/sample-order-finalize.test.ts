@@ -33,9 +33,9 @@ const proofOrder = {
   items: [proofItem], packagingGroups: [],
   shipments: [{ sequence: 1, destinationProvince: '上海', weightKg: null, lines: [{ orderItemId: 'item-1', quantity: 1 }] }],
 };
-function sampleOrder(province: string, weightKg: Prisma.Decimal | null = null) {
+function sampleOrder(province: string, weightKg: Prisma.Decimal | null = null, status = 'DRAFT') {
   return {
-    id: 'order-2', purpose: 'SAMPLE_SHIPMENT', status: 'DRAFT', isSfCollect: false, samplePackagingRuleCode: null,
+    id: 'order-2', purpose: 'SAMPLE_SHIPMENT', status, isSfCollect: false, samplePackagingRuleCode: null,
     priceRevision: 0, items: [{ id: 'item-1', sequence: 1 }], packagingGroups: [],
     shipments: [{ id: 'ship-1', sequence: 1, destinationProvince: province, weightKg, lines: [{ orderItemId: 'item-1', quantity: 3 }] }],
   };
@@ -78,4 +78,23 @@ it('re-derives the default on resubmission instead of trusting an earlier provin
   mocks.findUniqueOrThrow.mockResolvedValue(sampleOrder('新疆', new Prisma.Decimal('2')));
   await expect(submitWithCurrentQuote()).resolves.toMatchObject({ quotedFee: '13.00' });
   expect(mocks.shipmentUpdate).toHaveBeenCalledExactlyOnceWith({ where: { id: 'ship-1' }, data: { weightKg: '1' } });
+});
+
+// Codex 审查 P2：驳回后改到没有中通报价的地区，旧计费重量必须清空，运费保持待定。
+it('clears an earlier billable weight when a rejected sample moves to a province without a tariff', async () => {
+  mocks.findUniqueOrThrow.mockResolvedValue(sampleOrder('台湾', new Prisma.Decimal('2'), 'REJECTED'));
+  const result = await submitWithCurrentQuote();
+  expect(result.quotedFeeCompleteness).not.toBe('COMPLETE');
+  expect(mocks.shipmentUpdate).toHaveBeenCalledExactlyOnceWith({ where: { id: 'ship-1' }, data: { weightKg: null } });
+  const shipping = mocks.chargeUpsert.mock.calls.map(([args]) => args.create)
+    .find((row) => row.businessKey === 'SHIPMENT:1:SHIPPING_FEE');
+  expect(shipping).toMatchObject({ amount: null, status: 'PENDING_AMOUNT' });
+  expect(shipping.pricingSnapshot).not.toHaveProperty('weightBasis');
+  expect(mocks.revision).toHaveBeenCalledWith(tx, expect.objectContaining({ status: 'PENDING_ADMIN_CONFIRMATION' }));
+});
+
+it('leaves an address without a stored weight untouched when no tariff applies', async () => {
+  mocks.findUniqueOrThrow.mockResolvedValue(sampleOrder('台湾'));
+  await submitWithCurrentQuote();
+  expect(mocks.shipmentUpdate).not.toHaveBeenCalled();
 });

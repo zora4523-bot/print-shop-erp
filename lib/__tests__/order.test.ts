@@ -3561,6 +3561,78 @@ describe('shipOrder', () => {
     );
   });
 
+  // DECISIONS 2026-09-30：寄样默认首重。发货时没另填重量，定稿快照保留默认标记；
+  // 发货时填写了重量，就是实际登记，不再带默认标记（Codex 审查 P2）。
+  for (const [label, submittedWeight, keepsDefault] of [
+    ['keeps the sample first-weight default marker when shipping reuses it', null, true],
+    ['drops the sample first-weight default marker once a weight is entered at shipping', '2', false],
+  ] as const) {
+    it(label, async () => {
+      dbMock.order.findUnique
+        .mockResolvedValueOnce({
+          id: 'o1',
+          status: OrderStatus.COMPLETED,
+          submitterId: 'sales-1',
+          settlementType: OrderSettlementType.EXTERNAL_SALES,
+          pricingStatus: 'AUTO_CONFIRMED',
+          ...shipOrderVersionSnapshot,
+        })
+        .mockResolvedValueOnce({
+          settlementType: OrderSettlementType.EXTERNAL_SALES,
+          purpose: 'SAMPLE_SHIPMENT',
+          samplePackagingRuleCode: null,
+          isSfCollect: false,
+          processingAmount: '0.00',
+          customerCharges: [
+            {
+              id: 'charge-shipping',
+              businessKey: 'SHIPMENT:1:SHIPPING_FEE',
+              amount: '2.80',
+              priceBookId: 'logistics-book-test',
+              pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE', weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' },
+              category: { code: 'SHIPPING_FEE' },
+            },
+            {
+              id: 'charge-packing',
+              businessKey: 'SHIPMENT:1:PACKING_MATERIAL',
+              amount: '1.00',
+              priceBookId: 'logistics-book-test',
+              pricingSnapshot: { version: 1, source: 'SAMPLE_ORDER_QUOTE' },
+              category: { code: 'PACKING_MATERIAL' },
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ id: 'o1', orderNo: 'O-1' });
+      dbMock.orderShipment.findMany.mockResolvedValue([
+        { id: 'shipment-1', sequence: 1, destinationProvince: '浙江', weightKg: '1', lines: [{ quantity: 3 }] },
+      ]);
+      dbMock.order.update.mockResolvedValue({ id: 'o1', status: OrderStatus.SHIPPED });
+
+      await shipOrder('o1', ownerActor, {
+        ...shipOrderCommandSnapshot,
+        trackingNo: null,
+        shipments: [{
+          shipmentId: 'shipment-1', trackingNo: 'ZTO001', weightKg: submittedWeight, destinationProvince: '浙江',
+          shippingFee: '2.80', packingMaterialFee: '1.00', customerChargeOverrideReason: '寄样实际收费',
+        }],
+      }, new Date('2026-10-01T12:00:00Z'));
+
+      const shipping = dbMock.orderCustomerCharge.update.mock.calls
+        .map(([args]) => args)
+        .find((args) => args.where.id === 'charge-shipping');
+      expect(shipping?.data.status).toBe('FINAL');
+      if (keepsDefault) {
+        expect(shipping?.data.pricingSnapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT' });
+      } else {
+        expect(shipping?.data.pricingSnapshot).not.toHaveProperty('weightBasis');
+      }
+      const packing = dbMock.orderCustomerCharge.update.mock.calls
+        .map(([args]) => args)
+        .find((args) => args.where.id === 'charge-packing');
+      expect(packing?.data.pricingSnapshot).not.toHaveProperty('weightBasis');
+    });
+  }
+
   it('preserves a previously recorded carrier weight when SF collect is restored before shipping', async () => {
     dbMock.order.findUnique
       .mockResolvedValueOnce({
