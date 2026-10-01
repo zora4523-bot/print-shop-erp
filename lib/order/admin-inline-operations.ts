@@ -54,9 +54,13 @@ export async function getAdminOrderInlineOperations(
     hasLogisticsRows: hasLogisticsChargeRows(row.customerCharges),
   });
   const canPrice = row.settlementType !== OrderSettlementType.NO_CHARGE && (isPricingPending || row.purpose === 'PROOF');
+  // 业主 2026-10-01：先下发生产，生产后才处理物流。待下发的工单「当前待办」只给
+  // 「下发生产」；物流核对留在费用区，下发后（发货前）才进入当前待办。
+  const awaitingRelease = order.capabilities.release === true;
   const pricing = canPrice && isOrderPricingReviewAllowedStatus(row.status, row.purpose)
     ? 'factory'
     : canPrice && billsLogistics && isFulfillmentPricingStatus(row.status) && row.settledAt === null && row.settledFee === null
+      && !awaitingRelease
       ? 'fulfillment' : null;
   const charges = new Map(row.customerCharges.flatMap((charge) =>
     charge.shipmentId ? [[`${charge.shipmentId}:${charge.category.code}`, charge] as const] : [],
