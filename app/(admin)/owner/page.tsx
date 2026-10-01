@@ -28,8 +28,9 @@ import {
   OverReportsWatchlist,
 } from '@/components/business/dashboard/OwnerWatchlists';
 import { countRecentFailures } from '@/lib/notification/admin';
+import { ADMIN_DASHBOARD_TITLE } from '@/lib/navigation/labels';
 
-export const metadata = { title: '工作台' };
+export const metadata = { title: ADMIN_DASHBOARD_TITLE };
 
 export default async function OwnerDashboardPage() {
   await requirePermission('report:all');
@@ -46,7 +47,7 @@ export default async function OwnerDashboardPage() {
   return (
     <div className="min-w-0 space-y-4">
       <PageHeader
-        title="工作台"
+        title={ADMIN_DASHBOARD_TITLE}
         actions={
         <nav
           data-slot="dashboard-shortcuts"
@@ -64,9 +65,6 @@ export default async function OwnerDashboardPage() {
             className={buttonVariants({ variant: 'outline' })}
           >
             月度账单
-          </Link>
-          <Link href="/orders/new" className={buttonVariants()}>
-            新建工单
           </Link>
         </nav>
         }

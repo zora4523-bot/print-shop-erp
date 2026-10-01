@@ -18,8 +18,8 @@ describe('AppSidebar navigation feedback', () => {
     );
     expect(source).not.toContain('? true : false}');
     expect(source).toContain('IntentPrefetchScheduler');
-    expect(source).toContain('onEnter={scheduleIntentPrefetch}');
-    expect(source).toContain('onLeave={cancelIntentPrefetch}');
+    expect(source).toContain('onEnter: scheduleIntentPrefetch');
+    expect(source).toContain('onLeave: cancelIntentPrefetch');
     expect(source).toContain('onEnter(item.href)');
     expect(source).toContain('onMouseLeave');
     expect(source).not.toContain('onFocus');
@@ -46,28 +46,17 @@ describe('AppSidebar navigation feedback', () => {
     expect(source).not.toContain('window.sessionStorage');
   });
 
-  it('renders rule modules as accessible child navigation', () => {
-    const source = readFileSync(
-      path.join(
-        process.cwd(),
-        'components/business/admin/AppSidebar.tsx',
-      ),
-      'utf8',
-    );
-
-    expect(source).toContain('<SidebarMenuSub');
-    expect(source).toContain('<SidebarMenuSubItem data-menu-level="child">');
-    expect(source).toContain('<SidebarMenuSubButton');
+  it('keeps global module matching and local rule navigation separate', () => {
+    const source = readFileSync(path.join(process.cwd(), 'components/business/admin/AppSidebar.tsx'), 'utf8');
+    const rules = readFileSync(path.join(process.cwd(), 'components/business/rules/RuleCenterNavigation.tsx'), 'utf8');
+    expect(source).toContain('getAdminSidebarGroups(menuGroups)');
+    expect(source).toContain('getActiveAdminMenuHref(pathname, allItems, searchParams)');
     expect(source).toContain("aria-current={active ? 'page' : undefined}");
-    expect(source).toContain('data-has-active-child');
     expect(source).toContain('aria-controls={contentId}');
-    expect(source).toContain('useSearchParams');
-    expect(source).toContain(
-      'getActiveAdminMenuHref(pathname, allItems, searchParams)',
-    );
-    expect(source).toContain('text-sidebar-foreground/70');
-    expect(source).not.toContain('text-sidebar-foreground/50');
-    expect(source).not.toContain('data-menu-level="child-group"');
+    expect(rules).toContain('aria-label="规则模块导航"');
+    expect(rules).toContain('prefetch={false}');
+    expect(rules).toContain('scroll={false}');
+    expect(rules).toContain('<LinkPendingHint />');
   });
 
   it('keeps icon-only navigation vertically scrollable', () => {

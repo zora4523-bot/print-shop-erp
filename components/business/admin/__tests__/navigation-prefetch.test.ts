@@ -64,8 +64,8 @@ describe('admin navigation prefetch policy', () => {
     );
     expect(sidebar).not.toContain('? true : false}');
     expect(sidebar).toContain('IntentPrefetchScheduler');
-    expect(sidebar).toContain('onEnter={scheduleIntentPrefetch}');
-    expect(sidebar).toContain('onLeave={cancelIntentPrefetch}');
+    expect(sidebar).toContain('onEnter: scheduleIntentPrefetch');
+    expect(sidebar).toContain('onLeave: cancelIntentPrefetch');
     expect(sidebar).toContain('onEnter(item.href)');
     expect(sidebar).toContain('onMouseLeave');
     expect(sidebar).not.toContain('onFocus');

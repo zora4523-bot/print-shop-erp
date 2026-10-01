@@ -8,6 +8,7 @@ import {
   ADMIN_ROLE_BADGE,
   flattenAdminMenuItems,
   getAdminMenuItems,
+  getAdminSidebarGroups,
 } from '@/lib/navigation/admin-menu';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
@@ -22,9 +23,11 @@ vi.mock('next/link', () => ({
   __esModule: true,
   default: ({
     prefetch: _prefetch,
+    scroll: _scroll,
     ...props
-  }: ComponentProps<'a'> & { prefetch?: boolean }) => {
+  }: ComponentProps<'a'> & { prefetch?: boolean; scroll?: boolean }) => {
     void _prefetch;
+    void _scroll;
     return <a {...props} />;
   },
   useLinkStatus: () => ({ pending: false }),
@@ -33,22 +36,29 @@ vi.mock('@/actions/account', () => ({ signOutAction: vi.fn() }));
 
 import { AdminHeader } from '../AdminHeader';
 import { AppSidebar } from '../AppSidebar';
+import { RuleCenterNavigation } from '@/components/business/rules/RuleCenterNavigation';
 import { BreadcrumbEntity, BreadcrumbEntityProvider } from '../breadcrumb-entity';
 
 let host: HTMLDivElement;
 let root: Root;
+const preventNavigation = (event: MouseEvent) => {
+  if ((event.target as Element | null)?.closest('a[href]')) event.preventDefault();
+};
 
 beforeEach(() => {
   // Only this isolated browser-test context is changed; no login or database fixture.
   localStorage.removeItem('print-shop-erp:admin-sidebar-collapsed');
+  route.search = '';
   host = document.createElement('div');
   host.dataset.testid = 'admin-shell-fixture';
   document.body.append(host);
   root = createRoot(host);
   document.documentElement.lang = 'zh-CN';
+  document.addEventListener('click', preventNavigation);
 });
 
 afterEach(() => {
+  document.removeEventListener('click', preventNavigation);
   flushSync(() => root.unmount());
   host.remove();
   document.documentElement.classList.remove('dark');
@@ -82,6 +92,9 @@ async function renderShell(
           <div className="p-6">
             {entityLabel ? <BreadcrumbEntity label={entityLabel} /> : null}
             <h1>导航测试页面</h1>
+            {role === Role.ADMIN && route.pathname.startsWith('/owner/rules') ? (
+              <RuleCenterNavigation items={getAdminMenuItems({ role }).flatMap((group) => group.items).find((item) => item.href === '/owner/rules')?.children ?? []} />
+            ) : null}
           </div>
         </BreadcrumbEntityProvider>
       </SidebarInset>
@@ -131,19 +144,20 @@ async function settleMobileSidebar() {
 function assertMenuLinks(role: Role) {
   const nav = document.querySelector('[aria-label="后台主导航"]')!;
   const expected = flattenAdminMenuItems(
-    getAdminMenuItems({ role }).flatMap((group) => group.items),
+    getAdminSidebarGroups(getAdminMenuItems({ role })).flatMap((group) => group.items),
   ).filter((item) => item.href !== '#').map((item) => item.href).sort();
   const actual = [...nav.querySelectorAll('a')]
     .map((link) => link.getAttribute('href')).sort();
   expect(actual).toEqual(expected);
   expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
   for (const control of nav.querySelectorAll('a, button')) {
+    if (!control.checkVisibility()) continue;
     const style = getComputedStyle(control);
     expect(style.fontSize, control.textContent ?? '').toBe('14px');
     expect(style.lineHeight).toBe('20px');
     expect(control.getBoundingClientRect().height).toBeCloseTo(44, 1);
     const isEmphasized = control.getAttribute('aria-current') === 'page'
-      || Boolean(control.closest('[data-menu-level="parent"]') && control.matches('a[data-sidebar="menu-button"]'))
+      || Boolean(control.closest('[data-menu-level="action"]'))
       || control.hasAttribute('aria-expanded');
     expect(style.fontWeight).toBe(isEmphasized ? '500' : '400');
   }
@@ -156,17 +170,12 @@ function assertMenuLinks(role: Role) {
   } else {
     const rules = nav.querySelector('[data-menu-group="规则"]')!;
     expect(rules.querySelector('[data-slot="sidebar-group-label"]')).toBeNull();
-    const link = rules.querySelector<HTMLAnchorElement>('a[href="/owner/rules"]')!;
-    const toggle = rules.querySelector<HTMLButtonElement>('button')!;
-    expect(link.textContent).toBe('规则配置中心');
-    expect(toggle.getAttribute('aria-label')).toBe('收起规则配置中心子菜单');
-    expect(toggle.closest('a')).toBeNull();
-    const linkRect = link.getBoundingClientRect();
-    const toggleRect = toggle.getBoundingClientRect();
-    expect(linkRect.top).toBe(toggleRect.top);
-    // 移动抽屉的 transform 可能引入不足 0.01px 的浮点舍入差。
-    expect(linkRect.right).toBeLessThanOrEqual(toggleRect.left + 0.01);
-    expect(toggleRect.right).toBeLessThanOrEqual(nav.getBoundingClientRect().right);
+    expect(rules.querySelectorAll('a')).toHaveLength(1);
+    expect(rules.querySelector('button')).toBeNull();
+    expect(rules.querySelector('a')?.textContent).toBe('规则配置中心');
+    expect(nav.querySelector('a[href*="customer-pricing"]')).toBeNull();
+    expect(nav.querySelectorAll('a[href="/orders/new"]')).toHaveLength(1);
+    expect(nav.querySelector('a')?.getAttribute('href')).toBe('/orders/new');
   }
 }
 
@@ -203,6 +212,20 @@ describe.each([Role.SALES, Role.ADMIN])('%s shared navigation', (role) => {
         }
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
         expect(await commands.checkShellAccessibility()).toEqual([]);
+        if (role === Role.ADMIN) {
+          const summary = page.elementLocator(host.querySelector('summary')!);
+          summary.element().focus();
+          await userEvent.keyboard('{Enter}');
+          const localNav = page.getByRole('navigation', { name: '规则模块导航' });
+          await expect.element(localNav).toBeVisible();
+          expect(localNav.element().querySelectorAll('a')).toHaveLength(11);
+          expect(localNav.element().querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+          for (const link of localNav.element().querySelectorAll('a')) {
+            expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+          }
+          expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+          expect(await commands.checkShellAccessibility()).toEqual([]);
+        }
 
         if (width < 768) {
           await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
@@ -211,6 +234,15 @@ describe.each([Role.SALES, Role.ADMIN])('%s shared navigation', (role) => {
           expect(await commands.checkShellAccessibility()).toEqual([]);
         }
         assertMenuLinks(role);
+        if (role === Role.ADMIN && (width === 1280 || width === 375)) {
+          await page.screenshot({ path: `__screenshots__/grouped-sidebar-${theme}-${width}.png` });
+        }
+        const nav = document.querySelector('[aria-label="后台主导航"]')!;
+        for (const button of nav.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]')) {
+          await page.elementLocator(button).click();
+        }
+        assertMenuLinks(role);
+        expect(await commands.checkShellAccessibility()).toEqual([]);
         if (width < 768) {
           const sidebar = document.querySelector<HTMLElement>('[data-mobile="true"]')!;
           for (const control of sidebar.querySelectorAll<HTMLElement>('a, button:not([disabled])')) {
@@ -264,42 +296,70 @@ it('主题和账号菜单保持键盘、焦点与退出表单契约', async () =
   await vi.waitFor(() => expect(document.activeElement).toBe(account.element()));
 });
 
-it('规则中心入口与折叠按钮合为一行，键盘折叠后仍可进入总览', async () => {
+it('规则目录移入模块内，全局只保留一个当前模块入口', async () => {
   await page.viewport(1280, 800);
   route.pathname = '/owner/rules/customer-pricing';
-  await renderShell(Role.ADMIN);
-  assertMenuLinks(Role.ADMIN);
-  const toggle = page.getByRole('button', { name: '收起规则配置中心子菜单' });
-  toggle.element().focus();
-  await userEvent.keyboard('{Enter}');
-  expect(document.querySelector('[aria-label="规则配置中心子菜单"]')).toBeNull();
-  // 面包屑现在保留父级「规则配置中心」，这里断言的是侧栏入口。
-  await expect.element(page.getByRole('link', { name: '规则配置中心', exact: true }).and(page.elementLocator(document.querySelector('[data-sidebar="menu-button"][href="/owner/rules"]')!))).toBeVisible();
-  expect(JSON.parse(localStorage.getItem('print-shop-erp:admin-sidebar-collapsed')!)).toMatchObject({ 规则: true });
-  expect(await commands.checkShellAccessibility()).toEqual([]);
-  await userEvent.keyboard(' ');
-  assertMenuLinks(Role.ADMIN);
-  expect(host.querySelector('[data-menu-group="规则"] [data-menu-level="group-children"]')?.className).not.toContain('pl-2');
-});
-
-it('原有规则折叠偏好继续生效，图标模式与总览入口保持可用', async () => {
-  await page.viewport(1280, 800);
-  localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 规则: true }));
-  route.pathname = '/owner/rules';
+  route.search = 'section=machine';
   await renderShell(Role.ADMIN);
   const nav = page.getByRole('navigation', { name: '后台主导航' });
-  const link = nav.getByRole('link', { name: '规则配置中心', exact: true });
-  await expect.element(link).toHaveAttribute('href', '/owner/rules');
-  await expect.element(link).toHaveAttribute('aria-current', 'page');
-  const toggle = page.getByRole('button', { name: '展开规则配置中心子菜单' }).element();
-  await expect.element(toggle).toBeVisible();
-  expect(document.querySelector('[aria-label="规则配置中心子菜单"]')).toBeNull();
+  await expect.element(nav.getByRole('link', { name: '规则配置中心', exact: true })).toHaveAttribute('aria-current', 'page');
+  expect(nav.element().querySelector('[href*="customer-pricing"]')).toBeNull();
+  const summary = page.elementLocator(host.querySelector('summary')!);
+  summary.element().focus();
+  await userEvent.keyboard('{Enter}');
+  const local = page.elementLocator(host.querySelector('[aria-label="规则模块导航"]')!);
+  await expect.element(local.getByRole('link', { name: '局部烫金机烫费' })).toHaveAttribute('aria-current', 'page');
+  await local.getByRole('link', { name: '局部烫金机烫费' }).click();
+  expect(local.element().querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  summary.element().focus();
+  await userEvent.keyboard(' ');
+  await expect.element(local).not.toBeVisible();
+  route.pathname = '/owner/rules';
+  route.search = '';
+  await renderShell(Role.ADMIN);
+  expect(host.querySelector('[aria-label="规则模块导航"]')).toBeNull();
+});
+
+it('低频组默认收起，键盘展开与收起记忆生效，进入子页自动显露当前位置', async () => {
+  await page.viewport(1280, 800);
+  route.pathname = '/workbench';
+  await renderShell(Role.ADMIN);
+  const toggle = page.getByRole('button', { name: '财务结算 展开' });
+  const bill = page.elementLocator(host.querySelector('a[href="/owner/agent-bills"]')!);
+  await expect.element(bill).not.toBeVisible();
+  toggle.element().focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(bill).toBeVisible();
+  expect(JSON.parse(localStorage.getItem('print-shop-erp:admin-sidebar-collapsed')!)).toMatchObject({ 财务结算: false });
+  await userEvent.keyboard(' ');
+  await expect.element(bill).not.toBeVisible();
+  await renderShell(Role.ADMIN);
+  await expect.element(bill).not.toBeVisible();
+  route.pathname = '/owner/agent-bills';
+  await renderShell(Role.ADMIN);
+  await expect.element(bill).toBeVisible();
+  await expect.element(bill).toHaveAttribute('aria-current', 'page');
+  await page.getByRole('button', { name: '财务结算 收起' }).click();
+  await expect.element(bill).not.toBeVisible();
+});
+
+it('旧分组偏好兼容，图标模式保留所有模块入口与键盘焦点', async () => {
+  await page.viewport(1280, 800);
+  localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 财务: false, 运维: true, 规则: false }));
+  route.pathname = '/workbench';
+  await renderShell(Role.ADMIN);
+  const nav = page.getByRole('navigation', { name: '后台主导航' });
+  await expect.element(nav.getByRole('link', { name: '账单', exact: true })).toBeVisible();
+  await expect.element(page.elementLocator(nav.element().querySelector('a[href="/owner/accounts"]')!)).not.toBeVisible();
   await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
-  await expect.element(link).toBeVisible();
-  await expect.element(toggle).not.toBeVisible();
+  for (const link of nav.element().querySelectorAll('a')) expect(link.checkVisibility()).toBe(true);
+  const accounts = page.elementLocator(nav.element().querySelector('a[href="/owner/accounts"]')!);
+  accounts.element().focus();
+  await expect.element(accounts).toHaveFocus();
+  expect(nav.element().querySelectorAll('a[href="/owner/rules"]')).toHaveLength(1);
   await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
-  await page.getByRole('button', { name: '展开规则配置中心子菜单' }).click();
-  assertMenuLinks(Role.ADMIN);
+  await expect.element(accounts).not.toBeVisible();
+  await expect.element(nav.getByRole('link', { name: '账单', exact: true })).toBeVisible();
 });
 
 it('鼠标切换主题后按 Escape 关闭菜单，焦点返回主题按钮', async () => {
@@ -314,16 +374,16 @@ it('鼠标切换主题后按 Escape 关闭菜单，焦点返回主题按钮', as
   await vi.waitFor(() => expect(document.activeElement).toBe(theme.element()));
 });
 
-it('账号始终展开，不受旧折叠偏好影响', async () => {
+it('账号入口归入系统管理，打开账号页面时不被旧偏好隐藏', async () => {
   await page.viewport(1280, 800);
-  localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 账号: true, 财务: true }));
+  localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 账号: true, 运维: true }));
   route.pathname = '/owner/accounts';
   await renderShell(Role.ADMIN);
-  const group = host.querySelector('[data-menu-group="账号"]')!;
-  expect(group.querySelector('button[aria-expanded]')).toBeNull();
-  await expect.element(page.getByRole('navigation', { name: '后台主导航' }).getByRole('link', { name: '用户管理', exact: true })).toBeVisible();
-  expect(group.querySelector('a')?.getAttribute('aria-current')).toBe('page');
-  await expect.element(page.getByRole('button', { name: '财务 展开' })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: '后台主导航' });
+  const accounts = page.elementLocator(nav.element().querySelector('a[href="/owner/accounts"]')!);
+  await expect.element(accounts).toBeVisible();
+  await expect.element(accounts).toHaveAttribute('aria-current', 'page');
+  await expect.element(page.getByRole('button', { name: '系统管理 收起' })).toBeVisible();
 });
 
 describe('breadcrumb text alignment in the real admin shell', () => {

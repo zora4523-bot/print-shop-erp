@@ -10,6 +10,7 @@ import {
   getActiveAdminMenuHref,
   getAdminQuickLinks,
   getAdminMenuItems,
+  getAdminSidebarGroups,
   type AdminMenuItem,
 } from '../admin-menu';
 
@@ -50,25 +51,34 @@ describe('getAdminMenuItems', () => {
     const groups = getAdminMenuItems({ role: Role.ADMIN });
     const items = flatten(groups);
     expect(groups.map((g) => g.label)).toEqual([
-      '业务',
+      '业务模块',
+      '生产与采购',
+      '财务结算',
+      '基础资料',
       '规则',
-      '财务',
-      '字典',
-      '账号',
-      '运维',
+      '系统管理',
     ]);
     expect(items).toHaveLength(37);
     expect(items.map((i) => i.label)).toEqual([
-      '工作台',
+      '管理工作台',
       '经营概览',
       '销售工作台',
       '工单列表',
       '新建工单',
-      '采购单',
       '工单修改申请',
+      '采购单',
       '外协',
       '车间用料',
       '工时录入',
+      '账单',
+      '薪资总览',
+      '工序计件结算',
+      '历史日薪档案',
+      '历史时薪档案',
+      '物料',
+      '仓库/库位',
+      '用料清单',
+      '客户/供应商',
       '规则配置中心',
       '空白封单价',
       '局部烫金机烫费',
@@ -81,15 +91,6 @@ describe('getAdminMenuItems', () => {
       '产品结构',
       '建单工艺目录',
       '员工薪酬规则',
-      '账单',
-      '薪资总览',
-      '工序计件结算',
-      '历史日薪档案',
-      '历史时薪档案',
-      '物料',
-      '仓库/库位',
-      '用料清单',
-      '客户/供应商',
       '用户管理',
       '系统设置',
       '推送配置',
@@ -99,7 +100,7 @@ describe('getAdminMenuItems', () => {
     ]);
     // P1 #1 Slice A：/owner/page.tsx 已落地，Dashboard href 不再是 `#`
     // placeholder。锁住，防止未来回退时 sidebar 又指 404 路由。
-    const dashboard = items.find((i) => i.label === '工作台');
+    const dashboard = items.find((i) => i.label === '管理工作台');
     expect(dashboard?.href).toBe('/owner');
     const analytics = items.find((i) => i.label === '经营概览');
     expect(analytics?.href).toBe('/owner/analytics');
@@ -260,7 +261,7 @@ describe('getAdminMenuItems', () => {
     expect(labels).not.toContain('工艺字典');
     expect(labels).not.toContain('产品字典');
     expect(labels).not.toContain('产品分类');
-    expect(labels).toContain('工作台');
+    expect(labels).toContain('管理工作台');
     expect(labels).not.toContain('排产');
     expect(labels).toContain('外协');
     expect(labels).toContain('物料');
@@ -427,6 +428,32 @@ describe('getAdminMenuItems', () => {
         expect(link.status).toBe('implemented');
       }
     }
+  });
+});
+
+describe('全局侧栏与模块目录', () => {
+  it('保留完整授权目录，全局只显示模块入口并高亮规则根入口', () => {
+    const full = getAdminMenuItems({ role: Role.ADMIN });
+    const global = getAdminSidebarGroups(full);
+    const rules = full.flatMap((group) => group.items).find((item) => item.href === '/owner/rules');
+    expect(rules?.children).toHaveLength(11);
+    expect(flatten(global)).toHaveLength(26);
+    expect(flatten(global).every((item) => !item.children?.length)).toBe(true);
+    expect(getActiveAdminMenuHref('/owner/rules/customer-pricing', flatten(global), new URLSearchParams('section=machine'))).toBe('/owner/rules');
+    expect(getActiveAdminMenuHref('/owner/rules/customer-pricing', rules!.children!, new URLSearchParams('section=machine'))).toBe('/owner/rules/customer-pricing?section=machine');
+    for (const item of flatten(global)) {
+      expect(flatten(full)).toContainEqual(expect.objectContaining({ href: item.href, requiredPermission: item.requiredPermission }));
+    }
+  });
+
+  it('各角色的模块入口仍来自授权菜单，销售不出现规则与生产入口', () => {
+    for (const role of Object.values(Role)) {
+      const full = getAdminMenuItems({ role });
+      const roots = full.flatMap((group) => group.items);
+      expect(flatten(getAdminSidebarGroups(full)).map((item) => item.href)).toEqual(roots.map((item) => item.href));
+    }
+    expect(flatten(getAdminSidebarGroups(getAdminMenuItems({ role: Role.SALES })))).toHaveLength(5);
+    expect(getAdminSidebarGroups(getAdminMenuItems({ role: Role.WORKER }))).toEqual([]);
   });
 });
 

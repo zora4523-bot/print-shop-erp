@@ -4,8 +4,13 @@ import { listExternalSalesAccountOptions } from '@/lib/order/external-sales-asso
 import { listActiveCraftOrderOptions } from '@/lib/craft';
 import { SalesWorkbench } from '@/components/business/workbench/SalesWorkbench';
 import { Role } from '@/generated/prisma/enums';
+import { getSession } from '@/lib/auth/session';
+import { workbenchPageTitle } from '@/lib/navigation/labels';
 
-export const metadata = { title: '工作台' };
+export async function generateMetadata() {
+  const session = await getSession();
+  return { title: workbenchPageTitle(session?.user.role) };
+}
 
 export default async function WorkbenchPage() {
   const actor = await requirePermission('order:create');
@@ -20,6 +25,7 @@ export default async function WorkbenchPage() {
   const options = loaded?.[0] ?? null;
   return (
     <SalesWorkbench
+      title={workbenchPageTitle(actor.role)}
       crafts={loaded?.[1] ?? []}
       draftScope={actor.id}
       catalogUnavailable={options === null}
