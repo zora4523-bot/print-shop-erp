@@ -47,6 +47,8 @@ function render(existing = false, embedded = false, multiple = false) {
     <DisclosureSummary className="px-4 py-4"><h2>版费与其他费用</h2></DisclosureSummary>
     <div className="px-4 pb-5 pt-2 sm:px-6 sm:pb-6">{manager}</div>
   </Disclosure> : manager));
+  // 2026-10-01 起「添加制版明细 / 添加整单费用」默认收起（仍挂载）；这里按用户展开后的状态验证。
+  for (const details of host.querySelectorAll('details')) details.open = true;
   return [...host.querySelectorAll('fieldset')].find((field) => field.textContent?.includes(existing ? '制版明细 #1' : '添加制版明细'))!;
 }
 function fill(field: Element, label: string, value: string) {
