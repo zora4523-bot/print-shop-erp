@@ -40,7 +40,8 @@ type Props = {
   decision: ReactNode;
   prints: DetailPrintRecord[];
   printHint?: string;
-  supplementary: Array<{ id: string; title: string; content: ReactNode }>;
+  /** `collapsed`：低频维护区没有待处理事项时首次打开收起（业主 2026-10-02）。 */
+  supplementary: Array<{ id: string; title: string; content: ReactNode; collapsed?: boolean }>;
   packaging?: ReactNode;
   itemDetails?: Array<{ itemId: string; content: ReactNode }>;
   printActions?: ReactNode;
@@ -48,6 +49,19 @@ type Props = {
 
 function amount(value: string | null, status: AdminOrderDetailModel['status'], estimated = false, pricingStatus?: AdminOrderDetailModel['pricingStatus'], incomplete = false) {
   return <OrderAmount status={status} amount={value} estimated={estimated} pricingStatus={pricingStatus} incomplete={incomplete} />;
+}
+
+/**
+ * 详情分区折叠。展开状态只在首次挂载时由 `collapsed` 决定，之后跟随管理员手动展开/收起
+ * 与锚点定位；保存后刷新不会因待处理事项消失而把正在看的分区（及其结果提示）收起。
+ */
+function DetailSection({ id, title, collapsed, highlighted, children }: {
+  id: string; title: string; collapsed?: boolean; highlighted: boolean; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(!collapsed);
+  return <Disclosure open={open} onToggle={(event) => setOpen(event.currentTarget.open)} id={id} tabIndex={-1} className={cn(styles.extra, highlighted && styles.highlight)}>
+    <DisclosureSummary className={styles.disclosureSummary}><h2>{title}</h2><ChevronDown aria-hidden="true" className={styles.disclosureChevron} /><span className={styles.expandLabel}>展开</span><span className={styles.collapseLabel}>收起</span></DisclosureSummary><div>{children}</div>
+  </Disclosure>;
 }
 
 function Progress({ label, done, total, unit = '个' }: {
@@ -124,9 +138,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
   const placedSections = new Set(['detail-design-files', 'detail-pricing-tools', 'detail-delivery-records', 'detail-production-records', 'detail-business-records', 'detail-audit-records', 'detail-other-actions', 'detail-costs', 'detail-after-sales']);
   function renderSections(ids: string[]) {
     return supplementary.filter((section) => ids.includes(section.id)).map((section) => (
-      <Disclosure open key={section.id} id={section.id} tabIndex={-1} className={cn(styles.extra, highlighted === section.id && styles.highlight)}>
-        <DisclosureSummary className={styles.disclosureSummary}><h2>{section.title}</h2><ChevronDown aria-hidden="true" className={styles.disclosureChevron} /><span className={styles.expandLabel}>展开</span><span className={styles.collapseLabel}>收起</span></DisclosureSummary><div>{section.content}</div>
-      </Disclosure>
+      <DetailSection key={`${model.id}:${section.id}`} id={section.id} title={section.title} collapsed={section.collapsed} highlighted={highlighted === section.id}>{section.content}</DetailSection>
     ));
   }
   const navigation = [
