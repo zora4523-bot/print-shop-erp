@@ -2222,11 +2222,14 @@ async function finalizeExternalShipmentChargesInTx(
   );
   // 寄样首重默认（DECISIONS 2026-09-30）：最终计费重量仍等于提交时写入的首重，
   // 定稿快照保留 SAMPLE_FIRST_WEIGHT_DEFAULT；重量已按实际更正则去掉。发货登记会把
-  // 已存重量原样回填，所以按重量值判断，不按请求里有没有重量判断。
+  // 已存重量原样回填，所以按重量值判断，不按请求里有没有重量判断。到付不按重量计费，
+  // 与上面的报价一致按 null。
   const finalWeightByShippingKey = new Map(
     input.storedShipments.map((shipment) => [
       `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
-      input.trustedWeightByShipmentId.get(shipment.id) ?? null,
+      chargeOrder.isSfCollect
+        ? null
+        : input.trustedWeightByShipmentId.get(shipment.id) ?? null,
     ]),
   );
   for (const charge of finalizedCharges.charges) {

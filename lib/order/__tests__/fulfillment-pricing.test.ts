@@ -257,6 +257,47 @@ describe('fulfilment charge confirmation', () => {
     expect(mocks.tx.orderCustomerCharge.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ amount: '19.50' }) }));
   });
 
+  // Codex 审查 P2：寄付 → 到付 → 恢复寄付，恢复的是原寄付快照；到付那一版已去掉标记，
+  // 不能因此把仍然有效的默认首重依据删掉。往返期间重量改过则恢复不成立，要人工填运费。
+  it.each([
+    ['keeps the first-weight default marker when restoring the original prepaid freight after SF collect', '1', true],
+    ['does not restore the default freight once the weight changed during the round trip', '2', false],
+  ] as const)('%s', async (_label, weightKg, restores) => {
+    const markedSnapshot = {
+      source: 'SAMPLE_ORDER_QUOTE',
+      quote: { basis: { province: '广东', billableWeightKg: '1' } },
+      weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1',
+    };
+    const original = order();
+    original.shipments[0]!.weightKg = new Decimal('1');
+    original.customerCharges[0]!.pricingSnapshot = markedSnapshot;
+    const current = { ...order(), pricingStatus: 'PENDING_ADMIN_CONFIRMATION', confirmedFee: null, isSfCollect: true };
+    current.shipments[0]!.weightKg = new Decimal('1');
+    current.customerCharges[0]!.amount = new Decimal('0');
+    current.customerCharges[0]!.status = 'WAIVED';
+    current.totalAmount = new Decimal('147');
+    mocks.tx.order.findUnique.mockResolvedValue(current);
+    mocks.tx.orderPricingRevision.findMany.mockResolvedValue([
+      revision(current, 5, 'PENDING_ADMIN_CONFIRMATION', 'SF_COLLECT_CHANGED_PENDING'), revision(original, 4),
+    ]);
+    mocks.tx.orderLog.findMany.mockResolvedValue([{ changedFields: {
+      isSfCollect: { before: false, after: true }, priceRevision: { before: 4, after: 5 },
+    } }]);
+    const input = { orderId: current.id, isSfCollect: false, shipments: [{
+      shipmentId: 'shipment-1', destinationProvince: '广东', weightKg,
+      shippingFee: null, customerChargeOverrideReason: null,
+    }] };
+    if (!restores) {
+      await expect(previewFulfillmentPricing(input, admin)).resolves.toMatchObject({ canConfirm: false });
+      return;
+    }
+    await expect(confirm(input)).resolves.toMatchObject({ confirmedFee: '155.00' });
+    const snapshot = mocks.tx.orderCustomerCharge.update.mock.calls
+      .map(([args]) => args)
+      .find((args) => args.where.id === 'shipping-1')!.data.pricingSnapshot;
+    expect(snapshot).toMatchObject({ weightBasis: 'SAMPLE_FIRST_WEIGHT_DEFAULT', defaultWeightKg: '1' });
+  });
+
   it('requires manual confirmation instead of guessing when old freight has no billing-fact evidence', async () => {
     const current = { ...order(), pricingStatus: 'PENDING_ADMIN_CONFIRMATION', confirmedFee: null, isSfCollect: true };
     current.customerCharges[0]!.amount = new Decimal('0');

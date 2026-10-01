@@ -28,11 +28,18 @@ function asDecimal(value: unknown): Decimal | null {
   }
 }
 
-/** 提交时写入的默认首重；快照不带默认标记（或标记缺少重量）时为 null。 */
+/**
+ * 提交时写入的默认首重；快照不带默认标记时为 null。早于 `defaultWeightKg` 的
+ * 标记快照（未上线的开发数据）只认同一快照里报价行的证据：计费重量等于首重。
+ */
 export function sampleDefaultWeightKg(snapshot: unknown): Decimal | null {
   const object = asObject(snapshot);
   if (object?.weightBasis !== SAMPLE_FIRST_WEIGHT_DEFAULT) return null;
-  return asDecimal(object.defaultWeightKg);
+  if (object.defaultWeightKg !== undefined) return asDecimal(object.defaultWeightKg);
+  const basis = asObject(asObject(object.line)?.basis);
+  const billable = asDecimal(basis?.billableWeightKg);
+  const firstWeight = asDecimal(basis?.firstWeightKg);
+  return billable && firstWeight?.equals(billable) ? billable : null;
 }
 
 /** 提交时写入快照的默认标记。 */
@@ -44,8 +51,9 @@ export function sampleFirstWeightDefaultMarker(weightKg: Decimal.Value) {
 }
 
 /**
- * 以 `previous` 的默认标记为准，重写 `next` 上的标记：最终重量等于默认首重则保留，
- * 否则去掉。`previous` 不带标记时只清掉 `next` 上可能被复制过来的残留标记。
+ * 重写 `next` 上的标记：最终重量等于默认首重则保留，否则去掉。默认首重先取
+ * `previous`；`previous` 没有时取 `next` 自带的——寄付切到付再恢复寄付时，恢复的
+ * 是原寄付快照，到付那一版已没有标记。到付（最终重量 null）一律去掉。
  */
 export function reconcileSampleWeightBasis<T extends SnapshotObject>(
   previous: unknown,
@@ -55,7 +63,7 @@ export function reconcileSampleWeightBasis<T extends SnapshotObject>(
   const { weightBasis, defaultWeightKg, ...rest } = next;
   void weightBasis;
   void defaultWeightKg;
-  const defaultWeight = sampleDefaultWeightKg(previous);
+  const defaultWeight = sampleDefaultWeightKg(previous) ?? sampleDefaultWeightKg(next);
   const finalWeight = asDecimal(finalWeightKg);
   if (defaultWeight && finalWeight?.equals(defaultWeight)) {
     return { ...rest, ...sampleFirstWeightDefaultMarker(defaultWeight) } as unknown as T;

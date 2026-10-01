@@ -33,9 +33,9 @@ const proofOrder = {
   items: [proofItem], packagingGroups: [],
   shipments: [{ sequence: 1, destinationProvince: '上海', weightKg: null, lines: [{ orderItemId: 'item-1', quantity: 1 }] }],
 };
-function sampleOrder(province: string, weightKg: Prisma.Decimal | null = null, status = 'DRAFT') {
+function sampleOrder(province: string, weightKg: Prisma.Decimal | null = null, status = 'DRAFT', isSfCollect = false) {
   return {
-    id: 'order-2', purpose: 'SAMPLE_SHIPMENT', status, isSfCollect: false, samplePackagingRuleCode: null,
+    id: 'order-2', purpose: 'SAMPLE_SHIPMENT', status, isSfCollect, samplePackagingRuleCode: null,
     priceRevision: 0, items: [{ id: 'item-1', sequence: 1 }], packagingGroups: [],
     shipments: [{ id: 'ship-1', sequence: 1, destinationProvince: province, weightKg, lines: [{ orderItemId: 'item-1', quantity: 3 }] }],
   };
@@ -97,4 +97,17 @@ it('leaves an address without a stored weight untouched when no tariff applies',
   mocks.findUniqueOrThrow.mockResolvedValue(sampleOrder('台湾'));
   await submitWithCurrentQuote();
   expect(mocks.shipmentUpdate).not.toHaveBeenCalled();
+});
+
+// Codex 审查 P2：顺丰到付不收快递费，不写默认首重，也不带首重默认标记。
+it('writes no first-weight default for an SF collect sample and clears one left by an earlier submit', async () => {
+  mocks.findUniqueOrThrow.mockResolvedValue(sampleOrder('浙江', new Prisma.Decimal('1'), 'REJECTED', true));
+  await expect(submitWithCurrentQuote()).resolves.toEqual({ quotedFee: '1.00', quotedFeeCompleteness: 'COMPLETE' });
+  expect(mocks.shipmentUpdate).toHaveBeenCalledExactlyOnceWith({ where: { id: 'ship-1' }, data: { weightKg: null } });
+  const shipping = mocks.chargeUpsert.mock.calls.map(([args]) => args.create)
+    .find((row) => row.businessKey === 'SHIPMENT:1:SHIPPING_FEE');
+  expect(shipping).toMatchObject({ amount: '0.00' });
+  expect(shipping.pricingSnapshot).not.toHaveProperty('weightBasis');
+  expect(shipping.pricingSnapshot).not.toHaveProperty('defaultWeightKg');
+  expect(mocks.revision).toHaveBeenCalledWith(tx, expect.objectContaining({ status: 'AUTO_CONFIRMED' }));
 });

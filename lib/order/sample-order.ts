@@ -78,13 +78,14 @@ export function sampleQuoteFacts(input: CreateOrderInput): SampleQuoteFacts {
 /**
  * 业主 2026-09-30：寄样品只是几个红包，默认不超过首重。每个地址按收件省份的
  * 中通首重计费，提交时即自动确认；实际超重由管理员在履约费用中改。省份不在
- * 报价表内时没有首重，快递费保持待核价，不估算、不按零元。
+ * 报价表内时没有首重，快递费保持待核价，不估算、不按零元。顺丰到付不收快递费，
+ * 不写默认重量，也就不带首重默认标记。
  */
 function withSampleFirstWeight(
   facts: SampleQuoteFacts,
   rules: Parameters<typeof getZtoTariff>[1],
 ): SampleQuoteFacts {
-  if (facts.purpose !== 'SAMPLE_SHIPMENT') return facts;
+  if (facts.purpose !== 'SAMPLE_SHIPMENT' || facts.isSfCollect) return facts;
   return {
     ...facts,
     shipments: facts.shipments.map((shipment) => ({
