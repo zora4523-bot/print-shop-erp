@@ -148,8 +148,8 @@ export function SalesOrderDetailView({
         <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <PageHeader
-              // 改单页的返回由表单区「返回工单」承担（受离开拦截保护），页头不再重复（§8.3）。
-              back={editForm ? undefined : { href: '/orders', label: '返回工单列表' }}
+              // 不给 back：详情页返回由顶栏面包屑「我的工单」承担，改单页由表单区「返回工单」
+              // 承担（受离开拦截保护）——页头不再重复（§8.3、UI-SYSTEM「工单页面导航与标题去重」）。
               title={order.customName?.trim() || '未命名工单'}
               status={
                 <>

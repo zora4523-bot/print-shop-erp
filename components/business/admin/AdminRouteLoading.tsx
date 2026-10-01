@@ -7,7 +7,8 @@ type AdminRouteLoadingVariant = 'list' | 'detail' | 'form';
 /**
  * 管理端路由级 loading。骨架形状必须和目标页一致（审查 #26，CLS）：
  * - list：列表页，表格骨架；
- * - detail：详情页，页头（返回 + 标题 + 状态）+ 卡片区，不画表格；
+ * - detail：详情页，页头（返回 + 标题 + 状态）+ 卡片区，不画表格；页头没有返回入口的
+ *   详情（工单详情：返回由顶栏面包屑承担）传 `withBack={false}`，骨架同样不画返回占位；
  * - form：新建 / 编辑 / 盘点等表单页，页头 + FormPage 宽度（max-w-3xl）的字段卡片。
  *
  * 刻意没有 loading 的分组（登记）：`(billing)` 与 `(admin-forms)` 是零 JS
@@ -16,9 +17,12 @@ type AdminRouteLoadingVariant = 'list' | 'detail' | 'form';
 export function AdminRouteLoading({
   label = '正在加载页面',
   variant = 'list',
+  withBack = true,
 }: {
   label?: string;
   variant?: AdminRouteLoadingVariant;
+  /** 目标页页头是否有 `PageHeader` 返回入口；只影响 detail / form 骨架。 */
+  withBack?: boolean;
 }) {
   if (variant === 'list') {
     return (
@@ -35,7 +39,7 @@ export function AdminRouteLoading({
         data-variant={variant}
         className={cn(variant === 'form' && FORM_PAGE_WIDTH_CLASS, 'min-w-0 space-y-6')}
       >
-        <HeaderSkeleton withBack />
+        <HeaderSkeleton withBack={withBack} />
         {variant === 'form' ? (
           <div className="space-y-5 rounded-xl border bg-card p-6 shadow-sm">
             {[0, 1, 2, 3].map((field) => (

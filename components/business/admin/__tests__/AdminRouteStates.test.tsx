@@ -56,4 +56,17 @@ describe('admin route states', () => {
     expect(html).not.toContain('正在加载正在加载');
     if (variant === 'form') expect(html).toContain('max-w-3xl');
   });
+
+  // 骨架形状与目标页一致（审查 #26）：工单详情页头没有返回入口（由顶栏面包屑承担），
+  // 骨架也不能先画一条返回占位再在内容到达时消失。
+  it('detail 骨架默认画返回占位，withBack={false} 时不画', () => {
+    const backPlaceholder = /data-slot="skeleton" class="[^"]*\bh-5 w-24\b/g;
+    const withBack = renderToStaticMarkup(<AdminRouteLoading variant="detail" label="正在加载采购单" />);
+    const withoutBack = renderToStaticMarkup(
+      <AdminRouteLoading variant="detail" label="正在加载工单详情" withBack={false} />,
+    );
+    expect(withBack.match(backPlaceholder)).toHaveLength(1);
+    expect(withoutBack.match(backPlaceholder)).toBeNull();
+    expect(withoutBack).toContain('data-variant="detail"');
+  });
 });

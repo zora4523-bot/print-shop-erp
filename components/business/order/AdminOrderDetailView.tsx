@@ -152,7 +152,9 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
   }}>
     <OrderDetailStickyScope header={<div className={styles.header}>
       <div className={styles.identity}>
-        <PageHeader className="basis-full" back={{ href: '/orders', label: '返回工单列表' }}
+        {/* 不给 PageHeader back：返回工单列表由顶栏面包屑父级承担（吸顶、按角色命名、窄屏保留），
+            页内再放一个同目标的「返回工单列表」就是重复入口（UI-SYSTEM「工单页面导航与标题去重」）。 */}
+        <PageHeader className="basis-full"
           eyebrow={<OrderPurposeBadge purpose={model.purpose} />}
           title={model.name?.trim() || '未命名工单'}
           status={<><StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>

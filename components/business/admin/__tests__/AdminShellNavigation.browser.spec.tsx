@@ -329,6 +329,8 @@ it('账号始终展开，不受旧折叠偏好影响', async () => {
 describe('breadcrumb text alignment in the real admin shell', () => {
   const cases = [
     { path: '/orders/new', parentHref: '/orders', current: '新建工单' },
+    // 工单详情页头不再放「返回工单列表」：面包屑父级是唯一的返回入口，六视口都必须可见可聚焦。
+    { path: '/orders/cabcdefghijklmnopqrstuvwx', parentHref: '/orders', current: '工单详情' },
     { path: '/sales/bills', parentHref: null, current: '我的货款账单' },
     { path: '/orders', parentHref: null, current: '工单列表' },
     {
@@ -355,6 +357,8 @@ describe('breadcrumb text alignment in the real admin shell', () => {
           if (scenario.parentHref) {
             const link = header.querySelector<HTMLAnchorElement>(`a[href="${scenario.parentHref}"]`)!;
             expect(link).not.toBeNull();
+            expect(link.checkVisibility()).toBe(true);
+            expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
             link.focus();
             expect(document.activeElement).toBe(link);
             if (scenario.entityLabel) {
