@@ -484,7 +484,8 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           ) : null}
           {settledCorrection?.allowed ? (
             <SettledOrderCorrectionForm
-              key={`settled-correction-${order.revision}`}
+              // 按工单挂载：更正成功后页面刷新带来新修订号，表单不重建，成功回执与展开状态保留。
+              key={`settled-correction-${order.id}`}
               orderId={order.id}
               orderRevision={order.revision}
               settledFee={settledCorrection.settledFee}

@@ -76,3 +76,27 @@ it('announces a server refusal as an alert and keeps the typed amount', async ()
   await expect.element(page.getByRole('alert')).toHaveTextContent('请在账单里录入抵扣或补收');
   await expect.element(page.getByRole('textbox')).toHaveValue('5');
 });
+
+// Codex 审查 P3：成功后服务端刷新带来新修订号与金额，表单不重建：回执与展开状态保留，下一次用新的请求标识。
+it('keeps the receipt and open section across the post-success refresh, and rotates the request key', async () => {
+  mocks.correct.mockResolvedValue({ status: 'success', settledFee: '179.80', message: '已更正，结算金额 179.80 元' });
+  render(); await open();
+  await page.getByRole('textbox').fill('-20');
+  await page.getByRole('button', { name: '更正结算金额' }).click();
+  await page.getByRole('alertdialog').getByRole('textbox', { name: '更正原因' }).fill('运费多收');
+  await page.getByRole('alertdialog').getByRole('button', { name: '更正结算金额' }).click();
+  await expect.element(page.getByRole('status')).toHaveTextContent('已更正');
+  // 页面刷新：同一实例收到新的修订号与结算金额。
+  render({ ...props, orderRevision: 8, settledFee: '179.80' });
+  await expect.element(page.getByRole('status')).toHaveTextContent('已更正，结算金额 179.80 元');
+  expect(host.querySelector('details')?.open).toBe(true);
+  await expect.element(page.getByRole('textbox')).toHaveValue('');
+  await page.getByRole('textbox').fill('5');
+  await page.getByRole('button', { name: '更正结算金额' }).click();
+  await page.getByRole('alertdialog').getByRole('textbox', { name: '更正原因' }).fill('少收包装费');
+  await page.getByRole('alertdialog').getByRole('button', { name: '更正结算金额' }).click();
+  await vi.waitFor(() => expect(mocks.correct).toHaveBeenCalledTimes(2));
+  const [first, second] = mocks.correct.mock.calls.map(([input]) => input);
+  expect(second).toMatchObject({ expectedRevision: 8, amount: '5' });
+  expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+});

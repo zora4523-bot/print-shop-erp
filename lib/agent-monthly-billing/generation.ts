@@ -32,6 +32,9 @@ import type {
 
 type Tx = Prisma.TransactionClient;
 
+/** AgentMonthlyBill 金额列为 DECIMAL(12,2)。 */
+const BILL_AMOUNT_MAX = new Decimal('9999999999.99');
+
 const ELIGIBLE_ORDER_SELECT = {
   id: true,
   orderNo: true,
@@ -272,6 +275,9 @@ export async function allocateOutstandingCreditsInTx(
     if (earlierDraftWaiting(credit.sourceItem.bill.period)) continue;
     const unallocated = unallocatedOf(credit);
     if (unallocated.lte(0)) continue;
+    // 补收根记录不可改：放不进本账单的存储上限时整笔留待之后的账单，绝不让账单生成 /
+    // 确认因溢出失败（录入时已按最坏情况校验，这里兜住之后工单合计又增长的情况）。
+    if (remainingCapacity.plus(unallocated).gt(BILL_AMOUNT_MAX)) continue;
     await tx.agentMonthlyBillAdjustment.create({
       data: {
         billId: input.billId,

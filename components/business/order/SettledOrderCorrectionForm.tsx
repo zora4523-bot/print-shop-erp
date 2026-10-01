@@ -38,7 +38,8 @@ export function SettledOrderCorrectionForm(props: Props) {
   const [amount, setAmount] = useState('');
   const [message, setMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [pending, startTransition] = useTransition();
-  const [requestKey] = useState(() => globalThis.crypto.randomUUID());
+  // 表单实例在多次更正间保留（详情页按工单 id 挂载），成功后换新的请求标识。
+  const [requestKey, setRequestKey] = useState(() => globalThis.crypto.randomUUID());
   const after = correctedSettledFee(props.settledFee, amount, props.minimumSettledFee);
   const delta = after ? new Decimal(amount.trim()) : null;
 
@@ -63,6 +64,7 @@ export function SettledOrderCorrectionForm(props: Props) {
           });
           if (result.status === 'success') {
             setAmount('');
+            setRequestKey(globalThis.crypto.randomUUID());
             setMessage({ text: result.message, failed: false });
           } else {
             setMessage({

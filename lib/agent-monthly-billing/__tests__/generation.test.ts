@@ -269,3 +269,20 @@ it('reads allocations only after locking every source, and leaves a surcharge fo
     { billId: 'bill-7', creditId: 'credit-a', amount: '-20.00' },
   ]);
 });
+
+// Codex 审查 P2：录入后工单合计又增长（如结算更正）时，放不进本账单存储上限的补收整笔留待之后，
+// 账单生成 / 确认不能因溢出失败。
+it('defers a surcharge that would push the draft past the bill amount column limit', async () => {
+  tx.agentMonthlyBill.findUnique.mockReset().mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });
+  tx.agentMonthlyBillItem.aggregate.mockResolvedValue({ _sum: { settledFeeSnapshot: '9999999000.00' } });
+  tx.agentMonthlyBillCredit.findMany.mockResolvedValue([
+    { id: 'surcharge-big', requestedAmount: '1000.00', createdAt: new Date('2026-05-02'), allocations: [], sourceItem: { bill: { period: '2026-05' } } },
+    { id: 'surcharge-small', requestedAmount: '999.99', createdAt: new Date('2026-05-03'), allocations: [], sourceItem: { bill: { period: '2026-05' } } },
+  ]);
+
+  await allocateOutstandingCreditsInTx(tx as never, { billId: 'bill-6', agentUserId: 'agent-1', period: '2026-06' });
+
+  expect(tx.agentMonthlyBillAdjustment.create.mock.calls.map(([args]) => args.data)).toEqual([
+    { billId: 'bill-6', creditId: 'surcharge-small', amount: '999.99' },
+  ]);
+});
