@@ -199,9 +199,9 @@ export async function createAgentMonthlyBillCreditAction(
       status: 'success',
       message: (() => {
         const kind = parsed.data.direction === 'SURCHARGE' ? '补收' : '抵扣';
-        return result.allocatedBillIds.length > 0
+        return result.creditAllocated
           ? `${kind}已记录，已计入后续账单`
-          : `${kind}已记录，后续账单生成时计入`;
+          : `${kind}已记录，待计入后续账单`;
       })(),
     };
   } catch (error) {

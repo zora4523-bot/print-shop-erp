@@ -52,6 +52,7 @@ beforeEach(() => {
     creditId: 'credit-1',
     requestedAmount: '-10.00',
     allocatedBillIds: [],
+    creditAllocated: false,
   });
 });
 
@@ -216,6 +217,15 @@ describe('agent monthly bill actions', () => {
       expect.objectContaining({ direction: 'SURCHARGE', amount: '12.00' }),
       { id: 'admin-1', role: Role.ADMIN },
     );
+    // Codex 审查 P3：重排了草稿不等于本笔已入账（可能留给更早草稿或超出金额上限）。
+    createCreditMock.mockResolvedValueOnce({ creditId: 'c-2', requestedAmount: '12.00', allocatedBillIds: ['draft-6'], creditAllocated: false });
+    form.set('idempotencyKey', 'surcharge-3');
+    await expect(createAgentMonthlyBillCreditAction('bound-bill', null, form))
+      .resolves.toMatchObject({ status: 'success', message: '补收已记录，待计入后续账单' });
+    createCreditMock.mockResolvedValueOnce({ creditId: 'c-3', requestedAmount: '12.00', allocatedBillIds: ['draft-6'], creditAllocated: true });
+    form.set('idempotencyKey', 'surcharge-4');
+    await expect(createAgentMonthlyBillCreditAction('bound-bill', null, form))
+      .resolves.toMatchObject({ status: 'success', message: '补收已记录，已计入后续账单' });
     form.set('direction', 'REFUND');
     form.set('idempotencyKey', 'surcharge-2');
     await expect(createAgentMonthlyBillCreditAction('bound-bill', null, form))

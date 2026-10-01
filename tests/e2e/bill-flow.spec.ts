@@ -168,7 +168,7 @@ for (const mode of ['hydrated', 'native'] as const) {
         await page.getByLabel(/^抵扣金额/).fill('10.00');
         await page.getByLabel('原因', { exact: true }).fill('质量调整');
         await page.getByRole('button', { name: '录入抵扣', exact: true }).click();
-        await expect(page.getByText('抵扣已记录，后续账单生成时计入', { exact: true })).toBeVisible();
+        await expect(page.getByText('抵扣已记录，待计入后续账单', { exact: true })).toBeVisible();
         const state = await readBill(fixture.agentUserId, fixture.period);
         expect(state.credits).toHaveLength(1);
         expect(state.credits[0]).toMatchObject({ requestedAmount: '-10.00', reason: '质量调整' });

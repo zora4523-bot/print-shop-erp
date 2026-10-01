@@ -13,7 +13,7 @@ const { tx, dbMock, events, synchronizeMock, clockMock } = vi.hoisted(() => {
     agentMonthlyBillReceipt: { create: vi.fn() },
     agentMonthlyBillItem: { findUnique: vi.fn() },
     agentMonthlyBillCredit: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn() },
-    agentMonthlyBillAdjustment: { deleteMany: vi.fn() },
+    agentMonthlyBillAdjustment: { deleteMany: vi.fn(), count: vi.fn() },
   };
   return {
     events,
@@ -255,6 +255,7 @@ describe('agent monthly bill commands', () => {
       creditId: 'credit-1',
       requestedAmount: '-30.00',
       allocatedBillIds: [],
+      creditAllocated: false,
     });
     expect(events.indexOf('credit-created')).toBeLessThan(
       events.indexOf('future-draft-scan'),
@@ -323,6 +324,17 @@ describe('agent monthly bill commands', () => {
     expect(events).toContain('surcharge-agent');
     frozenSource([{ requestedAmount: '9999999990.00' }]);
     await expect(request('SURCHARGE', '10.00')).rejects.toThrow('补收金额过大');
+  });
+
+  it.each([
+    [0, false],
+    [1, true],
+  ])('reports this credit as allocated only when an adjustment row exists for it (%s rows)', async (rows, allocated) => {
+    frozenSource([]);
+    tx.agentMonthlyBill.findMany.mockResolvedValue([{ id: 'draft-6', period: '2026-06' }]);
+    tx.agentMonthlyBillAdjustment.count.mockResolvedValue(rows);
+    await expect(request('SURCHARGE', '5.00')).resolves.toMatchObject({ allocatedBillIds: ['draft-6'], creditAllocated: allocated });
+    expect(tx.agentMonthlyBillAdjustment.count).toHaveBeenCalledWith({ where: { creditId: 'credit-new' } });
   });
 
   it('refuses a replayed key whose direction changed', async () => {

@@ -299,7 +299,8 @@ export type CreateAgentMonthlyBillCreditInput = {
 async function allocateCreditsAcrossOpenDrafts(
   agentUserId: string,
   afterPeriod: string,
-): Promise<string[]> {
+  creditId: string,
+): Promise<{ billIds: string[]; creditAllocated: boolean }> {
   return db.$transaction(async (tx) => {
     await lockSettlementCutoffShared(tx);
     const drafts = await tx.agentMonthlyBill.findMany({
@@ -329,7 +330,11 @@ async function allocateCreditsAcrossOpenDrafts(
         period: bill.period,
       });
     }
-    return drafts.map((bill) => bill.id);
+    // 重算的草稿不等于本笔已入账：补收可能因更早草稿或金额上限留待之后。
+    const creditAllocations = drafts.length > 0
+      ? await tx.agentMonthlyBillAdjustment.count({ where: { creditId } })
+      : 0;
+    return { billIds: drafts.map((bill) => bill.id), creditAllocated: creditAllocations > 0 };
   });
 }
 
@@ -344,7 +349,10 @@ export async function createAgentMonthlyBillCredit(
 ): Promise<{
   creditId: string;
   requestedAmount: string;
+  /** 本次重排过的草稿账单（用于刷新页面），不代表本笔都已计入。 */
   allocatedBillIds: string[];
+  /** 本笔抵扣 / 补收是否已有分摊落在草稿账单上。 */
+  creditAllocated: boolean;
 }> {
   assertAdmin(actor);
   const amount = positiveMoney(input.amount);
@@ -487,13 +495,15 @@ export async function createAgentMonthlyBillCredit(
     };
   });
 
-  const allocatedBillIds = await allocateCreditsAcrossOpenDrafts(
+  const allocation = await allocateCreditsAcrossOpenDrafts(
     root.agentUserId,
     root.sourcePeriod,
+    root.creditId,
   );
   return {
     creditId: root.creditId,
     requestedAmount: root.requestedAmount,
-    allocatedBillIds,
+    allocatedBillIds: allocation.billIds,
+    creditAllocated: allocation.creditAllocated,
   };
 }
