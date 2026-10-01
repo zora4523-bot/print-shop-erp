@@ -3,8 +3,11 @@ import { loadEnvConfig } from '@next/env';
 import { activateE2eDatabase, controlledE2eBaseUrl } from './e2e-environment';
 
 const workerViewportProjects = [
+  { name: 'worker-320x568', width: 320, height: 568 },
   { name: 'worker-375x667', width: 375, height: 667 },
+  { name: 'worker-390x844', width: 390, height: 844 },
   { name: 'worker-393x852', width: 393, height: 852 },
+  { name: 'worker-430x932', width: 430, height: 932 },
   { name: 'worker-768x1024', width: 768, height: 1024 },
   { name: 'worker-1024x768', width: 1024, height: 768 },
   { name: 'worker-1280x800', width: 1280, height: 800 },
@@ -12,8 +15,11 @@ const workerViewportProjects = [
 ] as const;
 
 const adminViewportProjects = [
+  { name: 'admin-320x568', width: 320, height: 568 },
   { name: 'admin-375x667', width: 375, height: 667 },
+  { name: 'admin-390x844', width: 390, height: 844 },
   { name: 'admin-393x852', width: 393, height: 852 },
+  { name: 'admin-430x932', width: 430, height: 932 },
   { name: 'admin-768x1024', width: 768, height: 1024 },
   { name: 'admin-1024x768', width: 1024, height: 768 },
   { name: 'admin-1280x800', width: 1280, height: 800 },

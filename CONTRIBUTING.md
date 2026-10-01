@@ -94,7 +94,7 @@ applies_to: repository source at last_verified
 | Route Handler | 状态码/响应体/认证测试，并更新 API 文档 |
 | Prisma migration | 开发库状态、fresh DB 完整迁移链、数据前后置检查 |
 | 打印布局 | `tests/visual/order-print.spec.ts` 像素基线；未经确认不更新基线 |
-| 管理端/师傅端布局 | 六视口、明暗主题、overflow、touch 与 axe 门禁 |
+| 管理端/师傅端布局 | 九视口、明暗主题、overflow、touch 与 axe 门禁，并按 [Design QA](./docs/ui-规范.md#11-ui--ux-quality-standard) 实屏复核 |
 | 发布候选 | 架构、typecheck、完整 lint、全量单测与覆盖率、依赖安全审计、fresh DB、build、浏览器组件、关键 E2E、适用视觉门禁、目标环境 smoke |
 
 常用命令见 [DEVELOPMENT.md](./DEVELOPMENT.md)。视觉门禁通过只证明已定义的几何、可访问性和基线契约，不自动证明每一页都与设计稿逐像素一致。

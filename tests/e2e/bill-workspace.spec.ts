@@ -1,13 +1,14 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { selectBillTheme, waitForBillPaint } from './_bill-ui';
+import { expectViewportGate } from '../visual/ui-gates';
 import { login, withDb, E2E_USERS, E2E_PASSWORD, midPreviousShanghaiMonth, seedSettledExternalSalesOrder, uniqueSuffix } from './_helpers';
 
 test.use({ actionTimeout: 15_000 });
 
 // Independent append-only accounts avoid altering any existing financial history.
 test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', async ({ page, browser, baseURL }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(360_000);
   expect(process.env.E2E_APPEND_ONLY_DATABASE_ISOLATED).toBe('1');
   const targetDate = midPreviousShanghaiMonth();
   const sourceDate = new Date(targetDate);
@@ -43,6 +44,18 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await page.getByRole('button', { name: '标记已收', exact: true }).click();
   await expect(page.getByRole('heading', { name: '收款记录', exact: true })).toBeVisible();
   await page.getByRole('link', { name: '录入抵扣', exact: true }).click();
+  for (const width of [320, 375, 390, 393, 430, 768, 1024, 1280, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const theme of ['light', 'dark'] as const) {
+      await selectBillTheme(page, theme);
+      const info = test.info();
+      await expectViewportGate(page, {
+        ...info,
+        project: { ...info.project, use: { ...info.project.use, viewport: { width, height: 900 } } },
+      });
+      expect((await new AxeBuilder({ page }).include('#admin-main').analyze()).violations).toEqual([]);
+    }
+  }
   await page.getByLabel(/^抵扣金额/).fill('30.00');
   await page.getByLabel('原因', { exact: true }).fill('仅管理员可见的质量调整');
   await page.getByRole('button', { name: '录入抵扣', exact: true }).click();
@@ -88,7 +101,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await expect(sales.getByText('测试转账', { exact: true })).toBeVisible();
   await sales.keyboard.press('Enter');
   await expect(sales.getByText('测试转账', { exact: true })).toBeHidden();
-  for (const width of [375, 393, 768, 1024, 1280, 1920]) {
+  for (const width of [320, 375, 390, 393, 430, 768, 1024, 1280, 1920]) {
     await sales.setViewportSize({ width, height: 900 });
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`/owner/agent-bills?agentUserId=${source.agentUserId}`);

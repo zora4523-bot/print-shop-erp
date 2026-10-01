@@ -4,7 +4,7 @@ import { createE2eConfig } from './scripts/lib/playwright-config';
 const config = createE2eConfig('development');
 
 // These fixture routes intentionally do not exist in a production build.
-// The release configuration keeps the real admin pages in its own six-view gate.
+// The release configuration keeps the real admin pages in its own nine-view gate.
 export default defineConfig({
   ...config,
   projects: config.projects?.filter((project) => project.name?.startsWith('admin-')),

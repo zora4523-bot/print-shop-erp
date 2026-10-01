@@ -26,6 +26,8 @@ applies_to: repository UI implementation and design evidence at last_verified
 
 UI 任务的设计原则、十项 Design QA、验收条件与停止条件统一执行 [`UI / UX Quality Standard` §11](./docs/ui-规范.md#11-ui--ux-quality-standard)。下文历史验证不代表新增标准已在全站通过。
 
+2026-10-01—02 的业务实页 QA 见[检查与修复记录](./docs/audits/2026-10-01-business-design-qa.md)。本轮保留既定业务结构，修复窄屏编辑标题、通知对比度与表格、抵扣表单对齐、历史日薪长文本、手机导航 Escape、打印长串溢出、登录重试输入丢失及主题按钮初始化状态；实际范围、验证结果和未覆盖状态以该报告为准。
+
 早期 `收费项目工作台 重设计.dc.html` 的 Industry 皮肤已经被后续设计取代；定价以
 `批次五 价格与报价 交互稿.dc.html` 的现有 shadcn 皮肤版为准。不能把“包中有 85 页”理解为 85 个页面都有同等级高保真证据。
 
@@ -318,7 +320,7 @@ PageHeader
 
 ## 响应式与跨设备
 
-现有自动门禁矩阵：375×667、393×852、768×1024、1024×768、1280×800、1920×1080。后续 UI 任务执行 [`docs/ui-规范.md` §11.3](./docs/ui-规范.md#113-视口主题与状态矩阵) 的完整矩阵，额外实测 320×568、390×844、430×932；当前自动项目尚未覆盖这三项，不能将六视口通过写成完整验收。
+现有页面自动门禁为九视口：320×568、375×667、390×844、393×852、430×932、768×1024、1024×768、1280×800、1920×1080。管理端（含销售端）、师傅端及合并后 CI 均已补齐；完整验收仍须按 [`docs/ui-规范.md` §11](./docs/ui-规范.md#11-ui--ux-quality-standard) 执行实屏与交互复核。PR 的两个代表视口不能替代完整 Design QA。
 
 - 页面 body 不得横向溢出；表格内部滚动不等于页面溢出。
 - 移动端交互目标最低 44×44 CSS px；桌面紧凑尺寸不能污染手机。
@@ -345,9 +347,9 @@ PageHeader
 | 门禁 | 当前覆盖 | 能证明 | 不能证明 |
 |---|---|---|---|
 | `tests/visual/order-print.spec.ts` | 8 个打印 fixture 像素基线 | 相同环境下打印布局未发生非预期像素变化 | Web 全站与设计稿一致 |
-| `tests/visual/admin-responsive.spec.ts` | 六视口、light/dark、geometry、touch、axe | 被覆盖管理页面不触发已定义的裁切/无障碍门禁 | 与 `.dc.html` 自动像素匹配 |
+| `tests/visual/admin-responsive.spec.ts` | 九视口、light/dark、geometry、touch、axe | 被覆盖管理页面不触发已定义的裁切/无障碍门禁 | 与 `.dc.html` 自动像素匹配 |
 | `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx` | 管理员/销售共享导航六视口、明暗主题、overflow、touch、axe；销售平铺与菜单键盘操作 | 隔离于业务数据的导航布局、角色入口和交互契约 | 完整业务页面的截图或端到端授权 |
-| `tests/visual/worker-responsive.spec.ts` | 六视口、light/dark、七条路由、geometry、touch、axe | 被覆盖师傅端路由满足当前门禁 | 所有师傅端业务状态已逐像素审查 |
+| `tests/visual/worker-responsive.spec.ts` | 九视口、light/dark、师傅端路由与历史/缺失状态、geometry、touch、axe | 被覆盖师傅端路由满足当前门禁 | 所有师傅端业务状态已逐像素审查 |
 | `/dev/showcase` | 人工组件检查 | token、状态和原子件在主题/尺寸下可目视比较 | 自动回归或页面采用率 |
 
 ### 基线规则

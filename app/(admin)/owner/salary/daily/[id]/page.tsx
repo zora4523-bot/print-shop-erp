@@ -96,13 +96,13 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
         <h2 className="font-semibold">历史人工调整</h2>
           <ul className="divide-y border-t text-sm">
             {salary.adjustments.map((entry) => (
-              <li key={entry.id} className="grid gap-2 py-3 sm:grid-cols-[100px_100px_1fr_220px]">
+              <li key={entry.id} className="grid min-w-0 grid-cols-1 gap-2 py-3 sm:grid-cols-2 xl:grid-cols-[6rem_6rem_minmax(0,1fr)_14rem]">
                 <span>{ADJUSTMENT_LABELS[entry.type]}</span>
                 <span className={Number(entry.amount) < 0 ? 'font-sans tabular-nums text-destructive' : 'font-sans tabular-nums text-success-foreground'}>
                   {Number(entry.amount) > 0 ? '+' : ''}{String(entry.amount)}
                 </span>
-                <span>{entry.reason}</span>
-                <span className="text-xs text-muted-foreground">
+                <span className="admin-wrap-anywhere min-w-0">{entry.reason}</span>
+                <span className="admin-wrap-anywhere min-w-0 text-xs text-muted-foreground">
                   {entry.createdBy.displayName} · {formatDateTimeShanghai(entry.createdAt)}
                 </span>
               </li>

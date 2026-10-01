@@ -248,7 +248,7 @@ export default async function OwnerNotificationsPage({
           />
         ) : (
           <TableScrollArea label="最近推送日志" className="rounded-xl border bg-card shadow-sm">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-160 text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left">时间</th>
@@ -431,7 +431,7 @@ function NotificationRulesSection({ rules }: {
         />
       ) : (
         <TableScrollArea label="通知事件规则" className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-160 text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 text-left">事件</th>
@@ -492,7 +492,7 @@ function SmartBotConnectionPanel({
   return (
     <div
       data-slot="notifications-smart-bot-connection"
-      className={`rounded-md border px-3 py-2 text-sm ${presentation.danger ? 'border-destructive/40 bg-destructive/5' : 'bg-card'}`}
+      className={`rounded-md border bg-card px-3 py-2 text-sm ${presentation.danger ? 'border-destructive/40' : ''}`}
     >
       <div className="flex flex-wrap items-center gap-2">
         <strong>智能机器人长连接</strong>

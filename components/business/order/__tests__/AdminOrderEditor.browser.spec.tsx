@@ -209,8 +209,11 @@ describe('administrator edit design', () => {
   });
 
   for (const [width, height] of [
+    [320, 568],
     [375, 667],
+    [390, 844],
     [393, 852],
+    [430, 932],
     [768, 1024],
     [1024, 768],
     [1280, 800],
@@ -224,6 +227,18 @@ describe('administrator edit design', () => {
         await expect
           .element(page.getByRole('heading', { name: '编辑工单', exact: true }))
           .toBeVisible();
+        if (width < 640) {
+          const header = host.querySelector<HTMLElement>('[data-slot="page-header"]')!;
+          const heading = header.querySelector('h1')!;
+          const save = page.getByRole('button', { name: '保存修改…', exact: true }).element();
+          // No overflow alone cannot detect a title squeezed into a narrow column.
+          expect(heading.getBoundingClientRect().height).toBeLessThanOrEqual(
+            parseFloat(getComputedStyle(heading).lineHeight) + 1,
+          );
+          expect(save.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+            header.getBoundingClientRect().bottom,
+          );
+        }
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
         for (const element of host.querySelectorAll<HTMLElement>(
           'button, input:not([type="hidden"]):not([aria-hidden="true"]), select, textarea',

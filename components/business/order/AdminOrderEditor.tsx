@@ -903,7 +903,7 @@ function EditorActionsSection({
     <div
       role="group"
       aria-label="编辑工单操作"
-      className={`-mx-1 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-1 py-3`}
+      className="-mx-1 flex flex-col items-stretch justify-between gap-3 border-b bg-background px-1 py-3 sm:flex-row sm:flex-wrap sm:items-center"
     >
       <PageHeader
         className="min-w-0 flex-1"
