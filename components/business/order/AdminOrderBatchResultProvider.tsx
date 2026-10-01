@@ -8,6 +8,7 @@ import { ActionNotice, BatchActionResult } from '@/components/ui-business';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BATCH_COMMAND_CONFIG, batchReceiptRows, type BatchOrderSnapshot } from './admin-order-batch-ui';
+import { useRefreshAfterPrint } from './use-refresh-after-print';
 
 type BatchReceipt = {
   command: AdminOrderBatchCommand;
@@ -27,6 +28,7 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
   const [receipt, setReceipt] = useState<BatchReceipt | null>(null);
   const [open, setOpen] = useState(false);
   const focusReturnRef = useRef<HTMLButtonElement | null>(null);
+  const armPrintRefresh = useRefreshAfterPrint();
   const rows = receipt && !receipt.pending
     ? batchReceiptRows(receipt.command, receipt.orders, receipt.response)
     : [];
@@ -98,6 +100,7 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label={`去打印工单 ${row.order.orderNo}`}
+                        onClick={armPrintRefresh}
                         className={buttonVariants({ variant: 'outline', className: 'min-h-11 min-w-11' })}
                       >
                         去打印

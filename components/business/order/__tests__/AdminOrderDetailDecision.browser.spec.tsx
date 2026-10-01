@@ -88,17 +88,6 @@ describe('admin detail print reminder', () => {
     expect(host.textContent).not.toContain('收回旧版纸单');
   });
 
-  it('refreshes when the admin returns from the print tab, and only while a print is pending', async () => {
-    await page.viewport(1280, 900);
-    mount();
-    window.dispatchEvent(new Event('focus'));
-    expect(refresh).toHaveBeenCalledOnce();
-    const original = printableOrder();
-    mount({ ...original, capabilities: { ...original.capabilities, markPrinted: false } });
-    window.dispatchEvent(new Event('focus'));
-    expect(refresh).toHaveBeenCalledOnce();
-  });
-
   for (const theme of ['light', 'dark']) {
     it(`${theme}: the mobile reminder fits and passes axe`, async () => {
       await page.viewport(375, 667);

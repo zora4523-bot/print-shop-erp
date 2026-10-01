@@ -20,6 +20,7 @@ vi.mock('next/link', () => ({
 }));
 vi.mock('@/actions/admin-order-workflow', () => ({ runAdminOrderBatchAction: batchAction }));
 vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: printAction }));
+vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: vi.fn(), recordOrderPrintedAction: vi.fn() }));
 vi.mock('@/actions/order-export', () => ({ requestOrderExportAction: vi.fn() }));
 
 import { AdminOrderBatchActions } from '../AdminOrderBatchActions';

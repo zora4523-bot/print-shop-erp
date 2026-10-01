@@ -4,8 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { commands, page } from 'vitest/browser';
 import { OrderStatus } from '@/generated/prisma/enums';
 import '@/app/globals.css';
-const m = vi.hoisted(() => ({ start: vi.fn(), fetch: vi.fn() }));
+const m = vi.hoisted(() => ({ start: vi.fn(), fetch: vi.fn(), record: vi.fn(), refresh: vi.fn() }));
 vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: m.start }));
+vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: m.record }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: m.refresh }) }));
 import { BatchPrintControls } from '../BatchPrintControls';
 const originalFetch = globalThis.fetch.bind(globalThis);
 let root: Root;
@@ -18,7 +20,12 @@ beforeEach(() => {
   vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => String(input).startsWith('/api/orders/batch-print/') ? m.fetch(input, init) : originalFetch(input, init));
   m.start.mockResolvedValue({ status: 'queued', jobId: 'job-1' });
   m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'ready', completed: 2, total: 2, issues: [] }) });
+  m.record.mockResolvedValue({ status: 'success', marked: 2 });
 });
+// 打开 / 下载链接在测试里不真正导航，只验证点击时的记录。
+function stayOnPage(event: MouseEvent) { if ((event.target as Element | null)?.closest('a')) event.preventDefault(); }
+beforeEach(() => document.addEventListener('click', stayOnPage, true));
+afterEach(() => document.removeEventListener('click', stayOnPage, true));
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); document.documentElement.classList.remove('dark'); });
 it('submits selected order and offers both download and preview', async () => {
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
@@ -149,4 +156,33 @@ it('ends manual refresh loading when the status request times out', async () => 
     await expect.element(page.getByText('刷新未成功，请稍后重试。')).toBeVisible();
     await expect.element(page.getByRole('button', { name: '刷新进度' })).toBeEnabled();
   } finally { timeout.mockRestore(); }
+});
+
+// 业主 2026-10-02：打开或下载打印文件即记已打印；整批成功后刷新列表，失败可只重试记录。
+it('records the printed file once when it is opened or downloaded, then refreshes the list', async () => {
+  let settle!: (value: unknown) => void;
+  m.record.mockImplementationOnce(() => new Promise((done) => { settle = done; }));
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await page.getByRole('link', { name: '下载 PDF' }).click();
+  await page.getByRole('link', { name: '打开 PDF' }).click();
+  await expect.element(page.getByText('正在记为已打印…', { exact: true })).toBeVisible();
+  expect(m.record).toHaveBeenCalledOnce();
+  expect(m.record).toHaveBeenCalledWith('job-1');
+  settle({ status: 'success', marked: 2 });
+  await expect.element(page.getByText('已记为已打印 2 单。', { exact: true })).toBeVisible();
+  expect(m.refresh).toHaveBeenCalledOnce();
+});
+it('shows a failed record and retries only the record', async () => {
+  m.record.mockResolvedValueOnce({ status: 'error', message: '工单内容已变化，请重新选择并生成' }).mockRejectedValueOnce(new Error('offline'));
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await page.getByRole('link', { name: '下载 PDF' }).click();
+  await expect.element(page.getByRole('alert')).toHaveTextContent('打印记录未保存：工单内容已变化，请重新选择并生成');
+  expect(m.refresh).not.toHaveBeenCalled();
+  await page.getByRole('button', { name: '重试记录', exact: true }).click();
+  await expect.element(page.getByRole('alert')).toHaveTextContent('打印记录未保存：网络异常');
+  await page.getByRole('button', { name: '重试记录', exact: true }).click();
+  await expect.element(page.getByText('已记为已打印 2 单。', { exact: true })).toBeVisible();
+  expect(m.record).toHaveBeenCalledTimes(3);
+  expect(m.start).toHaveBeenCalledOnce();
+  expect(m.refresh).toHaveBeenCalledOnce();
 });

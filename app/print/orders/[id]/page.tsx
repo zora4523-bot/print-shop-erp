@@ -52,10 +52,11 @@ export default async function OrderPrintViewPage({
     autoprintFlag.toLowerCase() !== 'false';
 
   // 业主 2026-10-02：点「打印」即记已打印。只有能处理工单的管理员、且是浏览器打印入口
-  // （autoprint）时，打印对话框关闭后记录本次渲染的版本；服务端 PDF 不带 autoprint，不会记录。
+  // （autoprint）时，打印对话框关闭后记录本次渲染的内容（版本 + 修订号）；服务端 PDF 不带
+  // autoprint，不会记录。
   const canRecordPrint = autoprint && PERMISSIONS['order:change:review'].some((role) => role === user.role);
   const recordPrinted = canRecordPrint
-    ? recordOrderPrintedAction.bind(null, { orderId: id, workOrderVersion: order.workOrderVersion })
+    ? recordOrderPrintedAction.bind(null, { orderId: id, workOrderVersion: order.workOrderVersion, revision: order.revision })
     : undefined;
 
   return (

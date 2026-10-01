@@ -96,6 +96,7 @@ function fixtureOrder(overrides: Partial<PrintOrder> = {}): PrintOrder {
     id: 'order-abc',
     orderNo: 'GD-260423-001',
     workOrderVersion: 2,
+    revision: 5,
     status: 'RELEASED',
     hasPendingChange: false,
     customName: '春节礼盒',

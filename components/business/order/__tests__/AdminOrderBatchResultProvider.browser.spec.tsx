@@ -9,6 +9,8 @@ import type { BatchOrderSnapshot } from '../admin-order-batch-ui';
 import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 vi.mock('next/link', () => ({
   __esModule: true,
   default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => (
@@ -119,6 +121,21 @@ describe('batch receipt print handoff', () => {
     await expect.poll(() => document.activeElement?.textContent).toBe('查看批量结果');
     await page.getByRole('button', { name: '查看批量结果', exact: true }).click();
     await expect.element(page.getByRole('link', { name: '去打印工单 GD-260910-001', exact: true })).toBeVisible();
+
+    // 业主 2026-10-02：打印在新标签页完成并记录；点过「去打印」后回到本页刷新一次。
+    refresh.mockClear();
+    window.dispatchEvent(new Event('focus'));
+    expect(refresh).not.toHaveBeenCalled();
+    const stay = (event: MouseEvent) => event.preventDefault();
+    document.addEventListener('click', stay, true);
+    try {
+      await page.getByRole('link', { name: '去打印工单 GD-260910-001', exact: true }).click();
+    } finally {
+      document.removeEventListener('click', stay, true);
+    }
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('focus'));
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
   it.each(['SETTLE'] as const)('%s does not offer printing from its successful receipt', async (command) => {

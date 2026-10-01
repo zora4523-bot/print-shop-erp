@@ -412,6 +412,30 @@ describe('admin order workspace predicates', () => {
     expect(resolveAdminOrderCapabilities(scanFlow)).toMatchObject({ completeProduction: false, ship: false });
   });
 
+  // 业主 2026-10-02：点「打印」即记已打印。下发时没建打印任务、本版本从未打印过的工单，
+  // 同样提供「打印」入口（打印页记录时由服务端建任务）。
+  it('offers printing whenever the current version still needs printing, queued or not', () => {
+    const base = {
+      status: OrderStatus.RELEASED,
+      hasPendingChange: false,
+      manualPricing: false,
+      confirmationPreflightOk: true,
+      confirmedFeePresent: true,
+      pricingPending: false,
+      hasShipment: true,
+      hasLiveOutsource: false,
+      hasIncompleteProduction: false,
+    };
+    const unqueued = resolveAdminPrintFacts({ status: OrderStatus.RELEASED, workOrderVersion: 2, requests: [] });
+    expect(resolveAdminOrderCapabilities({ ...base, printFacts: unqueued })).toMatchObject({ markPrinted: true, createPrint: true });
+    const printed = resolveAdminPrintFacts({ status: OrderStatus.RELEASED, workOrderVersion: 2,
+      requests: [{ id: 'v2', workOrderVersion: 2, resolution: { state: OrderPrintJobState.PRINTED } }] });
+    expect(resolveAdminOrderCapabilities({ ...base, printFacts: printed })).toMatchObject({ markPrinted: false, createPrint: true });
+    const queued = resolveAdminPrintFacts({ status: OrderStatus.ON_HOLD, workOrderVersion: 3,
+      requests: [{ id: 'v3-reprint', workOrderVersion: 3, resolution: null }] });
+    expect(resolveAdminOrderCapabilities({ ...base, status: OrderStatus.ON_HOLD, printFacts: queued }).markPrinted).toBe(true);
+  });
+
   it('matches ship and settlement capabilities to their server prerequisites', () => {
     const base = {
       hasPendingChange: false,

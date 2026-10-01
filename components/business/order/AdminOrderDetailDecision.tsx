@@ -1,7 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { formatMoney } from '@/lib/dashboard/format';
@@ -12,19 +10,12 @@ export function AdminOrderDetailDecision({ order, requiresPaperRecall }: {
   order: AdminOrderWorkspaceRow;
   requiresPaperRecall: boolean;
 }) {
-  const router = useRouter();
-  // 业主 2026-10-02：点「打印」即记已打印，不再单独「确认已打印」。改单后补打时只提醒收回旧纸单。
+  // 业主 2026-10-02：点「打印」即记已打印，不再单独「确认已打印」。改单后补打时只提醒收回旧纸单；
+  // 打印入口在共用操作面板里，打印完成回到本页时由面板刷新。
   const printPending = order.capabilities.markPrinted;
   const hasAction = Object.values(order.capabilities).some(Boolean) ||
     ['PENDING_FACTORY', 'SUBMITTED'].includes(order.status) || Boolean(order.shipDisabledReason) ||
     (order.status === 'SHIPPED' && order.feeStages.confirmed === null);
-  // 打印在新标签页完成并记录；回到本页时刷新，待打印提示随之消失。
-  useEffect(() => {
-    if (!printPending) return;
-    const refresh = () => router.refresh();
-    window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
-  }, [printPending, router]);
 
   return <div className="space-y-3">
     {!order.pendingChangeRequest && order.priceComparison ? <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs">

@@ -35,6 +35,7 @@ import {
 import { OrderChangeReviewForm } from './OrderChangeReviewForm';
 import { cancellationReviewIssue } from './admin-order-cancellation-review';
 import { AdminOrderInlineOperations } from './AdminOrderInlineOperations';
+import { useRefreshAfterPrint } from './use-refresh-after-print';
 
 type FormMode =
   | 'reject'
@@ -156,6 +157,7 @@ function AdminDecisionActions({
   run: (task: DecisionTask) => void;
   runOneBatch: (command: 'CREATE_PRINT') => void;
 }) {
+  const armPrintRefresh = useRefreshAfterPrint();
   return (
     <div className="mt-3 flex flex-wrap gap-2">
       {order.capabilities.reject ? (
@@ -196,7 +198,8 @@ function AdminDecisionActions({
           }
         />
       ) : null}
-      {order.capabilities.createPrint ? (
+      {/* 待打印时「打印」本身就会记录，「加入待打印」只留给已打印过、需要补打进队列的工单。 */}
+      {order.capabilities.createPrint && !order.capabilities.markPrinted ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('CREATE_PRINT')}>
           加入待打印
         </Button>
@@ -207,6 +210,7 @@ function AdminDecisionActions({
           href={`/print/orders/${encodeURIComponent(order.id)}?autoprint=1`}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={armPrintRefresh}
           className={buttonVariants({ size: 'sm', variant: order.capabilities.release ? 'outline' : 'default' })}
         >
           打印

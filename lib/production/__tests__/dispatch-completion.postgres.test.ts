@@ -15,7 +15,7 @@ import { registerProductionCompletion } from '../completion-registration';
 import { allocateProductionWages } from '@/lib/salary/production-wages';
 import { lockPieceworkSettlement } from '@/lib/salary/piecework-settlement';
 import { activateProductionOperationsInTx } from '../operation-materialization-service';
-import { markCurrentVersionPrinted } from '@/lib/order/print-jobs';
+import { recordRenderedPrint } from '@/lib/order/print-jobs';
 import { registerShipment } from '@/lib/order/shipment-registration';
 import { assertShipOrderReadinessInTx } from '@/lib/order';
 import { reportProductionOperation } from '../operation-reporting';
@@ -268,7 +268,9 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
   it('creates a reprint task when a printed but unproduced order changes owner', async () => {
     const f = await assigned();
     const print = await db.orderPrintJob.findFirstOrThrow({ where: { orderId: f.order.id, state: 'PENDING' } });
-    await expect(markCurrentVersionPrinted({ orderId: f.order.id, workOrderVersion: print.workOrderVersion }, admin)).resolves.toEqual({ marked: true });
+    const printedPage = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    const rendered = { orderId: f.order.id, workOrderVersion: print.workOrderVersion, revision: printedPage.revision };
+    await expect(recordRenderedPrint(rendered, admin)).resolves.toBe('MARKED');
     const current = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
     const newOwner = await newWorker();
     const request = { requestKey: randomUUID(), orders: [{ ...f.request.orders[0], revision: current.revision, assignments: Object.fromEntries(Object.keys(f.request.orders[0].assignments).map(key => [key, newOwner.id])) }] };
@@ -277,6 +279,14 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     await publishProductionDispatch(request, admin); await publishProductionDispatch(request, admin);
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } })).workerId).toBe(newOwner.id);
     expect(await db.orderPrintJob.count({ where: { orderId: f.order.id, state: 'PENDING', printKind: 'REPRINT' } })).toBe(1);
+    // 业主 2026-10-02 点打印即记已打印：同版本换师傅只改修订号。仍开着的旧打印页（纸上是原师傅）
+    // 再关闭打印对话框，不能把新的补打任务记为已打印；按新内容打印的页面才能。
+    await expect(recordRenderedPrint(rendered, admin)).resolves.toBe('STALE');
+    const reprint = await db.orderPrintJob.findFirstOrThrow({ where: { orderId: f.order.id, state: 'PENDING', printKind: 'REPRINT' } });
+    expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.id } })).toBe(0);
+    const reassigned = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    await expect(recordRenderedPrint({ ...rendered, revision: reassigned.revision }, admin)).resolves.toBe('MARKED');
+    expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.id, state: 'PRINTED' } })).toBe(1);
   });
 
   it('approves a quantity while held and reconciles completion only on resume', async () => {

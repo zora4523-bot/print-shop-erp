@@ -502,7 +502,9 @@ export function resolveAdminOrderCapabilities(input: AdminOrderCapabilityFacts):
       input.confirmedFeePresent &&
       !input.hasPendingChange,
     createPrint: input.printFacts.canCreatePrint,
-    markPrinted: input.printFacts.canMarkPrinted,
+    // 业主 2026-10-02：点「打印」即记已打印。待打印（含下发时未建打印任务、从未打印过的当前版本）
+    // 时提供「打印」入口，打印页关闭打印对话框后由服务端建任务并记已打印。
+    markPrinted: input.printFacts.canMarkPrinted || input.printFacts.printPending,
     reviewChange: input.hasPendingChange,
     // Unassigned production and employment are re-checked by the server command.
     completeProduction:

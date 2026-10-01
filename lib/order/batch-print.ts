@@ -15,7 +15,7 @@ import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from '@/lib/background-jobs/heartbe
 import { enqueueBackgroundJob, BackgroundJobLeaseLostError } from '@/lib/background-jobs/repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 import { BATCH_PRINT_MAX, batchPrintRequestSchema, type BatchPrintIssue, type BatchPrintStatus } from './batch-print-contract';
-import { markCurrentVersionPrinted, OrderPrintJobError } from './print-jobs';
+import { recordRenderedPrintInTx, type RenderedPrintInput } from './print-jobs';
 
 const BATCH_PRINT_MAX_BYTES = 100 * 1024 * 1024;
 
@@ -54,11 +54,11 @@ async function loadCurrent(payload: Payload, index: number) {
 async function validateAll(payload: Payload) {
   await requireAdmin(payload.actorId);
   const issues: BatchPrintIssue[] = [];
-  const printed: { orderId: string; workOrderVersion: number }[] = [];
+  const printed: RenderedPrintInput[] = [];
   for (let i = 0; i < payload.orders.length; i++) {
     try {
       const { order } = await loadCurrent(payload, i);
-      printed.push({ orderId: order.id, workOrderVersion: order.workOrderVersion });
+      printed.push({ orderId: order.id, workOrderVersion: order.workOrderVersion, revision: order.revision });
     } catch (error) {
       if (!(error instanceof BatchPrintSelectionError)) throw error;
       issues.push(...error.issues);
@@ -211,21 +211,26 @@ export async function downloadBatchPrint(actorId: string, jobId: string) {
   if (job.status !== 'SUCCEEDED' || !result.success || result.data.issues.length || !result.data.artifactName) return null;
   await validateAll(payload);
   const bytes = await readPdfArtifact(result.data.artifactName);
-  await recordBatchPrinted(actorId, await validateAll(payload));
+  await validateAll(payload);
   return bytes;
 }
 
 /**
- * 业主 2026-10-02：打开或下载批量打印文件即记已打印。记录的是校验时与文件内容一致的版本；
- * 校验后又改过单的，记录时版本对不上，什么都不做。已打过、不在生产中的工单同样不记。
+ * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；记录由点击时的
+ * Server Action 调用这里完成。先按文件内容重新核对每张工单，再在一个事务里按工单 id 顺序
+ * 加锁逐单记录——任一失败整批回滚，不会出现前几张已记、文件却没拿到的半截状态。核对后
+ * 又被修改的工单（修订号变化）不记。
  */
-async function recordBatchPrinted(actorId: string, printed: { orderId: string; workOrderVersion: number }[]) {
-  for (const version of printed) {
-    try {
-      await markCurrentVersionPrinted(version, { id: actorId, role: Role.ADMIN });
-    } catch (error) {
-      // 打印记录只是提醒用途，任务状态冲突不能挡住拿到打印文件。
-      if (!(error instanceof OrderPrintJobError)) throw error;
-    }
-  }
+export async function recordBatchPrint(actorId: string, jobId: string): Promise<{ marked: number } | null> {
+  const { job, payload } = await ownedJob(actorId, jobId);
+  const result = resultSchema.safeParse(job.result);
+  if (job.status !== 'SUCCEEDED' || !result.success || result.data.issues.length || !result.data.artifactName) return null;
+  const printed = (await validateAll(payload)).sort((a, b) => (a.orderId < b.orderId ? -1 : a.orderId > b.orderId ? 1 : 0));
+  const actor = { id: actorId, role: Role.ADMIN };
+  const outcomes = await db.$transaction(async (tx) => {
+    const recorded = [];
+    for (const version of printed) recorded.push(await recordRenderedPrintInTx(tx, version, actor));
+    return recorded;
+  }, { timeout: 30_000 });
+  return { marked: outcomes.filter((outcome) => outcome === 'MARKED').length };
 }
