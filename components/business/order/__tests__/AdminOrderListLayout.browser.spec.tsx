@@ -181,16 +181,30 @@ describe('admin order list reference layout', () => {
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
   });
 });
+// 2026-10-01 审查 L-8：窄容器四列——左列字段与标题左对齐，数量（无进度条时）与行动作
+// 靠右、与标题右缘对齐；「交期 · 数量」「金额 · 按钮」各占一行，手机上卡片更矮。
 function expectNarrowRowAlignment() {
   for (const orderRow of host.querySelectorAll<HTMLElement>('li[data-order-id]')) {
     const cells = [...orderRow.children] as HTMLElement[];
-    const titleLeft = cells[2].getBoundingClientRect().left;
-    const fieldNames = ['状态', '交期', '数量', '金额', '操作'];
     expect(cells).toHaveLength(8);
-    for (const [index, field] of cells.slice(3).entries()) {
-      const contentLeft = field.getBoundingClientRect().left + parseFloat(getComputedStyle(field).paddingLeft);
-      expect(contentLeft, `${orderRow.dataset.orderId} ${fieldNames[index]}与标题左对齐`).toBeCloseTo(titleLeft, 1);
+    const title = cells[2].getBoundingClientRect();
+    const [status, due, quantity, fee, action] = cells.slice(3);
+    const id = orderRow.dataset.orderId;
+    const leftOf = (field: HTMLElement) => field.getBoundingClientRect().left + parseFloat(getComputedStyle(field).paddingLeft);
+    for (const [field, name] of [[status, '状态'], [due, '交期'], [fee, '金额']] as const) {
+      expect(leftOf(field), `${id} ${name}与标题左对齐`).toBeCloseTo(title.left, 1);
     }
+    const quantitySpansRow = Boolean(quantity.querySelector('[data-slot="admin-order-row-progress"]'));
+    if (quantitySpansRow) {
+      expect(leftOf(quantity), `${id} 带进度的数量占满一行`).toBeCloseTo(title.left, 1);
+    } else {
+      expect(quantity.getBoundingClientRect().right, `${id} 数量靠右`).toBeCloseTo(title.right, 1);
+      expect(quantity.getBoundingClientRect().top, `${id} 交期与数量同一行`).toBeCloseTo(due.getBoundingClientRect().top, 1);
+    }
+    expect(action.getBoundingClientRect().right, `${id} 行动作靠右`).toBeCloseTo(title.right, 1);
+    const feeBox = fee.getBoundingClientRect();
+    const actionBox = action.getBoundingClientRect();
+    expect(Math.min(feeBox.bottom, actionBox.bottom) - Math.max(feeBox.top, actionBox.top), `${id} 金额与行动作同一行`).toBeGreaterThan(0);
   }
 }
 

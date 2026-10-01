@@ -190,7 +190,9 @@ function AdminOrderRow({
       }}
       className={cn(
         styles.row,
-        'grid min-w-0 cursor-pointer grid-cols-[2.75rem_2.125rem_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-xl border bg-card px-3.5 py-3 transition-colors hover:border-foreground/60 motion-reduce:transition-none @min-[960px]:grid-cols-[1.75rem_2.125rem_minmax(160px,1.35fr)_minmax(110px,1fr)_5.5rem_7rem_6rem_7rem] @min-[960px]:items-center @min-[960px]:py-1.5',
+        // 窄容器（<960px）四列：右列放数量与行动作，「交期 · 数量」「金额 · 按钮」各占一行，
+        // 手机上每张卡从 8–9 行压到 5–6 行（审查 L-8）。宽容器仍是原 8 列。
+        'grid min-w-0 cursor-pointer grid-cols-[2.75rem_2.125rem_minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-xl border bg-card px-3.5 py-3 transition-colors hover:border-foreground/60 motion-reduce:transition-none @min-[960px]:grid-cols-[1.75rem_2.125rem_minmax(160px,1.35fr)_minmax(110px,1fr)_5.5rem_7rem_6rem_7rem] @min-[960px]:items-center @min-[960px]:py-1.5',
         'border border-border hover:border-muted-foreground/50 hover:bg-card has-[[data-batch-checkbox][aria-checked=true]]:bg-muted/50',
       )}
     >
@@ -200,7 +202,7 @@ function AdminOrderRow({
       </div>
       <OrderThumbnail order={order} />
 
-      <div className="min-w-0">
+      <div className="col-span-2 min-w-0 @min-[960px]:col-span-1">
         <div className={cn(styles.identity, 'flex min-w-0 flex-col items-start gap-1')}>
           {/* 工作台页头是 h1，行标题是其下唯一层级：用 h2 才不跳级（axe heading-order）。
               Tailwind preflight 把标题字号/字重重置为 inherit，改层级不改观感。 */}
@@ -234,7 +236,7 @@ function AdminOrderRow({
         <OrderRemark remark={order.remark} compact />
       </div>
 
-      <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto">
+      <div className="col-span-2 col-start-3 min-w-0 @min-[960px]:col-span-1 @min-[960px]:col-start-auto">
         <AdminWorkspaceStatusBadge status={order.status} />
         {!!order.productionOwners?.length && <p className="mt-1 text-xs">生产师傅：{order.productionOwners.join('、')}</p>}
         {!!order.productionReviews?.length && <div className="mt-1 flex flex-wrap gap-2">{order.productionReviews.map(job => <Link key={job.id} href={`/orders/${order.id}#production-job-${job.id}`} className="inline-flex min-h-11 items-center text-xs underline">核对 v{job.version} · {job.workerName} · {job.label}</Link>)}</div>}
@@ -254,7 +256,11 @@ function AdminOrderRow({
 
       <DueCell order={order} />
 
-      <div className="col-start-3 min-w-0 text-xs @min-[960px]:col-start-auto">
+      <div className={cn(
+        'min-w-0 text-xs @min-[960px]:col-span-1 @min-[960px]:col-start-auto @min-[960px]:text-left',
+        // 有进度条时需要整行宽度；否则与交期同一行、靠右。
+        !order.simpleProduction && showOrderProgress(order) ? 'col-span-2 col-start-3' : 'col-start-4 text-right',
+      )}>
         <p className="font-semibold tabular-nums">
           {order.itemCount} 款 · {order.totalQuantity.toLocaleString('zh-CN')}
         </p>
@@ -288,7 +294,7 @@ function AdminOrderRow({
         ) : null}
       </div>
 
-      <div className="col-start-3 min-w-0 @min-[960px]:col-start-auto @min-[960px]:text-right">
+      <div className="col-start-4 min-w-0 self-center text-right @min-[960px]:col-start-auto">
         {order.status === 'DRAFT' ? (
           <Link href={`/orders/${order.id}/edit`} prefetch={false} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
             编辑草稿
