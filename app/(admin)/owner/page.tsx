@@ -1,3 +1,4 @@
+import { CdrWorkbenchSection } from '@/components/business/cdr/CdrWorkbenchSection';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { requirePermission } from '@/lib/auth/permissions';
@@ -32,7 +33,7 @@ import { ADMIN_DASHBOARD_TITLE } from '@/lib/navigation/labels';
 
 export const metadata = { title: ADMIN_DASHBOARD_TITLE };
 
-export default async function OwnerDashboardPage() {
+export default async function OwnerDashboardPage({ searchParams = Promise.resolve({}) }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   await requirePermission('report:all');
   const now = new Date();
   // Each read has one consumer with an independent loading/error boundary.
@@ -69,6 +70,11 @@ export default async function OwnerDashboardPage() {
         </nav>
         }
       />
+      <ErrorBoundary scope="section" title="CDR 下载暂时无法加载" description="可进入按日期汇总页面查看。">
+        <Suspense fallback={<DashboardSectionLoading label="CDR 下载" />}>
+          <CdrWorkbenchSection searchParams={searchParams} />
+        </Suspense>
+      </ErrorBoundary>
       <ErrorBoundary
         scope="section"
         title="工单待办暂时无法加载"

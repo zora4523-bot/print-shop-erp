@@ -17,7 +17,7 @@ vi.mock('ali-oss', () => {
   return { default: MockOSS };
 });
 
-import { uploadBundleZip } from '../zip';
+import { safeArchiveFolder, uploadBundleZip } from '../zip';
 
 const configuredEnv = {
   OSS_ACCESS_KEY_ID: 'ak',
@@ -110,6 +110,34 @@ describe('uploadBundleZip — 真实 archiver 流式失败必须及时结束', (
     const zip = Buffer.concat(received);
     expect(zip.includes('O-1/a.cdr')).toBe(true);
     expect(zip.includes('O-2/b.cdr')).toBe(true);
+  });
+
+  it('按账号/工单/款式归档，清洗路径且最终条目名不会碰撞', async () => {
+    const { put, received } = collectingPut();
+    putStreamMock.mockImplementation(put);
+    getStreamMock.mockImplementation(async () => ({ stream: Readable.from(['cdr']) }));
+    await uploadBundleZip({ bundleId: 'b1', files: ['a.cdr', '(2) a.cdr', 'a.cdr'].map((fileName) => ({
+      orderNo: 'O-1', fileName, fileUrl: designUrl('file.cdr'), folders: ['../sales', 'O-1', 'item/1'],
+    })) }, realOpts);
+    const zip = Buffer.concat(received);
+    for (const name of ['a.cdr', '(2) a.cdr', '(3) a.cdr']) expect(zip.includes(`_sales/O-1/item_1/${name}`)).toBe(true);
+    expect(zip.includes('../sales/')).toBe(false);
+  });
+
+  it.each([undefined, ['销售', '工单', '款式']])('new and legacy archives preserve meaningful long Chinese filenames (%j)', async (folders) => {
+    const fileName = '客户名称-定制信封-局部烫金-最终确认版本-20261002.cdr';
+    const { put, received } = collectingPut();
+    putStreamMock.mockImplementation(put);
+    getStreamMock.mockImplementation(async () => ({ stream: Readable.from(['cdr']) }));
+    await uploadBundleZip({ bundleId: 'b1', files: [{ orderNo: 'O-1', fileName,
+      fileUrl: designUrl('file.cdr'), folders }] }, realOpts);
+    expect(Buffer.concat(received).includes(fileName)).toBe(true);
+  });
+
+  it('Windows reserved characters and long UTF-8 names remain extractable', () => {
+    expect(safeArchiveFolder('9*17:<>"|?')).toBe('9_17______');
+    expect(safeArchiveFolder('CON')).toBe('_CON');
+    expect(Buffer.byteLength(safeArchiveFolder('信封'.repeat(100)), 'utf8')).toBeLessThanOrEqual(50);
   });
 
   it('PUT 中途失败 → 及时 reject 原错误，并销毁正在读的设计文件流', async () => {

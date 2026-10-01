@@ -23,7 +23,7 @@ vi.mock('@/lib/db', () => ({ db: dbMock }));
 const { uploadMock } = vi.hoisted(() => ({
   uploadMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
 }));
-vi.mock('../zip', () => ({ uploadBundleZip: uploadMock }));
+vi.mock('../zip', () => ({ uploadBundleZip: uploadMock, isBundleSourceAddressValid: () => true }));
 
 const { enqueueBackgroundJobMock } = vi.hoisted(() => ({
   enqueueBackgroundJobMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -378,7 +378,7 @@ describe('createBundle', () => {
         },
         { id: 'u1' },
       ),
-    ).rejects.toThrow(/CDR 打包上传失败：AccessDenied/);
+    ).rejects.toThrow(/CDR 文件读取或打包失败，请核对附件后重试/);
     // 占位行清理
     expect(dbMock.designBundle.delete).toHaveBeenCalledWith({
       where: { id: 'b1' },
@@ -596,4 +596,44 @@ it('does not overwrite a terminal transition during CDR upload', async () => {
   await expect(processQueuedBundle('bundle')).rejects.toThrow('状态已变更');
   expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'bundle', status: 'PENDING' } }));
   expect(dbMock.designBundle.update).not.toHaveBeenCalled();
+});
+
+describe('workbench bundle snapshot', () => {
+  function currentOrder() {
+    return { id: 'o1', orderNo: 'O1', customName: null, status: 'CONFIRMED', submitterRole: 'SALES', submittedAt: new Date('2026-10-01T00:00:00Z'), settlementType: 'EXTERNAL_SALES',
+      submitter: { id: 's1', role: 'SALES', displayName: '销售', username: 'sales' }, sourceOrder: null,
+      items: [{ id: 'i1', sequence: 1, name: '信封', designs: [{ id: 'd1', fileName: 'a.cdr', fileUrl: 'https://example.com/design/a.cdr', fileSize: BigInt(10), uploadedAt: new Date('2026-10-01T00:00:00Z') }] }] };
+  }
+  it('durable enqueue persists archive paths and file fingerprints in the same bundle transaction', async () => {
+    const { workbenchOrderFacts } = await import('../workbench');
+    const order = currentOrder();
+    dbMock.order.findMany.mockResolvedValue([order]);
+    dbMock.designBundle.create.mockResolvedValue({ id: 'b1' });
+    enqueueBackgroundJobMock.mockResolvedValue({ job: { id: 'job1' } });
+    await enqueueBundle({ from: '', orderIds: ['o1'], baseUrl: 'https://erp.example.com', workbenchSelection: [{ id: 'o1', version: workbenchOrderFacts(order as Parameters<typeof workbenchOrderFacts>[0]).version }] }, { id: 'admin' });
+    const data = dbMock.designBundle.create.mock.calls[0][0].data;
+    expect(data.manifest.orders[0]).toEqual({ id: 'o1', fingerprint: expect.any(String) });
+    expect(data.manifest.files[0].folders).toEqual([expect.stringMatching(/^销售_[a-f0-9]{8}$/), 'O1', expect.stringMatching(/^1-信封_[a-f0-9]{8}$/)]);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+  it('worker refuses stale snapshots without touching storage', async () => {
+    dbMock.designBundle.findUnique.mockResolvedValue({ id: 'b1', status: 'PENDING', designIds: ['d1'], manifest: {
+      version: 1, orders: [{ id: 'o1', fingerprint: 'old' }], files: [],
+    } });
+    dbMock.orderItemDesign.findMany.mockResolvedValue([{ id: 'd1' }]);
+    dbMock.order.findMany.mockResolvedValue([currentOrder()]);
+    await expect(processQueuedBundle('b1')).rejects.toThrow('CDR 文件已更新');
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+});
+
+
+it.each([
+  { manifest: { version: 99 }, designs: [{ id: 'd1' }] },
+  { manifest: { version: 1, orders: [], files: [] }, designs: [] },
+])('worker treats malformed or deleted snapshot files as deterministic failures', async ({ manifest, designs }) => {
+  dbMock.designBundle.findUnique.mockResolvedValue({ id: 'b1', status: 'PENDING', designIds: ['d1'], manifest });
+  dbMock.orderItemDesign.findMany.mockResolvedValue(designs);
+  await expect(processQueuedBundle('b1')).rejects.toMatchObject({ name: 'CdrBundleStaleError' });
+  expect(uploadMock).not.toHaveBeenCalled();
 });

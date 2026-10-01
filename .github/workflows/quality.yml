@@ -408,6 +408,19 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm test:release:durable
 
+      - name: CDR real worker and ZIP downloads
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_cdr_ci
+          E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_cdr_ci
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_cdr_ci'
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+          pnpm test:release:cdr
+
       - name: Upload review data
         if: always()
         uses: actions/upload-artifact@v4

@@ -332,3 +332,13 @@ PDF 补强验证：`node --import tsx scripts/pdf-lifecycle-check.ts` 在本机�
 - 真实历史回放：11 张账单与原行核对，303 条大账单逐页走完 11 页，成员数与唯一工单号均为 303，末页 3 条；搜索末项只显示该项，顶部 128006.60 元整账金额保持不变。管理员按回放账号筛选同为 11 张、197275.80 元草稿。销售账号隔离预览保留在 `http://127.0.0.1:3336/sales/bills`；端口 3000 与原开发库没有切换。
 - 证据：`/tmp/erp-dabiaoge-0930/unit.log`、`targeted-final.log`、`ui-final-unit.log`、`import-unit.log`、`build-final.log`、`typecheck-last.log`、`lint-last.log`、`architecture-last.log`、`e2e-final.log`、`e2e-recheck.log`、`responsive-tabs-final.log`、`real-pagination.log`；截图和来源核对仅留本机临时目录。代码及测试不携带客户源数据。
 - Claude Code 本次使用 Opus 只读对抗审查命令，但返回周额度耗尽 `429`，模型未执行，记录在 `claude-review.json`；外部审查仍待完成。仅本地提交，不推送或部署。
+
+### CDR 工作台专项验证
+
+`pnpm test:release:cdr` 使用独立测试数据库及
+`E2E_DATABASE_URL` / `E2E_DATABASE_CONFIRM_DATABASE` / `E2E_ADMIN_PASSWORD` 的既有隔离门禁。
+先按既有流程 migrate / seed / `pnpm test:e2e:prepare`。默认端口3312运行 Next build/start，3313是用例内的本地对象存储 HTTP fixture（虚拟凭证），
+由用例控制真实 HEAVY worker 启停。覆盖真实 ZIP 流与下载、文件更新、确定性失败不重试、
+分享撤销与过期；不代替真实 OSS 服务验收。专项已接入 CI durable 作业，并从通用 durable 配置排除。
+诊断可用 `E2E_CDR_DEV=1`，不作为生产构建证据。
+普通交互与六视口明暗门禁运行 `tests/e2e/cdr-workbench.spec.ts`。

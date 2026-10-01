@@ -563,3 +563,25 @@ direct 生成失败返回 `X-Request-Id`，与只包含随机关联号、白名�
 - 销售工单列表及同源单条预览 DTO 增加可空 `bill: { id, period, status }`；仅当关联月账单的 `agentUserId` 与工单 `submitterId` 相同时投影。账单详情仍独立校验登录账号，不依赖列表链接授权。
 - `/sales/bills` 返回每张账单的成员数量，以及本人最近 12 个有账单月份的按状态金额。趋势不随列表筛选收窄，顶部统计仍按筛选条件汇总；各查询处于同一 RepeatableRead 事务。草稿金额不计入待支付。
 - `/sales/bills/:id` 支持 `q`（最多 100 字，工单号／展示名称）和 `page`（每页 30 条，越界收敛到末页）；有有效结算依据时按冻结名称搜索，否则按明确标为当前名称的回退值搜索。分页只限制展示，整张账单总额和抵扣保持不变。`returnTo` 沿用内部账单列表白名单。
+
+### 管理工作台 CDR 下载（2026-10-02）
+
+`/owner` 顶部 CDR 区域接受 `cdrScope=pending|all`、`cdrFrom/cdrTo`（上海提交日期）、
+`cdrQ`（工单号/名称/销售账号）、`cdrPage`。默认跨日期的 CONFIRMED / RELEASED /
+SCHEDULING（排除寄样），每页最多 100 单；“本页”和分组下载仅处理本页可下载工单，异常工单明确排除。
+
+`createWorkbenchBundleAction` 首先验证 `design:bundle:create`；`selection` 是含
+`id/version` 的 JSON 数组，最多 100 个且不允许重复。领域层重新读取归属、提交状态、
+每款 CDR 和文件版本；页面过期或任一工单不完整时整批拒绝。也可传 `bundleId`
+按历史工单集合重新生成**当前文件**；原记录保留，已删除工单不能静默略过。
+返回沿用 `CreateBundleResult`；durable 模式生成 HEAVY 任务，inline 为开发兼容路径。
+完成后失效 `/owner` 和 `/foreman/cdr`。撤销动作也失效两个入口。
+
+新包保存文件清单；worker 检查文件变更后按冻结路径打包。旧的日期汇总入口继续可用。
+文件未变标记只代表已有真实打包记录，不代表下载成功或已打印；旧包无清单时显示待核对，
+mock 包不作为版本基准。下载权限、令牌、有效期及速率限制沿用原下载接口。
+
+`getWorkbenchBundleProgressAction(bundleId)` 每次先验证 `design:bundle:create`，直接读取
+所请求的单个下载包，不受最近20条历史限制。只返回状态、计数、业务失败提示及有效的
+READY 下载链接。工作台每5秒读取当前任务进度，最多2分钟，随后提供手动刷新；仅终态
+刷新一次工作台。清单变化是确定性 `CdrBundleStaleError`，不占用三次重试。

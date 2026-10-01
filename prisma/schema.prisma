@@ -1492,6 +1492,8 @@ model DesignBundle {
   dateRangeTo           DateTime
   orderIds              String[]
   designIds             String[]
+  // Immutable file identities and archive paths for management-workbench downloads.
+  manifest              Json?
   zipFileUrl            String
   zipObjectKey          String?
   downloadUrl           String
@@ -1507,6 +1509,7 @@ model DesignBundle {
 
   createdBy User @relation(fields: [createdById], references: [id])
 
+  @@index([orderIds], type: Gin)
   @@index([createdById])
   @@index([status, createdAt])
   @@index([createdAt])
