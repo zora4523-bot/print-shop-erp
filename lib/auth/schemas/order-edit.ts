@@ -666,6 +666,23 @@ export const saveOrderManualChargeSchema = z
     }
   });
 
+/**
+ * 已结算工单在月账单确认前的结算更正（业主 2026-10-01）：正数补收、负数少收，
+ * 以调整行入账，不改原有收费明细。
+ */
+export const correctSettledOrderSchema = z.object({
+  orderId: orderChangeId,
+  expectedRevision: shipOrderVersionField('工单修订号', 1),
+  amount: signedOrderAdjustmentMoneyField.refine(
+    (value) => Number(value) !== 0,
+    '更正金额不能为 0',
+  ),
+  reason: requiredTrimmedText('更正原因', 500),
+  idempotencyKey: z.string().uuid('请求标识格式非法'),
+});
+
+export type CorrectSettledOrderInput = z.infer<typeof correctSettledOrderSchema>;
+
 export const deleteOrderManualChargeSchema = z.object({
   orderId: orderChangeId,
   chargeId: orderChangeId,
