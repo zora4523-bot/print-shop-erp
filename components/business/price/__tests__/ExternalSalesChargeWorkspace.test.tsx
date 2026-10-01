@@ -274,7 +274,7 @@ describe('RulePriceWorkbench', () => {
 
     expect(html).toContain('aria-label="价格状态"');
     expect(html).toContain('当前生效');
-    expect(html).toContain('用于之后的新工单计价。');
+    expect(html).not.toContain('用于之后的新工单计价。');
     expect(html).toContain('发起调价');
     expect(html).toContain(
       'aria-label="正在查看收费项目：中号专版双面烫金"',

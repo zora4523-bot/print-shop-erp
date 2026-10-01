@@ -99,7 +99,7 @@ function OperationPieceworkSalaryContent({
   // 结算汇总/列表、生产工资、待结算报工三块取数互不依赖：各自 Suspense 分区并行加载。
   return (
     <section className="min-w-0 space-y-4">
-      <SalaryHeader description="按日期查看报工明细。" />
+      <SalaryHeader />
       <Suspense key={`summary|${settlementKey}`} fallback={<SectionLoading label="工资汇总" />}>
         <SettlementSummary {...settlementProps} />
       </Suspense>
@@ -235,7 +235,7 @@ async function PieceworkSalaryContent({
         description={
           historical
             ? '历史日薪记录'
-            : '开机师傅 · 点击日期查看工单和计件明细。'
+            : '开机师傅'
         }
       />
       <SalarySummary total={total} unpaid={unpaid} />
@@ -327,7 +327,7 @@ async function HourlySalaryContent({
         description={
           historical
             ? '历史时薪记录'
-            : `${WORKER_TYPE_LABELS[workerType]} · 点击月份查看工时和计薪明细。`
+            : `${WORKER_TYPE_LABELS[workerType]}`
         }
       />
       <SalarySummary total={total} unpaid={unpaid} />
@@ -392,7 +392,7 @@ function SalaryHeader({
   description,
 }: {
   title?: string;
-  description: string;
+  description?: string;
 }) {
   return (
     <PageHeader size="worker" title={title} subtitle={description} className="worker-wrap-anywhere" />

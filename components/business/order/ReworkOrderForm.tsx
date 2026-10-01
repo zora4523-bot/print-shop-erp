@@ -252,7 +252,7 @@ export function ReworkOrderForm({ sourceOrderId, items }: Props) {
                           }
                         />
                         <span className="block text-xs text-muted-foreground">
-                          该值只用于原单缺失包装事实的这一款，不会覆盖已有包装组。
+                          仅补填本款每袋数量。
                         </span>
                       </label>
                     ) : null}

@@ -58,12 +58,12 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
       <section className="grid gap-4 rounded-xl border bg-card p-5 shadow-sm sm:grid-cols-3">
         <Amount label="工单合计" value={String(bill.memberSubtotal)} />
         <Amount label="跨月抵扣" value={String(bill.adjustmentAmount)} />
-        <Amount label={bill.status === 'DRAFT' ? '草稿金额（未定稿）' : '账单金额'} value={String(bill.totalAmount)} strong />
+        <Amount label={bill.status === 'DRAFT' ? '整单金额（未定稿）' : '整单金额'} value={String(bill.totalAmount)} strong />
         <p className="text-xs text-muted-foreground sm:col-span-3">
           {bill.paidAt
             ? `已于 ${formatDateTimeShanghai(bill.paidAt)} 结清`
             : bill.confirmedAt
-              ? `已于 ${formatDateTimeShanghai(bill.confirmedAt)} 确认冻结`
+              ? `已于 ${formatDateTimeShanghai(bill.confirmedAt)} 确认`
               : '草稿'}
         </p>
       </section>
@@ -95,8 +95,8 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
           <dl className="mt-3 grid gap-3 sm:grid-cols-4">
             <Fact label="金额" value={formatMoney(bill.receipt.amount)} />
             <Fact label="时间" value={formatDateTimeShanghai(bill.receipt.receivedAt)} />
-            <Fact label="方式" value={bill.receipt.paymentMethod ?? '未记录'} />
-            <Fact label="流水号" value={bill.receipt.referenceNo ?? '未记录'} />
+            {bill.receipt.paymentMethod ? <Fact label="方式" value={bill.receipt.paymentMethod} /> : null}
+            {bill.receipt.referenceNo ? <Fact label="流水号" value={bill.receipt.referenceNo} /> : null}
           </dl>
         </section>
       ) : null}
@@ -104,7 +104,7 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
       <section aria-labelledby="agent-bill-items-title" className="space-y-4">
         <div>
           <h2 id="agent-bill-items-title" className="font-semibold">账单明细</h2>
-          <p className="mt-1 text-sm text-muted-foreground">当前匹配 {members.total} / {bill.items.length} 单；上方金额为整张账单合计。</p>
+          <p className="mt-1 text-sm text-muted-foreground">{members.q ? `匹配 ${members.total} / ${bill.items.length} 单` : `${bill.items.length} 单`}</p>
         </div>
         <Form action={basePath} id="agent-bill-item-search" key={members.q} className="flex flex-wrap items-end gap-3">
           <input type="hidden" name="returnTo" value={returnHref} />

@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { ReworkCause, OrderPackagingMode, OrderCraft } from '../../../generated/prisma/enums';
 import { MAX_ORDER_ITEMS_PER_ORDER } from '../../order/limits';
+import { persistedOrderItemFoilSideColorsField } from '@/lib/auth/schemas/shared';
 import { craftIdSchema, formBoolean, moneyOptionalField, optionalDateFieldPartial, optionalFormBoolean, optionalShipmentText, optionalTrimmedText, orderItemFoilColorsField, orderItemFoilSideColorsField, orderItemMoneyOptionalField, orderItemQuantityField, requiredFormBoolean, requiredTrimmedText, shipmentBillableWeightField, shipmentChargeMoneyField } from './shared';
 
 export const cancelOrderSchema = z.object({
@@ -174,28 +175,41 @@ const addOrderItemChangeSchema = z.object({
   foilColors: orderItemFoilColorsField.optional(),
 });
 
-export const orderChangeRequestItemsSchema = z
-  .array(
-    z.discriminatedUnion('operation', [
-      updateOrderItemChangeSchema,
-      addOrderItemChangeSchema,
-    ]),
-  )
-  .max(50, '单次修改不超过 50 项')
-  .superRefine((value, ctx) => {
-    const updatedItemIds = new Set<string>();
-    value.forEach((item, index) => {
-      if (item.operation !== 'UPDATE') return;
-      if (updatedItemIds.has(item.itemId)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: [index, 'itemId'],
-          message: '同一款式不能重复提交修改',
-        });
-      }
-      updatedItemIds.add(item.itemId);
+function createChangeItemsSchema(sideColorsField: typeof orderItemFoilSideColorsField) {
+  return z
+    .array(
+      z.discriminatedUnion('operation', [
+        updateOrderItemChangeSchema.safeExtend({
+          frontFoilColors: sideColorsField.optional(),
+          backFoilColors: sideColorsField.optional(),
+        }),
+        addOrderItemChangeSchema.extend({
+          frontFoilColors: sideColorsField.optional(),
+          backFoilColors: sideColorsField.optional(),
+        }),
+      ]),
+    )
+    .max(50, '单次修改不超过 50 项')
+    .superRefine((value, ctx) => {
+      const updatedItemIds = new Set<string>();
+      value.forEach((item, index) => {
+        if (item.operation !== 'UPDATE') return;
+        if (updatedItemIds.has(item.itemId)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [index, 'itemId'],
+            message: '同一款式不能重复提交修改',
+          });
+        }
+        updatedItemIds.add(item.itemId);
+      });
     });
-  });
+}
+
+export const orderChangeRequestItemsSchema = createChangeItemsSchema(orderItemFoilSideColorsField);
+
+/** Stored JSON is rechecked against locked order facts before preview or approval. Never an input schema. */
+export const persistedOrderChangeRequestItemsSchema = createChangeItemsSchema(persistedOrderItemFoilSideColorsField);
 
 const orderChangeReason = z
   .string()

@@ -43,9 +43,9 @@ const renderDetail = async () => renderToStaticMarkup(await DetailPage({ params:
 it('identifies the sales bill as goods payable to the factory in the title, metadata and back link', async () => {
   const html = await renderDetail();
   expect(html).toContain('2026-08 货款账单');
-  expect(html).toContain('本账单用于核对您应付给工厂的货款。');
+  expect(html).not.toContain('本账单用于核对您应付给工厂的货款。');
   expect(html).toContain('返回我的货款账单');
-  expect(html).toContain('<dt>应付货款</dt>');
+  expect(html).toContain('<dt>整单应付货款</dt>');
   expect(html).not.toContain('对客应付');
   await expect(generateMetadata({ params: Promise.resolve({ id: bill.id }) })).resolves.toEqual({ title: '2026-08 货款账单 · 我的货款账单' });
   expect(titleRef).toHaveBeenCalledWith(bill.id, actor.id);
@@ -77,16 +77,22 @@ it('renders an explicit empty receipt state even when the bill is paid', async (
   const summary = disclosure?.match(/<summary[^>]*>[\s\S]*?<\/summary>/)?.[0];
   expect(disclosure).not.toMatch(/<details[^>]*\bopen(?:\s|=|>)/);
   expect(summary).toContain('工厂收款记录');
-  expect(summary).toContain('暂无记录');
+  expect(summary).not.toContain('暂无记录');
+  expect(html.match(/暂无工厂收款记录/g)).toHaveLength(1);
   expect(html).toContain('暂无工厂收款记录');
   expect(html).not.toContain('<dt>流水号</dt>');
 });
-it('renders missing optional receipt fields as unrecorded', async () => {
+it('omits missing optional receipt fields while keeping amount and payment date', async () => {
   detail.mockResolvedValue({ ...bill, receipt: {
     amount: new Decimal('120.30'), receivedAt: new Date('2026-09-01T01:02:00Z'),
     paymentMethod: null, referenceNo: null,
   } });
-  expect((await renderDetail()).match(/未记录/g)).toHaveLength(2);
+  const html = await renderDetail();
+  expect(html).not.toContain('未记录');
+  expect(html).not.toContain('<dt>流水号</dt>');
+  expect(html).not.toContain('<dt>付款方式</dt>');
+  expect(html).toContain('已收 ¥ 120.30');
+  expect(html).toContain('2026/09/01 09:02');
 });
 it('distinguishes CANCELLED and SETTLED rows with one compact evidence entry per order', async () => {
   const html = await renderDetail();
@@ -122,7 +128,8 @@ it('keeps the full settlement date, frozen paper version and current-order link 
   const evidence = BillItemEvidence({ item: { ...bill.items[0], workOrderVersionSnapshot: 7 }, period: bill.period, sales: true });
   const html = renderToStaticMarkup(<>{evidence.props.children}</>);
   expect(html).toContain('工单金额');
-  expect(html).toContain('工单金额为结算时金额；账单抵扣单独列示。');
+  expect(html).toContain('结算工单金额');
+  expect(html).not.toContain('工单金额为结算时金额；账单抵扣单独列示。');
   expect(html).not.toContain('应付货款');
   expect(html).toContain('60.15');
   expect(html).toContain('2026/08/20 08:00');
@@ -136,8 +143,8 @@ it('marks a DRAFT bill detail as provisional and labels item status through the 
   detail.mockResolvedValue({ ...bill, status: 'DRAFT', paidAt: null, items: [{ ...bill.items[0], orderStatusSnapshot: 'SHIPPED' }] });
   const html = await renderDetail();
   expect(html).toContain('金额未定稿');
-  expect(html).toContain('以工厂确认后的金额为准');
-  expect(html).toContain('<dt>暂计货款</dt>');
+  expect(html).not.toContain('以工厂确认后的金额为准');
+  expect(html).toContain('<dt>整单暂计货款</dt>');
   expect(html).toContain('已发货');
   expect(html).not.toContain('SHIPPED');
   expect(html).not.toContain('未识别');
@@ -164,14 +171,14 @@ it('keeps DRAFT rows visibly provisional and totals DRAFT, CONFIRMED and PAID se
     { ...bill, id: 'paid', status: 'PAID', totalAmount: new Decimal('50.50') },
   ], { DRAFT: '30.30', CONFIRMED: '40.40', PAID: '50.50' }));
   const html = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({ period: '2026-08' }) }));
-  expect(html).toContain('统计范围：当前筛选结果');
+  expect(html).toContain('当前筛选');
   const cards = html.split('data-slot="dashboard-kpi"').slice(1).map((part) => part.split('</div></div>')[0]);
   expect(cards).toHaveLength(3);
   for (const [index, label, amount] of [[0, '整理中', '30.30'], [1, '待付款', '40.40'], [2, '已结清', '50.50']] as const) {
     expect(cards[index]).toContain(label);
     expect(cards[index]).toContain(amount);
   }
-  expect(cards[0]).toContain('以工厂确认后的金额为准');
+  expect(cards[0]).toContain('金额未定稿');
   const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) ?? [];
   expect(rows.filter((row) => row.includes('整理中') && row.includes('金额未定稿'))).toHaveLength(2);
   expect(html).toContain('href="/sales/bills/draft-1?returnTo=');
@@ -220,7 +227,7 @@ it('puts the month list before optional amount distribution and keeps status whe
   expect(html).toContain('<details');
   expect(html).not.toMatch(/<details[^>]*\bopen=/);
   expect(html.indexOf('id="sales-bill-results"')).toBeLessThan(html.indexOf('查看账期金额分布'));
-  expect(html).toContain('我的全部账单，最近 1 个有账单的月份');
+  expect(html).toContain('全部账单 · 最近 1 个账期');
   expect(html).toContain('period=2026-08&amp;status=CONFIRMED#sales-bill-results');
   expect(html).toContain('id="sales-bill-results"');
   expect(html).toContain('导出当前筛选 CSV');
@@ -241,8 +248,9 @@ it('uses one responsive list and keeps whole-bill amounts while paging matching 
     expect(block).toContain('60.15');
     expect(block).not.toContain('BATCH-059');
   }
-  expect(html).toContain('当前匹配 65 单');
+  expect(html).toContain('匹配 65 / 65 单');
   expect(html).toContain('120.30');
+  expect(html).toContain('整单应付货款');
   expect(html).toContain('导出匹配明细 CSV');
   expect(html).toContain('href="/api/sales/bills/bill-a/export?q=BATCH-"');
 });

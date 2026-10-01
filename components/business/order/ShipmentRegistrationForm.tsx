@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { registerShipmentAction } from '@/actions/shipment-registration';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
@@ -42,7 +41,6 @@ async function preparePhoto(file: File): Promise<File> {
 }
 
 export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
-  const router = useRouter();
   const [tracking, setTracking] = useState(props.trackingNo ?? '');
   const [carrier, setCarrier] = useState(props.carrierCode ?? '');
   const [name, setName] = useState(props.carrierName ?? '');
@@ -78,7 +76,7 @@ export function ShipmentRegistrationForm(props: ShipmentRegistrationProps) {
       try {
         const result = await registerShipmentAction(form);
         setMessage(result.message); setFailed(!result.ok);
-        if (result.ok) { setSaved(true); router.refresh(); }
+        if (result.ok) setSaved(true);
       } catch { setFailed(true); setMessage('保存失败，请重试；若提示内容已更新，请刷新查看'); }
     });
   }

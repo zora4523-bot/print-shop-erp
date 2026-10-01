@@ -6198,3 +6198,173 @@ describe('unsubmitted external-sales draft modification', () => {
     expect((mocks.calculate.mock.calls[0]![1] as ServiceArgs).includeOrderCharges).toBe(true);
   });
 });
+
+describe('historical foil alias compatibility', () => {
+  const cases = [
+    { label: 'single alias', front: ['哑金'], back: [], aggregateOnly: false },
+    { label: 'same-side aliases', front: ['哑金', '亚金'], back: [], aggregateOnly: false },
+    { label: 'other aliases', front: ['红色', '红金'], back: [], aggregateOnly: false },
+    { label: 'custom color', front: ['品牌金'], back: [], aggregateOnly: false },
+    { label: 'aggregate-only aliases', front: ['哑金', '亚金'], back: [], aggregateOnly: true },
+    { label: 'cross-side aliases', front: ['哑金'], back: ['亚金'], aggregateOnly: false },
+  ];
+  function source(entry: typeof cases[number]) {
+    return item({
+      frontFoilColors: entry.aggregateOnly ? [] : entry.front,
+      backFoilColors: entry.back,
+      foilColors: [...entry.front, ...entry.back],
+      isDoubleSided: entry.back.length > 0,
+      isDoubleColor: entry.front.length + entry.back.length > 1,
+    });
+  }
+  const payload = () => createOrderChangeRequestSchema.parse({
+    orderId: 'order-1', expectedRevision: 2, expectedWorkOrderVersion: 1,
+    type: 'MODIFY', modifyKind: 'OTHER', reason: '核对名称',
+    items: [{ operation: 'UPDATE', itemId: 'item-1', name: '修正款式名称' }],
+  });
+  function assertNoFoilOrPriceWrite() {
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expect(mocks.appendRevision).not.toHaveBeenCalled();
+    const data = mocks.db.orderItem.update.mock.calls[0]![0].data;
+    for (const key of ['frontFoilColors', 'backFoilColors', 'foilColors', 'isDoubleSided',
+      'isDoubleColor', 'pricingSnapshot', 'subtotal', 'unitPrice', 'fixedFee', 'suggestedSubtotal']) {
+      expect(Object.hasOwn(data, key), key).toBe(false);
+    }
+  }
+  for (const actor of [sales, admin]) {
+    it.each(cases)(`create ${actor.role}: $label`, async (entry) => {
+      mocks.db.order.findUnique.mockResolvedValue(createRequestOrder({ items: [source(entry)] }));
+      mocks.db.orderChangeRequest.create.mockResolvedValue({ id: 'name-only-request' });
+      await expect(createOrderChangeRequest(payload(), actor)).resolves.toEqual({ id: 'name-only-request' });
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      const saved = mocks.db.orderChangeRequest.create.mock.calls[0]![0].data.proposedChanges.items[0];
+      expect(saved).not.toHaveProperty('frontFoilColors');
+      expect(saved).not.toHaveProperty('foilColors');
+    });
+  }
+  it.each(cases)('preview: $label', async (entry) => {
+    const value = request({
+      proposedChanges: { items: payload().items },
+      order: { ...request().order, items: [source(entry)] },
+    });
+    locate(value);
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({
+      quoteToken: null, newTotal: '1008.00', delta: '0.00', complete: true,
+      items: [expect.objectContaining({ frontFoilColors: entry.front, previousFrontFoilColors: entry.front })],
+    });
+    expect(mocks.calculate).not.toHaveBeenCalled();
+    expectNoApprovalMutation();
+  });
+  it.each(cases)('approve: $label', async (entry) => {
+    const value = request({
+      proposedChanges: { items: payload().items },
+      order: { ...request().order, items: [source(entry)] },
+    });
+    locate(value);
+    mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+      expectedPriceRevision: 5 }, admin);
+    expect(mocks.db.orderItem.update).toHaveBeenCalledWith({
+      where: { id: 'item-1' }, data: expect.objectContaining({ name: '修正款式名称' }),
+    });
+    assertNoFoilOrPriceWrite();
+  });
+  it('explicitly supplied aliases remain rejected at the command boundary', () => {
+    const input = payload();
+    input.items[0] = { ...input.items[0]!, frontFoilColors: ['哑金', '亚金'] };
+    expect(createOrderChangeRequestSchema.safeParse(input).success).toBe(false);
+  });
+
+  function pendingWithEcho(overrides: Record<string, unknown> = {}) {
+    return request({
+      proposedChanges: { items: [{ operation: 'UPDATE', itemId: 'item-1', name: '修正款式名称',
+        quantity: 1000, frontFoilColors: ['哑金', '亚金'], backFoilColors: [], ...overrides }] },
+      order: { ...request().order, items: [source(cases[1]!)] },
+    });
+  }
+  for (const operation of ['preview', 'approve'] as const) {
+    it.each([
+      { label: 'side echo', overrides: {} },
+      { label: 'aggregate echo', overrides: { frontFoilColors: undefined, backFoilColors: undefined, foilColors: ['哑金', '亚金'] } },
+      { label: 'partial side echo', overrides: { backFoilColors: undefined } },
+    ])(`${operation} preserves unchanged stored $label without foil writes`, async ({ overrides }) => {
+      const value = pendingWithEcho(overrides);
+      const original = structuredClone(value.proposedChanges);
+      locate(value);
+      if (operation === 'preview') {
+        await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({
+          newTotal: '1008.00', delta: '0.00', complete: true,
+        });
+        expectNoApprovalMutation();
+      } else {
+        mocks.db.orderItem.findMany.mockResolvedValue([{ subtotal: new Decimal(1000) }]);
+        await reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+          expectedPriceRevision: 5 }, admin);
+        assertNoFoilOrPriceWrite();
+      }
+      expect(mocks.calculate).not.toHaveBeenCalled();
+      expect(value.proposedChanges).toEqual(original);
+    });
+    it.each([
+      { label: 'quantity change', overrides: { quantity: 1200 } },
+      { label: 'pack change', overrides: { pack: 10 } },
+      { label: 'reordered echo', overrides: { frontFoilColors: ['亚金', '哑金'] } },
+      { label: 'different aliases', overrides: { frontFoilColors: ['红色', '红金'] } },
+      { label: 'conflicting aggregate', overrides: { foilColors: ['红金'] } },
+      { label: 'copied item', overrides: { operation: 'ADD', templateItemId: 'item-1' } },
+    ])(`${operation} rejects $label with duplicate aliases`, async ({ overrides }) => {
+      const value = pendingWithEcho(overrides);
+      locate(value);
+      const result = operation === 'preview'
+        ? previewOrderChangeRequestPricing(value.id, admin)
+        : reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+            expectedPriceRevision: 5 }, admin);
+      await expect(result).rejects.toThrow('同一面的烫金颜色不能重复');
+      expectNoApprovalMutation();
+      expect(mocks.calculate).not.toHaveBeenCalled();
+    });
+  }
+  it('explicitly resolving the duplicate enters repricing', async () => {
+    const value = pendingWithEcho({ frontFoilColors: ['亚金'] });
+    locate(value);
+    await previewOrderChangeRequestPricing(value.id, admin);
+    expect(mocks.calculate).toHaveBeenCalledOnce();
+  });
+  it('partial unchanged side echo retains aggregate-only source colors', async () => {
+    const value = pendingWithEcho({ frontFoilColors: undefined });
+    value.order.items = [source(cases[4]!)];
+    locate(value);
+    await expect(previewOrderChangeRequestPricing(value.id, admin)).resolves.toMatchObject({
+      newTotal: '1008.00', delta: '0.00', complete: true,
+      items: [expect.objectContaining({ frontFoilColors: ['哑金', '亚金'] })],
+    });
+    expect(mocks.calculate).not.toHaveBeenCalled();
+  });
+  it.each(['preview', 'approve'] as const)('%s cannot carry historical duplicate colors through a mixed whole-order reprice', async (operation) => {
+    const value = pendingWithEcho();
+    value.order.items.push(item({ id: 'item-2', sequence: 2 }));
+    value.proposedChanges.items.push({ operation: 'UPDATE', itemId: 'item-2', quantity: 1200 });
+    locate(value);
+    // Exercise the real engine's rejection instead of the usual permissive quote mock.
+    mocks.calculate.mockImplementationOnce(async (_tx: unknown, args: ServiceArgs) => {
+      const calculation = pureResult(args);
+      return { ...calculation, quote: calculateCreateOrderQuote(calculation.input, calculation.snapshot) };
+    });
+    const result = operation === 'preview'
+      ? previewOrderChangeRequestPricing(value.id, admin)
+      : reviewOrderChangeRequest({ requestId: value.id, decision: 'APPROVE', reviewRemark: null,
+          expectedPriceRevision: 5 }, admin);
+    await expect(result).rejects.toThrow('修改后整单需要人工核价');
+    expect(mocks.calculate).toHaveBeenCalledOnce();
+    expect(mocks.calculate.mock.calls[0]![1].facts.items[0].frontFoilColors).toEqual(['哑金', '亚金']);
+    expectNoApprovalMutation();
+  });
+  it('rejection remains available for a pre-upgrade request', async () => {
+    const value = pendingWithEcho();
+    locate(value);
+    await reviewOrderChangeRequest({ requestId: value.id, decision: 'REJECT', reviewRemark: '重新核对颜色' }, admin);
+    expect(mocks.db.orderChangeRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'DENIED' }),
+    }));
+  });
+});

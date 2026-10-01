@@ -54,6 +54,7 @@ test('管理员代外部销售建单保留人工价格并校验改量', async ({
   await page.getByRole('button', { name: '保存草稿', exact: true }).click();
   await page.waitForURL(/\/orders\/(?!new\b)[a-z0-9]+$/, { timeout: 45_000 });
   const id = page.url().split('/').pop();
+  if (!id) throw new Error('创建工单后未取得工单 ID');
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   await db.connect();
   try {
@@ -106,10 +107,11 @@ test('管理员代外部销售建单保留人工价格并校验改量', async ({
   }
   await page.context().clearCookies();
   await login(page, { from: `/orders?q=${encodeURIComponent(orderName)}`, username: E2E_USERS.sales.username, password: E2E_PASSWORD });
-  await expect(page.locator(`[data-order-id="${id}"]`)).toContainText(orderName);
+  await expect(page.getByRole('row').filter({ hasText: orderName })).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: orderName })).toHaveAttribute('data-order-id', id);
   await page.context().clearCookies();
   await login(page, { from: `/orders?q=${encodeURIComponent(orderName)}`, username: E2E_USERS.billingSales.username, password: E2E_PASSWORD });
-  await expect(page.locator('[data-sales-order-card]')).toHaveCount(0);
+  await expect(page.locator('[data-sales-order-card], [data-sales-order-row]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

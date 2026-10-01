@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState, useTransition, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   finalizeFulfillmentPricingAction,
   previewFulfillmentPricingAction,
@@ -62,7 +61,6 @@ function readCommand(form: HTMLFormElement, orderId: string, isSfCollect: boolea
 }
 
 export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingPending, shipments, variant = 'page', collapsible = false, onSuccess }: Props) {
-  const router = useRouter();
   const [target, setTarget] = useState(currentValue);
   const [edited, setEdited] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -140,8 +138,8 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
         });
         if (result.status === 'success') {
           setConfirmed(true);
-          if (onSuccess) onSuccess();
-          else router.refresh();
+          // The action revalidated; its response re-renders the page (DECISIONS 2026-08-27).
+          onSuccess?.();
         } else {
           setError(failureText(result));
           setAccepted(null);
@@ -160,7 +158,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
   const body = (
     <>
       {confirmed ? (
-        <p role="status" className="mt-3 text-sm">物流费用已确认，工单已刷新。</p>
+        <p role="status" className="mt-3 text-sm">物流费用已确认。</p>
       ) : (
         <form key={formVersion} onSubmit={preview} onChange={invalidatePreview} aria-busy={pending} className="mt-4 min-w-0 space-y-4">
           <fieldset disabled={pending || auxiliary.blocked} className="min-w-0 space-y-4">
@@ -176,9 +174,7 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
                 <option value="false">非到付（确认对客快递费）</option>
               </NativeSelect>
             </div>
-            {target ? (
-              <p className="text-sm text-muted-foreground">对客快递费将按零元核对，其他收费保持不变；存在已记录运费成本时仍需先处理成本冲突。</p>
-            ) : shipments.map((shipment) => {
+            {target ? null : shipments.map((shipment) => {
               const prefix = `fulfillment-${shipment.id}`;
               return (
                 <fieldset key={shipment.id} className="grid min-w-0 gap-3 rounded-lg border p-3 sm:grid-cols-2">
@@ -225,7 +221,6 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
                 ))}
               </ul>
               {quote.issues.length > 0 ? <ul role="alert" className="list-inside list-disc text-sm text-destructive">{quote.issues.map((issue, index) => <li key={`${index}-${issue}`}>{issue}</li>)}</ul> : null}
-              <p className="text-xs text-muted-foreground">确认后采用上方物流金额。</p>
               <Button type="button" disabled={pending || auxiliary.blocked || !quote.canConfirm} onClick={confirmPricing}>
                 确认物流费用
               </Button>
@@ -255,4 +250,3 @@ export function FulfillmentPricingReviewForm({ orderId, currentValue, isPricingP
     </section>
   );
 }
-

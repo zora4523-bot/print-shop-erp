@@ -5,7 +5,7 @@ import { progressCraftIdsForReporter } from '@/lib/production/progress-reporter-
 
 type Client = typeof db;
 
-export type DispatchPageTask = {
+type DispatchPageTask = {
   key: string;
   label: string;
   quantity: string;
@@ -14,7 +14,7 @@ export type DispatchPageTask = {
   options: { id: string; name: string }[];
 };
 
-export type DispatchPageOrder = {
+type DispatchPageOrder = {
   id: string;
   name: string;
   revision: number;

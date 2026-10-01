@@ -1,6 +1,7 @@
 'use client';
 
-import { foilColorLabel } from '@/lib/order/foil-colors';
+import { foilColorInputLabel } from '@/lib/order/foil-colors';
+import { foilColorIdentity, uniqueFoilColors } from '@/lib/order/foil-color-identity';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -25,7 +26,12 @@ export function OrderFoilColorPicker({
   onChange: (colors: string[]) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const choices = [...new Set([...options, ...selected])];
+  const selectedIdentities = new Set(selected.map(foilColorIdentity));
+  // Preserve every stored spelling until explicitly removed, but offer each new identity only once.
+  const choices = [
+    ...new Set(selected),
+    ...uniqueFoilColors(options).filter((color) => !selectedIdentities.has(foilColorIdentity(color))),
+  ];
   const visible = expanded
     ? choices
     : choices.filter(
@@ -66,7 +72,7 @@ export function OrderFoilColorPicker({
             )
           }
         >
-          {foilColorLabel(color)}
+          {foilColorInputLabel(color, selected)}
         </Button>
       ))}
       {choices.length > visible.length ? (

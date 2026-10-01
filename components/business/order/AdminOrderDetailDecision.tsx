@@ -43,7 +43,6 @@ export function AdminOrderDetailDecision({ order, requiresPaperRecall }: {
           if (item?.status === 'success') {
             setNotice({ tone: 'success', text: `已确认 v${order.workOrderVersion} 打印完成` });
           } else setNotice({ tone: 'warning', text: item?.message ?? '本次未执行，请刷新工单核对。' });
-          router.refresh();
         } else if (result.status === 'partial_failure') {
           setResultUnknown(true);
           setNotice({ tone: 'warning', text: '打印结果尚未确认，请刷新工单核对后再处理。' });

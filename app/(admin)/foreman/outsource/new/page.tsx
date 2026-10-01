@@ -33,11 +33,6 @@ export default async function NewOutsourcePage({ searchParams }: PageProps) {
         // 表单内自带提交中锁定的返回入口（PendingLink）；只有表单不渲染时才由页头提供。
         back={unavailableReason ? { href: `/orders/${order.id}`, label: '返回工单详情' } : undefined}
         title="新建外协单"
-        subtitle={
-          unavailableReason
-            ? undefined
-            : '选择要外协的款式，填写外协厂信息。保存后状态默认为“已发出”。'
-        }
       />
 
       {unavailableReason ? (

@@ -26,7 +26,7 @@ async function expectUnauthenticated(page: Page): Promise<void> {
   expect(await response.json()).toEqual({ error: '未登录或登录状态已失效，请重新登录' });
   await page.goto('/owner/agent-bills');
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
-  await expect(page.getByRole('heading', { name: '代理商月度账单', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '外部销售月账单', exact: true })).toHaveCount(0);
 }
 
 test('过期和损坏的 JWT 拒绝受保护 API 和页面', async ({ page, browser }) => {
@@ -71,7 +71,7 @@ test('已签发的合法令牌不能让停用账号继续访问财务页面或 A
     expect(inserted.rowCount).toBe(1);
   });
   await login(page, { from: '/owner/agent-bills', username: id, password: E2E_PASSWORD });
-  await expect(page.getByRole('heading', { name: '代理商月度账单', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '外部销售月账单', exact: true })).toBeVisible();
   await withIsolatedDb((db) => db.query('UPDATE "User" SET "isActive"=FALSE, "updatedAt"=NOW() WHERE id=$1', [id]));
   await expectUnauthenticated(page);
 });

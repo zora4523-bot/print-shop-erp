@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { Button } from '@/components/ui/button';
 import { ActionNotice, ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { setQuoteProductActiveAction } from '@/actions/owner-products';
@@ -19,9 +20,9 @@ export function ToggleActiveButton({
 }) {
   const formId = useId();
   const nextActive = !currentlyActive;
-  const [state, formAction, pending] = useActionState<ProductMutationResult | null, FormData>(
+  const [state, formAction, pending] = useActionState<AppliedActiveState<ProductMutationResult> | null, FormData>(
     async (_previous, formData) =>
-      setQuoteProductActiveAction(productId, nextActive, formData),
+      withAppliedActive(await setQuoteProductActiveAction(productId, nextActive, formData), nextActive),
     null,
   );
 
@@ -62,14 +63,14 @@ export function ToggleActiveButton({
       {error ? (
         <ActionNotice
           tone="error"
-          title={currentlyActive ? '产品停用失败' : '产品启用失败'}
+          title={visibleState?.appliedActive ? '产品启用失败' : '产品停用失败'}
           description={error}
         />
       ) : null}
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '产品已停用' : '产品已启用'}
+          title={visibleState?.appliedActive ? '产品已启用' : '产品已停用'}
         />
       ) : null}
     </div>

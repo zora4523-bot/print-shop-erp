@@ -110,7 +110,7 @@ for (const mode of ['hydrated', 'native'] as const) {
       });
 
       await test.step('确认冻结后记录数据库成员和总额', async () => {
-        await page.getByRole('button', { name: '确认并冻结账单', exact: true }).click();
+        await page.getByRole('button', { name: '确认账单', exact: true }).click();
         await expect(page.locator('[data-slot="badge"]').filter({ hasText: /^已确认·待收$/ })).toBeVisible();
         const state = await readBill(fixture.agentUserId, fixture.period);
         expect(state.bill.status).toBe('CONFIRMED');
@@ -168,7 +168,7 @@ for (const mode of ['hydrated', 'native'] as const) {
         await page.getByLabel(/^抵扣金额/).fill('10.00');
         await page.getByLabel('原因', { exact: true }).fill('质量调整');
         await page.getByRole('button', { name: '录入抵扣', exact: true }).click();
-        await expect(page.getByText('已记录负项，余额将在后续草稿账单中抵扣', { exact: true })).toBeVisible();
+        await expect(page.getByText('抵扣已记录，余额待抵扣', { exact: true })).toBeVisible();
         const state = await readBill(fixture.agentUserId, fixture.period);
         expect(state.credits).toHaveLength(1);
         expect(state.credits[0]).toMatchObject({ requestedAmount: '-10.00', reason: '质量调整' });

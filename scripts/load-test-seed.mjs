@@ -541,7 +541,8 @@ async function upsertOrderItems(db, input) {
     `INSERT INTO "OrderItem" (
        id, "orderId", sequence, name, specification, "paperType", quantity,
        crafts, "foilColors", "isDoubleSided", "isDoubleColor", "unitPrice",
-       "fixedFee", subtotal, "pricingSnapshot", remark, "createdAt", "updatedAt"
+       "fixedFee", subtotal, "pricingSnapshot", remark, "createdAt", "updatedAt",
+       "pricingRoute", "productStructure", "foilTechnique"
      )
      SELECT
        $1 || 'item-' || lpad(n::text, 6, '0') || '-' || style,
@@ -554,7 +555,9 @@ async function upsertOrderItems(db, input) {
          'source', 'LOAD_TEST', 'runId', $3::text, 'style', style
        ),
        '三款三工艺代表样本',
-       CURRENT_TIMESTAMP - make_interval(days => n % 730), CURRENT_TIMESTAMP
+       CURRENT_TIMESTAMP - make_interval(days => n % 730), CURRENT_TIMESTAMP,
+       'MANUAL_QUOTE'::"OrderItemPricingRoute",
+       'STANDARD_ENVELOPE'::"OrderProductStructure", 'FLAT'::"OrderFoilTechnique"
      FROM generate_series($4::int, $5::int) AS n
      CROSS JOIN generate_series(1, 3) AS style
      ON CONFLICT (id) DO UPDATE SET

@@ -60,8 +60,9 @@ describe('admin navigation prefetch policy', () => {
 
     expect(sidebar).toContain('useLinkStatus');
     expect(sidebar).toContain(
-      'prefetch={intentHref === item.href ? true : false}',
+      'prefetch={intentHref === item.href ? null : false}',
     );
+    expect(sidebar).not.toContain('? true : false}');
     expect(sidebar).toContain('IntentPrefetchScheduler');
     expect(sidebar).toContain('onEnter={scheduleIntentPrefetch}');
     expect(sidebar).toContain('onLeave={cancelIntentPrefetch}');

@@ -314,7 +314,6 @@ function AdminOrderRow({
 }
 
 function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow; onFeedback: (feedback: OrderRowFeedback) => void }) {
-  const router = useRouter();
   const [starred, setStarred] = useState(order.isStarred);
   const [pending, startTransition] = useTransition();
   const inFlightRef = useRef(false);
@@ -336,7 +335,6 @@ function OrderStarButton({ order, onFeedback }: { order: AdminOrderWorkspaceRow;
           return;
         }
         onFeedback({ tone: 'success', message: `${order.customName?.trim() || '未命名工单'} ${next ? '已添加星标' : '已取消星标'}` });
-        router.refresh();
       } catch {
         setStarred(!next);
         onFeedback({ tone: 'error', message: '星标更新失败，请重试' });

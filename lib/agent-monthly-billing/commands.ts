@@ -122,7 +122,7 @@ export async function confirmAgentMonthlyBill(
     if (!current) throw new AgentMonthlyBillNotFoundError();
     if (current.status !== AgentMonthlyBillStatus.DRAFT) {
       if (!current.confirmedAt) {
-        throw new AgentMonthlyBillingError('账单状态时间事实不完整');
+        throw new AgentMonthlyBillingError('账单确认或结清时间缺失，请联系管理员核对账单');
       }
       return {
         billId: current.id,
@@ -360,9 +360,9 @@ export async function createAgentMonthlyBillCredit(
         },
       },
     });
-    if (!source) throw new AgentMonthlyBillingError('负项来源成员不存在');
+    if (!source) throw new AgentMonthlyBillingError('来源工单不存在，请返回账单重新选择');
     if (source.billId !== input.expectedBillId) {
-      throw new AgentMonthlyBillingError('负项来源成员不属于当前账单');
+      throw new AgentMonthlyBillingError('来源工单不属于当前账单，请返回账单重新选择');
     }
     await lockAgentPeriod(tx, source.bill.agentUserId, source.bill.period);
     await lockAgentBill(tx, source.billId);
@@ -383,7 +383,7 @@ export async function createAgentMonthlyBillCredit(
         !new Decimal(replay.requestedAmount).eq(amount.negated()) ||
         replay.reason !== reason
       ) {
-        throw new AgentMonthlyBillingError('同一请求标识不能用于不同负项');
+        throw new AgentMonthlyBillingError('本次提交已失效，请刷新后重新录入抵扣');
       }
       return {
         creditId: replay.id,
@@ -407,7 +407,7 @@ export async function createAgentMonthlyBillCredit(
         freshSource.bill.status !== AgentMonthlyBillStatus.PAID)
     ) {
       throw new InvalidAgentMonthlyBillTransitionError(
-        '只能对已冻结账单成员记录负项',
+        '只能对已确认账单中的工单录入抵扣',
       );
     }
     const requestedBefore = freshSource.credits.reduce(
@@ -415,7 +415,7 @@ export async function createAgentMonthlyBillCredit(
       new Decimal(0),
     );
     if (requestedBefore.plus(amount).gt(freshSource.settledFeeSnapshot)) {
-      throw new AgentMonthlyBillingError('累计负项不能超过来源成员结算费');
+      throw new AgentMonthlyBillingError('累计抵扣不能超过来源工单的结算金额');
     }
 
     const created = await tx.agentMonthlyBillCredit.create({

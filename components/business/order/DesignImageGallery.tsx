@@ -1,7 +1,10 @@
 type DesignImage = {
   id: string;
   fileName: string;
+  /** 原图：点击打开查看 / 下载。 */
   fileUrl: string;
+  /** 网格预览（OSS 缩放版）；缺省时退回原图。 */
+  previewUrl?: string;
 };
 
 type Props = {
@@ -40,8 +43,10 @@ export function DesignImageGallery({
               {/* OSS signed URLs use deployment-specific hosts. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={image.fileUrl}
+                src={image.previewUrl ?? image.fileUrl}
                 alt={image.fileName}
+                loading="lazy"
+                decoding="async"
                 className="aspect-square w-full rounded-md object-cover"
               />
             </a>

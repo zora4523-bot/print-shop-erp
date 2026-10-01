@@ -48,8 +48,8 @@ export function BlankPaperForm({
   );
   useEffect(() => {
     if (result?.status === 'success') {
+      // addBlankPaperAction revalidated this path; push alone renders it fresh.
       router.push('/owner/rules/customer-pricing?section=blank');
-      router.refresh();
     }
   }, [result, router]);
   return (
@@ -137,7 +137,7 @@ export function BlankPaperForm({
           规格单价（元 / 个）
         </legend>
         <p className="text-sm text-muted-foreground">
-          单价最多四位小数；发布后正价可用于新单，0 或留空为未启用。
+          单价最多四位小数。
         </p>
         {BLANK_SPECIFICATIONS.map((spec) => (
           <div

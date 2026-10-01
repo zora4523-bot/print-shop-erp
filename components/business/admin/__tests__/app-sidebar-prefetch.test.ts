@@ -14,8 +14,9 @@ describe('AppSidebar navigation feedback', () => {
 
     expect(source).toContain('useLinkStatus');
     expect(source).toContain(
-      'prefetch={intentHref === item.href ? true : false}',
+      'prefetch={intentHref === item.href ? null : false}',
     );
+    expect(source).not.toContain('? true : false}');
     expect(source).toContain('IntentPrefetchScheduler');
     expect(source).toContain('onEnter={scheduleIntentPrefetch}');
     expect(source).toContain('onLeave={cancelIntentPrefetch}');

@@ -1,0 +1,98 @@
+# 功能切换 / 按钮直接切换 性能审查（2026-10-01）
+
+基线 `cdef3c8b`（分支 `claude/feature-toggle-performance-review-9c66a6`）。范围：侧边栏切换、页内 tab / 队列 / 分页切换、
+直接切换状态的按钮（启停、星标、裁决、一键完成等）从点击到反馈、到内容就绪的耗时，以及背后的服务端 / 客户端成本。
+
+## 方法
+
+- **静态审查（并行）**：4 个 Claude 子 agent 分别审查 导航与预取 / 服务端取数 / 切换类 mutation 与刷新 / 客户端包体与渲染；
+  Codex `gpt-6-astra`（xhigh，只读）独立对抗审查同一范围。所有采纳结论均由主会话回到代码 + Next 16.3.4 源码 / 文档核对。
+- **实测**：`next build` 生产构建（release 配置，`127.0.0.1:3200`）+ 隔离库 `erp_e2e_perf_20261001`，用 `scripts/load-test-seed.mjs`
+  灌入代表数据：**3 万工单 / 9 万款式 / 4.5 万任务 / 9 万发货 / 50 人 × 180 天工资 / 28 账号**。临时 Playwright 探针逐个点击
+  管理员 37 个侧边栏入口（冷、热、悬停后点击三轮）、每页前 5 个同路径切换链接、客户端 tab/展开按钮；销售、师傅（375 宽 + 4×
+  CPU 降速）、管理员手机端各一轮。记录点击→首个反馈（URL 变化 / 骨架 / aria-busy / DOM 变化）、内容稳定、RSC/action 请求、
+  INP（Event Timing）、长任务、首载 JS。慢 SQL 用只对该库生效的 `log_min_duration_statement` 捕获后单独 `EXPLAIN ANALYZE`。
+- **环境注意**：实测期间本机有其他会话的 Playwright / next-server / ASR 任务，load average 26–45（12 核），同一条全表 `SUM`
+  在 92 ms～1.8 s 间抖动。**绝对耗时被放大，只用于排序与前后对比**；数据库结论以 `EXPLAIN (ANALYZE, BUFFERS)` 为准。
+
+## 实测结论（修复前）
+
+| 场景 | 样本 | 首个反馈 p50 / p95 | 内容就绪 p50 / p95 / max | INP max |
+| --- | ---: | --- | --- | ---: |
+| 管理员侧边栏（冷） | 37 | 76 / 209 ms | 1.1 s / 3.0 s / 12.8 s | 88 ms |
+| 管理员侧边栏（热） | 37 | 56 / 242 ms | 0.39 s / 2.0 s / 10.8 s | 24 ms |
+| 管理员页内切换 | 26 | 281 ms / 9.8 s | 0.5 s / 9.8 s / 11.5 s | 192 ms |
+| 管理员客户端 tab/展开 | 68 | 79 ms | 0.13 s | 72 ms |
+| 销售侧边栏 / 页内切换 | 5 / 5 | 60 / 82 ms | 1.1 s / 0.7 s | 16 ms |
+| 师傅端（375 宽、4× CPU） | 7 页首载 | TTFB 11–57 ms | load 88–180 ms（`/worker/orders` 795 ms） | — |
+
+- **点击响应本身不卡**：INP 全部 ≤ 192 ms，侧边栏点击 76 ms 内就有反馈；首载 JS gzip 管理端中位 365 KB、销售 414 KB、师傅 228 KB。
+- **慢在服务端数据量**：离群点是随历史线性增长的查询——`/owner/agent-bills` 冷 12.8 s / 热 7.0 s（该分组刻意无骨架，整页像冻住；
+  根因是逐行 EXISTS 整表扫描，见下方修复）。`/orders` 待办队列当时测得 9–11 s，**同日在负载 3.4 下复测仅 ~150 ms**，属机器争用放大，
+  见「未修复」第 1 项。
+
+## 已修复（6 个提交）
+
+| 提交 | 问题 | 证据 |
+| --- | --- | --- |
+| `f13b2e24` fix(master-data) | **缺陷**：7 个启用/停用按钮（账号、用料清单、工艺、物料、客户/供应商、分类、产品）成功后回执说反——停用账号提示「账号已激活」。成功 action 的 revalidate 让同一响应带回翻转后的 `isActive`，组件不重挂、成功结果仍在，标题按已翻转的 prop 推导。改为把提交的目标值存进 action state。 | 新回归测试旧实现 21/21 失败、新实现 26/26 通过；生产构建真实浏览器：停用→「账号已停用」、激活→「账号已激活」，反向文案 0 处 |
+| `ba23a73e` fix(ui) | DECISIONS 2026-08-27 已拍板移除的「成功后重复 `router.refresh()`」回潮 26 处：星标、工单详情裁决 / 批量 / 核价 / 发货 / 改单审批、编辑保存（push 后又 refresh）、外协、通知渠道、CDR 撤销 / 重生成、价目簿发布 / 取消 / 改期 / 规则、导出受理。每次点击多一次整页渲染，并在路由队列里挡住下一次点击。 | Next `revalidate.js:221`：任何 `revalidatePath` 都让 action 响应带回当前页新渲染；逐处核对 action 该分支先 revalidate。保留 partial_failure / 结果未知 / 轮询 / 手动刷新 5 类。实测星标：1 个 action、0 次额外 RSC（原 2 次整页渲染） |
+| `464b4968` fix(cdr) | CDR 下载包生成后固定整页刷新 40 次 / 2 分钟：轮询条件是 `useActionState` 的 `queued`，包 READY 后仍为 `queued`。改由「最近下载包」区按 PENDING 签名轮询，签名空即停、同批上限 120 秒；候选区/历史区隔离契约不变。 | Browser Mode 真实计时器测试 4/4 |
+| `e58f0f64` fix(nav) | 侧边栏悬停 `prefetch={true}` 对动态路由是整页渲染（全部查询），结果缓存 5 分钟，之后点击不发请求——几分钟后点「工单」看到的是悬停时的队列。改为文档推荐的 `prefetch={intent ? null : false}`：只预取到 `loading.tsx`，点击即出骨架并取新数据。 | 修复前：悬停后点击 0 次请求；修复后：悬停只发 prefetch，点击 1 次 RSC |
+| `3a497db4` fix(db) | 两条逐行 `EXISTS` 在 3 万工单下退化为逐行整表扫描：产品目录「被多少工单引用」（`lib/product.ts`）与代理商账单代理人筛选（`lib/agent-monthly-billing/query.ts`）。新增 `OrderItem(productId, orderId)`、`Order(submitterId, settlementType)`。 | 20 行产品计数 385 ms → 0.9 ms；代理人筛选 4.9 s → 0.5 ms；`/owner/agent-bills` 热加载 7.0 s → ~130 ms |
+| `3495f649` fix(ops) | `load-test-seed.mjs` 因 `OrderItem` 三个新增非空列失效（事务回滚、无写入）。 | 按 `information_schema` 核对其余表无缺列；本次用它生成代表数据 |
+
+门禁：`pnpm lint`（2 条既有警告）、`typecheck`、`check:architecture`、`test:backup` 通过；全量单测 **8,100 通过 / 0 失败**（135 跳过均为
+只在隔离 e2e 库运行的 postgres 用例与既有 `describe.skip`，另在新建隔离库 + `test:e2e:prepare` 上补跑这些 postgres 用例，全部通过）；
+浏览器组件 **990/990**；生产构建重跑上述真实浏览器核对。
+
+## 未修复：按收益排序，需要业主拍板或先在安静机器上实测
+
+业主 09-21 口径是「实测收益不明显就停下说明」。以下项目要么改动面大（队列语义、详情页结构），要么本机负载下无法给出干净数字，
+故只记录证据与建议，不在本批动手。
+
+1. **（已复测，不改）`/orders` 默认待办队列汇总**。负载 45 时测得的 9–11 s 是机器争用：同日负载降到 3.4 后，直接调用
+   `loadAdminOrderWorkspace`（3 万工单库，4 次取后 3 次）待办 145–159 ms、生产 71–74 ms、已完结 124–126 ms、全部 131–134 ms；
+   原「9 s」的款式数量 SUM 单独 `EXPLAIN ANALYZE` 为 48–72 ms。计划仍随款式总量线性增长（约 0.5 ms / 千款式），但到十年量级
+   仍在百毫秒级；按业主 09-21「实测收益不明显就停」口径不改队列筛选结构，留作长期观察项。
+2. **（已修复）管理员手机端点侧栏无任何反馈**：原 `AppSidebar` 点击即关抽屉，唯一的 pending 指示随抽屉消失、触屏又无预取，旧页面
+   原样停到服务端返回。改为地址真正变化后再关抽屉（含浏览器前进 / 后退），被点项的加载指示全程可见；点当前页不会导航，立即收起。
+   Browser Mode 新测试旧实现失败；生产构建 375 宽 + 4× CPU + 人为放慢服务端 1.5 s：点「工单」后 0.9 s 仍在旧地址、抽屉打开且
+   被点项 `data-pending="true"`，2.3 s 新页提交后抽屉自动关闭；冒烟 3 项（含抽屉）通过。
+3. **（已实测，不改）工单详情 `/orders/[id]`**：生产构建 + 3 万工单库，4 张不同状态工单各 3 次：每次 117–131 条 SQL，但 SQL 合计仅
+   3–6 ms，TTFB 12–62 ms、HTML 完成 54–158 ms。查询条数多而单条极廉价；生产数据库在独立主机，内网往返按 0.2–0.5 ms 估算多出几十毫秒，
+   收益不明显，按 09-21 口径不重构。
+4. **（已实测，不改）建单表单按键**：销售账号 `/orders/new`、4× 降速 CPU、逐字输入：工单名称 / 设计款名称没有任何超过 16 ms 的按键事件；
+   数量框单款 40–64 ms、5 个设计款时 72 ms，远低于 200 ms 的「良好」INP 线。
+5. **（已修复 `82044882`）师傅端设计图用原图做缩略**：新增 OSS 缩放档 `w_480`，网格用预览图 + `loading="lazy" decoding="async"`，链接仍为原图。
+   同画面 A/B（375 宽、4× CPU）：页面 load 810 ms → 30 ms；单张 4.2 MB → 26 KB（一页 6 张约 25 MB → 157 KB）。
+6. **其他缺索引 / 无上限查询（补齐合成数据后实测）**：
+   - 外协单列表（已修复 `d6b16afa` + 索引 `394729df`）：3 千条时整页 37,011 个 DOM 节点、HTML 197 KB、约 400 ms；分页（每页 50）后 1,165 个节点、23 KB。
+   - 后台任务账本（已加索引 `394729df`）：30 万行取最近 100 条 53 ms → 0.03 ms。
+   - 计件结算日：未结算工资按日查询 0.4 ms（现有 `(workerId, workDate, settlementId)` 索引已覆盖，审查结论不成立）；待核义务 7.3 万任务 19 ms，不改。
+     `ProductionReport.reportedAt` 属旧报工路径，现行一键完成不再写入，未造数。
+   - 客户计价按 section 重读规则：未量化，留待后续。
+7. **P2 导出轮询在单次渲染 > 3 秒时会叠加**（`OrderExportControls.tsx:79-91` `setInterval(router.refresh, 3000)`）；导出结束即停，
+   根因是第 1 项。可改为上一次刷新完成后再排下一次。
+8. **（已核对，不改）师傅「完成生产」的报工日闸口锁**（`lib/production/completion-registration.ts:39`）。审查建议把报工方改为共享锁、
+   结算批保留排他；核对后**不可行**：`ProductionJob` / `ProductionWage` / `ProductionReport` / `PieceworkSettlement` 的数据库触发器
+   （`guard_production_fact_write`、`protect_production_wage`、`validate_foil_wage_report`、`protect_production_quantity_settlement`）
+   在每次写入时都以**排他**方式再取同一闸口。应用层改共享锁不仅拿不到并发收益，还会让两个同时登记的师傅各持共享锁、在触发器里
+   互等升级为排他——必然死锁。真要并行需同时重写这些工资守卫触发器，代价是改动工资事故防线，收益只是并发登记时多等一个短事务；
+   不做。
+9. **P3**：列表分页 / 排序 / 搜索提交无 pending 提示（`AdminDataTable`、各 `next/form` 筛选）；`owner/rules`、`owner/salary`、
+   师傅详情等无 `loading.tsx`；`sidebar_state` cookie 写了不读（每次整页进入侧栏重置展开）；详情页 `generateMetadata` 与页面重复读取
+   未用 `cache()`；React Compiler 未启用；`/worker/orders` 精确 count 覆盖全部历史工单。
+
+## 核对为「无问题」的部分
+
+- 各 layout 只读 React `cache` 的会话，无角标 / 计数查询；布局在客户端导航时不重渲。
+- 启停 / 加急 / 顺丰到付 / 后台任务按钮：pending 禁用、`aria-busy`、提交目标值（最后一次点击生效），无重复刷新。
+- 师傅一键完成：一次往返、确认步骤、pending 禁用，服务端请求哈希重放 + revision 校验防重复登记。
+- 主题切换纯客户端；recharts 走 `next/dynamic`；qrcode 不进客户端；客户端模块无任何 Prisma / `lib/db` 依赖。
+- `/orders` 队列切换（09-21 已验收）在 3 万工单下筛选队列 100–250 ms、反馈 50–100 ms。
+
+## 环境与清理
+
+隔离库 `erp_e2e_perf_20261001`（压测数据）、`erp_test_perf_unit_1001`（单测）、`erp_e2e_perf_pg_1001`（postgres 用例）在收尾时删除；
+临时探针脚本只在会话 scratchpad，未入库；未推送、未部署，生产与开发库未触碰。

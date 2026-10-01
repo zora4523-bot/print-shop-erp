@@ -114,7 +114,7 @@ type DraftItem = {
   front: string;
   back: string;
 };
-type Difference = { label: string; before: string; after: string };
+type Difference = { field?: string; label: string; before: string; after: string };
 type Props = {
   orderId: string;
   orderNo: string;
@@ -302,8 +302,8 @@ export function AdminOrderEditor(props: Props) {
         }
         if (result.status === 'saved') {
           allowNavigation();
+          // The save action revalidated /orders/[id]; push alone renders it fresh.
           router.push(`/orders/${props.orderId}`);
-          router.refresh();
         }
       } catch {
         setError('保存结果未确认，请刷新核对工单后再操作。');
@@ -451,7 +451,7 @@ export function AdminOrderEditor(props: Props) {
         <DialogContent finalFocus={detailsButtonRef}>
           <DialogHeader>
             <DialogTitle>第 {detailItem?.sequence} 款生产信息</DialogTitle>
-            <DialogDescription>已保存的工艺与生产事实</DialogDescription>
+            <DialogDescription>工艺与生产资料</DialogDescription>
           </DialogHeader>
           {detailItem?.details}
         </DialogContent>
@@ -537,13 +537,16 @@ function EditorConfirmationSection({
               ]
             : []),
         ]}
-        consequences={
-          review?.changesRevision
+        consequences={[
+          ...(differences.some((diff) => diff.field === 'externalSalesUserId')
+            ? ['工单及后续对账归属新账号，原账号将无法查看此工单。']
+            : []),
+          ...(review?.changesRevision
             ? ['CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(props.status)
               ? [`工单版本 v${props.workOrderVersion} → v${props.workOrderVersion + 1}。`]
               : ['保留当前纸质工单版本。']
-            : ['仅修改资料，保留当前工单版本与费用。']
-        }
+            : ['仅修改资料，保留当前工单版本与费用。']),
+        ]}
         confirmText="保存修改"
       />
     </ConfirmActionController>
@@ -684,6 +687,7 @@ function updateEditorMetadata({
             [...(select?.options ?? [])].find((option) => option.value === id)?.text ?? '未关联';
           return [
             {
+              field: key,
               label: fieldNames[key],
               before: account(before),
               after: account(value),
@@ -1075,7 +1079,7 @@ function DraftItemsSection({
         ) : null}
         {props.items.length > 0 && !props.productionLocked ? (
           <p className="text-xs text-muted-foreground">
-            工艺、纸张和已有款式的删除会改变生产基础，当前通过新建工单处理；规格、数量、烫金及已有分袋数量可在此修改。
+            修改工艺、纸张或删除已有款式，请新建工单。
           </p>
         ) : null}
       </CardContent>

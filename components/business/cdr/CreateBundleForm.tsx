@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useMemo, useState } from 'react';
+import { useActionState, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createBundleAction } from '@/actions/foreman-cdr';
@@ -45,16 +45,6 @@ export function CreateBundleForm({
   // 集换组 → form 重挂 → setSelected 拿新 allIds。比 useEffect+setState 更纯。
   const allIds = useMemo(() => eligible.map((o) => o.id), [eligible]);
   const [selected, setSelected] = useState<Set<string>>(new Set(allIds));
-
-  useEffect(() => {
-    if (state?.status !== 'queued') return;
-    const timer = window.setInterval(() => router.refresh(), 3_000);
-    const stop = window.setTimeout(() => window.clearInterval(timer), 120_000);
-    return () => {
-      window.clearInterval(timer);
-      window.clearTimeout(stop);
-    };
-  }, [router, state]);
 
   const allSelected = allIds.length > 0 && selected.size === allIds.length;
   const someSelected = selected.size > 0 && !allSelected;
@@ -222,10 +212,6 @@ export function CreateBundleForm({
                 >
                   打开下载链接
                 </Button>
-                <p className="text-xs text-muted-foreground">
-                  {formatDateTimeShanghai(new Date(state.expiresAt))} 过期。复制上方完整
-                  URL 发给外协。
-                </p>
               </div>
             }
           />

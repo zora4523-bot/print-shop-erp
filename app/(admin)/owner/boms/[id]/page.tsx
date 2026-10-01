@@ -99,7 +99,6 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
                 <TableEmptyState
                   colSpan={3}
                   title="暂无物料行"
-                  description="这个用料清单尚未配置用料。"
                 />
               ) : (
                 bom.items.map((item) => (
@@ -131,9 +130,6 @@ export default async function OwnerBomDetailPage({ params, searchParams }: PageP
         <h2 className="mb-2 text-base font-semibold">
           {bom.isActive ? '停用用料清单' : '启用用料清单'}
         </h2>
-        <p className="mb-3 text-sm text-muted-foreground">
-          启用时会检查同一用料对象是否已有启用的用料清单；停用后不会用于新估算。
-        </p>
         <ToggleBomActiveButton bomId={bom.id} currentlyActive={bom.isActive} />
       </section>}
     </div>

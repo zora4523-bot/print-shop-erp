@@ -1,3 +1,4 @@
+import { EmptyState } from '@/components/ui-business';
 import { requirePermission } from '@/lib/auth/permissions';
 import { listProductSpecificationFacts } from '@/lib/product';
 import { BLANK_SPECIFICATIONS } from '@/lib/price/blank-paper';
@@ -27,8 +28,7 @@ export default async function SpecificationsPage() {
       <ul className="space-y-2">{full.map((spec) => <li key={spec.label}>{spec.label}：{spec.values.join('、') || '暂无产品尺寸'}</li>)}</ul>
     </section>
     <section className="space-y-3 rounded-xl border bg-card p-4"><h2 className="font-semibold">彩印</h2>
-      <p className="text-sm text-muted-foreground">按现有彩印产品展示，尚未建立统一规格目录。</p>
-      <ul className="space-y-2">{print.map((spec) => <li key={spec}>{spec}</li>)}</ul>
+      {print.length > 0 ? <ul className="space-y-2">{print.map((spec) => <li key={spec}>{spec}</li>)}</ul> : <EmptyState title="暂无彩印规格" />}
     </section>
   </div>;
 }

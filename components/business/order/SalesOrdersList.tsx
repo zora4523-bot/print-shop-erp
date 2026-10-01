@@ -107,13 +107,20 @@ export function SalesOrdersList({
       },
     )
       .then(async (response) => {
+        if (!response.ok) {
+          setRemoteResult({
+            orderNo: openOrderNo,
+            error: response.status === 401 ? '登录已过期，请重新登录。'
+              : response.status === 403 || response.status === 404 ? '工单不存在或无权查看，请返回工单列表。'
+              : '工单明细加载失败，请返回列表后重新打开。',
+          });
+          return;
+        }
         const payload = (await response.json()) as {
           order?: SalesOrderListRow;
           error?: string;
         };
-        if (!response.ok || !payload.order) {
-          throw new Error(payload.error || '工单明细加载失败');
-        }
+        if (!payload.order) throw new Error('Missing sales order detail');
         if (payload.order.orderNo !== openOrderNo) {
           throw new Error('工单明细响应与请求不匹配');
         }
@@ -121,10 +128,10 @@ export function SalesOrdersList({
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
+        console.error('Sales order detail could not be loaded', error);
         setRemoteResult({
           orderNo: openOrderNo,
-          error:
-            error instanceof Error ? error.message : '工单明细加载失败',
+          error: '工单明细加载失败，请返回列表后重新打开。',
         });
       });
     return () => controller.abort();

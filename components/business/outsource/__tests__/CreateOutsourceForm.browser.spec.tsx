@@ -35,7 +35,7 @@ it('blocks the return link while creating, restores it on failure and keeps the 
     initialIdempotencyKey="outsource-test" />));
   await page.getByRole('checkbox').click();
   await page.getByLabelText('外协厂名 *', { exact: true }).fill('测试外协厂');
-  await page.getByRole('button', { name: '创建外协单', exact: true }).click();
+  await page.getByRole('button', { name: '创建并标记已发出', exact: true }).click();
   const back = page.getByRole('link', { name: '返回工单详情', exact: true });
   await expect.element(back).toHaveAttribute('href', '/orders/order');
   await expect.element(back).toHaveAttribute('aria-disabled', 'true');
@@ -46,7 +46,7 @@ it('blocks the return link while creating, restores it on failure and keeps the 
   await expect.element(back).not.toHaveAttribute('aria-disabled');
   await expect.element(page.getByLabelText('外协厂名 *', { exact: true })).toHaveValue('测试外协厂');
   expect(mocked.push).not.toHaveBeenCalled();
-  await page.getByRole('button', { name: '创建外协单', exact: true }).click();
+  await page.getByRole('button', { name: '创建并标记已发出', exact: true }).click();
   await expect.element(back).toHaveAttribute('aria-disabled', 'true');
   finish({ status: 'success', id: 'created-outsource' });
   await vi.waitFor(() => expect(mocked.push).toHaveBeenCalledExactlyOnceWith('/foreman/outsource/created-outsource'));

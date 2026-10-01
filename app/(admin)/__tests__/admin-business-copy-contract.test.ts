@@ -80,7 +80,8 @@ describe('admin business copy contract', () => {
     expect(workerTasks).toContain('step.craftName');
     expect(workerTasks).not.toContain('task.workerType');
     expect(workerTasks).not.toContain('task.machineType');
-    expect(workerTaskDetail).toContain('此记录来自旧派工流程，仅供查阅');
+    expect(workerTaskDetail).not.toContain('此记录来自旧派工流程，仅供查阅');
+    expect(workerTaskDetail).toContain('历史任务');
     expect(workerTaskDetail).not.toContain('task.machineType');
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { ActionNotice } from '@/components/ui-business';
 import { ActiveStateConfirmButton } from '@/components/business/master-data/ActiveStateConfirmButton';
 import { setUserActiveAction } from '@/actions/owner-accounts';
@@ -17,8 +18,8 @@ export function ToggleActiveButton({
 }) {
   const formId = useId();
   const nextActive = !currentlyActive;
-  const [state, formAction, pending] = useActionState<AccountMutationResult | null, FormData>(
-    async () => setUserActiveAction(userId, nextActive),
+  const [state, formAction, pending] = useActionState<AppliedActiveState<AccountMutationResult> | null, FormData>(
+    async () => withAppliedActive(await setUserActiveAction(userId, nextActive), nextActive),
     null,
   );
 
@@ -48,14 +49,14 @@ export function ToggleActiveButton({
       {error ? (
         <ActionNotice
           tone="error"
-          title={currentlyActive ? '账号停用失败' : '账号激活失败'}
+          title={visibleState?.appliedActive ? '账号激活失败' : '账号停用失败'}
           description={error}
         />
       ) : null}
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '账号已停用' : '账号已激活'}
+          title={visibleState?.appliedActive ? '账号已激活' : '账号已停用'}
         />
       ) : null}
     </div>

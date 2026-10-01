@@ -13,7 +13,6 @@ export default async function NewChannelPage() {
     <FormPage>
       <PageHeader
         title="新建通知目标"
-        subtitle="使用已配置机器人凭据的企业微信智能机器人。创建后先绑定企业微信群，再启用并配置事件规则。"
         back={{ href: '/owner/notifications', label: '返回推送配置' }}
       />
       <ChannelForm mode="create" action={createChannelAction} />

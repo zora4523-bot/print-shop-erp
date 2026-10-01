@@ -1360,7 +1360,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
           <h3 className="text-base font-semibold">暂不能结算</h3>
           <p className="text-sm text-muted-foreground">
-            当前对客价格待管理员确认。请先完成整单重算并生成终价修订，再结算。
+            工单费用待确认，请先核定费用再结算。
           </p>
           <Link href="#pricing-review" className={buttonVariants({ variant: 'outline', size: 'sm' })}>处理核价</Link>
         </section>

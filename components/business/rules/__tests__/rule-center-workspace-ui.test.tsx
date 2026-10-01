@@ -92,7 +92,7 @@ describe('rule center workspace UI', () => {
     expect(html).not.toContain('基础事实');
     expect(html).not.toContain('对客计价');
     expect(html).not.toContain('内部结算');
-    expect(html).toContain('保存后即时生效');
+    expect(html).not.toContain('保存后即时生效');
     expect(html).toContain('维护建单可选纸张。');
   });
 

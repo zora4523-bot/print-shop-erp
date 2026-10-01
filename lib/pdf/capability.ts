@@ -4,7 +4,7 @@ import { logPdfFailure } from './diagnostics';
 export const PDF_JOB_TYPES = [BACKGROUND_JOB_TYPES.ORDER_PDF, BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF] as const;
 /** Healthy probes render in Chromium and round-trip OSS; keep them well above the pool idle window. */
 export const PDF_PROBE_HEALTHY_INTERVAL_MS = 300_000;
-export const PDF_PROBE_RETRY_MS = 10_000;
+const PDF_PROBE_RETRY_MS = 10_000;
 /** Longer than the healthy interval so readiness never lapses between successful probes. */
 export const PDF_READY_TTL_MS = PDF_PROBE_HEALTHY_INTERVAL_MS + 60_000;
 

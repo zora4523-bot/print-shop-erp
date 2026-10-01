@@ -70,11 +70,9 @@ export function SmartBotBindingPanel({
         <h2 id="smart-bot-binding-title" className="font-semibold">
           绑定企业微信群
         </h2>
-        <p className="text-sm text-muted-foreground">
-          {isBound
-            ? '通知发往以下群聊。'
-            : '生成绑定码，在目标企业微信群 @机器人并发送完整绑定码。'}
-        </p>
+        {!isBound ? <p className="text-sm text-muted-foreground">
+          生成绑定码，在目标企业微信群 @机器人并发送完整绑定码。
+        </p> : null}
       </div>
 
       {isBound ? (

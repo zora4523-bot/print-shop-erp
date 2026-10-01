@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,7 +23,6 @@ export function TestChannelButton({
   disabledReason,
   disabledFixLabel,
 }: Props) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<ChannelTestResult | null>(null);
 
@@ -52,19 +50,13 @@ export function TestChannelButton({
         variant="secondary"
         pending={pending}
         pendingLabel="正在发送…"
-        title="发送测试消息（测试模式下不会实际发送）"
         onClick={() => {
           setResult(null);
           startTransition(async () => {
             const nextResult = await testChannelAction(channelId);
+            // success/queued both revalidate /owner/notifications, so the
+            // recent-log table arrives with the action response (DECISIONS 2026-08-27).
             setResult(nextResult);
-            if (
-              nextResult.status === 'success' ||
-              nextResult.status === 'queued'
-            ) {
-              // Refresh the recent-log table after the direct action call.
-              router.refresh();
-            }
           });
         }}
       >

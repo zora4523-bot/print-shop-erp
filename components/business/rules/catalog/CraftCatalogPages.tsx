@@ -80,7 +80,6 @@ export async function CraftCatalogList({
       <RuleCenterPageHeader
         title="建单工艺目录"
         effect="immediate"
-        subtitle="维护建单、计价与历史展示共用的工艺字典。"
         actions={
           <Link
             href={`${routeBase}/new`}
@@ -122,7 +121,6 @@ export async function NewCraftCatalogItem({
         lockBackWhilePending
         title="新建工艺"
         effect="immediate"
-        subtitle="启用后会进入新工单与新规则的工艺选择器。"
         back={{ href: routeBase, label: '返回工艺' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
@@ -184,11 +182,6 @@ export async function EditCraftCatalogItem({
           <h2 className="mb-2 text-base font-semibold">
             {craft.isActive ? '停用工艺' : '启用工艺'}
           </h2>
-          <p className="mb-3 text-sm text-muted-foreground">
-            {craft.isActive
-              ? '停用后不再出现在新工单和新规则的工艺选择器中；历史引用保留。'
-              : '启用后会重新进入新工单和新规则的工艺选择器。'}
-          </p>
           <ToggleActiveButton
             craftId={craft.id}
             currentlyActive={craft.isActive}

@@ -79,7 +79,7 @@ export function ConfirmAgentMonthlyBillForm({
     <form action={action} aria-busy={pending} className="space-y-2">
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
       <Button type="submit" disabled={pending}>
-        {pending ? '正在确认…' : '确认并冻结账单'}
+        {pending ? '正在确认…' : '确认账单'}
       </Button>
       <p className="text-xs text-muted-foreground">
         确认后账单不可修改。

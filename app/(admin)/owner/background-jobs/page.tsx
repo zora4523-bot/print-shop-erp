@@ -34,7 +34,6 @@ export default async function BackgroundJobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="后台任务"
-        subtitle="查看后台任务状态和失败记录；普通失败可重试，导出失败需重新发起。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -88,7 +87,7 @@ export default async function BackgroundJobsPage() {
                   colSpan={7}
                   className="px-3 py-8 text-center text-sm text-muted-foreground"
                 >
-                  暂无后台任务。通知、定时结算与文件生成的任务会落在这里。
+                  暂无后台任务。
                 </td>
               </tr>
             ) : null}

@@ -39,11 +39,11 @@ export function LegacyNotificationChannels({
             <li key={channel.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="min-w-0 break-words">{channel.channelName}</span>
               <span className="text-xs text-muted-foreground">
-                {channel.isActive ? '原开关开启（仅兼容存量投递）' : '已停用'}
+                {channel.isActive ? '原状态：启用' : '已停用'}
               </span>
               {channel.referencingConfigurationCount !== undefined ? (
                 <span className="text-xs text-muted-foreground">
-                  {channel.referencingConfigurationCount} 项存量配置引用
+                  {channel.referencingConfigurationCount} 项关联配置
                 </span>
               ) : null}
             </li>

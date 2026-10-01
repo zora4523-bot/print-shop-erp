@@ -7,7 +7,7 @@ import { updateBlankPriceMatrixFormAction } from '@/actions/blank-paper';
 import { fixedCustomTierIssue } from '@/lib/price/fixed-custom-tiers';
 
 import { cloneElement, type ReactElement, type ReactNode } from 'react';
-import { AlertTriangle, Info } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import {
   updateCustomerPriceSectionDraftFormAction,
   type CustomerPriceSectionFormBinding,
@@ -489,7 +489,7 @@ function ruleField(
   const consistent = sameValues(values);
   if (!consistent) {
     assembly.warnings.add(
-      '同一视觉输入对应的底层规则值不一致，已禁止合并修改。',
+      '此项目存在冲突价格，暂不可编辑，请联系管理员核对该项目的价格规则。',
     );
   }
   return boundField(
@@ -768,12 +768,10 @@ function SelectedCreateDraftDialog({
 
 function WarningBlocks({
   warnings,
-  shippingPolicyReadOnly,
 }: {
   warnings: readonly string[];
-  shippingPolicyReadOnly: boolean;
 }) {
-  if (warnings.length === 0 && !shippingPolicyReadOnly) return null;
+  if (warnings.length === 0) return null;
   return (
     <div className="min-w-0 space-y-2">
       {warnings.length > 0 ? (
@@ -790,15 +788,6 @@ function WarningBlocks({
                 <li key={warning}>{warning}</li>
               ))}
             </ul>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {shippingPolicyReadOnly ? (
-        <Alert variant="info" role="status">
-          <Info aria-hidden="true" />
-          <AlertTitle>物流重量参数</AlertTitle>
-          <AlertDescription>
-            红包单重与快递数量上限
           </AlertDescription>
         </Alert>
       ) : null}
@@ -1361,7 +1350,6 @@ export function CustomerPricingDedicatedSection({
         <VersionStatusBlocks workspace={workspace} />
         <WarningBlocks
           warnings={[...assembly.warnings]}
-          shippingPolicyReadOnly={workspace.section === 'ship'}
         />
       </div>
     ),

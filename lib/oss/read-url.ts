@@ -35,6 +35,9 @@ export const READ_URL_MIN_REMAINING_SECONDS = READ_URL_EXPIRES_SECONDS / 2;
 // 列表缩略图走 OSS 图片处理缩放版；x-oss-process 作为子资源进入签名
 // （ali-oss signatureUrl 的 options.process）。
 export const DESIGN_THUMBNAIL_PROCESS = 'image/resize,m_lfit,w_160,h_160';
+// 师傅端设计图网格：手机两列约 170 CSS px，2–3 倍屏需要 ~480 px。原图可达 10 MiB，
+// 网格里直接用原图一页六张约 25 MB（实测 4× 降速 CPU 解码 810 ms，480 px 版 30 ms）。
+export const DESIGN_GALLERY_PROCESS = 'image/resize,m_lfit,w_480,h_480';
 
 export function designReadUrlExpiresAt(nowSeconds: number): number {
   const floor = nowSeconds + READ_URL_MIN_REMAINING_SECONDS;
@@ -44,7 +47,7 @@ export function designReadUrlExpiresAt(nowSeconds: number): number {
 export function signDesignReadUrl(
   fileUrl: string,
   env: NodeJS.ProcessEnv = process.env,
-  options: { thumbnail?: boolean } = {},
+  options: { thumbnail?: boolean; gallery?: boolean } = {},
 ): string {
   let cfgResult: ReturnType<typeof readOssConfig>;
   try {
@@ -74,6 +77,10 @@ export function signDesignReadUrl(
   return client.signatureUrl(objectKey, {
     expires: designReadUrlExpiresAt(nowSeconds) - nowSeconds,
     method: 'GET',
-    ...(options.thumbnail ? { process: DESIGN_THUMBNAIL_PROCESS } : {}),
+    ...(options.thumbnail
+      ? { process: DESIGN_THUMBNAIL_PROCESS }
+      : options.gallery
+        ? { process: DESIGN_GALLERY_PROCESS }
+        : {}),
   });
 }

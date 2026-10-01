@@ -11,7 +11,6 @@ import {
   useState,
   useTransition,
 } from "react";
-import { useRouter } from "next/navigation";
 import {
   finalizeOrderPricingAction,
   previewOrderPricingReviewAction,
@@ -310,7 +309,6 @@ function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDraft
 }
 
 export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }: Props) {
-  const router = useRouter();
   const [previewState, previewAction] = useActionState<
     PreviewOrderPricingReviewResult | null,
     unknown
@@ -358,11 +356,11 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
 
   useEffect(() => {
     if (finalizeState?.status !== "success" || finalizeState.productionReadiness?.ready === false) return;
-    // 确认成功后工单已不再是“待管理员确认”。刷新服务端页面
-    // 以移除表单，不再重复请求已被服务端禁止的核价预览。
-    if (onSuccess) onSuccess();
-    else router.refresh();
-  }, [finalizeState, router, onSuccess]);
+    // 确认成功后工单已不再是“待管理员确认”。finalizeOrderPricingAction 已
+    // revalidatePath，其响应自带当前页的新渲染会移除表单；不再追加
+    // router.refresh()（DECISIONS 2026-08-27）。
+    onSuccess?.();
+  }, [finalizeState, onSuccess]);
 
   function submit() {
     if (!preview || finalizeState?.status === "success" || auxiliary.blocked || finalizePending || previewPending) return;

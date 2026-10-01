@@ -357,7 +357,7 @@ describe('AdminOrderBatchActions partial failure feedback', () => {
           items: [],
         },
       }),
-    ).toContain('成功 2 张，业务跳过 1 张，结果未知 1 张，未执行 3 张');
+    ).toContain('成功 2 张，跳过 1 张，结果未知 1 张，未执行 3 张');
   });
 });
 

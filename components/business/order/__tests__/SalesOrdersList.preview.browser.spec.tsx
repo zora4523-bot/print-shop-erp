@@ -1,6 +1,6 @@
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import '@/app/globals.css';
 import { SalesOrdersList } from '../SalesOrdersList';
@@ -11,6 +11,8 @@ let root: Root;
 
 afterEach(() => {
   root.unmount();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   host.remove();
   window.history.replaceState({}, '', window.location.pathname);
 });
@@ -114,4 +116,28 @@ it('keeps ledger rows compact from 768px and confines horizontal scrolling to th
   await page.viewport(393, 852);
   await expect.element(page.getByRole('list', { name: '销售工单列表' })).toBeVisible();
   await expect.element(page.getByRole('region', { name: '销售工单明细表', includeHidden: true })).not.toBeVisible();
+});
+
+
+it.each([
+  [401, '<html>Prisma failure</html>', '登录已过期，请重新登录。'],
+  [403, '{"error":"Secret reason"}', '工单不存在或无权查看，请返回工单列表。'],
+  [404, '{}', '工单不存在或无权查看，请返回工单列表。'],
+  [500, '<html>Prisma failure</html>', '工单明细加载失败，请返回列表后重新打开。'],
+  [200, '<html>Prisma failure</html>', '工单明细加载失败，请返回列表后重新打开。'],
+  [200, JSON.stringify({ order: { orderNo: 'ANOTHER-ORDER' } }), '工单明细加载失败，请返回列表后重新打开。'],
+])('handles remote preview response %i without exposing raw errors', async (status, body, message) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status })));
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  window.history.replaceState({}, '', `${window.location.pathname}#wo=REMOTE-ORDER`);
+  host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+  flushSync(() => root.render(<SalesOrdersList orders={[row()]} query={query()} nowIso="2026-08-30T00:00:00Z" />));
+  const drawer = page.getByRole('dialog');
+  await expect.element(drawer.getByText(message, { exact: true })).toBeVisible();
+  await expect.element(drawer).not.toHaveTextContent(/Prisma|Secret|ANOTHER-ORDER|不匹配/);
+  await drawer.getByRole('button', { name: '返回工单列表' }).click();
+  await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+  await page.viewport(393, 852);
+  await page.getByRole('button', { name: '端午定制', exact: true }).click();
+  await expect.element(page.getByRole('dialog').getByRole('link', { name: '查看完整详情' })).toBeVisible();
 });

@@ -51,7 +51,7 @@ export function AdminOrderProgress({
       />
       {corrupt ? (
         <p role="alert" className="text-xs font-semibold text-destructive">
-          进度超过工单数量 · 查数据
+          已报数量超过工单数量，请核对生产记录。
         </p>
       ) : progress.packingAhead ? (
         <p role="status" className="text-xs font-semibold text-warning-foreground">

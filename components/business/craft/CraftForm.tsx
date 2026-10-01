@@ -77,9 +77,6 @@ export function CraftForm(props: Props) {
         />
         <span className="min-w-0 space-y-1 py-2.5">
           <span className="block">外协工艺</span>
-          <span className="block text-xs text-muted-foreground">
-            勾选后，该工艺进入外协清单；内部工序由工单收费项固定生成。
-          </span>
         </span>
       </label>
 

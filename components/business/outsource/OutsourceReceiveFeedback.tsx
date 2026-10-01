@@ -20,7 +20,6 @@ export function OutsourceReceiveFeedback({
       <ActionNotice
         tone="success"
         title="外协单已标记回货"
-        description="系统已重新核对关联工单的生产完工条件。"
       />
     );
   }

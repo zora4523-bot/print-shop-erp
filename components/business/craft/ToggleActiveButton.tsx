@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useId } from 'react';
+import { withAppliedActive, type AppliedActiveState } from '@/components/business/master-data/applied-active-state';
 import { ActionNotice } from '@/components/ui-business';
 import { ActiveStateConfirmButton } from '@/components/business/master-data/ActiveStateConfirmButton';
 import { setCraftActiveAction } from '@/actions/owner-crafts';
@@ -18,8 +19,8 @@ export function ToggleActiveButton({
 }) {
   const formId = useId();
   const nextActive = !currentlyActive;
-  const [state, formAction, pending] = useActionState<CraftMutationResult | null, FormData>(
-    async () => setCraftActiveAction(craftId, nextActive),
+  const [state, formAction, pending] = useActionState<AppliedActiveState<CraftMutationResult> | null, FormData>(
+    async () => withAppliedActive(await setCraftActiveAction(craftId, nextActive), nextActive),
     null,
   );
 
@@ -46,7 +47,7 @@ export function ToggleActiveButton({
       {success ? (
         <ActionNotice
           tone="success"
-          title={currentlyActive ? '工艺已停用' : '工艺已启用'}
+          title={visibleState?.appliedActive ? '工艺已启用' : '工艺已停用'}
         />
       ) : null}
     </div>

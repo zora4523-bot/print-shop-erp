@@ -45,7 +45,7 @@ export function OrderCancellationRequestForm({
         role="status"
         className="rounded-lg border border-success/40 bg-success/10 p-3 text-sm"
       >
-        取消申请已提交；工单仍保留，管理员裁决前不会改变生产或结算事实。
+        取消申请已提交，待管理员审批。
       </p>
     );
   }
@@ -79,7 +79,7 @@ export function OrderCancellationRequestForm({
           required
           disabled={pending}
           className="w-full"
-          placeholder="说明取消原因，生产中订单由管理员核对已产数量并裁决"
+          placeholder="填写取消原因"
         />
       </label>
       {error ? (

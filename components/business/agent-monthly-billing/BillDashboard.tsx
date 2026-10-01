@@ -31,7 +31,7 @@ export function BillDashboard({ data, accounts, expanded }: { expanded: boolean;
             <span className="shrink-0 text-sm tabular-nums">{formatMoney(row.total)}</span>
           </Link>
         </li>)}</ul>
-        <p className="text-xs text-muted-foreground">待收 · 已结清 · 草稿；点击账期查看账单。</p>
+        <p className="text-xs text-muted-foreground">待收 · 已结清 · 草稿</p>
       </section>
       <section className="min-w-0 space-y-3" aria-label="外部销售待收分布">
         <h2 className="font-semibold">当前待收前 10 位</h2>

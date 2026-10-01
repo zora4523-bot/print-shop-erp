@@ -157,9 +157,6 @@ export function CreateOutsourceForm({
           <output aria-live="polite" className="font-medium tabular-nums">
             {chosenTotalQty.toLocaleString()} 个
           </output>
-          <span className="ml-2 text-xs text-muted-foreground">
-            （由系统根据所选款式计算，不可手工修改）
-          </span>
         </div>
       </section>
 
@@ -222,7 +219,7 @@ export function CreateOutsourceForm({
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          供应商应付按外协报价或合同人工确认，不套用客户报价、员工计件工资或销售提成规则；金额未知时可留空，回货后再补录。
+          外协金额选填，回货后可补录。
         </p>
       </section>
 
@@ -238,11 +235,11 @@ export function CreateOutsourceForm({
             cause="prerequisite"
             reason={chosenIds.length === 0 ? '先勾选要外协的款式。' : '先选择外协厂。'}
           >
-            <Button type="submit" disabled={pending || chosenIds.length === 0 || supplierName === ''}>创建外协单</Button>
+            <Button type="submit" disabled={pending || chosenIds.length === 0 || supplierName === ''}>创建并标记已发出</Button>
           </DisabledReason>
         ) : (
           <Button type="submit" disabled={pending}>
-            {pending ? '正在创建外协单…' : '创建外协单'}
+            {pending ? '正在创建外协单…' : '创建并标记已发出'}
           </Button>
         )}
         <PendingLink

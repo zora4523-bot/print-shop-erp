@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { confirmHistoricalBlankPriceAction } from '@/actions/historical-blank-price';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +16,6 @@ type Props = {
 };
 
 export function HistoricalBlankPriceEditor(props: Props) {
-  const router = useRouter();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -41,7 +39,6 @@ export function HistoricalBlankPriceEditor(props: Props) {
               expectedOrderRevision: props.orderRevision, expectedPriceRevision: props.priceRevision,
               unitPrice: value, reason });
             setMessage(result.status === 'success' ? '材料单价已确认' : result.message);
-            if (result.status === 'success') router.refresh();
           })}>
           <ConfirmActionDialog action="确认材料单价"
             changes={[{ label: item.label, old: item.unitPrice ? `${item.unitPrice} 元 / 个` : '待核价', new: `${value} 元 / 个` }]}

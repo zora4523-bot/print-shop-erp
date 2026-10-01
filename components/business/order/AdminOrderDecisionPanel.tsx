@@ -686,14 +686,12 @@ function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onComplet
           'warning',
         );
         setMode(null);
-        router.refresh();
         return;
       }
       clearDecisionFields();
       setMessage('');
       onCompleted('操作已完成，工单已更新。');
       setMode(null);
-      router.refresh();
       return;
     }
     if (result.status === 'invalid') {
@@ -768,7 +766,6 @@ function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onComplet
           return;
         }
         onCompleted(command === 'MARK_PRINTED' ? '已标记当前版本工单打印完成。' : '已创建当前版本的打印任务。');
-        router.refresh();
       } catch {
         setMessage('打印操作未完成，请刷新工单后重试。');
       } finally {

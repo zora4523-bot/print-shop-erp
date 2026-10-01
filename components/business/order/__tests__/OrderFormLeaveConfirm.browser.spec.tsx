@@ -200,3 +200,27 @@ it('fails closed when an unsaved editor has no persistence callback', async () =
   expect(mocks.push).not.toHaveBeenCalled();
   await expect.element(page.getByRole('alert').filter({ hasText: '本机草稿未保存' })).toBeVisible();
 });
+
+it('keeps an open leave confirmation actionable after autosave clears the dirty report', async () => {
+  const persist = vi.fn(() => null);
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: { ...IDLE, dirty: true }, persist }]} />));
+  await back().click();
+  const dialog = page.getByRole('alertdialog');
+  await expect.element(dialog).toHaveTextContent('本单已填写的内容将保存为本机草稿。');
+
+  // Autosave can finish while the user is reading the confirmation.
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: IDLE, persist }]} />));
+  await expect.element(dialog).not.toHaveTextContent('未取得操作内容');
+  await expect.element(dialog).toHaveTextContent('当前没有未保存的内容。');
+  const leave = dialog.getByRole('button', { name: '离开页面', exact: true });
+  await expect.element(leave).toBeEnabled();
+  expect(mocks.push).not.toHaveBeenCalled();
+
+  // A newly started request must still prevent leaving, even with no dirty text.
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: { ...IDLE, busy: true }, persist }]} />));
+  await expect.element(leave).toBeDisabled();
+  flushSync(() => root.render(<Harness orders={[{ id: 'a', state: IDLE, persist }]} />));
+  await leave.click();
+  expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/orders');
+  expect(persist).not.toHaveBeenCalled();
+});
