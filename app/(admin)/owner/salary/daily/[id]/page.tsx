@@ -153,7 +153,7 @@ export default async function DailySalaryDetailPage({ params }: PageProps) {
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {formatRuleSnapshot(item.salaryRuleSnapshot)}
                   </td>
-                  <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">{formatMoney(item.pieceworkAmount)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right font-sans tabular-nums font-medium">{formatMoney(item.pieceworkAmount)}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTimeShanghai(item.completedAt)}</td>
                 </tr>
               ))}

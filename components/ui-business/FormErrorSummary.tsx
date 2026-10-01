@@ -72,7 +72,7 @@ export function FormErrorSummary({
           <li key={`${error.fieldId}:${error.message}`}>
             <a
               href={`#${error.fieldId}`}
-              className="font-medium underline underline-offset-2 hover:no-underline"
+              className="inline-flex min-h-11 items-center font-medium underline underline-offset-2 hover:no-underline"
             >
               {error.label}：{error.message}
             </a>

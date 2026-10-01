@@ -29,7 +29,7 @@ export function TableScrollArea({
       aria-label={label}
       tabIndex={0}
       className={cn(
-        'admin-horizontal-scroll-cue w-full overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        'admin-horizontal-scroll-cue w-full overflow-x-auto [&_thead_th]:whitespace-nowrap overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         className,
       )}
     >

@@ -24,7 +24,7 @@ export default async function LegacyBillArchivePage() {
         <EmptyState icon={Archive} title="暂无历史账单" />
       ) : (
         <TableScrollArea label="历史账单归档" className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
+          <table className="w-full whitespace-nowrap text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">账期 / 序号</th>
@@ -42,7 +42,7 @@ export default async function LegacyBillArchivePage() {
                   <td className="px-4 py-3 font-sans tabular-nums">
                     {bill.period} · #{bill.sequence}
                   </td>
-                  <td className="px-4 py-3">{bill.salesUser.displayName}</td>
+                  <td className="min-w-40 max-w-64 whitespace-normal break-words px-4 py-3">{bill.salesUser.displayName}</td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.totalAmount)}</td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.paidAmount)}</td>
                   <td className="px-4 py-3 text-center">

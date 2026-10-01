@@ -54,7 +54,7 @@ export default async function LegacyBillArchiveDetailPage({ params, searchParams
                 </td>
                 <td className="px-4 py-3">{item.order.customName?.trim() || '未命名工单'}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTimeShanghai(item.order.finishedAt)}</td>
-                <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(item.orderAmount)}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-right font-sans tabular-nums">{formatMoney(item.orderAmount)}</td>
               </tr>
             ))}
           </tbody>

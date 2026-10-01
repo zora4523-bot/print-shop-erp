@@ -183,7 +183,7 @@ export default async function PieceworkSettlementPage({
                         {row.reportCount} / {row.orderCount}
                       </td>
                       <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                        {row.reportCount ? formatMoney(row.reportAmount) : row.obligations.every(item => item.status === 'WAGES_DUE') ? '待补发' : '待核定'}
+                        <span className="whitespace-nowrap">{row.reportCount ? formatMoney(row.reportAmount) : row.obligations.every(item => item.status === 'WAGES_DUE') ? '待补发' : '待核定'}</span>
                         {row.pendingPricing > 0 && <p className="text-sm text-warning-foreground">待补录提成 {row.pendingPricing} 笔</p>}
                         {row.obligations.map(item => <p key={item.id}><Link href={`/orders/${item.orderId}#production-job-${item.id}`} className="inline-flex min-h-11 items-center text-sm underline">{item.status === 'WAGES_DUE' ? '工资待补发' : item.status === 'REQUESTED' ? '数量待核定' : '历史生产待核对'} · {item.orderName} · v{item.version}</Link></p>)}
                       </td>
@@ -243,10 +243,10 @@ export default async function PieceworkSettlementPage({
                     <td className="px-4 py-3 text-center font-sans tabular-nums">
                       {row._count.items}
                     </td>
-                    <td className="px-4 py-3 text-right font-sans tabular-nums">
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-sans tabular-nums">
                       {formatMoney(row.reportAmount)}
                     </td>
-                    <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-sans tabular-nums font-medium">
                       {formatMoney(row.payableAmount)}
                     </td>
                     <td className="px-4 py-3 text-center">
