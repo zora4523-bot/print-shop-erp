@@ -7,6 +7,10 @@ import { reviewProductionFact } from '../fact-review';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { dispatchNotification } from '@/lib/notification/dispatch';
 import { createHash, randomUUID } from 'node:crypto';
+import { Client } from 'pg';
+import { utimes } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { publishProductionDispatch } from '../dispatch';
@@ -360,6 +364,46 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.jobId } })).toBe(0);
     await expect(recordBatchPrint(admin.id, job.id, randomUUID())).resolves.toEqual({ marked: 1 });
     expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.jobId, state: 'PRINTED' } })).toBe(1);
+
+    // 另一个打印任务沿用同一尝试标识：尝试键绑定任务，查的是另一组键，不重放旧任务的结果。
+    const otherJob = await db.backgroundJob.create({ data: {
+      type: BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF, queue: 'HEAVY', dedupeKey: randomUUID(), status: 'SUCCEEDED',
+      payload: { actorId: admin.id, baseUrl, orders: printed.map(({ id, key }) => ({ id, key })) },
+      result: { completed: 2, issues: [], artifactName },
+    } });
+    await expect(recordBatchPrint(admin.id, otherJob.id, attempt)).resolves.toEqual({ marked: 0 });
+    const otherKey = (orderId: string) => `batch-print:${createHash('sha256').update(`${otherJob.id}:${attempt}`).digest('hex').slice(0, 32)}:${orderId}`;
+    expect(await db.orderPrintAttempt.count({ where: { attemptKey: { in: ids.map(otherKey) }, outcome: 'ALREADY_PRINTED' } })).toBe(2);
+
+    // 前一次请求还没提交时到达的重试（确定性复现）：外部连接先按尝试加锁；本请求锁前查账本为空、
+    // 文件探测也因过期失败，然后在锁上等待；外部连接写入「前一次」的账本、改工单内容并提交。本请求
+    // 拿到锁后必须重放原结果，不能按探测结果或首次核对报错。
+    const waiting = randomUUID();
+    const waitingAttempt = createHash('sha256').update(`${job.id}:${waiting}`).digest('hex').slice(0, 32);
+    const holder = new Client({ connectionString: process.env.DATABASE_URL });
+    await holder.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`batch-print-attempt:${waitingAttempt}`]);
+      const expired = new Date(Date.now() - 2 * 60 * 60_000);
+      await utimes(join(process.env.PDF_ARTIFACT_DIR || join(tmpdir(), 'print-shop-erp-pdf-artifacts'), artifactName), expired, expired);
+      const pending = recordBatchPrint(admin.id, job.id, waiting);
+      await expect.poll(async () => (await holder.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
+      )).rows[0].n, { timeout: 15_000 }).toBeGreaterThan(0);
+      for (const id of ids) {
+        await holder.query(
+          `INSERT INTO "OrderPrintAttempt" (id, "attemptKey", "orderId", "workOrderVersion", outcome, "actorId") VALUES ($1, $2, $3, 1, 'ALREADY_PRINTED', $4)`,
+          [randomUUID(), `batch-print:${waitingAttempt}:${id}`, id, admin.id],
+        );
+      }
+      await holder.query(`UPDATE "Order" SET remark = '等待期间改的备注' WHERE id = $1`, [ids[1]]);
+      await holder.query('COMMIT');
+      await expect(pending).resolves.toEqual({ marked: 0 });
+    } finally {
+      await holder.end();
+      await db.order.update({ where: { id: ids[1] }, data: { remark: null } });
+    }
   });
 
   it('approves a quantity while held and reconciles completion only on resume', async () => {

@@ -109,8 +109,9 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
       {task ? <>
         <span role="status" className="text-sm">已生成 {status?.completed ?? 0} / {status?.total ?? task.labels.length} 单</span>
         {status?.status === 'ready' ? <>
-          <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=download`} onClick={(event) => { event.preventDefault(); deliver('download', task); }} />} nativeButton={false} variant="secondary" className="min-h-11">下载 PDF</Button>
-          <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=inline`} target="_blank" rel="noopener noreferrer" onClick={(event) => { event.preventDefault(); deliver('inline', task); }} />} nativeButton={false} variant="secondary" className="min-h-11">打开 PDF</Button>
+          {/* 按钮而不是链接：中键 / 右键在新标签页打开链接会绕过「打开即记已打印」，所以统一经交付流程。 */}
+          <Button type="button" variant="secondary" className="min-h-11" disabled={delivering} onClick={() => deliver('download', task)}>下载 PDF</Button>
+          <Button type="button" variant="secondary" className="min-h-11" disabled={delivering} onClick={() => deliver('inline', task)}>打开 PDF</Button>
         </> : status?.status !== 'failed' ? (
           <Button type="button" variant="secondary" className="min-h-11" disabled={refreshing} aria-busy={refreshing} onClick={() => {
             if (refreshInFlight.current) return;

@@ -3,9 +3,9 @@ import { PDFDocument } from 'pdf-lib';
 import type { ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 const m = vi.hoisted(() => ({
   active: vi.fn(), user: vi.fn(), find: vi.fn(), update: vi.fn(), worker: vi.fn(), order: vi.fn(),
-  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), available: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(), booked: vi.fn(), lock: vi.fn(),
+  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), available: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(), booked: vi.fn(), lock: vi.fn(), versions: vi.fn(),
 }));
-const tx = { $executeRaw: m.lock, orderPrintAttempt: { findMany: m.booked }, user: { findUnique: m.user } };
+const tx = { $executeRaw: m.lock, orderPrintAttempt: { findMany: m.booked }, user: { findUnique: m.user }, order: { findMany: m.versions } };
 vi.mock('@/lib/db', () => ({ db: { $transaction: m.transaction, orderPrintAttempt: { findMany: m.booked }, user: { findUnique: m.user }, backgroundJob: { findFirst: m.active, findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
 vi.mock('@/lib/background-jobs/repository', () => ({ enqueueBackgroundJob: m.enqueue, BackgroundJobLeaseLostError: class extends Error {} }));
 vi.mock('@/lib/background-jobs/clock', () => ({ databaseNow: async () => new Date('2026-09-13') }));
@@ -186,45 +186,56 @@ describe('recordBatchPrint', () => {
   });
   const attemptOf = (jobId: string, attemptId: string) => createHash('sha256').update(`${jobId}:${attemptId}`).digest('hex').slice(0, 32);
   const key = (orderId: string, jobId = 'j', attemptId = 'attempt-1') => `batch-print:${attemptOf(jobId, attemptId)}:${orderId}`;
+  const bookedAll = () => [
+    { attemptKey: key('a'), orderId: 'a', outcome: 'MARKED' },
+    { attemptKey: key('b'), orderId: 'b', outcome: 'ALREADY_PRINTED' },
+  ];
+  beforeEach(() => {
+    m.versions.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, workOrderVersion: id === 'a' ? 3 : 1 })));
+  });
 
-  it('serializes the attempt, checks the file, then records every order in id order on the same transaction', async () => {
+  it('probes the file outside the transaction, then locks the attempt, re-checks the ledger and records each order once', async () => {
     ready([{ id: 'b', key: 'b:1' }, { id: 'a', key: 'a:1' }]);
-    m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: id === 'a' ? 3 : 1 }));
     m.recordInTx.mockImplementationOnce(async (_tx: unknown, _attempt: unknown, _actor: unknown, check: () => Promise<boolean>) => (await check()) ? 'MARKED' : 'STALE')
-      .mockResolvedValueOnce('ALREADY_PRINTED');
+      .mockImplementationOnce(async (_tx: unknown, _attempt: unknown, _actor: unknown, check: () => Promise<boolean>) => (await check()) ? 'ALREADY_PRINTED' : 'STALE');
     expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toEqual({ marked: 1 });
-    expect(m.transaction).toHaveBeenCalledOnce();
+    expect(m.available).toHaveBeenCalledWith('j.pdf');
+    expect(m.available.mock.invocationCallOrder[0]).toBeLessThan(m.transaction.mock.invocationCallOrder[0]!);
     const sql = (m.lock.mock.calls[0]?.[0] as TemplateStringsArray).join('?');
     expect(sql).toContain('pg_advisory_xact_lock');
     expect(m.lock.mock.calls[0]?.[1]).toBe(`batch-print-attempt:${attemptOf('j', 'attempt-1')}`);
-    expect(m.lock.mock.invocationCallOrder[0]).toBeLessThan(m.booked.mock.invocationCallOrder[0]!);
-    expect(m.booked.mock.invocationCallOrder[0]).toBeLessThan(m.available.mock.invocationCallOrder[0]!);
-    expect(m.available).toHaveBeenCalledWith('j.pdf');
+    // 锁前查一次、锁内再查一次账本。
+    expect(m.booked).toHaveBeenCalledTimes(2);
+    expect(m.lock.mock.invocationCallOrder[0]).toBeLessThan(m.booked.mock.invocationCallOrder[1]!);
     expect(m.read).not.toHaveBeenCalled();
     expect(m.recordInTx.mock.calls.map((call) => call.slice(0, 3))).toEqual([
       [tx, { orderId: 'a', workOrderVersion: 3, attemptKey: key('a') }, { id: 'admin', role: 'ADMIN' }],
       [tx, { orderId: 'b', workOrderVersion: 1, attemptKey: key('b') }, { id: 'admin', role: 'ADMIN' }],
     ]);
-    // 核对与锁内重新读取都用同一事务连接，不另占连接池。
-    expect(m.order.mock.calls.every((call) => call[3] === tx)).toBe(true);
+    // 每张工单只在锁内完整读取一次打印内容，且用同一事务连接。
+    expect(m.order.mock.calls.map((call) => [call[0], call[3] === tx])).toEqual([['a', true], ['b', true]]);
   });
 
-  // 记录成功后响应丢失再重试：账本已整批记过就直接返回原结果，不因之后内容变化或文件过期而失败。
-  it('replays a fully booked attempt before checking the file or the current content', async () => {
+  // 记录成功后响应丢失再重试：账本已整批记过就直接返回原结果，不探测文件、不核对内容、不开事务。
+  it('replays a fully booked attempt before probing the file or opening a transaction', async () => {
     ready();
-    m.booked.mockResolvedValue([
-      { attemptKey: key('a'), orderId: 'a', outcome: 'MARKED' },
-      { attemptKey: key('b'), orderId: 'b', outcome: 'ALREADY_PRINTED' },
-    ]);
+    m.booked.mockResolvedValue(bookedAll());
     m.available.mockRejectedValue(new Error('PDF_ARTIFACT_EXPIRED'));
-    m.order.mockResolvedValue({ id: 'a', version: 9, workOrderVersion: 1 });
     expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toEqual({ marked: 1 });
     expect(m.booked).toHaveBeenCalledWith({ where: { attemptKey: { in: [key('a'), key('b')] } }, select: { attemptKey: true, orderId: true, outcome: true } });
     expect(m.available).not.toHaveBeenCalled();
+    expect(m.transaction).not.toHaveBeenCalled();
+  });
+
+  // 前一次请求还没提交时到达的重试：锁前账本为空、文件探测还失败了，拿到锁后前一次已提交 → 重放。
+  it('replays what an in-flight request committed while this one waited for the attempt lock', async () => {
+    ready();
+    m.booked.mockResolvedValueOnce([]).mockResolvedValueOnce(bookedAll());
+    m.available.mockRejectedValue(new Error('PDF_ARTIFACT_EXPIRED'));
+    expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toEqual({ marked: 1 });
     expect(m.recordInTx).not.toHaveBeenCalled();
   });
 
-  // 尝试键绑定打印任务：另一个任务沿用旧的尝试标识，查的是另一组键，不会重放旧结果。
   it('binds attempt keys to the batch job', async () => {
     ready();
     await recordBatchPrint('admin', 'j', 'attempt-1');
@@ -239,26 +250,22 @@ describe('recordBatchPrint', () => {
     expect(m.recordInTx).not.toHaveBeenCalled();
   });
 
-  it('rolls the whole batch back when any order changed under the lock or left production', async () => {
+  it('rolls the whole batch back when any order changed or left production', async () => {
     ready();
-    let reads = 0;
-    // 首次核对全部一致；记录时锁内重新读取第二张已变。
-    m.order.mockImplementation(async (id: string) => ({ id, version: id === 'b' && ++reads > 1 ? 2 : 1, workOrderVersion: 1 }));
+    m.order.mockImplementation(async (id: string) => ({ id, version: id === 'b' ? 2 : 1, workOrderVersion: 1 }));
     await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单内容已变化，请重新选择并生成' }] });
-    m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('NOT_PRINTABLE');
     m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: 1 }));
+    m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('NOT_PRINTABLE');
     await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单已不在生产中，请取消选择后重新生成' }] });
     m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('STALE');
     await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintSelectionError);
+    m.versions.mockResolvedValueOnce([{ id: 'a', workOrderVersion: 1 }]);
+    await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单不存在或已无权打印，请取消选择后重试' }] });
   });
 
-  it('records nothing when the file is not ready or its orders changed since generation', async () => {
+  it('records nothing when the file is not ready', async () => {
     expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toBeNull();
     expect(m.transaction).not.toHaveBeenCalled();
-    ready();
-    m.order.mockResolvedValueOnce({ id: 'a', version: 2, workOrderVersion: 1 });
-    await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintSelectionError);
-    expect(m.recordInTx).not.toHaveBeenCalled();
   });
 
   it('refuses another actor’s job before touching orders', async () => {

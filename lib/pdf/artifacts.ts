@@ -48,11 +48,11 @@ export async function readPdfArtifact(name: string): Promise<Buffer> {
   return readFile(path);
 }
 
-/** 只确认产物仍在有效期内可读，不读取内容（批量打印记录前核对文件可交付）。 */
+/** 只确认产物仍在有效期内可读，不读取内容（批量打印记录前核对文件可交付）。OSS 探测限时 10 秒。 */
 export async function assertPdfArtifactAvailable(name: string): Promise<void> {
   checkedName(name);
   if (storage() === 'oss') {
-    const result = await client().head(PREFIX + name);
+    const result = await client().head(PREFIX + name, { timeout: 10_000 });
     const headers = result.res.headers as Record<string, unknown>;
     assertFresh(Date.parse(String(headers['last-modified'] ?? '')));
     return;

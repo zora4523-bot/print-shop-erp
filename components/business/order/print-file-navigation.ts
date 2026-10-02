@@ -35,32 +35,26 @@ export async function fetchPrintFile(url: string, signal: AbortSignal): Promise<
   }
 }
 
-/**
- * 交付已取得的文件：下载直接保存；预览打开到点击当下开好的标签页。标签页被浏览器拦截或已被
- * 关闭时返回 false，由页面给出「打开打印文件」按钮（再点一次在点击当下打开）。
- */
-export function deliverPrintFile(blob: Blob, delivery: 'download' | 'inline', tab: Window | null, fileName: string): boolean {
-  const url = URL.createObjectURL(blob);
-  setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
-  if (delivery === 'download') {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    return true;
-  }
-  if (tab && !tab.closed) {
-    tab.location.href = url;
-    return true;
-  }
-  return false;
+function saveFile(url: string, fileName: string) {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
 }
 
-/** 「打开打印文件」按钮：在点击当下用已取得的文件打开新标签页。 */
-export function openPrintFileBlob(blob: Blob): void {
+/**
+ * 交付已取得的文件：下载直接保存；预览打开到点击当下开好的标签页。标签页被浏览器拦截或已被
+ * 关闭时改为下载（下载不受弹窗拦截），文件总能交到管理员手上，离开列表也一样。
+ */
+export function deliverPrintFile(blob: Blob, delivery: 'download' | 'inline', tab: Window | null, fileName: string): 'opened' | 'downloaded' | 'downloaded-instead' {
   const url = URL.createObjectURL(blob);
-  window.open(url, '_blank', 'noopener');
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
+  if (delivery === 'inline' && tab && !tab.closed) {
+    tab.location.href = url;
+    return 'opened';
+  }
+  saveFile(url, fileName);
+  return delivery === 'download' ? 'downloaded' : 'downloaded-instead';
 }

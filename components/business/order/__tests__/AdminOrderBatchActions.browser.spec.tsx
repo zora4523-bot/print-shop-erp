@@ -297,7 +297,7 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
         mount([batchOrder()], `${dark}-${state}`);
         if (state !== 'idle') {
           await page.getByRole('button', { name: '打印所选（1）' }).click();
-          if (state === 'ready') await expect.element(page.getByRole('link', { name: '打开 PDF' })).toBeVisible();
+          if (state === 'ready') await expect.element(page.getByRole('button', { name: '打开 PDF' })).toBeVisible();
           else await expect.element(page.getByText(state === 'failed'
             ? '未生成打印文件，请检查以下工单或减少所选数量后重试。'
             : state === 'unavailable' ? '等待打印服务恢复，将自动更新进度；如长时间未恢复，请联系管理员。'
@@ -317,8 +317,9 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
           expect(box.width).toBeGreaterThanOrEqual(44);
         }
         if (state === 'ready') {
-          const link = host.querySelector('a[href*="batch-print"]')!.getBoundingClientRect();
-          expect(link.top).toBeGreaterThanOrEqual(Math.max(...boxes.map((box) => box.bottom)));
+          // 打开 / 下载 PDF 是按钮（不用可被中键另开、绕过记录的链接），排在主操作行下方。
+          const open = buttons.find((button) => button.textContent === '打开 PDF')!.getBoundingClientRect();
+          expect(open.top).toBeGreaterThanOrEqual(Math.max(...boxes.map((box) => box.bottom)));
         }
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
         expect(await commands.checkShellAccessibility('[aria-label="工单批量操作"]')).toEqual([]);

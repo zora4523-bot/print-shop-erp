@@ -220,17 +220,17 @@ export async function downloadBatchPrint(actorId: string, jobId: string) {
 
 /**
  * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；浏览器先成功取得
- * 文件，再由 Server Action 调这里记录，记录成功后才把文件交给管理员。一个事务里：
+ * 文件，再由 Server Action 调这里记录：
  *
- * 1. 按本批次尝试加锁：同一尝试的并发请求（前一次断连但仍在执行时的重试）串行，后到的等前一次
- *    提交后再判断，不会在账本还空着时抢先走首次记录。
- * 2. 本尝试已整批记过 → 直接返回原结果（不再核对文件与当前内容）。
- * 3. 首次记录：文件仍在有效期内可读；用同一事务连接重新读取每张工单，再按工单 id 顺序（与批量
- *    排单同一比较方式）加工单锁，锁内完整快照摘要须与文件一致；任一工单不一致、已不在生产中
- *    都整批回滚，不留半截记录。
+ * 1. 本尝试已整批记过 → 直接返回原结果（不再核对文件与当前内容）。
+ * 2. 在事务外探测文件仍可读（OSS 限时 10 秒），不让存储慢请求占住事务与连接。
+ * 3. 事务内先按本批次尝试加锁，同一尝试的并发请求（前一次断连但仍在执行时的重试）串行，并
+ *    再查一次账本：前一次已提交就重放，不会抢先走首次记录、也不受探测结果影响。
+ * 4. 首次记录：按工单 id 顺序（与批量排单同一比较方式）逐单加工单锁，锁内用同一事务连接读取
+ *    打印内容，完整快照摘要须与文件一致；任一工单不一致、已不在生产中都整批回滚，不留半截记录。
  *
- * 尝试键 `batch-print:<任务与尝试的摘要>:<工单>` 绑定打印任务：换一个任务沿用旧尝试标识也不会
- * 重放旧结果。同一打印文件之后再打开是新的尝试，会记录期间新建的补打任务。
+ * 尝试键 `batch-print:<sha256(任务:尝试) 前 32 位>:<工单>` 绑定打印任务：换一个任务沿用旧尝试
+ * 标识也不会重放旧结果。同一打印文件之后再打开是新的尝试，会记录期间新建的补打任务。
  */
 export async function recordBatchPrint(actorId: string, jobId: string, attemptId: string): Promise<{ marked: number } | null> {
   const { job, payload } = await ownedJob(actorId, jobId);
@@ -239,21 +239,36 @@ export async function recordBatchPrint(actorId: string, jobId: string, attemptId
   const artifactName = result.data.artifactName;
   const attempt = createHash('sha256').update(`${jobId}:${attemptId}`).digest('hex').slice(0, 32);
   const attemptKeys = new Map(payload.orders.map((order) => [`batch-print:${attempt}:${order.id}`, order.id]));
-  const actor = { id: actorId, role: Role.ADMIN };
-  return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`batch-print-attempt:${attempt}`}))`;
-    const booked = await tx.orderPrintAttempt.findMany({
+  const replay = async (client: Pick<Prisma.TransactionClient, 'orderPrintAttempt'>) => {
+    const booked = await client.orderPrintAttempt.findMany({
       where: { attemptKey: { in: [...attemptKeys.keys()] } },
       select: { attemptKey: true, orderId: true, outcome: true },
     });
-    if (booked.length === attemptKeys.size && booked.every((entry) => attemptKeys.get(entry.attemptKey) === entry.orderId)) {
-      return { marked: booked.filter((entry) => entry.outcome === 'MARKED').length };
-    }
-    try { await assertPdfArtifactAvailable(artifactName); }
-    catch { throw new BatchPrintArtifactUnavailableError(); }
-    const printed = (await validateAll(payload, tx)).sort((a, b) => a.orderId.localeCompare(b.orderId));
+    return booked.length === attemptKeys.size && booked.every((entry) => attemptKeys.get(entry.attemptKey) === entry.orderId)
+      ? { marked: booked.filter((entry) => entry.outcome === 'MARKED').length }
+      : null;
+  };
+  const earlier = await replay(db);
+  if (earlier) return earlier;
+  const available = await assertPdfArtifactAvailable(artifactName).then(() => true, () => false);
+  const actor = { id: actorId, role: Role.ADMIN };
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`batch-print-attempt:${attempt}`}))`;
+    const booked = await replay(tx);
+    if (booked) return booked;
+    if (!available) throw new BatchPrintArtifactUnavailableError();
+    await requireAdmin(actorId, tx);
+    const versions = new Map((await tx.order.findMany({
+      where: { id: { in: payload.orders.map((order) => order.id) } },
+      select: { id: true, workOrderVersion: true },
+    })).map((order) => [order.id, order.workOrderVersion]));
+    const ordered = payload.orders.map((order, index) => ({ index, orderId: order.id }))
+      .sort((a, b) => a.orderId.localeCompare(b.orderId));
     let marked = 0;
-    for (const { index, orderId, workOrderVersion } of printed) {
+    for (const { index, orderId } of ordered) {
+      const workOrderVersion = versions.get(orderId);
+      if (workOrderVersion === undefined) throw new BatchPrintSelectionError([{ position: index + 1, message: '工单不存在或已无权打印，请取消选择后重试' }]);
+      // 版本先读后锁：锁前若又改单，锁内比较版本 / 内容会得到 STALE，整批回滚。
       const outcome = await recordRenderedPrintInTx(tx, { orderId, workOrderVersion, attemptKey: `batch-print:${attempt}:${orderId}` }, actor,
         async () => { await loadCurrent(payload, index, tx); return true; });
       if (outcome === 'STALE' || outcome === 'NOT_PRINTABLE') {

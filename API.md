@@ -436,7 +436,7 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 打印记录（业主 2026-10-02「点打印即记已打印」，`actions/order-print-record.ts`，均要求 `order:change:review`，领域层复核 ADMIN）：
 
 - `recordOrderPrintedAction({orderId, workOrderVersion, contentKey, attemptKey})`：打印页渲染时由服务端绑定（`contentKey` 为生产指令摘要，`attemptKey` 为 `print-page:<UUID>`；`.bind` 参数不是防伪凭据，管理员自行构造只影响其本就能做的记录），关闭打印对话框后调用。返回 `{status:'success', outcome}`，`outcome` 为 `MARKED`（已记录，失效 `/orders` 与详情）、`ALREADY_PRINTED`（本版本已打印）、`STALE`（版本或纸面生产指令已变，不记录）、`NOT_PRINTABLE`（已不在生产中）；已知业务错误返回 `{status:'error', message}`，未知异常继续抛出。每个尝试的结果写入 `OrderPrintAttempt`，同一 `attemptKey` 重放只返回原结果。
-- `recordBatchPrintAction({jobId, attemptId})`：浏览器取得批量打印文件后调用（`attemptId` 为 UUID，每次打开 / 下载一个，同一次的重试沿用）。任务不属于本人或文件未就绪返回错误；同一尝试已整批记过则直接返回原结果（不再核对文件与内容）；首次记录时文件已过期、任一工单内容已变或不在生产中返回 `{status:'error', message}` 且整批不写。同一尝试的并发请求按尝试串行，后到的等前一次提交后再判断。成功返回 `{status:'success', marked}`（本尝试记录的张数）。每张工单的尝试键为 `batch-print:<attemptId>:<工单>`，重放返回原结果；同一文件之后再打开是新尝试，会记录期间新建的补打任务。
+- `recordBatchPrintAction({jobId, attemptId})`：浏览器取得批量打印文件后调用（`attemptId` 为 UUID，每次打开 / 下载一个，同一次的重试沿用）。任务不属于本人或文件未就绪返回错误；同一尝试已整批记过则直接返回原结果（不再核对文件与内容）；首次记录时文件已过期、任一工单内容已变或不在生产中返回 `{status:'error', message}` 且整批不写。同一尝试的并发请求按尝试串行，后到的拿到锁后先重查账本再判断；文件探测在事务外（OSS 限时 10 秒）。浏览器在记录成功或结果未知（网络中断）时交付已取得的文件，明确失败时不交付。成功返回 `{status:'success', marked}`（本尝试记录的张数）。每张工单的尝试键为 `batch-print:<sha256(jobId:attemptId) 前 32 位>:<工单>`（绑定打印任务），重放返回原结果；同一文件之后再打开是新尝试，会记录期间新建的补打任务。
 
 ### 空白封单价与材料补核（2026-09-20）
 

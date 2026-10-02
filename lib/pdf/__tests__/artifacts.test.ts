@@ -67,7 +67,7 @@ describe('PDF artifact persistence', () => {
     vi.stubEnv('PDF_ARTIFACT_STORAGE', 'oss');
     oss.head.mockResolvedValueOnce({ res: { headers: { 'last-modified': new Date().toUTCString() } } });
     await expect(assertPdfArtifactAvailable('job.pdf')).resolves.toBeUndefined();
-    expect(oss.head).toHaveBeenCalledWith('private/order-pdf/job.pdf');
+    expect(oss.head).toHaveBeenCalledWith('private/order-pdf/job.pdf', { timeout: 10_000 });
     expect(oss.get).not.toHaveBeenCalled();
     oss.head.mockResolvedValueOnce({ res: { headers: { 'last-modified': past.toUTCString() } } });
     await expect(assertPdfArtifactAvailable('job.pdf')).rejects.toThrow('PDF_ARTIFACT_EXPIRED');
