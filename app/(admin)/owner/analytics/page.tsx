@@ -11,7 +11,6 @@ export default async function OwnerAnalyticsPage() {
     <div className="space-y-4">
       <PageHeader
         title="经营概览"
-        back={{ href: '/owner', label: '返回工作台' }}
       />
       <OwnerAnalytics />
     </div>

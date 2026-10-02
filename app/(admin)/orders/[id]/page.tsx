@@ -1420,7 +1420,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     workReports: presentation.workReports, signImageUrl: signDesignReadUrl,
   });
   return <>
-    <BreadcrumbEntity label={order.orderNo} />
+    <BreadcrumbEntity label={order.customName} />
     <ReceiptNotice receipt={receipt} noun="工单" />
     <AdminOrderDetailView simpleProduction={order.simpleProduction} productionOwners={presentation.workspace.productionOwners} model={model} canEdit={canEdit} prints={presentation.prints}
       printHint={maxDesignsPerItem >= DESIGN_GRID_WARN_THRESHOLD

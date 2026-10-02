@@ -22,6 +22,7 @@ import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-regist
 import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { PageHeader, StatusBadge, EmptyState, FilterClearLink } from '@/components/ui-business';
+import { BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
 
 type Props = { params: Promise<{ id: string }>; searchParams?: Promise<{ returnTo?: string | string[]; q?: string | string[]; page?: string | string[] }> };
 export async function generateMetadata({ params }: Props) {
@@ -39,9 +40,10 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
   const returnTo = billListReturnHref(search.returnTo, true);
   const basePath = `/sales/bills/${bill.id}`;
   return <div className="space-y-6">
+    {/* 返回我的货款账单由面包屑父级承担，带上原列表的筛选与页码（returnTo）。 */}
+    <BreadcrumbParent href={returnTo} />
     <PageHeader
       title={`${bill.period} 货款账单`}
-      back={{ href: returnTo, label: `返回${SALES_BILL_PAGE_TITLE}` }}
       status={<StatusBadge tone={SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}>{SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label}</StatusBadge>}
     />
     {bill.status === 'DRAFT' ? <p className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">金额未定稿</p> : null}

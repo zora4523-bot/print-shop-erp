@@ -52,7 +52,6 @@ export default async function EditRulePage({
     <FormPage>
       <PageHeader
         title="编辑事件规则"
-        back={{ href: '/owner/notifications', label: '返回推送配置' }}
       />
       <RuleForm
         eventType={event}

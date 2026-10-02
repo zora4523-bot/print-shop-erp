@@ -260,12 +260,12 @@ export async function NewMaterialCatalogItem({
         <RuleCenterPageHeader
           title="新建纸张"
           effect="immediate"
-          back={{ href: backHref, label: supplement ? '返回原录入' : '返回纸张' }}
+          back={supplement ? { href: backHref, label: '返回原录入' } : undefined}
         />
       ) : (
         <PageHeader
           title="新建物料"
-          back={{ href: backHref, label: supplement ? '返回原录入' : '返回物料' }}
+          back={supplement ? { href: backHref, label: '返回原录入' } : undefined}
         />
       )}
 
@@ -342,7 +342,6 @@ export async function EditMaterialCatalogItem({
             externalPriceBusinessText(material.name) || '未命名纸张'
           }`}
           effect="immediate"
-          back={{ href: routeBase, label: '返回纸张' }}
           status={<ActiveStatusBadge active={material.isActive} />}
           subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
         />
@@ -351,7 +350,6 @@ export async function EditMaterialCatalogItem({
           title={`编辑物料：${
             externalPriceBusinessText(material.name) || '未命名物料'
           }`}
-          back={{ href: routeBase, label: '返回物料' }}
           status={<ActiveStatusBadge active={material.isActive} />}
           subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
         />

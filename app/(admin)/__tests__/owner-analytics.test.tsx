@@ -55,7 +55,8 @@ describe('经营概览页面', () => {
     expect(requirePermissionMock).toHaveBeenCalledWith('report:all');
     const header = findElements(result, (element) => element.type === PageHeader)[0];
     expect(header?.props.title).toBe('经营概览');
-    expect(header?.props.back).toEqual({ href: '/owner', label: '返回工作台' });
+    // 返回工作台由顶栏面包屑父级承担（ui-规范 §8.3，业主 2026-10-02「请保持一致性」）。
+    expect(header?.props.back).toBeUndefined();
     expect(findElements(result, (element) => element.type === OwnerAnalytics)).toHaveLength(1);
     expect(getProductionTrendMock).not.toHaveBeenCalled();
     expect(getSalesRankingMock).not.toHaveBeenCalled();

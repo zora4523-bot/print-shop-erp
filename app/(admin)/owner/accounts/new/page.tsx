@@ -16,7 +16,6 @@ export default async function NewAccountPage() {
     <FormPage>
       <PageHeader
         title="新建用户"
-        back={{ href: '/owner/accounts', label: '返回用户管理' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <AccountForm mode="create" action={createUserAction} />

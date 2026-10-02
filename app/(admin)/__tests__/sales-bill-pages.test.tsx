@@ -12,6 +12,14 @@ vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NEXT_NOT_
 import DetailPage, { generateMetadata } from '@/app/(admin)/sales/bills/[id]/page';
 import ListPage from '@/app/(admin)/sales/bills/page';
 import { BillItemEvidence } from '@/components/business/agent-monthly-billing/BillItemEvidence';
+import { BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
+import { isValidElement, type ReactNode } from 'react';
+
+function findElements(node: ReactNode, predicate: (element: { type: unknown; props: Record<string, unknown> }) => boolean): Array<{ type: unknown; props: Record<string, unknown> }> {
+  if (Array.isArray(node)) return node.flatMap((child) => findElements(child, predicate));
+  if (!isValidElement<Record<string, unknown>>(node)) return [];
+  return [...(predicate(node) ? [node] : []), ...findElements(node.props.children as ReactNode, predicate)];
+}
 
 const actor = { id: 'sales-a', role: Role.SALES };
 const bill = {
@@ -40,11 +48,13 @@ beforeEach(() => {
 });
 const renderDetail = async () => renderToStaticMarkup(await DetailPage({ params: Promise.resolve({ id: bill.id }) }));
 
-it('identifies the sales bill as goods payable to the factory in the title, metadata and back link', async () => {
+it('identifies the sales bill as goods payable to the factory in the title and metadata', async () => {
   const html = await renderDetail();
   expect(html).toContain('2026-08 货款账单');
   expect(html).not.toContain('本账单用于核对您应付给工厂的货款。');
-  expect(html).toContain('返回我的货款账单');
+  // 业主 2026-10-02「请保持一致性」：返回由顶栏面包屑「我的货款账单」承担，页头不再给返回链接。
+  expect(html).not.toContain('返回我的货款账单');
+  expect(html).not.toContain('data-slot="page-header-back"');
   expect(html).toContain('<dt>整单应付货款</dt>');
   expect(html).not.toContain('对客应付');
   await expect(generateMetadata({ params: Promise.resolve({ id: bill.id }) })).resolves.toEqual({ title: '2026-08 货款账单 · 我的货款账单' });
@@ -253,4 +263,18 @@ it('uses one responsive list and keeps whole-bill amounts while paging matching 
   expect(html).toContain('整单应付货款');
   expect(html).toContain('导出匹配明细 CSV');
   expect(html).toContain('href="/api/sales/bills/bill-a/export?q=BATCH-"');
+});
+
+it('hands the list filters and page to the breadcrumb parent instead of a page-header back link', async () => {
+  const tree = await DetailPage({
+    params: Promise.resolve({ id: bill.id }),
+    searchParams: Promise.resolve({ returnTo: '/sales/bills?period=2026-08&status=PAID&page=2' }),
+  });
+  const parents = findElements(tree, (element) => element.type === BreadcrumbParent);
+  expect(parents).toHaveLength(1);
+  expect(parents[0].props.href).toMatch(/^\/sales\/bills\?/);
+  expect(parents[0].props.href).toContain('period=2026-08');
+  expect(parents[0].props.href).toContain('page=2');
+  const plain = findElements(await DetailPage({ params: Promise.resolve({ id: bill.id }) }), (element) => element.type === BreadcrumbParent);
+  expect(plain[0].props.href).toBe('/sales/bills');
 });

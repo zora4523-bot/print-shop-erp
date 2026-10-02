@@ -4,7 +4,8 @@ import { Fragment, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { useBreadcrumbEntityLabel } from './breadcrumb-entity';
+import { useBreadcrumbEntityLabel, useBreadcrumbParent } from './breadcrumb-entity';
+import { PendingLink } from '@/components/ui-business';
 import { ADMIN_MODULES } from '@/lib/navigation/admin-modules';
 import type { Role } from '@/generated/prisma/enums';
 import { RULE_CENTER_SIDEBAR_ITEMS } from '@/lib/navigation/rule-center';
@@ -80,6 +81,8 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     // '/orders' 不在此固定：管理员「工单列表」与外部销售「我的工单」按角色从模块表取。
     '/orders/new': '新建工单',
     '/owner/agent-bills/unbilled': '未出账工单',
+    // 兼容别名，redirect 到 /owner/agent-bills；历史账单归档的父级按落点命名。
+    '/owner/bills': '外部销售月账单',
     '/owner/bills/archive': '历史账单归档',
     '/owner/materials/count': '库存盘点',
     '/orders/production': '安排生产师傅',
@@ -194,12 +197,26 @@ export function buildBreadcrumbCrumbs(
     const label =
       (isBillCredit && isLast ? '录入抵扣或补收' : undefined) ??
       BREADCRUMB_PATH_LABELS[href] ??
-      (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
+      // 工单 id 段显示工单名称（业主 2026-10-02：员工靠名称认单，工单号不重要），
+      // 名称为空或首帧未交上来时回落「工单详情」，不显示工单号。
+      (segments[0] === 'orders' && i === 1 && seg !== 'new' ? entityLabel ?? '工单详情' : undefined) ??
       resolveSegmentLabel(seg, entityLabel, isLast ? pageHeading : null, href, role);
     if (!label) return;
     crumbs.push({ href, label, linkable: !LAYOUT_ONLY_PATHS.has(href), isLast });
   });
   return crumbs;
+}
+
+/**
+ * 页面经 BreadcrumbParent 交上来的父级地址：只接受同一路径加查询串 / hash
+ * （列表筛选、页码、returnTo），换路径、外站或协议相对地址一律回落父级自身。
+ */
+export function resolveBreadcrumbParentHref(parentHref: string, override: string | null): string {
+  if (!override || !override.startsWith('/') || override.startsWith('//')) return parentHref;
+  let url: URL;
+  try { url = new URL(override, 'https://breadcrumb.invalid'); } catch { return parentHref; }
+  if (url.origin !== 'https://breadcrumb.invalid' || url.pathname !== parentHref) return parentHref;
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function subscribePageHeading(listener: () => void) {
@@ -223,6 +240,7 @@ export function AdminBreadcrumb({ role }: { role?: Role } = {}) {
   // 详情页通过 <BreadcrumbEntity> 把已经查出来的业务编号交上来，
   // 这里不发任何请求。
   const entityLabel = useBreadcrumbEntityLabel();
+  const parentOverride = useBreadcrumbParent();
   const pageHeading = useSyncExternalStore(
     subscribePageHeading,
     getPageHeadingSnapshot,
@@ -278,10 +296,21 @@ export function AdminBreadcrumb({ role }: { role?: Role } = {}) {
                 ) : crumb.linkable ? (
                   // shadcn 这套 BreadcrumbLink 用 @base-ui/react 的
                   // useRender，不接受 Radix 的 asChild —— 走 render
-                  // prop 把 <a> 替换成 next/link。
+                  // prop 把 <a> 替换成 next/link。父级是二级页唯一的返回
+                  // 入口：带上页面交来的列表上下文，表单提交中锁住。
                   <BreadcrumbLink
                     className="inline-flex min-h-11 min-w-0 max-w-full items-center"
-                    render={<Link href={href} prefetch={false} />}
+                    render={
+                      i === parentIndex ? (
+                        <PendingLink
+                          href={resolveBreadcrumbParentHref(href, parentOverride.href)}
+                          pending={parentOverride.pending}
+                          prefetch={false}
+                        />
+                      ) : (
+                        <Link href={href} prefetch={false} />
+                      )
+                    }
                   >
                     {/* The truncating element carries the full text (visual gate: hidden-clipping). */}
                     <span className="min-w-0 truncate" title={label}>{label}</span>

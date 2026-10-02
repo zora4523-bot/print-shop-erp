@@ -367,6 +367,18 @@ describe('order detail commercial visibility', () => {
     if (withHistory) expect(html).toContain('历史生产记录');
     else expect(html).not.toContain('历史生产记录');
   });
+  // UI-SYSTEM「工单页面导航与标题去重」：返回列表由顶栏面包屑父级（管理员「工单列表」、外部销售
+  // 「我的工单」）承担。2026-09-29 迁移 PageHeader 时把页内「返回工单列表」加了回来，和面包屑同目标、
+  // 同行为，业主 2026-10-01 指出重复；这里锁住两种角色的详情都不再渲染页头返回入口。
+  it.each([Role.ADMIN, Role.SALES])('%s 详情页头不重复面包屑的返回入口', async (role) => {
+    requireSessionMock.mockResolvedValue({ user: { id: `${role}-1`, role } });
+    getOrderDetailMock.mockResolvedValue(orderFixture());
+    getSalesOrderDetailByIdMock.mockResolvedValue(salesDetailFixture());
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
+    expect(html).toContain('data-slot="page-header"');
+    expect(html).not.toContain('data-slot="page-header-back"');
+    expect(html).not.toContain('返回工单列表');
+  });
   it('places secondary operations inside the right-hand action panel and omits retired display fields', async () => {
     requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
     getOrderDetailMock.mockResolvedValue(orderFixture());

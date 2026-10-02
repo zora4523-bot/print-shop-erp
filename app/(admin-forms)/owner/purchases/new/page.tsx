@@ -45,7 +45,6 @@ export default async function NewOwnerPurchasePage({ searchParams }: PageProps) 
       <ReceiptNotice receipt={receipt} noun={receiptNoun} />
       <ScopedPageHeader
         title="新建采购单"
-        back={{ href: '/owner/purchases', label: '返回采购单' }}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

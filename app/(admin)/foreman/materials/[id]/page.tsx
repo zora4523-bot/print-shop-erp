@@ -73,7 +73,6 @@ export default async function EditForemanMaterialPage({ params, searchParams }: 
     <FormPage>
       <ReceiptNotice receipt={receipt} noun="物料" />
       <PageHeader
-        back={{ href: '/foreman/materials', label: '返回车间用料' }}
         title={`编辑物料：${externalPriceBusinessText(material.name)}`}
         subtitle={`${MATERIAL_CATEGORY_LABELS[material.category]} · 当前库存 ${decimal(material.currentStock)} ${material.unit}`}
         status={<ActiveStatusBadge active={material.isActive} />}
