@@ -24,7 +24,7 @@ describe('completePlannedProductionInTx lock order', () => {
       productionJob: { findMany: vi.fn(async () => [job('j1', 'worker-b'), job('j2', 'worker-a')]) },
       productionOperation: { findMany: vi.fn(async () => []) },
       productionProgressStep: { findMany: vi.fn(async () => []) },
-      user: { findMany: vi.fn(async () => [{ id: 'worker-a', displayName: 'A', employmentStartDate: null, employmentEndDate: null }, { id: 'worker-b', displayName: 'B', employmentStartDate: null, employmentEndDate: null }]) },
+      user: { findMany: vi.fn(async () => [{ id: 'worker-a', displayName: 'A', isActive: true, role: 'WORKER', employmentStartDate: null, employmentEndDate: null }, { id: 'worker-b', displayName: 'B', isActive: true, role: 'WORKER', employmentStartDate: null, employmentEndDate: null }]) },
     };
     await completePlannedProductionInTx(tx as never, 'o1', { id: 'admin', role: 'ADMIN' }, 'ADMIN_BATCH');
     const workerLocks = calls.filter(call => call.startsWith('lock:') && call.includes('worker-'));

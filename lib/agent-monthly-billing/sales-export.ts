@@ -74,7 +74,7 @@ export async function exportSalesBillItems(actor: Actor, id: string, params: URL
       '工单', bill.period, statusLabel, basis,
       item.orderNoSnapshot, name.name, name.current ? '当前名称' : '结算时名称', billOrderStatus(item.orderStatusSnapshot).label,
       String(item.workOrderVersionSnapshot), formatDateTimeShanghai(item.settledAtSnapshot), csvDecimal(item.settledFeeSnapshot),
-      evidence ? csvDecimal(evidence.processingAmount) : null,
+      evidence?.processingAmount != null ? csvDecimal(evidence.processingAmount) : null,
       evidence ? evidence.charges.map((charge) => `${charge.description}：${charge.amount} 元`).join('；') || '无其他费用' : '费用明细待补',
     ]);
   }

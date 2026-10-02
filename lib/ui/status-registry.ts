@@ -752,3 +752,11 @@ export function sensitiveColumnMaskingDefinition(
       : SENSITIVE_COLUMN_MASKING_STATUS.LABEL_PENDING
   ];
 }
+
+
+export const CDR_FILE_PACKAGE_STATUS_REGISTRY: StatusRegistry<'new' | 'updated' | 'unchanged' | 'unknown'> = {
+  new: { label: '尚未打包', tone: 'neutral' },
+  updated: { label: '文件已更新', tone: 'warning' },
+  unchanged: { label: '已打包当前文件', tone: 'neutral' },
+  unknown: { label: '旧包版本待核对', tone: 'neutral' },
+};

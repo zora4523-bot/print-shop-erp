@@ -15,9 +15,9 @@ applies_to: repository source at last_verified
 
 - `GET /api/sales/bills/export`：当前数据库校验的 `bill:view:self` 会话（仅 SALES）；接受 `period=YYYY-MM`、`status=DRAFT|CONFIRMED|PAID`，空值表示全部，非法值返回 400。账号范围强制来自会话，忽略传入 `agentUserId`；忽略 `page`，导出全部筛选结果而非当前分页。
 - `GET /api/sales/bills/[id]/export`：相同授权；只读取本人账单及其结算快照。可选 `q`（去首尾空格，最多 100 字）与详情页共用工单号/历史名称匹配函数，忽略 `page`；不合法 ID 或非本人账单统一 404。历史费用证据不足时，仅名称允许使用当前名称并标注依据，金额仍使用原结算快照，绝不补当前价格。
-- 两个接口成功返回含 BOM 的 UTF-8 CSV，`Content-Disposition: attachment`、`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`；金额通过 Decimal 输出两位十进制，用户文本进行 CSV 转义和公式注入防护。整理中账单明确标注暂计、未定稿。结果超过 10,000 条返回 400 并要求缩小范围，不静默截断。会话/角色无权限 401，服务异常 503，错误响应不含内部信息。
+- 两个接口成功返回含 BOM 的 UTF-8 CSV，`Content-Disposition: attachment`、`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`；金额通过 Decimal 输出两位十进制，用户文本进行 CSV 转义和公式注入防护。整理中账单明确标注暂计、未定稿。结果超过 10,000 条返回 400 并要求缩小范围，不静默截断。会话/角色无权限 401；未知异常交给框架错误处理与监控，客户端仅显示通用失败提示。
 - 明细 CSV 包含结算时工单状态，明确区分正常结算与“已取消（取消费）”；同时输出有效结算快照中的加工费和其他费用说明；快照缺失或费用合计不符时标记“费用明细待补”，不从现价补算。
-- `SalesBillExportButton` 使用原生下载链接，增强后先检查状态码与 CSV/XLSX 文件类型，再保存文件；下载等待最多一分钟，失败在原页显示并可重试，不保存 JSON/登录页。管理员月账单 XLSX 仍沿用原权限、请求快照和持久化异步任务；生成失败返回结构化结果，状态检查最多两分钟，网络失败暂停并提供手动刷新，下载过期/失败明确要求重新生成。
+- `SalesBillExportButton` 使用按钮先检查状态码与 CSV/XLSX 文件类型，再保存文件；未启用 JavaScript 时提供普通链接。等待响应头最多一分钟，文件传输不受该时限限制，失败在原页显示并可重试，不保存 JSON/登录页。管理员月账单 XLSX 仍沿用原权限、请求快照和持久化异步任务；生成失败返回结构化结果，状态检查最多两分钟，网络失败暂停并提供手动刷新，下载过期/失败明确要求重新生成。
 - 销售工单列表新增 `createdMonth=YYYY-MM`，按上海时区下单月份过滤；状态数量与当前 `q`、月份保持相同范围。`GET /api/orders/sales/[orderNo]` 的本人投影新增 `createdAt`、可空 `shippedAt` 及 `shipments` 完整已登记运单；不返回其他销售或内部成本。
 
 ## 2026-09-28 单负责人排单与完工提成
@@ -52,7 +52,7 @@ applies_to: repository source at last_verified
 
 `maintainWarehouseAction` 接收 kind（warehouse/location）、id、operation（rename/disable/restore）、expectedUpdatedAt 及改名时的 name。入口与领域均要求当前启用的 warehouse:manage 账号；编码、所属仓库和默认标记不可变。相同结果的重试不重复审计；其他旧版本提交拒绝并提示刷新。库存逐条非零时拒绝停用，默认对象不能停用，恢复父仓不改变子库位各自状态；恢复库位前必须先恢复所属仓库，等待配置锁后仍重新核对父状态。
 
-配置写入在取锁前设置事务内 3 秒锁等待上限，超时回滚并提示“仓库正在处理出入库，请稍后重试”。盘点可选行只包含启用仓库下的启用库位；旧页面提交会指明已停用仓库/库位，并要求移除该行或恢复后重试。
+配置写入在取锁前设置事务内 3 秒锁等待上限，超时回滚并提示“仓库正在处理出入库，请稍后重试”。盘点页面在挂载或恢复时重新读取库存；未录入库位采用新账面数，已编辑过的库位保留原账面基线，后续提交仍接受逐行冲突检查。盘点可选行只包含启用仓库下的启用库位；旧页面提交会指明已停用仓库/库位，并要求移除该行或恢复后重试。
 
 
 ## 2026-09-27 采购/BOM 录入恢复
@@ -546,13 +546,13 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 `GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
 
-202 HTML 每次查询结束后等待 3 秒再查询，单次网络查询上限 15 秒、页面自动查询上限两分钟；不刷新整页、不自动抢焦点。就绪后再次通过授权下载路由打开 PDF；离线、超时或错误停止自动查询。禁用 JS 时仍可手动查询。HTML 提供网页打印、返回工单，以及仅对 `ops:jobs:manage` 角色显示的后台任务入口；跳转目标仍独立授权。
+202 HTML 每次查询结束后等待 3 秒再查询，单次网络查询上限 15 秒、页面自动查询上限两分钟；不刷新整页、不自动抢焦点。就绪后再次通过授权下载路由打开 PDF；短暂网络异常每 10 秒重试，连续三次失败后停止；401/403 和业务终态立即停止。绑定 jobId 的 PDF_WORKER_UNAVAILABLE（503）页面及查询响应保留原任务，每 10 秒重试，仍受两分钟页面上限约束，HTTP/JSON 状态契约不变。批量打印对连续不可用或网络异常限制 120 秒，正常生成中的任务继续查询，手动刷新重启异常等待窗口。禁用 JS 时仍可手动查询。HTML 提供网页打印、返回工单，以及仅对 `ops:jobs:manage` 角色显示的后台任务入口；跳转目标仍独立授权。
 
 已知错误包括 PDF_WORKER_UNAVAILABLE、PDF_QUEUE_DELAYED、PDF_FONT_UNAVAILABLE、PDF_BROWSER_VERSION_MISMATCH、PDF_LAYOUT_OVERFLOW、PDF_ARTWORK_UNAVAILABLE、PDF_STORAGE_UNAVAILABLE、PDF_VERSION_CHANGED、PDF_RENDER_TIMEOUT；未知错误只显示 PDF_GENERATION_FAILED。inline 渲染失败现在与 durable 一致返回可恢复 HTML，而非只有 JSON 错误。
 
 ### PDF 能力与诊断补强（2026-09-30）
 
-`/api/health/jobs` 新增 `pdf: {ready: boolean | null}`：durable 仅在当前发布版本的活跃 HEAVY 心跳明确上报 PDF 可用时为 true；inline 为 null（不代表 Web 渲染已检查）。失能产生 `pdf-worker-unavailable` 告警，jobs 返回 503，但不单独使 Web ready 失败。发布 jobs gate 在能力未知/失能时拒绝放行。PDF 等待端点要求相同版本和有效能力；已生成产物仍先按原授权规则读取。
+`/api/health/jobs` 新增 `pdf: {ready: boolean | null}`：durable 仅在当前发布版本的活跃 HEAVY 心跳明确上报 PDF 可用时为 true；inline 为 null（不代表 Web 渲染已检查）。失能产生 `pdf-worker-unavailable` 告警，jobs 返回 503，但不单独使 Web ready 失败。发布 jobs gate 在能力未知/失能时拒绝放行。PDF 等待端点按实际领取条件判断：任意版本的活跃 HEAVY、且能力未明确为 false（含升级前 null）均可继续等待；部署 gate 仍要求目标版本且能力为 true；已生成产物仍先按原授权规则读取。
 
 direct 生成失败返回 `X-Request-Id`，与只包含随机关联号、白名单错误码、模式、阶段和耗时的日志对应。容量、浏览器、字体、版本、产物存储不可用返回 503；其他渲染失败保留 500。图稿不完整时继续提供含原有警告的 PDF，但不保存到 direct 完成缓存；批量打印原有严格图稿校验不变。
 
@@ -563,3 +563,29 @@ direct 生成失败返回 `X-Request-Id`，与只包含随机关联号、白名�
 - 销售工单列表及同源单条预览 DTO 增加可空 `bill: { id, period, status }`；仅当关联月账单的 `agentUserId` 与工单 `submitterId` 相同时投影。账单详情仍独立校验登录账号，不依赖列表链接授权。
 - `/sales/bills` 返回每张账单的成员数量，以及本人最近 12 个有账单月份的按状态金额。趋势不随列表筛选收窄，顶部统计仍按筛选条件汇总；各查询处于同一 RepeatableRead 事务。草稿金额不计入待支付。
 - `/sales/bills/:id` 支持 `q`（最多 100 字，工单号／展示名称）和 `page`（每页 30 条，越界收敛到末页）；有有效结算依据时按冻结名称搜索，否则按明确标为当前名称的回退值搜索。分页只限制展示，整张账单总额和抵扣保持不变。`returnTo` 沿用内部账单列表白名单。
+
+### 管理工作台 CDR 下载（2026-10-02）
+
+`/owner` 顶部 CDR 区域接受 `cdrScope=pending|all`、`cdrFrom/cdrTo`（上海提交日期）、
+`cdrQ`（工单号/名称/销售账号）、`cdrPage`。默认跨日期的 CONFIRMED / RELEASED /
+SCHEDULING（排除寄样），每页最多 100 单；“本页”和分组下载仅处理本页可下载工单，异常工单明确排除。
+
+`createWorkbenchBundleAction` 首先验证 `design:bundle:create`；`selection` 是含
+`id/version` 的 JSON 数组，最多 100 个且不允许重复。领域层重新读取归属、提交状态、
+每款 CDR 和文件版本；页面过期或任一工单不完整时整批拒绝。也可传 `bundleId`
+按历史工单集合重新生成**当前文件**；原记录保留，已删除工单不能静默略过。
+返回沿用 `CreateBundleResult`；durable 模式生成 HEAVY 任务，inline 为开发兼容路径。
+完成后失效 `/owner` 和 `/foreman/cdr`。撤销动作也失效两个入口。
+
+新包保存文件清单；worker 检查文件变更后按冻结路径打包。旧的日期汇总入口继续可用。
+文件未变标记只代表已有真实打包记录，不代表下载成功或已打印；旧包无清单时显示待核对，
+mock 包不作为版本基准。下载权限、令牌、有效期及速率限制沿用原下载接口。
+
+`getWorkbenchBundleProgressAction(bundleId)` 每次先验证 `design:bundle:create`，直接读取
+所请求的单个下载包，不受最近20条历史限制。只返回状态、计数、业务失败提示及有效的
+READY 下载链接。工作台每5秒读取当前任务进度，最多2分钟，随后提供手动刷新；仅终态
+刷新一次工作台。清单变化是确定性 `CdrBundleStaleError`，不占用三次重试。
+
+CDR 工作台分页保留 `#cdr-download`，下载记录与当前回执在最近有效期边界更新，页面恢复焦点或可见时重新核对有效期；不按秒重渲染工单列表。工单导出下载读取 HTTP 状态和文件类型，失效、未授权及生成中的响应作为可恢复提示展示，不保存为文件。
+
+管理员代登记完工还要求师傅账号启用、角色仍为 WORKER 且当天在雇佣期内；不满足时整单回滚并要求改派。整单发货写入生产及工资事实后，同时失效生产、工人任务和工资页面。私有设计图只读签名按 30 分钟时间桶复用，剩余有效期至少 30 分钟、少于 60 分钟；此签名策略不适用于 CDR 下载令牌。

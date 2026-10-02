@@ -15,3 +15,4 @@ export * from './schemas/finance';
 export * from './schemas/notification';
 export * from './schemas/design-upload';
 export { YMD_RE, parseStrictYmd, parseStrictShanghaiDateTimeLocal } from './schemas/shared';
+export * from './schemas/cdr-workbench';

@@ -33,7 +33,7 @@ test('工作台重点记录、完整关注列表和经营概览可连续使用',
   await page.getByRole('button', { name: /确认.*账单/ }).click();
   await expect(page.getByRole('button', { name: '标记已收' })).toBeVisible();
   await page.goto('/owner');
-  await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '管理工作台', exact: true })).toBeVisible();
   const kpis = page.locator('[data-slot="dashboard-kpi"]');
   await expect(kpis).toHaveCount(4);
   await expect(kpis.filter({ hasText: '今日提交工单' })).toContainText(/其中急单 \d+/);

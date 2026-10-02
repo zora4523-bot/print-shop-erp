@@ -1,7 +1,7 @@
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { commands, page } from 'vitest/browser';
 import '@/app/globals.css';
 import { SalesOrdersList } from '../SalesOrdersList';
 import { query, row } from './sales-orders-list-fixtures';
@@ -14,6 +14,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   host.remove();
+  document.documentElement.classList.remove('dark');
   window.history.replaceState({}, '', window.location.pathname);
 });
 
@@ -140,4 +141,22 @@ it.each([
   await page.viewport(393, 852);
   await page.getByRole('button', { name: '端午定制', exact: true }).click();
   await expect.element(page.getByRole('dialog').getByRole('link', { name: '查看完整详情' })).toBeVisible();
+});
+
+it('shows delivery warnings without page overflow across six viewports and both themes', async () => {
+  // Reproduce the application's body tokens inside Vitest's host document.
+  host = document.createElement('main'); host.className = 'admin-viewport bg-background text-foreground'; document.body.append(host); root = createRoot(host);
+  flushSync(() => root.render(<SalesOrdersList orders={[row()]} query={query()} nowIso="2026-08-27T08:00:00Z" />));
+  for (const width of [375, 390, 768, 1024, 1280, 1440]) {
+    await page.viewport(width, 900);
+    for (const dark of [false, true]) {
+      document.documentElement.classList.toggle('dark', dark);
+      // Measure the settled theme, after the browser's actual color transitions.
+      await Promise.all(document.getAnimations().map(animation => animation.finished));
+      const scope = width >= 768 ? page.getByRole('region', { name: '销售工单明细表' }) : page.getByRole('list', { name: '销售工单列表' });
+      await expect.element(scope.getByText('交货 08-30', { exact: false })).toBeVisible();
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+      expect(await commands.checkShellAccessibility('body')).toEqual([]);
+    }
+  }
 });

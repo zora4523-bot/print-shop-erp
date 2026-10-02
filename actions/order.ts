@@ -373,6 +373,8 @@ export async function shipOrderAction(
 
   revalidatePath('/orders');
   revalidatePath(`/orders/${orderId}`);
+  for (const path of ['/orders/production', '/worker/tasks', '/worker/orders', '/worker/salary', '/owner/salary/piecework']) revalidatePath(path);
+  revalidatePath(`/worker/orders/${orderId}`);
   return { status: 'success' };
 }
 

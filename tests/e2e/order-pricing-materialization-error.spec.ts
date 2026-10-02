@@ -115,13 +115,13 @@ test('生产事实缺失时终价照存、缺项提示且不生成生产事实�
   await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toHaveCount(0);
   expect(await readPricingState(orderId)).toEqual(after);
   await expectNoNextErrorOverlay(page);
-  const workbenchLink = page.getByRole('link', { name: '工作台', exact: true }).first();
+  const workbenchLink = page.getByRole('link', { name: '管理工作台', exact: true }).first();
   if (!(await workbenchLink.isVisible())) {
     await page.getByRole('button', { name: '打开/关闭侧边栏菜单', exact: true }).click();
   }
   await workbenchLink.click();
   await expect(page).toHaveURL(/\/owner$/);
-  await expect(page.getByRole('heading', { name: '工作台', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '管理工作台', exact: true })).toBeVisible();
 });
 
 test('管理端旧链接进入详情后终价照存、缺项提示，且不生成生产事实', async ({ page }) => {

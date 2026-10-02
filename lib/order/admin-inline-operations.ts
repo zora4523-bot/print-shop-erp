@@ -1,7 +1,7 @@
 import 'server-only';
 import { hasLogisticsChargeRows, orderBillsLogistics } from './settlement';
 
-import { OrderChangeRequestStatus, OrderPricingStatus, OrderSettlementType, Role } from '@/generated/prisma/enums';
+import { OrderChangeRequestStatus, OrderPricingStatus, OrderSettlementType, OrderStatus, Role } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
 import { UnauthorizedError } from '@/lib/auth/errors';
 import { isOrderPricingReviewAllowedStatus } from './pricing-status';
@@ -30,6 +30,7 @@ export async function getAdminOrderInlineOperations(
       purpose: true, revision: true, editVersion: true, workOrderVersion: true, priceRevision: true,
       status: true, settlementType: true, pricingStatus: true, isSfCollect: true,
       settledAt: true, settledFee: true,
+      workflowDecisions: { where: { action: 'HOLD' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { fromStatus: true } },
       shipments: {
         orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
         select: {
@@ -56,7 +57,8 @@ export async function getAdminOrderInlineOperations(
   const canPrice = row.settlementType !== OrderSettlementType.NO_CHARGE && (isPricingPending || row.purpose === 'PROOF');
   // 业主 2026-10-01：先下发生产，生产后才处理物流。待下发的工单「当前待办」只给
   // 「下发生产」；物流核对留在费用区，下发后（发货前）才进入当前待办。
-  const awaitingRelease = order.capabilities.release === true;
+  const heldFrom = row.workflowDecisions[0]?.fromStatus;
+  const awaitingRelease = row.status === OrderStatus.CONFIRMED || (row.status === OrderStatus.ON_HOLD && (!heldFrom || heldFrom === OrderStatus.CONFIRMED));
   const pricing = canPrice && isOrderPricingReviewAllowedStatus(row.status, row.purpose)
     ? 'factory'
     : canPrice && billsLogistics && isFulfillmentPricingStatus(row.status) && row.settledAt === null && row.settledFee === null

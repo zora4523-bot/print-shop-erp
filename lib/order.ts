@@ -2436,7 +2436,9 @@ export async function shipOrder(
           const held = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { workOrderVersion: true, settlementType: true, simpleProduction: true, requiresOutsource: true } });
           await assertShipOrderReadinessInTx(tx, { orderId, workOrderVersion: held.workOrderVersion, settlementType: held.settlementType, isVersionedCommand: true,
             hasSubmittedShipmentDetails: requestedShipments.length > 0, simpleProduction: held.simpleProduction, requiresOutsource: held.requiresOutsource });
-          throw new OrderInvariantError('生产已登记，但工单仍未完工，暂不能发货');
+          throw new OrderInvariantError(completion.completedJobCount === 0
+            ? '没有待登记的生产任务，工单仍未完工，暂不能发货'
+            : '工单仍未完工，暂不能发货；本次生产登记未保存');
         }
         productionNotification = completion.notification;
         return completion.versions;

@@ -297,3 +297,13 @@ it('fails closed when production PDF mode is missing', async () => {
   expect(await response.text()).toContain('PDF_CONFIGURATION_INVALID');
   expect(mocks.direct).not.toHaveBeenCalled();
 });
+
+it.each([Role.ADMIN, Role.SALES, Role.WORKER])('returns %s to an accessible order page from a PDF failure', async role => {
+  mocks.session.mockResolvedValue({ user: { id: 'user', role } });
+  mocks.mode.mockReturnValue('durable');
+  mocks.wait.mockResolvedValue({ status: 'unavailable' });
+  const response = await request();
+  const html = await response.text();
+  expect(html).toContain(`href="${role === Role.WORKER ? '/worker/orders' : '/orders'}/order-1">返回工单`);
+  if (role === Role.WORKER) expect(html).not.toContain('href="/orders/order-1"');
+});

@@ -772,7 +772,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'dashboard',
       path: '/owner',
-      readyHeading: '工作台',
+      readyHeading: '管理工作台',
       prepareGateState: async (page) => {
         await expect(page.locator('[data-slot="dashboard-watchlist-shipments"]:visible')).toHaveCount(1);
         await expect(page.locator('[data-slot="dashboard-kpi"]:visible')).toHaveCount(4);

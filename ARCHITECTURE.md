@@ -276,3 +276,5 @@ HEAVY 心跳与 PDF 能力分开：`lib/pdf/capability.ts` 异步执行真实 Ch
 并发和缓存上限为每个 Web 进程，不是集群配额；多副本部署需按 Web + HEAVY 进程树评估内存和 CPU。`PDF_ORDER_MODE=queued` 保留回退能力，旧 jobId 和批量打印不迁移、不删除。PDF_BROWSER_REUSE 控制 HEAVY 池；Web 直接模式的受限池随 direct 模式启用，回退整个直接路径使用 PDF_ORDER_MODE。
 
 本次能力变化只新增 `BackgroundWorkerHeartbeat.pdfReady` 可空列，现有业务数据与历史产物不改写。jobs 探针和发布 gate 要求当前版本 HEAVY 的 PDF 能力明确为 true，旧版本心跳不可作为新发布的能力证明；Web ready 不因 PDF 单项失能停止其他页面。direct 图稿加载失败仍可下载带警告的 PDF，但不进入五分钟完成缓存；后续请求重新加载图稿。未知异常使用白名单通用错误，direct 响应 X-Request-Id 与结构化日志关联。
+
+PDF 探测区分运行期读写能力与部署清理验收：OSS 清理失败只记录固定告警码，文件系统清理仍严格失败；CLI `check:pdf` 使用严格清理模式。任务领取规则、pdfReady 心跳和部署健康门禁不变，下载恢复重试仅作用于展示层并有时间上限。

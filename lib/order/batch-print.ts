@@ -150,6 +150,9 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
       // Infrastructure failures are not the order's fault: rethrow so the worker
       // invalidates PDF capability and the durable job retries (CLAUDE.md §15.4).
       if (isPdfInfrastructureFailure(error)) throw error;
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        return { completed: index, issues: [{ position: index + 1, message: '工单生成超时，请稍后重试或减少所选工单' }] };
+      }
       return { completed: index, issues: [{ position: index + 1, message: error instanceof Error && error.name === 'PrintArtworkUnavailableError'
         ? '图稿加载失败，请检查图稿后重试' : '工单生成失败，请检查打印内容后重试' }] };
     }
@@ -189,10 +192,17 @@ export async function batchPrintStatus(actorId: string, jobId: string): Promise<
   if (job.status === 'SUCCEEDED') return { ...base, status: result.artifactName ? 'ready' : 'failed' };
   const at = await databaseNow();
   // Same capability rule as single-order PDFs: a live HEAVY worker that cannot
-  // render (pdfReady=false) or runs another version will not claim this job.
-  // A RUNNING job is already owned by a worker.
-  const worker = job.status === 'RUNNING' ? true : await db.backgroundWorkerHeartbeat.findFirst({
-    where: { queue: BackgroundJobQueue.HEAVY, pdfReady: true, version: process.env.APP_VERSION || 'dev',
+  // render (pdfReady=false) will not claim this job. Claims are not release-bound;
+  // legacy workers with null capability may still claim during rollout.
+  // A claimed job may continue during a capability probe, but only with a live owner.
+  const owner = job.status === 'RUNNING' && job.lockedBy
+    ? await db.backgroundWorkerHeartbeat.findFirst({
+        where: { workerId: job.lockedBy.replace(/:\d+$/, ''), queue: BackgroundJobQueue.HEAVY,
+          lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
+        select: { workerId: true },
+      }) : null;
+  const worker = owner ?? await db.backgroundWorkerHeartbeat.findFirst({
+    where: { queue: BackgroundJobQueue.HEAVY, OR: [{ pdfReady: true }, { pdfReady: null }],
       lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
     select: { workerId: true },
   });

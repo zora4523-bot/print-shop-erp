@@ -29,7 +29,7 @@ import {
 } from '../production/work-order-progress-query';
 import { selectOrderCustomerFee } from './customer-fee';
 import { buildOrderWhere } from './list-query';
-import { outsourceCoverageApplies } from '../outsource/coverage';
+import { outsourceCoverageApplies, findUndercoveredOutsourceItems } from '../outsource/coverage';
 import { promisedDaysLeft } from './promised-date';
 import { shippedShipmentViolation } from './change-request-shipment-guard';
 import { canConfirmOrderPrinted } from './print-eligibility';
@@ -407,7 +407,7 @@ const adminOrderSelect = {
     select: { id: true, workOrderVersion: true, status: true },
   },
   outsourceOrders: {
-    select: { status: true },
+    select: { status: true, itemSnapshots: { select: { orderItemId: true, quantity: true } } },
   },
   logs: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -737,7 +737,7 @@ function emptyFilters(): AdminOrderWorkspaceQuery['list']['filters'] {
 async function loadCraftNames(
   rows: readonly AdminOrderRecord[],
   client: Pick<Prisma.TransactionClient, 'craft'> = db,
-): Promise<Map<string, string>> {
+): Promise<Map<string, { name: string; isOutsource: boolean }>> {
   const ids = [
     ...new Set(rows.flatMap((row) => row.items.flatMap((item) => item.crafts))),
   ];
@@ -746,15 +746,15 @@ async function loadCraftNames(
       ? []
       : await client.craft.findMany({
           where: { id: { in: ids } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, isOutsource: true },
         });
-  return new Map(crafts.map((craft) => [craft.id, craft.name]));
+  return new Map(crafts.map((craft) => [craft.id, { name: craft.name, isOutsource: craft.isOutsource }]));
 }
 
 function mapAdminOrderRow(
   row: AdminOrderRecord,
   actorId: string,
-  craftNames: ReadonlyMap<string, string>,
+  craftNames: ReadonlyMap<string, { name: string; isOutsource: boolean }>,
   progress: WorkOrderProgressProjection | undefined,
   now: Date,
   stagnationDays: number,
@@ -772,7 +772,7 @@ function mapAdminOrderRow(
       specification: item.specification,
       paper: formatPaper(item.paperType, item.paperWeightGsm),
       crafts: item.crafts
-        .map((id) => craftNames.get(id))
+        .map((id) => craftNames.get(id)?.name)
         .filter((name): name is string => Boolean(name)),
       thumbnail: design
         ? {
@@ -887,10 +887,12 @@ function mapAdminOrderRow(
     pricingPending: row.pricingStatus === OrderPricingStatus.PENDING_ADMIN_CONFIRMATION,
     hasShipment: row._count.shipments > 0,
     hasLiveOutsource,
-    // List rows only load outsource statuses: surface the missing-order case here;
-    // per-item quantity coverage is shown on the detail page and enforced by the ship gate.
-    hasOutsourceGap: outsourceCoverageApplies(row) &&
-      !row.outsourceOrders.some((outsource) => outsource.status !== OutsourceStatus.CANCELLED),
+    hasOutsourceGap: outsourceCoverageApplies(row) && (
+      !row.outsourceOrders.some(outsource => outsource.status !== OutsourceStatus.CANCELLED) ||
+      findUndercoveredOutsourceItems(row.items,
+        new Set([...craftNames].filter(([, craft]) => craft.isOutsource).map(([id]) => id)),
+        row.outsourceOrders.filter(outsource => outsource.status !== OutsourceStatus.CANCELLED)).length > 0
+    ),
     hasIncompleteProduction,
     printFacts,
     ...(row.simpleProduction ? { plannedCompletion: plannedCompletionFacts(row) } : {}),

@@ -4,10 +4,12 @@ const mocks = vi.hoisted(() => ({
   options: vi.fn(),
   crafts: vi.fn(),
   sales: vi.fn(),
+  session: vi.fn(),
 }));
 vi.mock('@/lib/auth/permissions', () => ({
   requirePermission: mocks.permission,
 }));
+vi.mock('@/lib/auth/session', () => ({ getSession: mocks.session }));
 vi.mock('@/lib/order/create-order-options', () => ({
   listExternalCreateOrderOptions: mocks.options,
 }));
@@ -16,11 +18,21 @@ vi.mock('@/lib/order/external-sales-association', () => ({ listExternalSalesAcco
 vi.mock('@/components/business/workbench/SalesWorkbench', () => ({
   SalesWorkbench: () => null,
 }));
-import WorkbenchPage from '../workbench/page';
+import WorkbenchPage, { generateMetadata } from '../workbench/page';
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.permission.mockResolvedValue({ id: 's', role: 'SALES' });
+  mocks.session.mockResolvedValue({ user: { role: 'SALES' } });
   mocks.crafts.mockResolvedValue([]);
+});
+it('uses the role-specific workbench title for metadata and page heading', async () => {
+  mocks.options.mockResolvedValue({ products: [], papers: [], specifications: [], foilColors: [] });
+  for (const [role, title] of [['ADMIN', '销售工作台'], ['SALES', '工作台']]) {
+    mocks.permission.mockResolvedValue({ id: 'actor', role });
+    mocks.session.mockResolvedValue({ user: { role } });
+    expect(await generateMetadata()).toEqual({ title });
+    expect((await WorkbenchPage()).props.title).toBe(title);
+  }
 });
 it('checks permission before catalog access', async () => {
   mocks.permission.mockRejectedValue(new Error('unauthorized'));

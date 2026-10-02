@@ -45,7 +45,8 @@
     "test:compat": "playwright test --config=playwright.compat.config.ts",
     "test:release": "playwright test --config=playwright.release.config.ts",
     "test:release:dev-fixtures": "playwright test --config=playwright.dev-fixtures.config.ts",
-    "test:release:durable": "playwright test --config=playwright.durable.config.ts"
+    "test:release:durable": "playwright test --config=playwright.durable.config.ts",
+    "test:release:cdr": "playwright test --config=playwright.cdr.config.ts"
   },
   "dependencies": {
     "@auth/core": "0.41.3",

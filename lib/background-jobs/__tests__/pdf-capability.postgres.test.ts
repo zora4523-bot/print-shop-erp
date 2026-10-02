@@ -1,3 +1,4 @@
+import { isDisposableE2eDatabaseName, postgresDatabaseIdentity } from '@/scripts/lib/e2e-environment';
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
@@ -8,7 +9,8 @@ import { getBackgroundJobHealth, hasReadyPdfWorker } from '../health';
 import { PDF_JOB_TYPES } from '@/lib/pdf/capability';
 
 const scope = `pdf-capability-${randomUUID()}`;
-describe.skipIf(!process.env.DATABASE_URL).sequential('PDF capability in PostgreSQL', () => {
+const identity = process.env.DATABASE_URL ? postgresDatabaseIdentity(process.env.DATABASE_URL) : null;
+describe.skipIf(!identity || !isDisposableE2eDatabaseName(identity.databaseName)).sequential('PDF capability in PostgreSQL', () => {
   afterAll(async () => {
     await db.backgroundJob.deleteMany({ where: { dedupeKey: { startsWith: scope } } });
     await db.backgroundWorkerHeartbeat.deleteMany({ where: { workerId: { startsWith: scope } } });

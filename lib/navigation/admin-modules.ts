@@ -2,6 +2,7 @@ import { Role } from '../../generated/prisma/enums';
 import type { Permission } from '../auth/permissions-dict';
 import { RULE_CENTER_SIDEBAR_ITEMS } from './rule-center';
 import { SALES_BILL_PAGE_TITLE } from '../agent-monthly-billing/labels';
+import { ADMIN_DASHBOARD_TITLE, workbenchPageTitle } from './labels';
 
 // 受控的图标名集合。新增图标时同时更新 AppSidebar 的 ICONS map。
 export type IconName =
@@ -29,11 +30,11 @@ export type AdminModuleStatus = 'implemented' | 'placeholder';
 
 export type AdminMenuSection =
   | 'workflow'
+  | 'production'
   | 'rules'
   | 'finance'
   | 'dictionary'
-  | 'operations'
-  | 'account';
+  | 'operations';
 
 export type AdminModuleMetadata = {
   id: string;
@@ -91,10 +92,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'sales.workbench',
-    label: '工作台',
+    label: workbenchPageTitle(Role.SALES),
     routeBase: '/workbench',
     iconName: 'BookOpen',
-    breadcrumbLabel: '工作台',
+    breadcrumbLabel: workbenchPageTitle(Role.SALES),
     menuSection: 'workflow',
     status: 'implemented',
     menuOrder: 10,
@@ -103,10 +104,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'owner.salesWorkbench',
-    label: '销售工作台',
+    label: workbenchPageTitle(Role.ADMIN),
     routeBase: '/workbench',
     iconName: 'BookOpen',
-    breadcrumbLabel: '销售工作台',
+    breadcrumbLabel: workbenchPageTitle(Role.ADMIN),
     menuSection: 'workflow',
     status: 'implemented',
     menuOrder: 16,
@@ -115,10 +116,10 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
   },
   {
     id: 'owner.dashboard',
-    label: '工作台',
+    label: ADMIN_DASHBOARD_TITLE,
     routeBase: '/owner',
     iconName: 'LayoutDashboard',
-    breadcrumbLabel: '工作台',
+    breadcrumbLabel: ADMIN_DASHBOARD_TITLE,
     menuSection: 'workflow',
     status: 'implemented',
     menuOrder: 10,
@@ -150,8 +151,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'order:view:all',
   },
   {
-    // First-level entry in the pinned「常用」group (AppSidebar PINNED_HREFS);
-    // SALES / CS already have their own /orders/new modules.
+    // 与销售入口一样，侧栏将建单动作独立放在导航顶部。
     id: 'owner.orders.new',
     label: '新建工单',
     routeBase: '/orders/new',
@@ -170,7 +170,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     routeBase: '/owner/purchases',
     iconName: 'ClipboardList',
     breadcrumbLabel: '采购单',
-    menuSection: 'workflow',
+    menuSection: 'production',
     status: 'implemented',
     menuOrder: 25,
     menuRoles: [Role.ADMIN],
@@ -303,7 +303,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     routeBase: '/owner/accounts',
     iconName: 'Users',
     breadcrumbLabel: '用户管理',
-    menuSection: 'account',
+    menuSection: 'operations',
     status: 'implemented',
     menuOrder: 130,
     menuRoles: [Role.ADMIN],
@@ -363,7 +363,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     routeBase: '/foreman/outsource',
     iconName: 'PackageOpen',
     breadcrumbLabel: '外协',
-    menuSection: 'workflow',
+    menuSection: 'production',
     status: 'implemented',
     menuOrder: 40,
     menuRoles: [Role.ADMIN],
@@ -375,7 +375,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     routeBase: '/foreman/materials',
     iconName: 'Boxes',
     breadcrumbLabel: '车间用料',
-    menuSection: 'workflow',
+    menuSection: 'production',
     status: 'implemented',
     menuOrder: 45,
     menuRoles: [Role.ADMIN],
@@ -387,7 +387,7 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     routeBase: '/foreman/attendance',
     iconName: 'Clock',
     breadcrumbLabel: '工时录入',
-    menuSection: 'workflow',
+    menuSection: 'production',
     status: 'implemented',
     menuOrder: 50,
     menuRoles: [Role.ADMIN],

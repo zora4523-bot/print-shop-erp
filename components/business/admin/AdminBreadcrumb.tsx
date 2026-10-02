@@ -84,7 +84,7 @@ export const BREADCRUMB_PATH_LABELS: Readonly<Record<string, string>> =
     '/owner/materials/count': '库存盘点',
     '/orders/production': '安排生产师傅',
     '/owner/purchases/new': '新建采购单',
-    '/owner/accounts/new': '新建账号',
+    '/owner/accounts/new': '新建用户',
     '/owner/boms/new': '新建用料清单',
     '/owner/materials/new': '新建物料',
     '/owner/parties/new': '新建客户/供应商',

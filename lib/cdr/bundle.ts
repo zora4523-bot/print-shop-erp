@@ -1,3 +1,8 @@
+import { cdrPackingDiagnostic } from './diagnostics';
+import { CdrBundleError, CdrBundleStaleError } from './errors';
+export { CdrBundleError } from './errors';
+import { collectWorkbenchSelection, validateWorkbenchManifest } from './workbench';
+import { cdrManifestSchema, type CdrManifest } from './workbench-model';
 import { db } from '../db';
 import { createBundleAccessToken, decryptBundleDownloadUrl, encryptBundleDownloadUrl, hashBundleAccessToken, isBundleAccessToken } from './access-token';
 import { uploadBundleZip, type ZipUploadResult } from './zip';
@@ -29,13 +34,6 @@ import {
 // 时间窗口：dateRangeFrom / To 走 `Order.submittedAt`（业务上&ldquo;某天提交
 // 的工单的 CDR&rdquo;最直观；和 dashboard 业绩归属保持同一口径——DECISIONS
 // 2026-04-26）。
-
-export class CdrBundleError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CdrBundleError';
-  }
-}
 
 const SHANGHAI_OFFSET_HOURS = 8;
 
@@ -120,6 +118,7 @@ export type CreateBundleInput = {
   // 与 listEligibleOrders 的 input 保持一致即可。
   from: string;
   to?: string;
+  workbenchSelection?: unknown;
   // 拼绝对 URL 用 base（含 protocol，无尾斜线，如
   // 'https://erp.example.com'）。action 层从请求 headers 推导
   // （host + x-forwarded-proto），保证 split-origin 部署也得到对的
@@ -149,6 +148,7 @@ export type EnqueueBundleResult = {
 };
 
 type CollectedBundle = {
+  manifest?: CdrManifest;
   start: Date;
   end: Date;
   orderIds: string[];
@@ -158,10 +158,12 @@ type CollectedBundle = {
     orderNo: string;
     fileName: string;
     fileUrl: string;
+    folders?: string[];
   }>;
 };
 
 async function collectBundle(input: CreateBundleInput): Promise<CollectedBundle> {
+  if (input.workbenchSelection !== undefined) return collectWorkbenchSelection(input.workbenchSelection);
   if (input.orderIds.length === 0) {
     throw new CdrBundleError('至少勾选 1 个工单');
   }
@@ -234,6 +236,7 @@ export async function createBundle(
       dateRangeTo: collected.end,
       orderIds: collected.orderIds,
       designIds: collected.designIds,
+      ...(collected.manifest ? { manifest: collected.manifest } : {}),
       zipFileUrl: '',
       zipObjectKey: null,
       downloadUrl: '',
@@ -247,24 +250,21 @@ export async function createBundle(
 
   let upload: ZipUploadResult;
   try {
+    if (collected.manifest) await validateWorkbenchManifest(collected.manifest);
     upload = await uploadBundleZip(
       {
-        files: collected.files.map(({ orderNo, fileName, fileUrl }) => ({
-          orderNo,
-          fileName,
-          fileUrl,
-        })),
+        files: collected.files,
         bundleId: bundle.id,
       },
       { expireHours },
     );
-  } catch (err) {
+  } catch (error) {
     // OSS 打包失败（凭证 403 / 网络 / 对象缺失）：删掉占位 row 让 UI
     // 看到清晰失败状态，并把原因翻译成 CdrBundleError 给表单展示。
     await db.designBundle.delete({ where: { id: bundle.id } }).catch(() => {});
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error('[cdr] bundle zip upload failed:', detail);
-    throw new CdrBundleError(`CDR 打包上传失败：${detail}`);
+    if (error instanceof CdrBundleError) throw error;
+    console.error('[cdr] bundle generation failed', { bundleId: bundle.id, ...cdrPackingDiagnostic(error) });
+    throw new CdrBundleError('CDR 文件读取或打包失败，请核对附件后重试');
   }
 
   // 公开链接仅返回给已授权管理员，数据库只存 token hash。
@@ -318,6 +318,7 @@ export async function enqueueBundle(
         dateRangeTo: collected.end,
         orderIds: collected.orderIds,
         designIds: collected.designIds,
+        ...(collected.manifest ? { manifest: collected.manifest } : {}),
         zipFileUrl: '',
         zipObjectKey: null,
         downloadUrl: '',
@@ -367,7 +368,7 @@ export async function processQueuedBundle(
 }> {
   const bundle = await db.designBundle.findUnique({
     where: { id: bundleId },
-    select: { id: true, designIds: true, downloadUrl: true, status: true },
+    select: { id: true, designIds: true, downloadUrl: true, status: true, manifest: true },
   });
   if (!bundle) throw new CdrBundleError('CDR 下载包不存在');
   if (bundle.status === DesignBundleStatus.FAILED) throw new CdrBundleError('下载包已失败，请重新生成');
@@ -385,16 +386,21 @@ export async function processQueuedBundle(
     },
   });
   if (designs.length !== bundle.designIds.length) {
+    if (bundle.manifest) throw new CdrBundleStaleError();
     throw new CdrBundleError('CDR 设计文件已变更，请重新生成下载包');
   }
 
+  const parsedManifest = bundle.manifest ? cdrManifestSchema.safeParse(bundle.manifest) : null;
+  if (parsedManifest && !parsedManifest.success) throw new CdrBundleStaleError();
+  const manifest = parsedManifest?.success ? parsedManifest.data : null;
+  if (manifest) await validateWorkbenchManifest(manifest);
   const { hours: expireHours } = await getSetting('cdr_link_expire_hours');
   await context.assertLease?.();
   context.signal?.throwIfAborted();
   const upload = await uploadBundleZip(
     {
       bundleId,
-      files: designs.map((design) => ({
+      files: manifest?.files ?? designs.map((design) => ({
         orderNo: design.orderItem.order.orderNo,
         fileName: design.fileName,
         fileUrl: design.fileUrl,
