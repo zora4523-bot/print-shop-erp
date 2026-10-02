@@ -2,16 +2,18 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { decryptBundleDownloadUrl } from '../../lib/cdr/access-token';
 import { readWorkbookXml } from './_xlsx';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Locator, type TestInfo } from '@playwright/test';
 import { E2E_PASSWORD, E2E_USERS, login, midPreviousShanghaiMonth, seedSettledExternalSalesOrder, uniqueSuffix } from '../e2e/_helpers';
 import { seedOutsourcePrerequisites, withSupplyChainDb } from '../e2e/_supply-chain-fixtures';
 import { assertDurableEnvironment, expectJobSucceeded, readJob, startHeavyWorker } from './_helpers';
 
 test.beforeEach(assertDurableEnvironment);
 
-async function downloadWorkbook(page: Page, href: string, file: string, testInfo: TestInfo) {
+async function downloadWorkbook(page: Page, button: Locator, href: string, file: string, testInfo: TestInfo) {
   const downloaded = page.waitForEvent('download');
-  await page.locator(`a[href="${href}"]`).first().click();
+  const response = page.waitForResponse(res => new URL(res.url()).pathname === href && res.request().method() === 'GET');
+  await button.click();
+  expect((await response).status()).toBe(200);
   const download = await downloaded;
   const filePath = testInfo.outputPath(file);
   await download.saveAs(filePath);
@@ -40,8 +42,8 @@ test('工单导出真实排队、IO失败和worker重试后生成可读XLSX，�
   await expect(exportFiltered).toBeVisible();
   await exportFiltered.click();
   await expect(panel.getByText('已排队，完成后会出现下载按钮。', { exact: true })).toBeVisible();
-  const exported = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string }>(
-    `SELECT id,status::text,"backgroundJobId" FROM "OrderExport" WHERE filters::text LIKE $1 ORDER BY "createdAt" DESC LIMIT 1`, [`%${fixture.orderNo}%`],
+  const exported = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string; fileName: string }>(
+    `SELECT id,status::text,"backgroundJobId","fileName" FROM "OrderExport" WHERE filters::text LIKE $1 ORDER BY "createdAt" DESC LIMIT 1`, [`%${fixture.orderNo}%`],
   ));
   expect(exported.rows).toHaveLength(1);
   const row = exported.rows[0]!;
@@ -81,8 +83,9 @@ test('工单导出真实排队、IO失败和worker重试后生成可读XLSX，�
     await testInfo.attach('order-export-retry-result', { body: JSON.stringify(succeeded), contentType: 'application/json' });
     await page.reload();
     await page.getByRole('button', { name: '导出工单', exact: true }).click();
-    await expect(page.locator(`a[href="${href}"]`)).toBeVisible();
-    expect(await downloadWorkbook(page, href, 'orders.xlsx', testInfo)).toContain(fixture.orderNo);
+    const downloadButton = page.getByRole('listitem').filter({ hasText: row.fileName }).getByRole('button', { name: '下载', exact: true });
+    await expect(downloadButton).toBeVisible();
+    expect(await downloadWorkbook(page, downloadButton, href, 'orders.xlsx', testInfo)).toContain(fixture.orderNo);
     await otherAdminCannotDownload(page, href);
     // Expiry is mutable artifact metadata, not a financial/history mutation.
     await withSupplyChainDb((db) => db.query('UPDATE "OrderExport" SET "expiresAt"=NOW()-INTERVAL \'1 second\' WHERE id=$1', [row.id]));
@@ -100,7 +103,7 @@ test('月账单导出由真实worker读取请求时数据并生成可下载XLSX'
   await page.goto(`/owner/agent-bills?period=${fixture.period}&agentUserId=${fixture.agentUserId}`);
   await page.getByRole('button', { name: '导出当前结果（1 张）', exact: true }).click();
   await expect(page.getByText('正在生成导出文件，完成后会显示下载按钮。', { exact: true })).toBeVisible();
-  const exported = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string }>('SELECT id,status::text,"backgroundJobId" FROM "AgentMonthlyBillExport" WHERE filters::text LIKE $1 ORDER BY "createdAt" DESC LIMIT 1', [`%${fixture.agentUserId}%`]));
+  const exported = await withSupplyChainDb((db) => db.query<{ id: string; status: string; backgroundJobId: string; fileName: string }>('SELECT id,status::text,"backgroundJobId","fileName" FROM "AgentMonthlyBillExport" WHERE filters::text LIKE $1 ORDER BY "createdAt" DESC LIMIT 1', [`%${fixture.agentUserId}%`]));
   expect(exported.rows).toHaveLength(1);
   const row = exported.rows[0]!;
   const href = `/api/owner/agent-bills/exports/${row.id}`;
@@ -111,8 +114,9 @@ test('月账单导出由真实worker读取请求时数据并生成可下载XLSX'
   try {
     await expectJobSucceeded(row.backgroundJobId);
     await page.reload();
-    await expect(page.locator(`a[href="${href}"]`)).toBeVisible();
-    const contents = await downloadWorkbook(page, href, 'agent-bills.xlsx', testInfo);
+    const downloadButton = page.getByRole('listitem').filter({ hasText: row.fileName }).getByRole('button', { name: '下载', exact: true });
+    await expect(downloadButton).toBeVisible();
+    const contents = await downloadWorkbook(page, downloadButton, href, 'agent-bills.xlsx', testInfo);
     expect(contents).toContain(fixture.orderNo);
     expect(contents).toContain('321.09');
     await otherAdminCannotDownload(page, href);
