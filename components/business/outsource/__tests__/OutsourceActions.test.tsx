@@ -43,6 +43,7 @@ describe('OutsourceReceiveFeedback', () => {
     expect(actionsSource).toContain('已回货终态，不能直接回退');
     expect(actionsSource).toContain('不会自动确认外协应付金额');
     expect(actionsSource).toContain('已取消终态');
+    expect(actionsSource.match(/关联工单将自动完工并发送通知/g)).toHaveLength(2);
     expect(actionsSource).not.toContain('<Button type="submit"');
   });
 });

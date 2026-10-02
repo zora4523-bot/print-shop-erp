@@ -52,6 +52,11 @@ describe('师傅一键完成', () => {
     await expect.element(page.getByRole('button', { name: '完成生产' })).toBeVisible();
     await expect.element(page.getByLabelText('实际完成数量')).not.toBeVisible();
     await page.getByText('实际数量与计划不一致？上报数量').click();
+    await expect.element(page.getByLabelText('实际完成数量')).toHaveValue(null);
+    await page.getByLabelText('实际完成数量').fill('1000');
+    await expect.element(page.getByRole('button', { name: '提交数量审批' })).toBeDisabled();
+    await expect.element(page.getByText('数量与计划一致，请直接点完成生产')).toBeVisible();
+    expect(action).not.toHaveBeenCalled();
     await page.getByLabelText('实际完成数量').fill('990');
     await page.getByLabelText('数量修改原因').fill('少了 10 个');
     await page.getByRole('button', { name: '提交数量审批' }).click();

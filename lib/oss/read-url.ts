@@ -70,10 +70,11 @@ export function signDesignReadUrl(
   if (!objectKey || !objectKey.startsWith('design/')) return fileUrl;
 
   const client = createOssClient(cfg);
-  // ali-oss 的 expires 是相对秒数（内部 = 当前秒 + expires），这里换算成
+  // ali-oss 使用 Math.round(Date.now() / 1000)，相对秒数必须使用相同取整。
+  // expires 内部 = 当前秒 + expires，这里换算成
   // 桶边界的相对值；两次读秒同一秒内完成，跨秒的极小窗口只会让该次 URL
   // 与桶内其它 URL 不同，不影响正确性。
-  const nowSeconds = Math.floor(Date.now() / 1000);
+  const nowSeconds = Math.round(Date.now() / 1000);
   return client.signatureUrl(objectKey, {
     expires: designReadUrlExpiresAt(nowSeconds) - nowSeconds,
     method: 'GET',

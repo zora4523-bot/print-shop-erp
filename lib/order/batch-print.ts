@@ -190,8 +190,14 @@ export async function batchPrintStatus(actorId: string, jobId: string): Promise<
   const at = await databaseNow();
   // Same capability rule as single-order PDFs: a live HEAVY worker that cannot
   // render (pdfReady=false) or runs another version will not claim this job.
-  // A RUNNING job is already owned by a worker.
-  const worker = job.status === 'RUNNING' ? true : await db.backgroundWorkerHeartbeat.findFirst({
+  // A claimed job may continue during a capability probe, but only with a live owner.
+  const owner = job.status === 'RUNNING' && job.lockedBy
+    ? await db.backgroundWorkerHeartbeat.findFirst({
+        where: { workerId: job.lockedBy, queue: BackgroundJobQueue.HEAVY,
+          lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
+        select: { workerId: true },
+      }) : null;
+  const worker = owner ?? await db.backgroundWorkerHeartbeat.findFirst({
     where: { queue: BackgroundJobQueue.HEAVY, pdfReady: true, version: process.env.APP_VERSION || 'dev',
       lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
     select: { workerId: true },

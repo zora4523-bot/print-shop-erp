@@ -202,6 +202,7 @@ export async function waitForOrderPdfJob(
         result: true,
         lastErrorCode: true,
         createdAt: true,
+        lockedBy: true,
       },
     });
     phase = job?.status === BackgroundJobStatus.RUNNING ? 'running' : 'queued';
@@ -227,10 +228,15 @@ export async function waitForOrderPdfJob(
     // Check only after the actor/order binding and completed-state checks.
     // Database time keeps queue age and remote worker heartbeats comparable.
     const at = await databaseNow();
-    // A RUNNING job is demonstrably owned by a worker; a stale capability
-    // heartbeat (e.g. a probe queued behind this very render) must not
-    // report it unavailable.
-    const worker = job.status === BackgroundJobStatus.RUNNING ? true : await db.backgroundWorkerHeartbeat.findFirst({
+    // An active owner can finish its claimed job even while its next PDF probe
+    // waits. Once that owner's heartbeat expires, require a capable replacement.
+    const owner = job.status === BackgroundJobStatus.RUNNING && job.lockedBy
+      ? await db.backgroundWorkerHeartbeat.findFirst({
+          where: { workerId: job.lockedBy, queue: BackgroundJobQueue.HEAVY,
+            lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
+          select: { workerId: true },
+        }) : null;
+    const worker = owner ?? await db.backgroundWorkerHeartbeat.findFirst({
       where: {
         queue: BackgroundJobQueue.HEAVY,
         pdfReady: true,

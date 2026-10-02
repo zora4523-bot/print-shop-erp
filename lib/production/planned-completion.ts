@@ -95,7 +95,7 @@ export async function completePlannedProductionInTx(tx: Prisma.TransactionClient
   for (const job of plan.pending) {
     try {
       const result = await registerProductionCompletionInTx(tx, { jobId: job.id, revision: job.revision, quantity: job.plannedQty.toString(), mode: 'BACKFILL',
-        reason: REASONS[source], workDate: today, confirmedSettledDay: true }, actor, { recordSource: source });
+        reason: REASONS[source], workDate: today }, actor, { recordSource: source });
       notification = result.notification ?? notification;
     } catch (error) {
       // Curated domain messages only; unknown failures keep propagating unchanged.

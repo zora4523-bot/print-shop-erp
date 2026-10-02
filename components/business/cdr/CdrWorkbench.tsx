@@ -33,11 +33,14 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
   const serialize = (rows: CdrWorkbenchOrder[]) => JSON.stringify(rows.map(({ id, version }) => ({ id, version })));
   const [polled, setPolled] = useState<CdrHistoryRow | null>(null);
   const [pollEpoch, setPollEpoch] = useState(0);
-  const [pollMessage, setPollMessage] = useState<string | null>(null);
+  const [pollWarning, setPollWarning] = useState<{ state: CreateBundleResult; epoch: number; message: string } | null>(null);
+  const pollMessage = !pending && pollWarning?.state === state && pollWarning.epoch === pollEpoch ? pollWarning.message : null;
   const { current, url, bundleId } = cdrClientProgress(state, bundles, polled, now);
   useEffect(() => {
     if (state?.status !== 'queued') return;
     const requestedId = state.bundleId;
+    const submission = state;
+    const setPollMessage = (message: string | null) => setPollWarning(message ? { state: submission, epoch: pollEpoch, message } : null);
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const started = Date.now();
@@ -47,7 +50,8 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
         if (stopped) return;
         setPolled(result);
         if (!result) { setPollMessage('下载记录不存在，请刷新工单后重试'); return; }
-        if (result.status !== 'PENDING') { setPollMessage(null); router.refresh(); return; }
+        setPollMessage(null);
+        if (result.status !== 'PENDING') { router.refresh(); return; }
         if (cdrPollExpired(started, Date.now())) { setPollMessage('文件仍在生成，可稍后刷新进度'); return; }
         timer = setTimeout(poll, CDR_POLL_INTERVAL_MS);
       } catch {
@@ -132,15 +136,16 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
     <Disclosure className="border-t pt-2">
       <DisclosureSummary>下载记录（最近 {bundles.length} 条）<DisclosureIndicator /></DisclosureSummary>
       <Button type="button" variant="outline" onClick={() => router.refresh()}>刷新记录</Button>
-      <div className="divide-y">{bundles.map((bundle) => <BundleHistory key={bundle.id} bundle={bundle} now={now} />)}</div>
+      <div className="divide-y">{bundles.map((bundle) => <BundleHistory key={bundle.id} bundle={bundle} now={now} action={action} pending={pending} />)}</div>
       {!bundles.length && <EmptyState kind="no-data" noun="下载记录" />}
     </Disclosure>
   </div>;
 }
 
-function BundleHistory({ bundle, now }: { bundle: CdrHistoryRow; now: string }) {
+function BundleHistory({ bundle, now, action, pending }: {
+  bundle: CdrHistoryRow; now: string; action: (formData: FormData) => void; pending: boolean;
+}) {
   const { copy, feedback } = useCopyToClipboard();
-  const [state, action, pending] = useActionState<CreateBundleResult | null, FormData>(createWorkbenchBundleAction, null);
   const expired = new Date(bundle.expiresAt).getTime() <= new Date(now).getTime();
   const ready = bundle.status === 'READY' && !expired && !bundle.revokedAt && !bundle.isMock && !!bundle.downloadUrl;
   const display = DESIGN_BUNDLE_DISPLAY_STATUS_REGISTRY[bundle.revokedAt ? 'REVOKED' : bundle.status === 'FAILED' ? 'FAILED' : bundle.status === 'PENDING' ? 'PENDING' : expired ? 'EXPIRED' : bundle.isMock ? 'MOCK' : 'READY'];
@@ -153,8 +158,6 @@ function BundleHistory({ bundle, now }: { bundle: CdrHistoryRow; now: string }) 
       <input type="hidden" name="bundleId" value={bundle.id} />
       <PendingButton pending={pending} pendingLabel="正在重新生成…" variant="outline">按原工单重新生成</PendingButton>
       <p className="mt-1 text-xs text-muted-foreground">使用这些工单当前的 CDR 文件。</p>
-      {state?.status === 'error' && <ActionNotice tone="error" title={state.message} />}
-      {state && (state.status === 'success' || state.status === 'queued') && <ActionNotice tone="success" title="已创建新记录，可在下载记录中查看" />}
     </form>}
   </div>;
 }

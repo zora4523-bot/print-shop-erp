@@ -97,8 +97,8 @@ describe('batch PDF invariants', () => {
   it('only counts HEAVY workers that can currently render PDFs, unless the job is already running', async () => {
     await batchPrintStatus('admin', 'j');
     expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', pdfReady: true, version: process.env.APP_VERSION || 'dev' });
-    m.worker.mockResolvedValue(null);
-    m.find.mockResolvedValue({ ...job, status: 'RUNNING', result: { completed: 1, issues: [] } });
+    m.worker.mockImplementation(async ({ where }) => where.workerId === 'owner' ? { workerId: 'owner' } : null);
+    m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'owner', result: { completed: 1, issues: [] } });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending', phase: 'rendering' });
   });
   it('rechecks contents even after reading the finished artifact', async () => {
@@ -149,7 +149,7 @@ it('does not cache or publish a PDF whose uploaded artwork failed', async () => 
   expect(m.write).not.toHaveBeenCalled();
 });
 
-it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError', 'TargetCloseError'])(
+it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError'])(
   'rethrows PDF infrastructure failures (%s) so the durable job retries instead of reporting the order',
   async (name) => {
     m.render.mockRejectedValueOnce(Object.assign(new Error('infra'), { name }));
@@ -161,4 +161,17 @@ it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError', 'TargetCloseEr
 it('classifies a raw cache write failure (ENOSPC) as storage infrastructure and rethrows it', async () => {
   m.write.mockRejectedValueOnce(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }));
   await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name: 'PdfArtifactStorageError' });
+});
+
+it.each(['TargetCloseError', 'ProtocolError'])('reports a page-level %s without retrying the whole batch', async (name) => {
+  m.render.mockRejectedValueOnce(Object.assign(new Error('page content failed'), { name }));
+  expect(await handleBatchPrintJob(job)).toMatchObject({ completed: 0, issues: [{ position: 1, message: '工单生成失败，请检查打印内容后重试' }] });
+  expect(m.write).not.toHaveBeenCalled();
+});
+it('reports unavailability for a crashed running worker when its heartbeat expires', async () => {
+  m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'dead-owner', result: { completed: 1, issues: [] } });
+  m.worker.mockResolvedValue(null);
+  expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'unavailable' });
+  expect(m.worker).toHaveBeenCalledTimes(2);
+  expect(m.worker).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ pdfReady: true }) }));
 });

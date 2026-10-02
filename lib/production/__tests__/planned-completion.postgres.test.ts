@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
+import { lockPieceworkSettlement } from '@/lib/salary/piecework-settlement';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 import { shipOrder } from '@/lib/order';
 import { runAdminOrderBatch } from '@/lib/order/admin-batch';
@@ -117,6 +118,23 @@ pg.sequential('planned completion (batch / ship implies completion) · real Post
     await expect(completeOrderProductionAtPlan({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion }, admin))
       .rejects.toMatchObject({ code: 'WORKER_UNAVAILABLE', message: expect.stringContaining('已离职师傅') });
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('PENDING');
+  });
+
+  it('requires explicit settled-day handling and rolls back proxy completion and shipment', async () => {
+    const worker = await newWorker();
+    const paid = await released(worker);
+    const pending = await released(worker, { noCharge: true });
+    await registerProductionCompletion({ jobId: paid.job.id, revision: paid.job.revision, quantity: '1000', mode: 'COMPLETE', reason: '' }, worker);
+    const receipt = await lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) });
+    const frozen = await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } });
+    await expect(completeOrderProductionAtPlan({ orderId: pending.order.id, expectedRevision: pending.order.revision, expectedWorkOrderVersion: pending.order.workOrderVersion }, admin))
+      .rejects.toMatchObject({ code: 'REGISTRATION_FAILED', message: expect.stringContaining('工资已结算') });
+    await expect(registerShipment(shipmentInput(pending.order), admin)).rejects.toThrow('工资已结算');
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: pending.job.id } })).status).toBe('PENDING');
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: pending.order.shipments[0].id } })).status).toBe('PLANNED');
+    expect(await db.productionWage.count({ where: { jobId: pending.job.id } })).toBe(0);
+    expect(await db.productionFactReview.count({ where: { jobId: pending.job.id } })).toBe(0);
+    expect(await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } })).toEqual(frozen);
   });
 
   it('confirming the first of two addresses registers production at plan; the order waits for the second address', async () => {

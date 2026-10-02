@@ -374,10 +374,17 @@ describe('PDF queue availability', () => {
     await expect(waitForOrderPdfJob('j', { expected: { ...expected, actorId: 'other' } })).resolves.toEqual({ status: 'failed', errorCode: 'JobNotFound' });
     expect(dbMock.backgroundWorkerHeartbeat.findFirst).not.toHaveBeenCalled();
   });
-  it('never reports a RUNNING job unavailable from a stale PDF capability heartbeat', async () => {
-    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.RUNNING });
-    dbMock.backgroundWorkerHeartbeat.findFirst.mockResolvedValue(null);
+  it('trusts a fresh owning worker heartbeat even while PDF capability is stale', async () => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.RUNNING, lockedBy: 'owner' });
+    dbMock.backgroundWorkerHeartbeat.findFirst.mockImplementation(async ({ where }) => where.workerId === 'owner' ? { workerId: 'owner' } : null);
     await expect(waitForOrderPdfJob('j', { expected, timeoutMs: 1_000 })).resolves.toEqual({ status: 'timeout', phase: 'running' });
-    expect(dbMock.backgroundWorkerHeartbeat.findFirst).not.toHaveBeenCalled();
+    expect(dbMock.backgroundWorkerHeartbeat.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workerId: 'owner', lastSeenAt: { gte: expect.any(Date) } }) }));
   });
+  it.each([null, 'dead-owner'])('checks capability when the running owner is missing or stale (%s)', async (lockedBy) => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.RUNNING, lockedBy });
+    dbMock.backgroundWorkerHeartbeat.findFirst.mockResolvedValue(null);
+    await expect(waitForOrderPdfJob('j', { expected })).resolves.toEqual({ status: 'unavailable' });
+    expect(dbMock.backgroundWorkerHeartbeat.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ pdfReady: true }) }));
+  });
+
 });

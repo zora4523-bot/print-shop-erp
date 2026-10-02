@@ -27,7 +27,7 @@ const SALES_TABS: Array<{
   { id: 'todo', label: '需关注', count: 'todo' },
   { id: 'doing', label: '进行中', count: 'doing' },
   { id: 'shipped', label: '已发货', count: 'shipped' },
-  { id: 'done', label: '已结算', count: 'done' },
+  { id: 'done', label: '已完成', count: 'done' },
   { id: 'cancelled', label: '已取消', count: 'cancelled' },
   { id: 'draft', label: '草稿', count: 'draft' },
 ];

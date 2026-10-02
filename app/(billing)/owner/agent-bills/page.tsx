@@ -52,6 +52,9 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
     getAgentBillDashboard(actor),
   ]);
 
+  const latestClosedPeriod = previousShanghaiMonth();
+  const generatePeriod = period && period <= latestClosedPeriod ? period : latestClosedPeriod;
+
   return (
     <div className="min-w-0 space-y-6">
       <PageHeader
@@ -95,7 +98,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
       </div>
       <BillDashboard data={dashboard} accounts={accounts} expanded={!period && !status && !agentUserId} />
       <section className="rounded-xl border bg-card p-4 shadow-sm">
-        <GenerateAgentMonthlyBillsForm key={period ?? previousShanghaiMonth()} defaultPeriod={period ?? previousShanghaiMonth()} />
+        <GenerateAgentMonthlyBillsForm key={generatePeriod} defaultPeriod={generatePeriod} />
         <p className="mt-2 text-xs text-muted-foreground">
           仅可选择已结束的月份。生成或更新全部外部销售该月的草稿账单，不受列表筛选影响。
         </p>
