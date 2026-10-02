@@ -836,13 +836,13 @@ function RuleRows({
             </p>
           ) : null}
         </td>
-        <td className="px-3 py-3 text-right font-sans font-semibold tabular-nums">
+        <td className="whitespace-nowrap px-3 py-3 text-right font-sans font-semibold tabular-nums">
           {item.currentAmountLabel}
         </td>
         {hasDraft ? (
           <td
             className={cn(
-              'px-3 py-3 text-right font-sans font-semibold tabular-nums',
+              'whitespace-nowrap px-3 py-3 text-right font-sans font-semibold tabular-nums',
               item.changed && 'text-warning-foreground',
             )}
           >

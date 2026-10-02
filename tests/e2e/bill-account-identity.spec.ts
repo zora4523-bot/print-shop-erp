@@ -33,7 +33,7 @@ test('同名大表哥账号：未出账定位、排行、操作与销售隔离',
     const row = unbilled.getByRole('row').filter({ hasText: account.orderNo });
     await expect(row).toContainText('大表哥');
     await expect(row).toContainText(account.agentUsername);
-    const href = new URL(await row.getByRole('link', { name: `查看 ${first.period} 账单` }).getAttribute('href') as string, baseURL);
+    const href = new URL(await row.getByRole('link', { name: `处理 ${first.period} 未出账工单` }).getAttribute('href') as string, baseURL);
     expect(href.searchParams.get('agentUserId')).toBe(account.agentUserId);
     expect(href.searchParams.get('period')).toBe(first.period);
   }
@@ -53,7 +53,7 @@ test('同名大表哥账号：未出账定位、排行、操作与销售隔离',
     }
   }
   await checkResponsive(page, 'unbilled-accounts');
-  await unbilled.getByRole('row').filter({ hasText: first.orderNo }).getByRole('link', { name: `查看 ${first.period} 账单` }).click();
+  await unbilled.getByRole('row').filter({ hasText: first.orderNo }).getByRole('link', { name: `处理 ${first.period} 未出账工单` }).click();
   await expect(page.getByRole('combobox', { name: '外部销售', exact: true })).toHaveValue(first.agentUserId);
   await page.getByRole('button', { name: '生成或更新草稿', exact: true }).click();
   await expect(page.getByText(new RegExp(`^已生成或更新 \\d+ 张 ${first.period} 账单$`))).toBeVisible();

@@ -21,7 +21,7 @@ declare module 'vitest/browser' {
 export default defineConfig({
   // Prebundle chart and select dependencies before mounting React browser fixtures.
   // Discovering it mid-test can reload the module graph with another React instance.
-  optimizeDeps: { include: ['recharts', '@base-ui/react/select', '@hookform/resolvers/zod', 'react-hook-form'] },
+  optimizeDeps: { include: ['next/dist/shared/lib/router-context.shared-runtime', 'recharts', '@base-ui/react/select', '@hookform/resolvers/zod', 'react-hook-form'] },
   // next/form reads process.env at module scope; browser mode has no `process`.
   define: { 'process.env': JSON.stringify({ NODE_ENV: 'test' }) },
   resolve: {

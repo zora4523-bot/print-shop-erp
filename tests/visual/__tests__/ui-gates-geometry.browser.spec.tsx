@@ -20,6 +20,16 @@ function mount(html: string) {
 
 const control = 'style="height:44px;width:120px;box-sizing:border-box"';
 
+it('flags badge glyphs outside the pill even inside a horizontal table scroller', () => {
+  mount('<div style="width:30px;overflow-x:auto"><span data-slot="badge" style="display:inline-flex;width:32px;height:24px;font-size:12px;line-height:16px;align-items:center">已确认·待收</span></div>');
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('badge-text-overflow'))).toHaveLength(1);
+});
+
+it('accepts a complete badge that scrolls with its table', () => {
+  mount('<div style="width:30px;overflow-x:auto"><span data-slot="badge" style="display:inline-flex;white-space:nowrap;height:24px;font-size:12px;line-height:16px;align-items:center">已确认·待收</span></div>');
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('badge-text-overflow'))).toEqual([]);
+});
+
 it('flags equal-height controls whose bottoms are offset in one row', () => {
   mount(`<div style="display:flex;align-items:flex-start;gap:8px">
     <input ${control} aria-label="名称" />
@@ -184,4 +194,16 @@ it('still ignores hyphenated identifiers whose segments wrap', () => {
   mount(`<p style="width:40px;overflow-wrap:anywhere;font-size:16px">GD-260824-001</p>
     <p style="width:40px;overflow-wrap:anywhere;font-size:16px">e2e-sales-16d7ca8d-5532-40d8</p>`);
   expect(collectGeometryIssues().filter((issue) => issue.startsWith('number-split'))).toEqual([]);
+});
+
+
+it('flags single-character column headings and currency separated from table amounts', () => {
+  mount('<table style="width:40px;table-layout:fixed"><thead><tr><th style="font-size:16px;padding:12px">预计回货</th></tr></thead><tbody><tr><td style="font-size:16px">¥ 123,456.78</td></tr></tbody></table>');
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('table-heading-stacked'))).toHaveLength(1);
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('table-money-split'))).toHaveLength(1);
+});
+
+it('allows readable two-line headings and intact amounts inside a local scroller', () => {
+  mount('<div style="width:40px;overflow-x:auto"><table style="min-width:140px"><thead><tr><th>预计<br>回货</th></tr></thead><tbody><tr><td style="white-space:nowrap">¥ 123,456.78</td></tr></tbody></table></div>');
+  expect(collectGeometryIssues().filter((issue) => issue.startsWith('table-heading-stacked') || issue.startsWith('table-money-split'))).toEqual([]);
 });

@@ -17,6 +17,8 @@ type RegistrationJob = {
 };
 export function CompletionRegistrationForm({ job, admin, today }: { job: RegistrationJob; admin: boolean; today: string }) {
   const [state, action, pending] = useActionState(registerProductionCompletionAction, null);
+  const [reportedQuantity, setReportedQuantity] = useState('');
+  const sameAsPlan = reportedQuantity !== '' && Number(reportedQuantity) === Number(job.quantity);
   const [day, setDay] = useState(job.workDate ?? today);
   const approval = job.status === 'REQUESTED' || !!(job.historical && job.requestedQty);
   const recovery = admin && job.historical;
@@ -30,9 +32,10 @@ export function CompletionRegistrationForm({ job, admin, today }: { job: Registr
       <DisclosureSummary className="gap-2"><span className="min-w-0 flex-1">实际数量与计划不一致？上报数量</span><ChevronDown aria-hidden className="size-4 shrink-0 transition-transform group-open:rotate-180" /></DisclosureSummary>
       <form action={action} aria-busy={pending} className="space-y-3 pt-2">
         <input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="revision" value={job.revision} />
-        <div className="space-y-1"><label htmlFor={`${job.id}-quantity`}>实际完成数量</label><Input id={`${job.id}-quantity`} className="min-h-11" name="quantity" type="number" min="1" step="1" max="9999999999" required defaultValue={job.quantity} /></div>
+        <div className="space-y-1"><label htmlFor={`${job.id}-quantity`}>实际完成数量</label><Input id={`${job.id}-quantity`} className="min-h-11" name="quantity" type="number" min="1" step="1" max="9999999999" required value={reportedQuantity} onChange={event => setReportedQuantity(event.target.value)} /></div>
         <div className="space-y-1"><label htmlFor={`${job.id}-reason`}>数量修改原因</label><Input id={`${job.id}-reason`} className="min-h-11" name="reason" maxLength={500} required /></div>
-        <Button type="submit" name="mode" value="COMPLETE" variant="outline" className="min-h-11" disabled={pending || state?.ok}>{pending ? '正在提交…' : '提交数量审批'}</Button>
+        <Button type="submit" name="mode" value="COMPLETE" variant="outline" className="min-h-11" disabled={pending || state?.ok || sameAsPlan}>{pending ? '正在提交…' : '提交数量审批'}</Button>
+        {sameAsPlan && <p role="status" className="text-sm text-muted-foreground">数量与计划一致，请直接点完成生产</p>}
         {state && <p role="status" className={state.ok ? 'text-muted-foreground' : 'text-destructive'}>{state.message}</p>}
       </form>
     </Disclosure>

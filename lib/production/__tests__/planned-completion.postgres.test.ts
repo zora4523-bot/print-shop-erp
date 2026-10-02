@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
+import { lockPieceworkSettlement } from '@/lib/salary/piecework-settlement';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 import { shipOrder } from '@/lib/order';
 import { runAdminOrderBatch } from '@/lib/order/admin-batch';
@@ -119,6 +120,44 @@ pg.sequential('planned completion (batch / ship implies completion) · real Post
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('PENDING');
   });
 
+  it.each([{ isActive: false }, { role: 'SALES' as const }])('rejects an unavailable worker account %j without recording wages', async data => {
+    const worker = await newWorker('待改派师傅');
+    const { order, job } = await released(worker);
+    await db.user.update({ where: { id: worker.id }, data });
+    await expect(completeOrderProductionAtPlan({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion }, admin))
+      .rejects.toMatchObject({ code: 'WORKER_UNAVAILABLE' });
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('PENDING');
+    expect(await wageOf(job.id)).toBeNull();
+  });
+
+  it('rolls back planned completion and shipment when required outsourcing is missing', async () => {
+    const worker = await newWorker();
+    const { order, job } = await released(worker);
+    const current = await db.order.update({ where: { id: order.id }, data: { requiresOutsource: true }, include: { shipments: { orderBy: { sequence: 'asc' } } } });
+    await expect(registerShipment(shipmentInput(current), admin)).rejects.toThrow(/外协/);
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('PENDING');
+    expect(await wageOf(job.id)).toBeNull();
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: order.shipments[0].id } })).status).toBe('PLANNED');
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).revision).toBe(current.revision);
+  });
+
+  it('requires explicit settled-day handling and rolls back proxy completion and shipment', async () => {
+    const worker = await newWorker();
+    const paid = await released(worker);
+    const pending = await released(worker, { noCharge: true });
+    await registerProductionCompletion({ jobId: paid.job.id, revision: paid.job.revision, quantity: '1000', mode: 'COMPLETE', reason: '' }, worker);
+    const receipt = await lockPieceworkSettlement({ reporterId: worker.id, workDate: todayShanghai(), actor: admin, now: new Date(Date.now() + 86400000) });
+    const frozen = await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } });
+    await expect(completeOrderProductionAtPlan({ orderId: pending.order.id, expectedRevision: pending.order.revision, expectedWorkOrderVersion: pending.order.workOrderVersion }, admin))
+      .rejects.toMatchObject({ code: 'REGISTRATION_FAILED', message: expect.stringContaining('工资已结算') });
+    await expect(registerShipment(shipmentInput(pending.order), admin)).rejects.toThrow('工资已结算');
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: pending.job.id } })).status).toBe('PENDING');
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: pending.order.shipments[0].id } })).status).toBe('PLANNED');
+    expect(await db.productionWage.count({ where: { jobId: pending.job.id } })).toBe(0);
+    expect(await db.productionFactReview.count({ where: { jobId: pending.job.id } })).toBe(0);
+    expect(await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } })).toEqual(frozen);
+  });
+
   it('confirming the first of two addresses registers production at plan; the order waits for the second address', async () => {
     const worker = await newWorker();
     const { order, job } = await released(worker, { addresses: 2 });
@@ -165,4 +204,18 @@ pg.sequential('planned completion (batch / ship implies completion) · real Post
     await expect(shipOrder(order.id, admin, command)).resolves.toMatchObject({ idempotentReplay: true });
     expect(await db.productionWage.count({ where: { jobId: job.id } })).toBe(1);
   });
+  it('reports no pending jobs honestly and leaves an unreconciled released order unshipped', async () => {
+    const order = await db.order.create({ data: { orderNo: `PLANNED-EMPTY-${randomUUID()}`, submitterId: `${prefix}_sales`, createdById: admin.id,
+      submitterRole: 'SALES', settlementType: 'EXTERNAL_SALES', simpleProduction: true, status: 'RELEASED',
+      pricingStatus: 'ADMIN_CONFIRMED', pricingConfirmedAt: new Date(), pricingConfirmedById: admin.id, confirmedFee: '100', totalAmount: '100',
+      shipments: { create: { sequence: 1, receiverName: '测试', receiverPhone: '13800138000', receiverAddress: '测试地址' } } }, include: { shipments: true } });
+    await expect(shipOrder(order.id, admin, { expectedRevision: order.revision, expectedEditVersion: order.editVersion,
+      expectedWorkOrderVersion: order.workOrderVersion, expectedPriceRevision: order.priceRevision, idempotencyKey: randomUUID(),
+      trackingNo: 'ZTEMPTY', shipments: [{ shipmentId: order.shipments[0].id, trackingNo: 'ZTEMPTY', weightKg: null }] }))
+      .rejects.toThrow('没有待登记的生产任务，工单仍未完工，暂不能发货');
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('RELEASED');
+    expect(await db.productionWage.count({ where: { job: { orderId: order.id } } })).toBe(0);
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: order.shipments[0].id } })).shippedAt).toBeNull();
+  });
+
 });

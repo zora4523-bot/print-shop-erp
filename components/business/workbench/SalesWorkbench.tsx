@@ -2,7 +2,6 @@
 
 import { paperDisplayLabel } from '@/lib/rules/paper-label';
 import { useState } from 'react';
-import Link from 'next/link';
 import {
   BookOpen,
   Calculator,
@@ -17,7 +16,7 @@ import {
   SALES_SCENARIOS,
   PAPER_GUIDE,
 } from '@/lib/workbench/knowledge';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
 import { Input } from '@/components/ui/input';
@@ -30,6 +29,7 @@ import {
 import { WorkbenchCalculator } from './WorkbenchCalculator';
 import type { PricingCraftIdentity } from '@/lib/order/pricing-route';
 import type { ExternalSalesAccountOption } from '@/lib/order/external-sales-association';
+import { workbenchPageTitle } from '@/lib/navigation/labels';
 
 export function SalesWorkbench({
   options,
@@ -37,7 +37,9 @@ export function SalesWorkbench({
   draftScope = '',
   catalogUnavailable = false,
   externalSalesAccounts,
+  title = workbenchPageTitle(undefined),
 }: {
+  title?: string;
   options: ExternalCreateOrderOptions;
   externalSalesAccounts?: readonly ExternalSalesAccountOption[];
   catalogUnavailable?: boolean;
@@ -61,7 +63,7 @@ export function SalesWorkbench({
   return (
     <div className="mx-auto max-w-7xl space-y-4" data-testid="sales-workbench">
       <div className="flex flex-col gap-2 rounded-xl border bg-card p-2 sm:flex-row sm:items-center">
-        <PageHeader title="工作台" className="sr-only" />
+        <PageHeader title={title} className="sr-only" />
         <nav
           aria-label="工作台分区"
           className="grid min-w-0 flex-1 grid-cols-3 gap-2"
@@ -87,17 +89,6 @@ export function SalesWorkbench({
             </Button>
           ))}
         </nav>
-        <Link
-          href="/orders/new"
-          prefetch={false}
-          className={buttonVariants({
-            variant: 'outline',
-            className: 'min-h-11 shrink-0 self-end sm:self-auto',
-          })}
-        >
-          <Plus aria-hidden className="size-4" />
-          新建工单
-        </Link>
       </div>
       <section
         hidden={section !== 'quote'}

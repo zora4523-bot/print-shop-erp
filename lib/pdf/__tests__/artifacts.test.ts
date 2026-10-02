@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
-const oss = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn(), head: vi.fn() }));
+const oss = vi.hoisted(() => ({ put: vi.fn(), get: vi.fn(), delete: vi.fn(), head: vi.fn() }));
 vi.mock('../../oss/client', () => ({ createOssClient: () => oss }));
 vi.mock('../../oss/config', () => ({ readOssConfig: () => ({ configured: true, cfg: {} }) }));
 import { assertPdfArtifactAvailable, checkPdfArtifactStorage, cleanupOldPdfArtifacts, PDF_ARTIFACT_TTL_MS, readPdfArtifact, writePdfArtifact } from '../artifacts';
@@ -13,7 +13,7 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'erp-pdf-storage-test-'));
   vi.stubEnv('PDF_ARTIFACT_DIR', dir);
   vi.stubEnv('PDF_ARTIFACT_STORAGE', 'filesystem');
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 afterEach(async () => { vi.unstubAllEnvs(); await rm(dir, { recursive: true, force: true }); });
 describe('PDF artifact persistence', () => {
@@ -80,4 +80,22 @@ it('probes storage with real bytes and cleans only its own artifact', async () =
   await checkPdfArtifactStorage(Buffer.from('%PDF-probe'));
   expect(await readdir(dir)).toEqual(['business.pdf']);
   expect((await readPdfArtifact('business.pdf')).toString()).toBe('business');
+});
+
+it('keeps OSS read/write capability when cleanup fails and preserves primary errors', async () => {
+  vi.stubEnv('PDF_ARTIFACT_STORAGE', 'oss');
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    const content = Buffer.from('%PDF-probe');
+    oss.get.mockResolvedValue({ content, res: { headers: { 'last-modified': new Date().toUTCString() } } });
+    oss.delete.mockRejectedValue(new Error('private credential diagnostics'));
+    await expect(checkPdfArtifactStorage(content)).resolves.toEqual({ probeRemoved: false });
+    expect(oss.delete).toHaveBeenCalledWith(oss.put.mock.calls[0][0]);
+    expect(warn).toHaveBeenCalledWith('[pdf-probe] cleanup-failed');
+    const failure = new Error('put failed');
+    oss.put.mockRejectedValueOnce(failure);
+    await expect(checkPdfArtifactStorage(content)).rejects.toBe(failure);
+    oss.get.mockResolvedValueOnce({ content: Buffer.from('wrong'), res: { headers: { 'last-modified': new Date().toUTCString() } } });
+    await expect(checkPdfArtifactStorage(content)).rejects.toThrow('PDF_ARTIFACT_MISMATCH');
+  } finally { warn.mockRestore(); }
 });

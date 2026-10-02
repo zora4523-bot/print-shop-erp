@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { finished, PassThrough, type Readable } from 'node:stream';
 import { ZipArchive } from 'archiver';
 import { readOssConfig, type OssConfig } from '../oss/config';
@@ -32,7 +33,7 @@ export type ZipUploadResult = {
 
 export type ZipUploadInput = {
   // 要打的 CDR 文件 OSS URL 列表（从 OrderItemDesign.fileUrl 取）
-  files: ReadonlyArray<{ orderNo: string; fileName: string; fileUrl: string }>;
+  files: ReadonlyArray<{ orderNo: string; fileName: string; fileUrl: string; folders?: readonly string[] }>;
   // 用于对象 key：bundles/<bundleId>.zip
   bundleId: string;
 };
@@ -93,9 +94,31 @@ function deriveObjectKey(fileUrl: string, cfg: OssConfig): string {
   return key;
 }
 
-// ZIP 条目名的防御性清洗。登记时已按 designFileNameIssue 拒绝路径分隔符、
-// 控制与双向字符及非 .cdr 扩展名；这里再兜住历史数据：只取最后一段、去掉
-// 不可见字符、强制 .cdr 扩展名，条目永远落在 `<工单号>/` 目录内。
+/** Use the same object-key rules as the actual packer, without touching storage. */
+export function isBundleSourceAddressValid(fileUrl: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    const url = new URL(fileUrl);
+    if (!['http:', 'https:'].includes(url.protocol)) return false;
+    const config = readOssConfig(env);
+    if (config.configured) { deriveObjectKey(fileUrl, config.cfg); return true; }
+    return decodeURIComponent(url.pathname).replace(/^\/+/, '').startsWith('design/');
+  } catch { return false; }
+}
+
+// Keep directory components compact; filenames use a separate, larger limit.
+export function safeArchiveFolder(value: string, maxBytes = 50): string {
+  let cleaned = stripUnsafeFileNameChars(value.replace(/[/\\<>:"|?*]/g, '_'))
+    .replace(/^[. ]+|[. ]+$/g, '');
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(cleaned)) cleaned = `_${cleaned}`;
+  if (Buffer.byteLength(cleaned, 'utf8') > maxBytes) {
+    const suffix = createHash('sha256').update(cleaned).digest('hex').slice(0, 8);
+    const chars = Array.from(cleaned);
+    while (Buffer.byteLength(chars.join(''), 'utf8') > maxBytes - 10) chars.pop();
+    cleaned = `${chars.join('')}_${suffix}`;
+  }
+  return cleaned || '未命名';
+}
+
 function safeEntryFileName(fileName: string): string {
   const lastSegment = fileName.split(/[/\\]/).pop() ?? '';
   const cleaned = stripUnsafeFileNameChars(lastSegment).trim();
@@ -256,7 +279,7 @@ async function generateRealZip(
 
   try {
     // ZIP 内按工单号分目录；同名文件追加序号，避免静默覆盖。
-    const usedNames = new Map<string, number>();
+    const usedNames = new Set<string>();
     for (const entry of entries) {
       await context.assertLease?.();
       context.signal?.throwIfAborted();
@@ -266,14 +289,14 @@ async function generateRealZip(
         client.getStream(entry.objectKey, { timeout: DESIGN_GET_TIMEOUT }),
         (late) => (late.stream as Readable | undefined)?.destroy(),
       );
-      const fileName = safeEntryFileName(entry.fileName);
-      const baseName = `${entry.orderNo}/${fileName}`;
-      const seen = usedNames.get(baseName) ?? 0;
-      usedNames.set(baseName, seen + 1);
-      const name =
-        seen === 0
-          ? baseName
-          : `${entry.orderNo}/(${seen + 1}) ${fileName}`;
+      const safeName = safeArchiveFolder(safeEntryFileName(entry.fileName), 240);
+      const fileName = /\.cdr$/i.test(safeName) ? safeName : `${safeName}.cdr`;
+      const folder = (entry.folders ?? [entry.orderNo]).map((part) => safeArchiveFolder(part)).join('/');
+      const baseName = `${folder}/${fileName}`;
+      let name = baseName;
+      let suffix = 2;
+      while (usedNames.has(name.normalize('NFC').toLocaleLowerCase('en-US'))) name = `${folder}/(${suffix++}) ${fileName}`;
+      usedNames.add(name.normalize('NFC').toLocaleLowerCase('en-US'));
       await upload.append(result.stream as Readable, name);
     }
     await upload.finish();

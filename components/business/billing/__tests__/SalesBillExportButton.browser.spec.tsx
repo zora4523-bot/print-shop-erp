@@ -16,12 +16,12 @@ it('keeps failed downloads on the page and allows retry without saving JSON or l
   const fetch = vi.spyOn(window, 'fetch').mockResolvedValueOnce(new Response('{"error":"private"}', { status: 503 })).mockResolvedValueOnce(new Response('login', { headers: { 'Content-Type': 'text/html' } }));
   const create = vi.spyOn(URL, 'createObjectURL');
   flushSync(() => root.render(<SalesBillExportButton href="/api/sales/bills/export" label="导出当前账单" />));
-  await userEvent.click(page.getByRole('link', { name: '导出当前账单' }));
+  await userEvent.click(page.getByRole('button', { name: '导出当前账单' }));
   await expect.element(page.getByRole('alert')).toHaveTextContent('暂时无法下载');
-  await userEvent.click(page.getByRole('link', { name: '导出当前账单' }));
+  await userEvent.click(page.getByRole('button', { name: '导出当前账单' }));
   await expect.element(page.getByRole('alert')).toHaveTextContent('未收到有效');
   expect(fetch).toHaveBeenCalledTimes(2); expect(create).not.toHaveBeenCalled();
-  expect(host.querySelector('a')?.hasAttribute('download')).toBe(true);
+  expect(host.querySelector('a[download]')).toBeNull();
 });
 
 it('guards duplicate downloads and aborts an unfinished request when unmounted', async () => {
@@ -31,8 +31,8 @@ it('guards duplicate downloads and aborts an unfinished request when unmounted',
     return new Promise(() => undefined);
   });
   flushSync(() => root.render(<SalesBillExportButton href="/api/sales/bills/export" label="导出账单" />));
-  const link = host.querySelector('a')!;
+  const link = host.querySelector('button')!;
   flushSync(() => { link.click(); link.click(); });
-  expect(fetch).toHaveBeenCalledTimes(1); expect(link.getAttribute('aria-disabled')).toBe('true');
+  expect(fetch).toHaveBeenCalledTimes(1); expect(link.disabled).toBe(true);
   flushSync(() => root.render(null)); expect(signal?.aborted).toBe(true);
 });

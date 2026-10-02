@@ -32,7 +32,7 @@ for (const width of [375, 1280]) test(`管理员 ${width}px 从导航找到用�
   await page.setViewportSize({ width, height: 852 });
   await login(page, { username: E2E_USERS.owner!.username, password: E2E_PASSWORD, from: '/owner' });
   if (width === 375) await page.getByRole('button', { name: '打开/关闭侧边栏菜单', exact: true }).click();
-  const dictionary = page.getByRole('button', { name: /^字典 (展开|收起)$/ });
+  const dictionary = page.getByRole('button', { name: /^基础资料\s*(展开|收起)$/ });
   if (await dictionary.getAttribute('aria-expanded') !== 'true') await dictionary.click();
   await page.getByRole('link', { name: '用料清单', exact: true }).click();
   await expect(page).toHaveURL(/\/owner\/boms$/);

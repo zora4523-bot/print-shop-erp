@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '../../../generated/prisma/client';
 import { Role } from '../../../generated/prisma/enums';
 
 const mocks = vi.hoisted(() => {
@@ -120,6 +121,33 @@ describe('settled order correction (owner 2026-10-01)', () => {
     });
     expect(mocks.allocate).toHaveBeenCalledWith(mocks.tx, { billId: 'bill-1', agentUserId: 'sales-1', period: '2026-09' });
     expect(mocks.tx.order.update.mock.calls[0][0].data.settledFee).toBe('214.80');
+  });
+
+  it('excludes waived charges when refreshing a corrected draft snapshot', async () => {
+    mocks.tx.agentMonthlyBillItem.findUnique.mockResolvedValue(draftItem);
+    mocks.tx.order.findUniqueOrThrow.mockResolvedValue({
+      settledFee: new Decimal('179.80'), customName: null, processingAmount: new Decimal('180.00'),
+      customerCharges: [
+        { description: '免收', amount: null, status: 'WAIVED' },
+        { description: '调整', amount: new Decimal('-0.20'), status: 'FINAL' },
+      ],
+    });
+    await correctSettledOrder(input(), admin);
+    expect(mocks.tx.order.findUniqueOrThrow).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({ customerCharges: expect.objectContaining({ select: { description: true, amount: true, status: true } }) }),
+    }));
+    expect(mocks.tx.agentMonthlyBillItem.update.mock.calls[0][0].data.settlementDetailSnapshot).toEqual({
+      schemaVersion: 1, orderName: null, processingAmount: '180.00', charges: [{ description: '调整', amount: '-0.20' }],
+    });
+  });
+
+  it('writes database null for unavailable corrected draft evidence', async () => {
+    mocks.tx.agentMonthlyBillItem.findUnique.mockResolvedValue(draftItem);
+    mocks.tx.order.findUniqueOrThrow.mockResolvedValue({
+      settledFee: new Decimal('179.80'), customName: null, processingAmount: null, customerCharges: [],
+    });
+    await correctSettledOrder(input(), admin);
+    expect(mocks.tx.agentMonthlyBillItem.update.mock.calls[0][0].data.settlementDetailSnapshot).toBe(Prisma.DbNull);
   });
 
   it.each([

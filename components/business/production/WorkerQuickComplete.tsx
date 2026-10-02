@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useCompletionFeedback } from './WorkerCompletionFeedback';
 import { registerProductionCompletionAction } from '@/actions/production-dispatch';
 
 /**
@@ -10,8 +11,14 @@ import { registerProductionCompletionAction } from '@/actions/production-dispatc
  * 数量与计划不一致时走任务详情里的数量上报（原审批逻辑）。
  */
 export function WorkerQuickComplete({ job }: { job: { id: string; revision: number; plannedQty: string } }) {
-  const [state, action, pending] = useActionState(registerProductionCompletionAction, null);
+  const feedback = useCompletionFeedback();
+  const [state, action, pending] = useActionState(async (previous: Awaited<ReturnType<typeof registerProductionCompletionAction>> | null, data: FormData) => {
+    const result = await registerProductionCompletionAction(previous, data);
+    if (result?.ok) feedback?.(result.message);
+    return result;
+  }, null);
   const [confirming, setConfirming] = useState(false);
+  if (state?.ok && feedback) return null;
   if (state?.ok) return <p role="status" className="text-sm text-muted-foreground">{state.message}</p>;
   return <div className="space-y-2">
     {confirming ? <form action={action} aria-busy={pending} className="flex flex-wrap gap-2">

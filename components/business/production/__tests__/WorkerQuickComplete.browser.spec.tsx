@@ -52,6 +52,11 @@ describe('师傅一键完成', () => {
     await expect.element(page.getByRole('button', { name: '完成生产' })).toBeVisible();
     await expect.element(page.getByLabelText('实际完成数量')).not.toBeVisible();
     await page.getByText('实际数量与计划不一致？上报数量').click();
+    await expect.element(page.getByLabelText('实际完成数量')).toHaveValue(null);
+    await page.getByLabelText('实际完成数量').fill('1000');
+    await expect.element(page.getByRole('button', { name: '提交数量审批' })).toBeDisabled();
+    await expect.element(page.getByText('数量与计划一致，请直接点完成生产')).toBeVisible();
+    expect(action).not.toHaveBeenCalled();
     await page.getByLabelText('实际完成数量').fill('990');
     await page.getByLabelText('数量修改原因').fill('少了 10 个');
     await page.getByRole('button', { name: '提交数量审批' }).click();
@@ -60,4 +65,17 @@ describe('师傅一键完成', () => {
     expect(Object.fromEntries(form.entries())).toMatchObject({ jobId: 'job-1', quantity: '990', reason: '少了 10 个', mode: 'COMPLETE' });
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(375);
   });
+});
+
+it('keeps the receipt in a stable parent after the completed row is removed', async () => {
+  const { WorkerCompletionFeedback } = await import('../WorkerCompletionFeedback');
+  action.mockImplementationOnce(async () => {
+    flushSync(() => root.render(<WorkerCompletionFeedback>{null}</WorkerCompletionFeedback>));
+    return { ok: true, message: '已登记完成' };
+  });
+  flushSync(() => root.render(<WorkerCompletionFeedback><WorkerQuickComplete job={job} /></WorkerCompletionFeedback>));
+  await page.getByRole('button', { name: '完成生产' }).click();
+  await page.getByRole('button', { name: '确认完成 1000 个' }).click();
+  await expect.element(page.getByText('已登记完成', { exact: true })).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '完成生产' })).not.toBeInTheDocument();
 });

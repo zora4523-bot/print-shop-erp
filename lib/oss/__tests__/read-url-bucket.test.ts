@@ -35,7 +35,7 @@ describe('designReadUrlExpiresAt', () => {
   it('剩余有效期不低于下限、不超过下限 + 桶长', () => {
     for (let t = BASE; t < BASE + 2 * READ_URL_BUCKET_SECONDS; t += 37) {
       const remaining = designReadUrlExpiresAt(t) - t;
-      expect(remaining).toBeGreaterThanOrEqual(READ_URL_MIN_REMAINING_SECONDS);
+      expect(remaining).toBeGreaterThanOrEqual(30 * 60);
       expect(remaining).toBeLessThan(READ_URL_MIN_REMAINING_SECONDS + READ_URL_BUCKET_SECONDS);
       expect(designReadUrlExpiresAt(t) % READ_URL_BUCKET_SECONDS).toBe(0);
     }
@@ -46,7 +46,7 @@ describe('signDesignReadUrl 时间桶', () => {
   it('同一桶内两次签名 URL 完全相同', () => {
     vi.useFakeTimers();
     const a = signAt(BASE + 1);
-    const b = signAt(BASE + READ_URL_BUCKET_SECONDS - READ_URL_MIN_REMAINING_SECONDS - 1);
+    const b = signAt(BASE + READ_URL_BUCKET_SECONDS - 1);
     expect(a).toBe(b);
     const expires = Number(new URL(a).searchParams.get('Expires'));
     expect(expires % READ_URL_BUCKET_SECONDS).toBe(0);
@@ -62,7 +62,7 @@ describe('signDesignReadUrl 时间桶', () => {
     );
   });
 
-  it('桶末尾签出的 URL 仍保留至少一半有效期', () => {
+  it('桶末尾签出的 URL 仍保留至少 30 分钟有效期', () => {
     vi.useFakeTimers();
     const t = BASE + READ_URL_BUCKET_SECONDS - READ_URL_MIN_REMAINING_SECONDS;
     const expires = Number(new URL(signAt(t)).searchParams.get('Expires'));

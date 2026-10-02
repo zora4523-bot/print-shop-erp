@@ -409,9 +409,7 @@ describe('CreateCustomerPriceBookDraftForm', () => {
     expect(textarea).toContain('required=""');
     expect(textarea).toContain('aria-required="true"');
     expect(textarea).toContain('aria-invalid="false"');
-    expect(textarea).toContain(
-      'aria-describedby="changeReason-PROCESSING-hint"',
-    );
+    expect(textarea).not.toContain('aria-describedby');
   });
 
   it('在弹窗中复用表单时使用业务名称且不重复面板说明', () => {
@@ -451,7 +449,7 @@ describe('CreateCustomerPriceBookDraftForm', () => {
 
     expect(textarea).toContain('aria-invalid="true"');
     expect(textarea).toContain(
-      'aria-describedby="changeReason-PROCESSING-hint changeReason-PROCESSING-error"',
+      'aria-describedby="changeReason-PROCESSING-error"',
     );
     expect(html).toContain('id="changeReason-PROCESSING-error"');
     expect(html).toContain('role="alert"');

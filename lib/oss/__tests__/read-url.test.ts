@@ -118,3 +118,14 @@ describe('signDesignReadUrl', () => {
     expect(signatureUrlMock).not.toHaveBeenCalled();
   });
 });
+
+it('keeps the same signed expiry in either half of a second with ali-oss rounding', () => {
+  const clock = vi.spyOn(Date, 'now');
+  signatureUrlMock.mockImplementation((key, options) => `https://signed.example/${key}?Expires=${Math.round(Date.now() / 1000) + options.expires}`);
+  try {
+    clock.mockReturnValue(new Date('2026-10-02T01:01:01.100Z').getTime());
+    const first = signDesignReadUrl(bucketHostUrl, configuredEnv);
+    clock.mockReturnValue(new Date('2026-10-02T01:01:01.700Z').getTime());
+    expect(signDesignReadUrl(bucketHostUrl, configuredEnv)).toBe(first);
+  } finally { clock.mockRestore(); }
+});

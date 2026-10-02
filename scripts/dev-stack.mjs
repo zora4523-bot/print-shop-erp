@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import nextEnv from '@next/env';
 const { loadEnvConfig } = nextEnv;
 import pg from 'pg';
+import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS, WORKER_HEARTBEAT_MAX_INTERVAL_MS } from '../lib/background-jobs/heartbeat-timing.mjs';
 
 export function devProcesses(mode, args = []) {
   const web = { name: 'web', args: ['node_modules/next/dist/bin/next', 'dev', ...args] };
@@ -16,16 +17,37 @@ export function devProcesses(mode, args = []) {
   ] : [web];
 }
 
+/** Keep the preflight address aligned with every Next CLI flag spelling. */
+/** @param {string[]} args @param {{ PORT?: string }} env */
+export function devListenOptions(args, env = process.env) {
+  let portValue;
+  let hostnameValue;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--') break;
+    if (arg === '--port' || arg === '-p') portValue = args[++index] ?? '';
+    else if (arg.startsWith('--port=')) portValue = arg.slice(7);
+    else if (arg.startsWith('-p') && !arg.startsWith('--')) portValue = arg.slice(2);
+    else if (arg === '--hostname' || arg === '-H') hostnameValue = args[++index] ?? '';
+    else if (arg.startsWith('--hostname=')) hostnameValue = arg.slice(11);
+    else if (arg.startsWith('-H')) hostnameValue = arg.slice(2);
+  }
+  const port = Number(portValue ?? env.PORT ?? 3000);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('INVALID_PORT');
+  const host = hostnameValue ?? '127.0.0.1';
+  if (!host || host.startsWith('-')) throw new Error('INVALID_HOSTNAME');
+  const defaults = [...(portValue === undefined ? ['--port', String(port)] : []), ...(hostnameValue === undefined ? ['--hostname', host] : [])];
+  const separator = args.indexOf('--');
+  const webArgs = separator < 0 ? [...args, ...defaults] : [...args.slice(0, separator), ...defaults, ...args.slice(separator)];
+  return { port, host, webArgs };
+}
+
 export async function startDevStack(args = process.argv.slice(2)) {
   if (process.env.NODE_ENV === 'production') throw new Error('DEV_REQUIRES_DEVELOPMENT');
   loadEnvConfig(process.cwd(), true);
   const mode = process.env.BACKGROUND_JOBS_MODE || 'durable';
   if (!['durable', 'inline'].includes(mode)) throw new Error('INVALID_BACKGROUND_MODE');
-  const portFlag = args.findIndex((arg) => arg === '--port' || arg === '-p');
-  const port = Number(portFlag >= 0 ? args[portFlag + 1] : process.env.PORT || 3000);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('INVALID_PORT');
-  const hostnameFlag = args.findIndex((arg) => arg === '--hostname' || arg === '-H');
-  const host = hostnameFlag >= 0 ? args[hostnameFlag + 1] : '127.0.0.1';
+  const { port, host, webArgs } = devListenOptions(args);
   await checkPort(port, host);
   const version = `dev-${randomUUID()}`;
   const env = { ...process.env, NODE_ENV: 'development', BACKGROUND_JOBS_MODE: mode, APP_VERSION: version, NOTIFICATION_MOCK_MODE: 'true' };
@@ -54,7 +76,7 @@ export async function startDevStack(args = process.argv.slice(2)) {
     return child;
   }
   try {
-    const configs = devProcesses(mode, [...args, ...(portFlag < 0 ? ['--port', String(port)] : []), ...(hostnameFlag < 0 ? ['--hostname', host] : [])]);
+    const configs = devProcesses(mode, webArgs);
     if (mode === 'durable') {
       for (const config of configs.slice(0, -1)) launch(config);
       await waitForWorkers(env, () => stopping);
@@ -73,16 +95,16 @@ export async function startDevStack(args = process.argv.slice(2)) {
   } catch (error) { stop(1); throw error; }
 }
 
-async function waitForWorkers(env, stopped) {
+export async function waitForWorkers(env, stopped) {
   const client = new pg.Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 5000, query_timeout: 5000 });
   try {
     await client.connect();
     // Heartbeat columns contain UTC wall time, matching databasePoolConfig.
     // Do not inherit the operator/database default time zone for comparisons.
     await client.query("SET TIME ZONE 'UTC'");
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + WORKER_HEARTBEAT_ACTIVE_WINDOW_MS + WORKER_HEARTBEAT_MAX_INTERVAL_MS;
     while (!stopped() && Date.now() < deadline) {
-      const result = await client.query('SELECT DISTINCT queue FROM "BackgroundWorkerHeartbeat" WHERE version = $1 AND (queue != \'HEAVY\' OR "pdfReady" IS TRUE) AND "lastSeenAt" > now() - interval \'30 seconds\'', [env.APP_VERSION]);
+      const result = await client.query('SELECT DISTINCT queue FROM "BackgroundWorkerHeartbeat" WHERE version = $1 AND (queue != \'HEAVY\' OR "pdfReady" IS TRUE) AND "lastSeenAt" > now() - ($2 * interval \'1 millisecond\')', [env.APP_VERSION, WORKER_HEARTBEAT_ACTIVE_WINDOW_MS]);
       if (result.rows.some((row) => row.queue === 'LIGHT') && result.rows.some((row) => row.queue === 'HEAVY')) return;
       await new Promise((resolveWait) => setTimeout(resolveWait, 500));
     }

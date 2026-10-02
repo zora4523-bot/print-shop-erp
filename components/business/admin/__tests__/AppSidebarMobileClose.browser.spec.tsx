@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { Role } from '@/generated/prisma/enums';
 import { ADMIN_ROLE_BADGE, getAdminMenuItems } from '@/lib/navigation/admin-menu';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
@@ -97,4 +97,32 @@ it('closes immediately when the tapped item is the current page', async () => {
 
   mobileSheet()!.querySelector<HTMLAnchorElement>('a[href="/orders"]')!.click();
   await vi.waitFor(() => expect(mobileSheet()).toBeNull());
+});
+
+it('one Escape closes the mobile menu after focusing a navigation link and restores focus', async () => {
+  await render();
+  await openSheet();
+  for (let index = 0; index < 35; index += 1) {
+    await userEvent.keyboard('{Tab}');
+    expect(mobileSheet()!.contains(document.activeElement)).toBe(true);
+  }
+  await frames();
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(mobileSheet()).toBeNull());
+  await expect.element(page.getByRole('button', { name: '打开导航' })).toHaveFocus();
+});
+
+it('keeps keyboard tooltips available in the collapsed desktop sidebar', async () => {
+  await page.viewport(1280, 800);
+  await render();
+  await page.getByRole('button', { name: '打开导航' }).click();
+  await userEvent.keyboard('{Tab}');
+  host.querySelector<HTMLAnchorElement>('a[href="/owner/accounts"]')!.focus();
+  await vi.waitFor(() => {
+    const popup = document.querySelector('[data-slot="tooltip-content"][data-open]');
+    expect(popup?.textContent).toBe('用户管理');
+    expect(popup?.checkVisibility()).toBe(true);
+  });
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(document.querySelector('[data-slot="tooltip-content"][data-open]')).toBeNull());
 });

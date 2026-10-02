@@ -7,7 +7,7 @@ import {
   OrderSettlementType,
   OrderStatus,
   Role,
-  type Prisma,
+  Prisma,
 } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import type { CorrectSettledOrderInput } from '@/lib/auth/schemas';
@@ -334,7 +334,7 @@ async function refreshDraftBillMember(tx: Tx, orderId: string, itemId: string): 
       processingAmount: true,
       // 与 generation.ts 的 ELIGIBLE_ORDER_SELECT 同序，快照与整张账单同步时一致。
       customerCharges: {
-        select: { description: true, amount: true },
+        select: { description: true, amount: true, status: true },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       },
     },
@@ -343,7 +343,7 @@ async function refreshDraftBillMember(tx: Tx, orderId: string, itemId: string): 
     where: { id: itemId },
     data: {
       settledFeeSnapshot: fresh.settledFee!.toFixed(2),
-      settlementDetailSnapshot: createBillSettlementDetail(fresh),
+      settlementDetailSnapshot: createBillSettlementDetail(fresh) ?? Prisma.DbNull,
     },
     select: { id: true },
   });

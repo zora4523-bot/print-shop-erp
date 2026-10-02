@@ -155,7 +155,7 @@ export function CreateAgentMonthlyBillCreditForm({
     <form
       action={action}
       aria-busy={pending}
-      className="mt-3 grid gap-2 rounded-lg bg-muted/40 p-3 sm:grid-cols-[9rem_1fr_auto]"
+      className="mt-3 grid items-end gap-2 rounded-lg bg-muted/40 p-3 sm:grid-cols-[9rem_1fr_auto]"
     >
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
       <input type="hidden" name="sourceItemId" value={sourceItemId} />

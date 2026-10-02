@@ -13,7 +13,7 @@ describe('SalesOrdersList', () => {
     const html = renderToStaticMarkup(<SalesOrdersList orders={[order]} query={query()} nowIso="2026-08-27T08:00:00Z" />);
     const table = html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? '';
     const headers = [...table.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((match) => match[1]);
-    expect(headers).toEqual(['工单号', '下单日期', '工单名称', '工艺 / 纸张', '数量', '工单金额', '状态', '月账单', '操作']);
+    expect(headers).toEqual(['工单号', '下单 / 交货', '工单名称', '工艺 / 纸张', '数量', '工单金额', '状态', '月账单', '操作']);
     expect(table).toContain('title="预览工单 GD-260827-001"');
     expect(table).toContain('title="快速预览工单"');
     expect(table).toContain('aria-label="复制工单号 GD-260827-001"');
@@ -53,7 +53,7 @@ describe('SalesOrdersList', () => {
     expect(html).toContain('data-sales-order-row=""');
     expect(html).toContain('aria-label="销售工单明细表"');
     expect(html).toContain('2026/08/27');
-    expect(html).toContain('下单日期');
+    expect(html).toContain('下单 / 交货');
     expect(html).toContain(
       'data-slot="sales-orders-pagination" class="mt-4"',
     );
@@ -196,4 +196,11 @@ describe('SalesOrdersList', () => {
     expect(html).not.toContain(printSnapshot.url);
     expect(html).toContain('暂无款式照片');
   });
+});
+
+it('keeps desktop due-date warnings visible with the mobile card', () => {
+  const html = renderToStaticMarkup(<SalesOrdersList orders={[row()]} query={query()} nowIso="2026-08-27T08:00:00Z" />);
+  const table = html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? '';
+  expect(table).toContain('交货'); expect(table).toContain('08-30');
+  expect(table).toContain('data-tone="warning"');
 });

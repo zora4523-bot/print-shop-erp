@@ -179,6 +179,7 @@ export function AdminPagination({
   pageSize,
   queryParams,
   pageParam = 'page',
+  anchor,
 }: {
   basePath: string;
   page: number;
@@ -188,9 +189,12 @@ export function AdminPagination({
   queryParams: TableHrefParams;
   /** 同页多张表时用于区分的分页参数名，默认 `page`。 */
   pageParam?: string;
+  /** 分页后定位的元素 id，不含 #。 */
+  anchor?: string;
 }) {
-  const prevHref = buildTableHref(basePath, queryParams, { [pageParam]: page - 1 });
-  const nextHref = buildTableHref(basePath, queryParams, { [pageParam]: page + 1 });
+  const hash = anchor ? `#${encodeURIComponent(anchor)}` : '';
+  const prevHref = buildTableHref(basePath, queryParams, { [pageParam]: page - 1 }) + hash;
+  const nextHref = buildTableHref(basePath, queryParams, { [pageParam]: page + 1 }) + hash;
 
   return (
     <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">

@@ -102,11 +102,11 @@ describe('batch PDF invariants', () => {
     m.worker.mockResolvedValue({ workerId: 'w' });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending' });
   });
-  it('only counts HEAVY workers that can currently render PDFs, unless the job is already running', async () => {
+  it('counts live claim-capable HEAVY workers across release versions, unless a live owner already holds the job', async () => {
     await batchPrintStatus('admin', 'j');
-    expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', pdfReady: true, version: process.env.APP_VERSION || 'dev' });
-    m.worker.mockResolvedValue(null);
-    m.find.mockResolvedValue({ ...job, status: 'RUNNING', result: { completed: 1, issues: [] } });
+    expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', OR: [{ pdfReady: true }, { pdfReady: null }] });
+    m.worker.mockImplementation(async ({ where }) => where.workerId === 'owner' ? { workerId: 'owner' } : null);
+    m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'owner:1', result: { completed: 1, issues: [] } });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending', phase: 'rendering' });
   });
   it('rechecks contents even after reading the finished artifact', async () => {
@@ -164,7 +164,7 @@ it('does not cache or publish a PDF whose uploaded artwork failed', async () => 
   expect(m.write).not.toHaveBeenCalled();
 });
 
-it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError', 'TargetCloseError'])(
+it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError'])(
   'rethrows PDF infrastructure failures (%s) so the durable job retries instead of reporting the order',
   async (name) => {
     m.render.mockRejectedValueOnce(Object.assign(new Error('infra'), { name }));
@@ -176,6 +176,33 @@ it.each(['PdfBrowserUnavailableError', 'PdfArtifactStorageError', 'TargetCloseEr
 it('classifies a raw cache write failure (ENOSPC) as storage infrastructure and rethrows it', async () => {
   m.write.mockRejectedValueOnce(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }));
   await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name: 'PdfArtifactStorageError' });
+});
+
+it.each(['TargetCloseError', 'ProtocolError'])('reports a page-level %s without retrying the whole batch', async (name) => {
+  m.render.mockRejectedValueOnce(Object.assign(new Error('page content failed'), { name }));
+  expect(await handleBatchPrintJob(job)).toMatchObject({ completed: 0, issues: [{ position: 1, message: '工单生成失败，请检查打印内容后重试' }] });
+  expect(m.write).not.toHaveBeenCalled();
+});
+it('reports unavailability for a crashed running worker when its heartbeat expires', async () => {
+  m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'dead-owner:1', result: { completed: 1, issues: [] } });
+  m.worker.mockResolvedValue(null);
+  expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'unavailable' });
+  expect(m.worker).toHaveBeenCalledTimes(2);
+  expect(m.worker).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ OR: [{ pdfReady: true }, { pdfReady: null }] }) }));
+});
+
+it('reports the render budget timeout without blaming order content', async () => {
+  m.render.mockRejectedValueOnce(new DOMException('budget exhausted', 'TimeoutError'));
+  expect(await handleBatchPrintJob(job)).toMatchObject({ completed: 0, issues: [{ position: 1, message: '工单生成超时，请稍后重试或减少所选工单' }] });
+  expect(m.write).not.toHaveBeenCalled();
+});
+
+it.each([true, null])('keeps queued batch PDFs pending across releases with capability %s', async pdfReady => {
+  m.worker.mockImplementation(async ({ where }) => {
+    expect(where.version).toBeUndefined();
+    return where.OR.some((entry: { pdfReady: boolean | null }) => entry.pdfReady === pdfReady) ? { workerId: 'old-release' } : null;
+  });
+  expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending' });
 });
 
 // 业主 2026-10-02：打开或下载批量打印文件即记已打印——浏览器取得文件后由 Server Action 调用；

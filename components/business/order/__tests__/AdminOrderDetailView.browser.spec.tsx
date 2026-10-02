@@ -481,3 +481,17 @@ it('keeps collect-shipping and plate-fee context next to the total without contr
   await expect.element(fees.getByText('制版费见各款式，未计入款式加工费合计。', { exact: true })).toBeVisible();
   expect(document.getElementById('order-detail-fees')?.textContent).not.toContain('尚未形成报价');
 });
+
+it('opens a logistics target whose id is on the closed disclosure itself', async () => {
+  flushSync(() => root.render(<AdminOrderDetailView model={detailModel()} canEdit prints={[]} decision={<a href="#fulfillment-pricing">核对物流费用</a>}
+    supplementary={[{ id: 'detail-pricing-tools', title: '计价与核价', content: <Disclosure id="fulfillment-pricing"><DisclosureSummary>物流费用</DisclosureSummary><Input aria-label="物流费" /></Disclosure> }]} />));
+  const target = document.getElementById('fulfillment-pricing') as HTMLDetailsElement;
+  expect(target.open).toBe(false);
+  await page.getByRole('link', { name: '核对物流费用', exact: true }).click();
+  await expect.poll(() => target.open).toBe(true);
+  await expect.element(page.getByLabelText('物流费')).toBeVisible();
+  await page.getByText('物流费用', { exact: true }).click();
+  expect(target.open).toBe(false);
+  await page.getByRole('link', { name: '核对物流费用', exact: true }).click();
+  await expect.poll(() => target.open).toBe(true);
+});

@@ -141,3 +141,12 @@ it.each([
     expect(list.csv).not.toContain('已确认应付');
   }
 });
+
+it('exports the frozen cancellation name and amount without inventing a processing fee', async () => {
+  findFirst.mockResolvedValue(bill({ items: [{ ...item(1), orderStatusSnapshot: 'CANCELLED', settledFeeSnapshot: '12.34',
+    settlementDetailSnapshot: { schemaVersion: 2, kind: 'CANCELLATION', orderName: '取消时名称', settlementAmount: '12.34' } }] }));
+  const { csv } = await exportSalesBillItems(actor, 'bill-a', new URLSearchParams('q=取消时名称'));
+  expect(csv).toContain('取消时名称');
+  expect(csv).not.toContain('现在改名');
+  expect(csv).toContain('"12.34","","取消结算金额：12.34 元"');
+});

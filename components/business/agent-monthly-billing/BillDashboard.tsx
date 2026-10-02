@@ -67,7 +67,7 @@ export function BillDashboard({ data, accounts, expanded }: { expanded: boolean;
     </div>
     <Disclosure className="mt-4">
       <DisclosureSummary className="min-h-11 cursor-pointer py-2 text-sm">查看账期数据表</DisclosureSummary>
-      <TableScrollArea label="账期金额数据"><table className="w-full text-sm"><thead><tr>
+      <TableScrollArea label="账期金额数据"><table className="w-full whitespace-nowrap text-sm"><thead><tr>
         <th className="p-2 text-left">账期</th><th className="p-2 text-right">待收</th><th className="p-2 text-right">已结清</th><th className="p-2 text-right">草稿</th>
       </tr></thead><tbody>{data.periods.map((row) => <tr key={row.period} className="border-t">
         <td className="p-2"><Link className="inline-flex min-h-11 items-center underline" href={buildTableHref(list, {}, { period: row.period })}>{row.period}</Link></td>

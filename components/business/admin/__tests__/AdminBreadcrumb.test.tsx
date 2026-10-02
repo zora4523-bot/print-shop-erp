@@ -71,7 +71,7 @@ function visibleText(html: string): string {
 describe('AdminBreadcrumb SSR', () => {
   it.each([
     ['/owner/purchases/new', '新建采购单'],
-    ['/owner/accounts/new', '新建账号'],
+    ['/owner/accounts/new', '新建用户'],
     ['/owner/boms/new', '新建用料清单'],
     ['/owner/materials/new', '新建物料'],
     ['/owner/parties/new', '新建客户/供应商'],

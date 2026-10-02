@@ -510,7 +510,6 @@ export function CreateCustomerPriceBookDraftForm({
   const formRef = useFocusFirstInvalidField(state);
   const errors = mutationFieldErrors(state);
   const changeReasonId = `changeReason-${purpose}`;
-  const changeReasonHintId = `${changeReasonId}-hint`;
   const changeReasonErrorId = `${changeReasonId}-error`;
 
   useEffect(() => {
@@ -566,7 +565,6 @@ export function CreateCustomerPriceBookDraftForm({
           aria-describedby={fieldDescriptionIds(
             changeReasonErrorId,
             errors.changeReason,
-            changeReasonHintId,
           )}
         />
         <FieldErrorMessages

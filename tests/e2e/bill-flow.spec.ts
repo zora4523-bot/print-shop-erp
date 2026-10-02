@@ -7,6 +7,7 @@ import {
   E2E_USERS,
   seedSettledExternalSalesOrder,
   midPreviousShanghaiMonth,
+  withDb,
 } from './_helpers';
 
 // Keep immutable financial facts in a fresh E2E-only ownership scope. These
@@ -219,4 +220,35 @@ test('账单脚本仍在加载时原生提交能结束并显示生成结果', as
     await Promise.allSettled(pendingScripts.map((release) => release()));
     await context.close();
   }
+});
+
+
+test('取消结算保留独立费用依据，待报价附加费不阻塞生成和冻结', async ({ page }) => {
+  test.setTimeout(90_000);
+  requireIsolatedDatabase();
+  const fixture = await seedSettledExternalSalesOrder({ customerRef: `cancel-bill-${uniqueSuffix()}`, settledFee: '100.00', settledAt: midPreviousShanghaiMonth() });
+  await withDb(async db => {
+    await db.query(`UPDATE "Order" SET status='CANCELLED', "customName"='取消时名称', "settledFee"=12.34 WHERE id=$1`, [fixture.orderId]);
+    await db.query(`UPDATE "OrderCustomerCharge" SET status='PENDING_AMOUNT', amount=NULL, "finalizedAt"=NULL, "finalizedById"=NULL WHERE "orderId"=$1`, [fixture.orderId]);
+  });
+  await login(page, { from: `/owner/agent-bills?period=${fixture.period}&agentUserId=${fixture.agentUserId}`, username: E2E_USERS.owner.username, password: E2E_PASSWORD });
+  await generateDraft(page, fixture.period);
+  const draft = await readBill(fixture.agentUserId, fixture.period);
+  expect(draft.bill.totalAmount).toBe('12.34');
+  expect(draft.items).toHaveLength(1);
+  expect(draft.items[0].settlementDetailSnapshot).toEqual({ schemaVersion: 2, kind: 'CANCELLATION', orderName: '取消时名称', settlementAmount: '12.34' });
+  await page.goto(`/owner/agent-bills/${draft.bill.id}`);
+  await page.getByRole('button', { name: '确认账单', exact: true }).click();
+  await expect(page.getByRole('button', { name: '标记已收', exact: true })).toBeVisible();
+  expect((await readBill(fixture.agentUserId, fixture.period)).bill.status).toBe('CONFIRMED');
+  await withDb(async db => {
+    await db.query(`UPDATE "Order" SET "customName"='之后名称' WHERE id=$1`, [fixture.orderId]);
+    await expect(db.query(`UPDATE "AgentMonthlyBillItem" SET "settlementDetailSnapshot"=NULL WHERE "billId"=$1`, [draft.bill.id])).rejects.toThrow(/immutable|DRAFT/);
+  });
+  await page.reload();
+  await expect(page.getByText('取消时名称', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: `查看 ${fixture.orderNo} 明细`, exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('取消结算金额', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('加工费', { exact: true })).toHaveCount(0);
 });

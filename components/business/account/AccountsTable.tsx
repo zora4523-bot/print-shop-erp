@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
 import { buttonVariants } from '@/components/ui/button';
 import { Role } from '../../../generated/prisma/enums';
 import type { AccountSummary } from '@/lib/account';
@@ -90,7 +91,7 @@ export function AccountsTable({
                 <Link
                   href={`/owner/accounts/${a.id}`}
                   prefetch={false}
-                  className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'min-h-11')}
                 >
                   编辑账号
                 </Link>

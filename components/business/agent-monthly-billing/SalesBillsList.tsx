@@ -11,7 +11,7 @@ type Bill = Awaited<ReturnType<typeof listSalesMonthlyBills>>['rows'][number];
 export function SalesBillsList({ rows, returnTo }: { rows: Bill[]; returnTo: string }) {
   return <section aria-label="我的月账单" className="min-w-0">
     <TableScrollArea label="我的月账单列表" className="md:rounded-xl md:border md:bg-card">
-      <table className="block w-full text-sm md:table">
+      <table className="block w-full text-sm md:table md:whitespace-nowrap">
         <thead className="hidden border-b bg-muted/40 text-muted-foreground md:table-header-group"><tr>
           <th className="p-3 text-left">账期</th><th className="p-3 text-left">状态</th><th className="p-3 text-right">工单</th><th className="p-3 text-right">工单合计</th><th className="p-3 text-right">抵扣 / 补收</th><th className="p-3 text-right">应付货款</th><th className="p-3 text-right">操作</th>
         </tr></thead>

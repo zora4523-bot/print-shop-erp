@@ -36,21 +36,33 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const startedAt = Date.now();
     let manualRefresh = pollKey > 0;
+    let failureSince: number | null = null;
+    function retryUnavailable() {
+      failureSince ??= Date.now();
+      if (Date.now() - failureSince >= 120_000) {
+        setMessage('暂时无法获取进度，已停止自动查询。请点击刷新进度重试。');
+      } else timer = setTimeout(poll, 10_000);
+    }
     async function poll() {
       try {
         const response = await fetch(`/api/orders/batch-print/${jobId}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) });
+        if (response.status === 401 || response.status === 403) {
+          if (!controller.signal.aborted) setMessage('登录已失效或无权查看，请重新登录后重试。');
+          return;
+        }
         if (!response.ok) throw new Error('Status unavailable');
         const next: BatchPrintStatus = await response.json();
         if (controller.signal.aborted) return;
         setStatus(next);
         setIssues(next.issues);
         setRefreshFeedback(manualRefresh ? '进度已刷新。' : '');
+        if (next.status !== 'unavailable') failureSince = null;
         if (next.status === 'pending') {
           setMessage(next.phase === 'queued' ? '正在排队，请勿重复提交。' : next.phase === 'merging' ? '正在合并打印文件，请稍候。' : '正在准备打印文件，完成后可打开打印或下载。');
           timer = setTimeout(poll, Date.now() - startedAt < 120_000 ? 2000 : 10_000);
         } else if (next.status === 'unavailable') {
           setMessage('等待打印服务恢复，将自动更新进度；如长时间未恢复，请联系管理员。');
-          timer = setTimeout(poll, 10_000);
+          retryUnavailable();
         } else if (next.status === 'failed') {
           setMessage('未生成打印文件，请检查以下工单或减少所选数量后重试。');
         } else setMessage('打印文件已生成。');
@@ -58,7 +70,7 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
         if (!controller.signal.aborted) {
           setMessage('暂时无法获取进度，将自动重试，也可点击刷新进度。');
           if (manualRefresh) setRefreshFeedback('刷新未成功，请稍后重试。');
-          timer = setTimeout(poll, 10_000);
+          retryUnavailable();
         }
       } finally {
         if (!controller.signal.aborted && manualRefresh) {

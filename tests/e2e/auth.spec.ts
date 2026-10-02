@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, ADMIN_USERNAME, expectNoNextErrorOverlay } from './_helpers';
+import { login, ADMIN_USERNAME, ADMIN_PASSWORD, expectNoNextErrorOverlay } from './_helpers';
 
 test.describe('登录闸口', () => {
   test('未登录访问受保护页面 → 重定向到 /login', async ({ page }) => {
@@ -22,7 +22,7 @@ test.describe('登录闸口', () => {
     await expectNoNextErrorOverlay(page);
   });
 
-  test('错误密码留在 /login 并显示错误', async ({ page }) => {
+  test('错误密码保留用户名，修改密码后可直接重试登录', async ({ page }) => {
     await page.goto('/login');
     await page.locator('#username').fill(ADMIN_USERNAME);
     await page.locator('#password').fill('wrong-password');
@@ -33,5 +33,68 @@ test.describe('登录闸口', () => {
     // (Codex round 73 / P2)。
     await expect(page.getByRole('alert')).toBeVisible({ timeout: 5_000 });
     await expect(page).toHaveURL(/\/login/);
+    await expect(page.locator('#username')).toHaveValue(ADMIN_USERNAME);
+    await page.locator('#password').fill(ADMIN_PASSWORD);
+    await page.locator('#password').press('Enter');
+    await expect(page).toHaveURL(/\/(owner|orders|foreman|sales)/);
+    await expectNoNextErrorOverlay(page);
   });
+
+  test('主题按钮在脚本未就绪时禁用，就绪后首次点击可切换', async ({ page }) => {
+    await login(page, { from: '/owner/agent-bills' });
+    await page.setViewportSize({ width: 320, height: 900 });
+    let releaseScripts!: () => void;
+    const scriptsReady = new Promise<void>((resolve) => { releaseScripts = resolve; });
+    await page.route('**/*', async (route) => {
+      if (route.request().resourceType() === 'script') await scriptsReady;
+      await route.continue();
+    });
+    try {
+      // Real full navigation: HTML paints while JavaScript is still in flight.
+      await page.goto('/owner/agent-bills', { waitUntil: 'commit' });
+      const trigger = page.getByRole('button', { name: '切换界面主题', exact: true });
+      await expect(trigger).toBeVisible();
+      await expect(trigger).toBeDisabled();
+      releaseScripts();
+      await expect(trigger).toBeEnabled();
+      await trigger.click();
+      await page.getByRole('menuitemradio', { name: '暗色', exact: true }).click();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+      await trigger.click();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+      await expectNoNextErrorOverlay(page);
+    } finally {
+      releaseScripts();
+      await page.unrouteAll({ behavior: 'wait' });
+    }
+  });
+});
+
+
+test('水合前输入的用户名在失败提交后仍保留，修正密码可登录', async ({ page }) => {
+  let releaseScripts!: () => void;
+  const scriptsReady = new Promise<void>((resolve) => { releaseScripts = resolve; });
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() === 'script') await scriptsReady;
+    await route.continue();
+  });
+  try {
+    await page.goto('/login', { waitUntil: 'commit' });
+    await page.locator('#username').fill(ADMIN_USERNAME);
+    await page.locator('#password').fill('wrong-password');
+    releaseScripts();
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '登录', exact: true }).click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.locator('#username')).toHaveValue(ADMIN_USERNAME);
+    await page.locator('#password').fill(ADMIN_PASSWORD);
+    await page.locator('#password').press('Enter');
+    await expect(page).toHaveURL(/\/(owner|orders|foreman|sales)/);
+    await expectNoNextErrorOverlay(page);
+  } finally {
+    releaseScripts();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
 });

@@ -25,11 +25,19 @@ export function parseSalesHistoryPreview(input: unknown) {
     const parts = row.components.map((value) => value === null ? null : new Decimal(value).toFixed(2));
     const sum = parts.reduce<Decimal>((total, value) => total.plus(value ?? 0), new Decimal(0));
     const balanced = amount !== null && sum.eq(amount);
-    const totals = [row.h, row.g, row.quantity].map((value) => number.safeParse(value));
-    const numericTotal = totals.find((value) => value.success);
-    const conflictingTotals = totals[0].success && totals[1].success && !new Decimal(totals[0].data).eq(totals[1].data);
-    const quantity = !conflictingTotals && numericTotal?.success ? new Decimal(numericTotal.data) : null;
-    if (quantity && (!quantity.isInteger() || quantity.isNegative() || quantity.gt(2_147_483_647))) throw new Error('Invalid source quantity');
+    const totals = [row.h, row.g, row.quantity].flatMap(raw => {
+      const value = typeof raw === 'string' ? raw.trim() : raw;
+      if (value === null) return [];
+      // Descriptive quantity text (e.g. 各100) is not an explicit total.
+      if (typeof value === 'string' && !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim()) && !/^[+-]?(?:NaN|Infinity)$/i.test(value.trim())) return [];
+      const parsed = number.safeParse(value);
+      if (!parsed.success) throw new Error('Invalid source quantity');
+      const total = new Decimal(parsed.data);
+      if (!total.isInteger() || total.isNegative() || total.gt(2_147_483_647)) throw new Error('Invalid source quantity');
+      return [total];
+    });
+    const conflictingTotals = totals.some(total => !total.eq(totals[0]));
+    const quantity = conflictingTotals ? null : totals[0] ?? null;
     const processing = new Decimal(parts[0] ?? 0).plus(parts[1] ?? 0).plus(parts[2] ?? 0);
     if (processing.gt('9999999999.99')) throw new Error('Processing amount exceeds database range');
     return { ...row, amount, parts, balanced, conflictingTotals, quantityRaw: row.quantity, quantity: quantity?.toNumber() ?? null,

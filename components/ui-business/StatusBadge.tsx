@@ -31,7 +31,7 @@ export function StatusBadge({
       data-slot="badge"
       data-tone={tone}
       className={cn(
-        'inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium',
+        'inline-flex h-6 w-fit shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full border px-2.5 text-xs font-medium',
         TONE_BADGE_SOFT[tone],
         className,
       )}
@@ -39,7 +39,7 @@ export function StatusBadge({
       {dot ? (
         <span
           aria-hidden
-          className={cn('size-1.5 rounded-full', TONE_DOT[tone])}
+          className={cn('size-1.5 shrink-0 rounded-full', TONE_DOT[tone])}
         />
       ) : null}
       {children}

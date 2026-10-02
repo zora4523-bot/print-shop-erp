@@ -221,6 +221,30 @@ it('rejects direct draft synchronization before removing existing members', asyn
   expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
 });
 
+it('bills a cancellation from its final fee without requiring an original quote', async () => {
+  tx.order.findMany.mockResolvedValue([{ ...ORDER, status: OrderStatus.CANCELLED, settledFee: '12.34', processingAmount: '100.00', totalAmount: '100.00',
+    customerCharges: [{ description: '待报价', amount: null, status: 'PENDING_AMOUNT' }] }]);
+  tx.agentMonthlyBillItem.aggregate.mockResolvedValue({ _sum: { settledFeeSnapshot: '12.34' } });
+  const result = await generateAgentMonthlyBillsForPeriod('2026-05', { id: 'admin', role: Role.ADMIN }, { now: new Date('2026-06-02T00:00:00Z') });
+  expect(result.errors).toEqual([]);
+  expect(result.generated).toEqual([expect.objectContaining({ totalAmount: '12.34' })]);
+  const member = tx.agentMonthlyBillItem.upsert.mock.calls[0][0];
+  for (const row of [member.create, member.update]) expect(row.settlementDetailSnapshot).toEqual({ schemaVersion: 2, kind: 'CANCELLATION', orderName: ORDER.customName, settlementAmount: '12.34' });
+});
+it('excludes waived charges from normal bill evidence and eligibility totals', async () => {
+  tx.order.findMany.mockResolvedValue([{ ...ORDER, customerCharges: [...ORDER.customerCharges, { description: '免收', amount: '100', status: 'WAIVED' }] }]);
+  const result = await generateAgentMonthlyBillsForPeriod('2026-05', { id: 'admin', role: Role.ADMIN }, { now: new Date('2026-06-02T00:00:00Z') });
+  expect(result.errors).toEqual([]);
+  expect(tx.agentMonthlyBillItem.upsert.mock.calls[0][0].create.settlementDetailSnapshot.charges).toEqual([{ description: '运费', amount: '5.00' }]);
+});
+it('rejects an unpriced normal charge before any bill write', async () => {
+  tx.order.findMany.mockResolvedValue([{ ...ORDER, customerCharges: [{ description: '待报价', amount: null, status: 'PENDING_AMOUNT' }] }]);
+  const result = await generateAgentMonthlyBillsForPeriod('2026-05', { id: 'admin', role: Role.ADMIN }, { now: new Date('2026-06-02T00:00:00Z') });
+  expect(result.errors).toHaveLength(1);
+  expect(tx.agentMonthlyBill.create).not.toHaveBeenCalled();
+  expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
+});
+
 // 业主 2026-10-01：补收（正数）先全额计入草稿账单并提高可抵扣额度，抵扣（负数）再在额度内分摊。
 it('allocates surcharges in full before capping credits by the raised capacity', async () => {
   tx.agentMonthlyBill.findUnique.mockReset().mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });

@@ -774,7 +774,7 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
     {
       name: 'dashboard',
       path: '/owner',
-      readyHeading: '工作台',
+      readyHeading: '管理工作台',
       prepareGateState: async (page) => {
         await expect(page.locator('[data-slot="dashboard-watchlist-shipments"]:visible')).toHaveCount(1);
         await expect(page.locator('[data-slot="dashboard-kpi"]:visible')).toHaveCount(4);
@@ -936,9 +936,21 @@ function ownerRoutes(data: WorkerUiFixture): readonly AdminRoute[] {
       readyHeading: '工单修改申请',
     },
     { name: 'salary', path: '/owner/salary', readyHeading: '薪资总览' },
+    { name: 'salary-daily-detail', path: `/owner/salary/daily/${data.salaryId}`, readyHeading: `E2E 开机仔 · ${data.salaryDate.replaceAll('-', '/')}` },
     { name: 'warehouses', path: '/owner/warehouses', readyHeading: '仓库/库位' },
     { name: 'pigsty', path: '/owner/pigsty', readyHeading: 'Pigsty 运维' },
     { name: 'settings', path: '/owner/settings', readyHeading: '系统设置' },
+    { name: 'notifications', path: '/owner/notifications', readyHeading: '推送配置', prepareGateState: async (page) => {
+      // A table can fit the viewport while squeezing Chinese event names into
+      // one-character columns. Preserve readable labels inside the scroll area.
+      const event = page.getByRole('region', { name: '通知事件规则', exact: true }).locator('tbody tr:first-child td:first-child');
+      const text = await event.evaluate((cell) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return { height: range.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(cell).lineHeight) };
+      });
+      expect(text.height).toBeLessThanOrEqual(text.lineHeight * 2);
+    } },
     {
       name: 'not-found',
       path: '/orders/e2e-admin-ui-missing',
@@ -1440,7 +1452,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   );
   await expect(filters).toBeVisible();
   const views = filters.getByRole('navigation', { name: '销售工单视图' });
-  for (const label of ['全部', '需关注', '进行中', '已发货', '已结算', '已取消', '草稿']) {
+  for (const label of ['全部', '需关注', '进行中', '已发货', '已完成', '已取消', '草稿']) {
     await expect(views.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
   }
   await expect(

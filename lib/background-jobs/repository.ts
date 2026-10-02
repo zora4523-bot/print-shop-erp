@@ -397,7 +397,7 @@ export async function failBackgroundJob(
     lastErrorCode: initialErrorCode,
   });
   let exhausted =
-    job.attempts >= job.maxAttempts || terminalNotificationFailure;
+    (job.type === BACKGROUND_JOB_TYPES.CDR_BUNDLE && initialErrorCode === 'CdrBundleStaleError') || job.attempts >= job.maxAttempts || terminalNotificationFailure;
 
   await db.$transaction(async (tx) => {
     // availableAt 之后要被 claim 拿 `availableAt <= now()` 比较，所以退避

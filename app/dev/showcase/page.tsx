@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { ConfirmationExamples } from './ConfirmationExamples';
 import {
   Bell,
   BookOpen,
@@ -18,7 +19,6 @@ import {
   ActionShortcut,
   BatchActionResult,
   ConflictResolutionPanel,
-  ConfirmActionController, ConfirmActionDialog,
   ContentSkeleton,
   DisabledReason,
   EmptyState,
@@ -97,7 +97,7 @@ export default function ShowcasePage() {
   if (process.env.NODE_ENV === 'production') notFound();
 
   return (
-    <main className="mx-auto max-w-6xl space-y-12 p-8">
+    <main className="touch-viewport mx-auto w-full min-w-0 max-w-6xl space-y-12 p-4 sm:p-8">
       <PageHeader
         title="设计系统 · Showcase"
         subtitle="业务原子组件 + tone 变体可视化目录。改 globals.css 的语义 token 后此页立即跟随。"
@@ -110,7 +110,7 @@ export default function ShowcasePage() {
           cta={
             <a
               href="/owner"
-              className="text-sm font-medium text-primary underline-offset-2 hover:underline"
+              className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline-offset-2 hover:underline"
             >
               进入管理员看板 →
             </a>
@@ -269,7 +269,7 @@ export default function ShowcasePage() {
             action={
               <a
                 href="#"
-                className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                className="inline-flex min-h-11 items-center text-xs font-medium text-primary underline-offset-2 hover:underline"
               >
                 清除筛选 →
               </a>
@@ -282,7 +282,7 @@ export default function ShowcasePage() {
         title="五态组件库"
         subtitle="ContentSkeleton / EmptyState kind / ErrorState / DisabledReason / PendingButton / LongTaskReceipt。"
       >
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
           <ContentSkeleton rows={4} variant="table" />
           <EmptyState kind="no-data" noun="工单" />
           <EmptyState kind="no-result" noun="工单" />
@@ -365,6 +365,10 @@ export default function ShowcasePage() {
             <FormMessage fieldId="showcase-unit-price" tone="error">
               单价必须大于或等于 0
             </FormMessage>
+            <label htmlFor="showcase-customer" className="block text-sm font-medium">
+              客户
+            </label>
+            <Input id="showcase-customer" placeholder="客户名称" aria-invalid="true" />
           </div>
           <FormErrorSummary
             errors={[
@@ -448,22 +452,7 @@ export default function ShowcasePage() {
         title="ConfirmActionDialog"
         subtitle="L2 先核对影响范围；L3 还必须填写审计理由，关闭后焦点回到触发按钮。"
       >
-        <div className="flex flex-wrap gap-3">
-          <ConfirmActionController level="L2"
-            trigger={<Button variant="outline">停用通知群</Button>}>
-            <ConfirmActionDialog action="停用“生产通知群”？" changes={[]} consequences={[
-              '新通知不会再投递到该群。',
-              '历史投递日志仍会保留。',
-            ]} confirmText="确认停用" />
-          </ConfirmActionController>
-          <ConfirmActionController level="L3"
-            trigger={<Button variant="destructive">作废结算结果</Button>}>
-            <ConfirmActionDialog action="作废这份结算结果？" changes={[]} consequences={[
-              '当前结算结果将不再作为付款依据。',
-              '需要重新核算后才能继续后续流程。',
-            ]} confirmText="填写理由并作废" />
-          </ConfirmActionController>
-        </div>
+        <ConfirmationExamples />
       </Section>
 
       <Section

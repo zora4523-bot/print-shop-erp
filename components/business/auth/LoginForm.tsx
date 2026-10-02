@@ -22,8 +22,10 @@ export function LoginForm({ from }: { from: string }) {
       <div className="space-y-2">
         <Label htmlFor="username">用户名</Label>
         <Input
+          key={state?.username ?? ''}
           id="username"
           name="username"
+          defaultValue={state?.username ?? ''}
           type="text"
           autoComplete="username"
           autoCapitalize="off"

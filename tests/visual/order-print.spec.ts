@@ -252,12 +252,18 @@ function buildStandaloneHtml(order: PrintOrder): string {
 async function expectEverySheetFitsOneA4Page(page: Page) {
   const measurements = await page.locator('.sheet').evaluateAll((sheets) =>
     sheets.map((sheet) => ({
+      clientWidth: sheet.clientWidth,
+      scrollWidth: sheet.scrollWidth,
       clientHeight: sheet.clientHeight,
       scrollHeight: sheet.scrollHeight,
       renderedHeight: sheet.getBoundingClientRect().height,
     })),
   );
   for (const [index, measurement] of measurements.entries()) {
+    expect(
+      measurement.scrollWidth,
+      `第 ${index + 1} 张模板页不应横向溢出 A4 纸张`,
+    ).toBeLessThanOrEqual(measurement.clientWidth + 1);
     expect(
       measurement.scrollHeight,
       `第 ${index + 1} 张模板页不应有隐藏溢出`,
@@ -300,6 +306,24 @@ function textPreview(value: string, maxCharacters: number): string {
 }
 
 test.describe('OrderPrintLayout 截图回归', () => {
+  test('连续英文规格和款名完整换行且不撑出 A4 纸张', async ({ page }) => {
+    const order = await standaloneOrderFixture();
+    const specification = 'https://example.invalid/specification/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/very-long-unbroken-value';
+    const name = '超长款式名称红包烫金高级定制版ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    for (const item of order.items) {
+      item.specification = specification;
+      item.name = name;
+    }
+    await page.setContent(buildStandaloneHtml(order));
+    await waitForPrintReady(page);
+    await expect(page.locator('.items tbody tr')).toHaveCount(order.items.length);
+    for (const row of await page.locator('.items tbody tr').all()) {
+      await expect(row.locator('td').nth(1)).toHaveText(specification);
+      await expect(row.locator('td').nth(2)).toContainText(name);
+    }
+    await expectDeclaredPagination(page);
+  });
+
   test('长测试编号不会挤压页眉或增加单款页数', async ({ page }) => {
     const order = await standaloneOrderFixture();
     order.orderNo = 'e2e-sales-status-3a45a04f-1ee6-4340-bd40-6de653334496-42828677-155d-405a-a2fc-d57dd57db6ef';

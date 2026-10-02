@@ -96,17 +96,26 @@ export async function cleanupOldPdfArtifacts(): Promise<void> {
 }
 
 /** Probe only its own unique private artifact; never removes business output. */
-export async function checkPdfArtifactStorage(pdf: Buffer): Promise<void> {
+export async function checkPdfArtifactStorage(pdf: Buffer): Promise<{ probeRemoved: boolean }> {
   const name = `probe-${randomUUID()}.pdf`;
+  let primaryFailure: { error: unknown } | undefined;
+  let probeRemoved = true;
   try {
     await writePdfArtifact(name, pdf);
     if (!(await readPdfArtifact(name)).equals(pdf)) throw new Error('PDF_ARTIFACT_MISMATCH');
-  } finally {
+  } catch (error) { primaryFailure = { error }; }
+  try {
     if (storage() === 'oss') await client().delete(PREFIX + name);
     else await unlink(join(directory(), name)).catch((error: unknown) => {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     });
+  } catch (error) {
+    probeRemoved = false;
+    if (storage() === 'oss') console.warn('[pdf-probe] cleanup-failed');
+    else if (!primaryFailure) primaryFailure = { error };
   }
+  if (primaryFailure) throw primaryFailure.error;
+  return { probeRemoved };
 }
 
 export class PdfArtifactStorageError extends Error {

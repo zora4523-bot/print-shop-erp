@@ -16,8 +16,8 @@ export async function handleSalesBillExport(request: NextAuthRequest, billId?: s
       'X-Content-Type-Options': 'nosniff',
     } });
   } catch (error) {
-    const status = error instanceof UnauthorizedError ? 401 : error instanceof SalesBillExportNotFoundError ? 404 : error instanceof SalesBillExportInputError ? 400 : 503;
-    if (status === 503) console.error('[sales-bill-export] request failed', error instanceof Error ? error.name : 'UnknownError');
+    if (!(error instanceof UnauthorizedError || error instanceof SalesBillExportNotFoundError || error instanceof SalesBillExportInputError)) throw error;
+    const status = error instanceof UnauthorizedError ? 401 : error instanceof SalesBillExportNotFoundError ? 404 : 400;
     const message = status === 401 ? '请重新登录后导出。' : status === 404 ? '账单不存在或无权查看。' : error instanceof SalesBillExportInputError ? error.message : '暂时无法导出，请稍后重试。';
     return NextResponse.json({ error: message }, { status, headers: { 'Cache-Control': 'private, no-store' } });
   }

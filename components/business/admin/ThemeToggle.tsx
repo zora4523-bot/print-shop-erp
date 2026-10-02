@@ -17,6 +17,7 @@ type ThemeMode = 'light' | 'dark' | 'system';
 
 const STORAGE_KEY = 'erp-theme';
 const THEME_EVENT = 'erp-theme-change';
+const subscribeToHydration = () => () => undefined;
 
 function currentTheme(): ThemeMode {
   if (typeof document === 'undefined') return 'system';
@@ -42,6 +43,8 @@ function subscribeToTheme(listener: () => void) {
 export function ThemeToggle() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const restoreFocusOnClose = useRef(false);
+  // SSR HTML is visible before the menu can handle pointer events.
+  const hydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false);
   const theme = useSyncExternalStore(
     subscribeToTheme,
     currentTheme,
@@ -75,6 +78,7 @@ export function ThemeToggle() {
     >
       <DropdownMenuTrigger
         ref={triggerRef}
+        disabled={!hydrated}
         aria-label="切换界面主题"
         title="切换界面主题"
         className={buttonVariants({

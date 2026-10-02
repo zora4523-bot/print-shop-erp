@@ -27,6 +27,43 @@ export function collectGeometryIssues(): string[] {
   const centerY = (r: DOMRect) => r.top + r.height / 2;
   const centerX = (r: DOMRect) => r.left + r.width / 2;
 
+  // A locally scrollable table may fit the page while badge text spills out of
+  // its fixed-height pill. Check glyph bounds, including overflow:visible.
+  for (const badge of document.querySelectorAll<HTMLElement>('[data-slot="badge"]')) {
+    if (!isVisible(badge)) continue;
+    const box = badge.getBoundingClientRect();
+    const walker = document.createTreeWalker(badge, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      if (!node.textContent?.trim() || node.parentElement?.closest('.sr-only, [aria-hidden=true]')) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      if ([...range.getClientRects()].some((r) => r.width > 0 && r.height > 0 &&
+        (r.top < box.top - 1 || r.bottom > box.bottom + 1 || r.left < box.left - 1 || r.right > box.right + 1))) {
+        issues.push(`badge-text-overflow:${describe(badge)}`);
+        break;
+      }
+    }
+  }
+
+  // Short column headings must not collapse into a one-character-wide column.
+  for (const header of document.querySelectorAll<HTMLElement>('thead th')) {
+    if (!isVisible(header)) continue;
+    const walker = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const label = node.textContent?.trim() ?? '';
+      if (!/^[\u4e00-\u9fff]{2,8}$/.test(label) || node.parentElement?.closest('.sr-only, [aria-hidden=true]')) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const lines = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+      if (lines.length === label.length) {
+        issues.push(`table-heading-stacked:${describe(header)}`);
+        break;
+      }
+    }
+  }
+
   // ---- 1. same-row control alignment ---------------------------------------
   const CONTROL_SELECTOR = [
     'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]):not([aria-hidden=true])',
@@ -245,6 +282,16 @@ export function collectGeometryIssues(): string[] {
   let numberNode: Node | null;
   while ((numberNode = numberWalker.nextNode())) {
     const text = numberNode.textContent ?? '';
+    // In a data table, the currency sign and amount form one scannable value.
+    if (numberNode.parentElement?.closest('td, th')) {
+      for (const match of text.matchAll(/[¥￥]\s*-?\d[\d,]*(?:\.\d+)?/g)) {
+        const range = document.createRange();
+        range.setStart(numberNode, match.index);
+        range.setEnd(numberNode, match.index + match[0].length);
+        const lines = new Set([...range.getClientRects()].filter((r) => r.width && r.height).map((r) => Math.round(r.top / 2)));
+        if (lines.size > 1) issues.push(`table-money-split:${describe(numberNode.parentElement!)}`);
+      }
+    }
     for (const match of text.matchAll(NUMBER_TOKEN)) {
       const token = match[0];
       const digits = token.replace(/^-/, '');

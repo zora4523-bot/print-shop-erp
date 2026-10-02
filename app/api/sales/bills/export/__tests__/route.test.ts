@@ -27,9 +27,15 @@ it('routes the selected bill through the owned member export', async () => {
   await handleSalesBillExport(request(), 'bill-a');
   expect(detail).toHaveBeenCalledWith(actor, 'bill-a', expect.any(URLSearchParams)); expect(list).not.toHaveBeenCalled();
 });
-it.each([[new InputError('筛选条件不合法'), 400], [new NotFoundError('private bill'), 404], [new Error('database secret'), 503]])('maps a safe failure response', async (error, status) => {
+it.each([[new InputError('筛选条件不合法'), 400], [new NotFoundError('private bill'), 404]])('maps a safe failure response', async (error, status) => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   list.mockRejectedValue(error);
   const response = await handleSalesBillExport(request());
   expect(response.status).toBe(status); expect(await response.text()).not.toMatch(/private|secret/); log.mockRestore();
+});
+
+it('propagates unexpected failures to framework monitoring instead of swallowing them', async () => {
+  const failure = new Error('database failure');
+  list.mockRejectedValue(failure);
+  await expect(handleSalesBillExport(request())).rejects.toBe(failure);
 });

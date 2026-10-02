@@ -223,7 +223,7 @@ test('销售全部状态均能打开详情，分类结果和汇总计数一致',
     const { rows } = await db.query('SELECT status, COUNT(*)::int AS count FROM "Order" WHERE "submitterId"=$1 AND "orderNo" ILIKE $2 GROUP BY status', [salesId, `%${batch}%`]);
     for (const row of rows) counts.set(row.status, row.count);
   } finally { await db.end(); }
-  const labels = { doing: '进行中', shipped: '已发货', done: '已结算', cancelled: '已取消', draft: '草稿' };
+  const labels = { doing: '进行中', shipped: '已发货', done: '已完成', cancelled: '已取消', draft: '草稿' };
   for (const [view, statuses] of Object.entries(groups)) {
     const tab = page.getByRole('navigation', { name: '销售工单视图' }).getByRole('link', { name: new RegExp(`^${labels[view as keyof typeof labels]}`) });
     await expect(tab).toHaveText(`${labels[view as keyof typeof labels]}${statuses.reduce((sum, status) => sum + (counts.get(status) ?? 0), 0)}`);

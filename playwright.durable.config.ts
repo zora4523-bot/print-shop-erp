@@ -29,6 +29,7 @@ export default defineConfig({
   ...base,
   testDir: './tests/durable',
   testMatch: '**/*.spec.ts',
+  testIgnore: '**/cdr-workbench.spec.ts', // Own real-storage fixture and configuration.
   grepInvert: undefined,
   fullyParallel: false,
   workers: 1,

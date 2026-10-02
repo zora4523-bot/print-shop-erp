@@ -10,7 +10,7 @@ export function assertDurableEnvironment(): void {
   }
 }
 
-export async function startHeavyWorker(testInfo: TestInfo) {
+export async function startHeavyWorker(testInfo: TestInfo, options: { requirePdfReady?: boolean } = {}) {
   assertDurableEnvironment();
   const existing = await withSupplyChainDb((db) => db.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM "BackgroundWorkerHeartbeat"
@@ -44,7 +44,7 @@ export async function startHeavyWorker(testInfo: TestInfo) {
     await expect.poll(async () => {
       if (child.exitCode !== null) throw new Error(`HEAVY worker exited before startup: ${output.slice(-1500)}`);
       const heartbeat = await withSupplyChainDb((db) => db.query<{ version: string }>(
-        `SELECT version FROM "BackgroundWorkerHeartbeat" WHERE queue='HEAVY' AND "pdfReady" IS TRUE AND "lastSeenAt">NOW()-INTERVAL '30 seconds'`,
+        `SELECT version FROM "BackgroundWorkerHeartbeat" WHERE queue='HEAVY' AND ($1::boolean IS FALSE OR "pdfReady" IS TRUE) AND "lastSeenAt">NOW()-INTERVAL '30 seconds'`, [options.requirePdfReady !== false],
       ));
       return heartbeat.rows.map((row) => row.version);
     }, { timeout: 60_000 }).toEqual([process.env.APP_VERSION]);

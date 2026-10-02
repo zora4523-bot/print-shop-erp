@@ -11,6 +11,7 @@ export type CdrBundleFailureDisplay = {
 export function cdrBundleFailureDisplay(
   errorCode: string | null,
 ): CdrBundleFailureDisplay {
+  if (errorCode === 'CdrBundleStaleError') return { title: '文件已更新', description: '请核对最新工单后重新生成下载包。' };
   if (errorCode === 'CancelledByOperator') {
     return {
       title: '任务已取消',

@@ -1211,6 +1211,16 @@ describe('terminal CDR state', () => {
     });
   });
 
+  it('terminates a stale CDR snapshot on its first attempt', async () => {
+    dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
+    dbMock.backgroundJobAttempt.update.mockResolvedValue({});
+    await failBackgroundJob({ ...claimed, attempts: 1 }, Object.assign(new Error('changed'), { name: 'CdrBundleStaleError' }), new Date('2026-07-17T08:01:00Z'));
+    expect(dbMock.designBundle.updateMany).toHaveBeenCalledWith({
+      where: { backgroundJobId: 'job-cdr', status: 'PENDING' },
+      data: { status: 'FAILED', lastErrorCode: 'CdrBundleStaleError' },
+    });
+  });
+
   it('keeps a retryable CDR failure pending with its error code', async () => {
     dbMock.backgroundJob.updateMany.mockResolvedValue({ count: 1 });
     dbMock.backgroundJobAttempt.update.mockResolvedValue({});

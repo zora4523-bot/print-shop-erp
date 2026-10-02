@@ -2,10 +2,10 @@
 
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Download, FileSpreadsheet, X } from 'lucide-react';
+import { FileSpreadsheet, X } from 'lucide-react';
 import { requestOrderExportAction, type OrderExportActionResult } from '@/actions/order-export';
 import { OrderExportStatus } from '@/generated/prisma/enums';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui-business';
 import {
   Sheet,
@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/sheet';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { ORDER_EXPORT_STATUS_REGISTRY } from '@/lib/ui/status-registry';
-import { cn } from '@/lib/utils';
+import { SalesBillExportButton } from '@/components/business/billing/SalesBillExportButton';
 import {
   ORDER_EXPORT_POLLING_TIMEOUT_MS,
   pendingOrderExportSignature,
@@ -215,17 +215,7 @@ export function OrderExportControls({
                       </p>
                     </div>
                     {item.status === OrderExportStatus.READY ? (
-                      <a
-                        href={`/api/orders/exports/${item.id}`}
-                        download
-                        className={cn(
-                          buttonVariants({ variant: 'outline', size: 'sm' }),
-                          'min-h-11 shrink-0',
-                        )}
-                      >
-                        <Download aria-hidden="true" />
-                        下载
-                      </a>
+                      <SalesBillExportButton href={`/api/orders/exports/${item.id}`} label="下载" pendingLabel="正在下载…" />
                     ) : null}
                   </li>
                 ))}

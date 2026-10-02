@@ -60,5 +60,5 @@ export function startPdfCapabilityMonitor(probe: () => Promise<unknown>) {
 
 export function isPdfInfrastructureFailure(error: unknown): boolean {
   return error instanceof Error && ['PdfBrowserUnavailableError', 'PrintFontUnavailableError',
-    'PDF_BROWSER_VERSION_MISMATCH', 'PdfArtifactStorageError', 'TargetCloseError', 'ProtocolError'].includes(error.name);
+    'PDF_BROWSER_VERSION_MISMATCH', 'PdfArtifactStorageError'].includes(error.name);
 }

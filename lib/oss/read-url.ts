@@ -6,7 +6,7 @@ import { objectKeyFromReadUrl } from './object-key';
 //
 // bucket 是私有的：OrderItemDesign.fileUrl 存的是不带签名的
 // `${publicBaseUrl}/${objectKey}`，浏览器 <img> 直接 GET 会 403。
-// 详情页/打印视图渲染前把它换成短期预签 GET URL（30 分钟——够一次
+// 详情页/打印视图渲染前把它换成短期预签 GET URL（至少 30 分钟——够一次
 // 页面停留 + Puppeteer PDF 渲染；过期刷新页面即重签）。
 //
 // 不签直接原样返回的情况（调用方无需分支）：
@@ -25,12 +25,12 @@ import { objectKeyFromReadUrl } from './object-key';
 
 const READ_URL_EXPIRES_SECONDS = 30 * 60;
 
-// 过期时间按固定 30 分钟桶取整（审查 #4）：同一对象在一个桶内签出的 URL
+// 过期时间按固定 30 分钟桶取整：同一对象在一个桶内签出的 URL
 // 完全相同，浏览器缓存可以跨页面切换复用缩略图，不再每次 RSC 刷新都换 URL
 // 重新下载。取整目标 = 「now + 有效期下限」向上取到桶边界，所以剩余有效期
-// 落在 [READ_URL_EXPIRES_SECONDS / 2, READ_URL_EXPIRES_SECONDS / 2 + 桶长)。
+// 落在 [READ_URL_EXPIRES_SECONDS, READ_URL_EXPIRES_SECONDS + 桶长)。
 export const READ_URL_BUCKET_SECONDS = 30 * 60;
-export const READ_URL_MIN_REMAINING_SECONDS = READ_URL_EXPIRES_SECONDS / 2;
+export const READ_URL_MIN_REMAINING_SECONDS = READ_URL_EXPIRES_SECONDS;
 
 // 列表缩略图走 OSS 图片处理缩放版；x-oss-process 作为子资源进入签名
 // （ali-oss signatureUrl 的 options.process）。
@@ -70,10 +70,11 @@ export function signDesignReadUrl(
   if (!objectKey || !objectKey.startsWith('design/')) return fileUrl;
 
   const client = createOssClient(cfg);
-  // ali-oss 的 expires 是相对秒数（内部 = 当前秒 + expires），这里换算成
+  // ali-oss 使用 Math.round(Date.now() / 1000)，相对秒数必须使用相同取整。
+  // expires 内部 = 当前秒 + expires，这里换算成
   // 桶边界的相对值；两次读秒同一秒内完成，跨秒的极小窗口只会让该次 URL
   // 与桶内其它 URL 不同，不影响正确性。
-  const nowSeconds = Math.floor(Date.now() / 1000);
+  const nowSeconds = Math.round(Date.now() / 1000);
   return client.signatureUrl(objectKey, {
     expires: designReadUrlExpiresAt(nowSeconds) - nowSeconds,
     method: 'GET',

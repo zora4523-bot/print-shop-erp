@@ -61,6 +61,7 @@ export async function createBundleAction(
         { id: actor.id },
       );
       revalidatePath('/foreman/cdr');
+      revalidatePath('/owner');
       return {
         status: 'queued',
         bundleId: queued.bundleId,
@@ -74,6 +75,7 @@ export async function createBundleAction(
       { id: actor.id },
     );
     revalidatePath('/foreman/cdr');
+    revalidatePath('/owner');
     return {
       status: 'success',
       bundleId: result.bundleId,
@@ -103,6 +105,7 @@ export async function revokeBundleAction(
   try {
     await revokeBundleAccess(bundleId.trim());
     revalidatePath('/foreman/cdr');
+    revalidatePath('/owner');
     return { status: 'success' };
   } catch (error) {
     if (error instanceof CdrBundleError) {

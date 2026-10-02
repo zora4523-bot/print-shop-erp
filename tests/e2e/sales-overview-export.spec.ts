@@ -113,12 +113,12 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   expect(errors).toEqual([]);
 });
 
-test('销售总览六视口明暗主题：范围与导航可见、无溢出且键盘触控可用', async ({ page }) => {
+test('销售总览九视口明暗主题：范围与导航可见、无溢出且键盘触控可用', async ({ page }) => {
   test.setTimeout(180_000);
   const source = await seedSettledExternalSalesOrder({ customerRef: '看板响应式', settledFee: '1.00', settledAt: midPreviousShanghaiMonth() });
   await seedDraftAgentMonthlyBill(source);
   await login(page, { from: '/sales/overview', username: source.agentUsername, password: E2E_PASSWORD });
-  for (const [width, height] of [[375,667], [393,852], [768,1024], [1024,768], [1280,800], [1920,1080]]) {
+  for (const [width, height] of [[320,568], [375,667], [390,844], [393,852], [430,932], [768,1024], [1024,768], [1280,800], [1920,1080]]) {
     await page.setViewportSize({ width, height });
     for (const theme of ['light', 'dark'] as const) {
       await selectBillTheme(page, theme);

@@ -28,17 +28,18 @@ export type AdminMenuItem = {
 
 export type AdminMenuGroup = {
   label?: string;
+  iconName?: IconName;
   collapsible?: boolean;
   items: AdminMenuItem[];
 };
 
-const SECTION_LABELS: Record<AdminMenuSection, string> = {
-  workflow: '业务',
-  rules: '规则',
-  finance: '财务',
-  dictionary: '字典',
-  operations: '运维',
-  account: '账号',
+const SECTIONS: Record<AdminMenuSection, Omit<AdminMenuGroup, 'items'>> = {
+  workflow: { label: '业务模块', collapsible: false },
+  production: { label: '生产与采购', iconName: 'PackageOpen', collapsible: true },
+  finance: { label: '财务结算', iconName: 'Wallet', collapsible: true },
+  dictionary: { label: '基础资料', iconName: 'Boxes', collapsible: true },
+  rules: { label: '规则', collapsible: false },
+  operations: { label: '系统管理', iconName: 'Settings', collapsible: true },
 };
 
 function isVisible(
@@ -83,10 +84,6 @@ function toMenuItem(
   };
 }
 
-function sectionLabel(section: AdminMenuSection): string {
-  return SECTION_LABELS[section];
-}
-
 /**
  * 返回当前用户在 (admin) 壳内可见的菜单分组。
  *
@@ -121,16 +118,26 @@ export function getAdminMenuItems(user: { role: Role }): AdminMenuGroup[] {
 
   const groups: AdminMenuGroup[] = [];
   for (const adminModule of rootModules) {
-    const label = sectionLabel(adminModule.menuSection);
+    const section = SECTIONS[adminModule.menuSection];
+    const { label } = section;
     const group = groups.find((candidate) => candidate.label === label);
     const item = toMenuItem(adminModule, childrenByParent);
     if (group) {
       group.items.push(item);
     } else {
-      groups.push({ label, items: [item], collapsible: adminModule.menuSection !== 'account' });
+      groups.push({ ...section, items: [item] });
     }
   }
-  return groups;
+  const labels = Object.values(SECTIONS).map((section) => section.label);
+  return groups.sort((a, b) => labels.indexOf(a.label) - labels.indexOf(b.label));
+}
+
+/** 全局侧栏只显示模块入口；完整的授权子项继续供模块内目录与路由匹配使用。 */
+export function getAdminSidebarGroups(groups: readonly AdminMenuGroup[]): AdminMenuGroup[] {
+  return groups.map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({ ...item, children: undefined })),
+  }));
 }
 
 /**

@@ -43,8 +43,8 @@ async function main(): Promise<void> {
   );
   const pdfBrowserReuse = queue === BackgroundJobQueue.HEAVY && process.env.PDF_BROWSER_REUSE !== '0';
   const requestedConcurrency = intEnv(queue === BackgroundJobQueue.HEAVY ? 'HEAVY_WORKER_CONCURRENCY' : 'LIGHT_WORKER_CONCURRENCY', queue === BackgroundJobQueue.HEAVY ? 1 : 2, 1, 8);
-  // The reused PDF browser is serial (docs/audits 2026-09-30 PDF plan T1): extra
-  // HEAVY slots would only queue behind it and burn their lease/render budgets.
+  // Reuse mode deliberately serializes the entire HEAVY queue, including
+  // non-PDF exports and CDR bundles, to bound combined memory use.
   const concurrency = pdfBrowserReuse ? 1 : requestedConcurrency;
   if (concurrency !== requestedConcurrency) {
     console.warn(`[worker] HEAVY_WORKER_CONCURRENCY=${requestedConcurrency} clamped to 1 while PDF_BROWSER_REUSE is enabled`);

@@ -59,6 +59,7 @@ applies_to: repository source at last_verified
 ### UI
 
 - 遵守 [UI-SYSTEM.md](./UI-SYSTEM.md) 的组件分层、五态、语义颜色、响应式和可访问性规范。
+- UI 规则以 [`docs/ui-规范.md`](./docs/ui-规范.md) 为准；UI 任务执行其 [§11 质量标准](./docs/ui-规范.md#11-ui--ux-quality-standard)，按任务影响完成 Design QA、修复复验及证据记录。文档修改本身不等于页面验收。
 - 业务页面不新增 Tailwind 调色板字面量；ESLint 已在 `app/`、`components/business/` 和 `components/ui-business/` 建立门禁。
 - 不新增 `window.alert` / `window.confirm`，不为同一种状态再造局部 Badge、空态或 loading。
 - 交互只隐藏或禁用按钮不算授权；服务端约束仍必须存在。
@@ -93,7 +94,7 @@ applies_to: repository source at last_verified
 | Route Handler | 状态码/响应体/认证测试，并更新 API 文档 |
 | Prisma migration | 开发库状态、fresh DB 完整迁移链、数据前后置检查 |
 | 打印布局 | `tests/visual/order-print.spec.ts` 像素基线；未经确认不更新基线 |
-| 管理端/师傅端布局 | 六视口、明暗主题、overflow、touch 与 axe 门禁 |
+| 管理端/师傅端布局 | 九视口、明暗主题、overflow、touch 与 axe 门禁，并按 [Design QA](./docs/ui-规范.md#11-ui--ux-quality-standard) 实屏复核 |
 | 发布候选 | 架构、typecheck、完整 lint、全量单测与覆盖率、依赖安全审计、fresh DB、build、浏览器组件、关键 E2E、适用视觉门禁、目标环境 smoke |
 
 常用命令见 [DEVELOPMENT.md](./DEVELOPMENT.md)。视觉门禁通过只证明已定义的几何、可访问性和基线契约，不自动证明每一页都与设计稿逐像素一致。

@@ -34,7 +34,7 @@ test.describe('automation smoke', () => {
     }
   });
 
-  test('ADMIN uses direct rule-center sidebar entries and canonical rule pages', async ({
+  test('ADMIN uses the rule-center module directory and canonical rule pages', async ({
     page,
   }) => {
     test.setTimeout(90_000);
@@ -98,7 +98,7 @@ test.describe('automation smoke', () => {
       sidebar.locator('[data-menu-group="概览"]'),
     ).toHaveCount(0);
     const dashboardLink = sidebar.getByRole('link', {
-      name: '工作台',
+      name: '管理工作台',
       exact: true,
     });
     await expect(dashboardLink).toHaveCount(1);
@@ -111,27 +111,15 @@ test.describe('automation smoke', () => {
     );
     if (!ruleRootItem) throw new Error('规则配置中心父菜单缺失');
 
-    for (const item of RULE_CENTER_SIDEBAR_ITEMS) {
-      const entry = sidebar.getByRole('link', {
-        name: item.label,
-        exact: true,
-      });
-      await expect(entry).toHaveCount(1);
-      await expect(entry).toHaveAttribute('href', item.href);
-    }
-
-    const ruleParentLink = sidebar.getByRole('link', {
-      name: ruleRootItem.label,
-      exact: true,
-    });
-    const ruleParent = sidebar.locator(
-      '[data-menu-level="parent"]:has(a[href="/owner/rules"])',
-    );
-    const ruleSubmenu = ruleParent.locator('[data-sidebar="menu-sub"]');
-    await expect(ruleParent).toHaveCount(1);
-    await expect(ruleSubmenu).toHaveCount(1);
+    const ruleParentLink = sidebar.getByRole('link', { name: ruleRootItem.label, exact: true });
+    await expect(ruleParentLink).toHaveAttribute('href', ruleRootItem.href);
     await expect(ruleParentLink).toHaveAttribute('aria-current', 'page');
-    await expect(ruleParent).not.toHaveAttribute('data-has-active-child');
+    for (const child of ruleChildItems) {
+      await expect(sidebar.getByRole('link', { name: child.label, exact: true })).toHaveCount(0);
+    }
+    const ruleSubmenu = page.getByRole('navigation', { name: '规则模块导航', includeHidden: true });
+    const ruleToggle = () => page.locator('summary').filter({ hasText: '规则目录' });
+    await expect(ruleSubmenu).toHaveCount(0);
 
     await page.goto('/owner/rules/customer-pricing?section=blank');
     await expect(
@@ -140,8 +128,9 @@ test.describe('automation smoke', () => {
         exact: true,
       }),
     ).toBeVisible();
-    await expect(ruleParentLink).not.toHaveAttribute('aria-current', 'page');
-    await expect(ruleParent).toHaveAttribute('data-has-active-child', 'true');
+    await expect(ruleParentLink).toHaveAttribute('aria-current', 'page');
+    await expect(ruleSubmenu).toBeHidden();
+    await ruleToggle().click();
     await expect(
       ruleSubmenu.getByRole('link', {
         name: '空白封单价',
@@ -160,13 +149,8 @@ test.describe('automation smoke', () => {
       '员工薪酬规则',
     ]) {
       await expect(
-        ruleSubmenu.locator(`[data-menu-subgroup="${groupLabel}"]`).first(),
+        ruleSubmenu.getByRole('heading', { name: groupLabel, exact: true }),
       ).toBeVisible();
-    }
-    for (const redundantGroupLabel of ['客户计价规则', '建单主数据']) {
-      await expect(
-        ruleSubmenu.getByText(redundantGroupLabel, { exact: true }),
-      ).toHaveCount(0);
     }
     for (const oldGroupLabel of ['对客计价', '基础事实', '内部结算']) {
       await expect(ruleSubmenu.getByText(oldGroupLabel, { exact: true })).toHaveCount(0);
@@ -177,16 +161,12 @@ test.describe('automation smoke', () => {
       ).toHaveAttribute('href', child.href);
     }
 
-    // 规则分组只显示父入口，子菜单使用专属开关。
-    await expect(sidebar.getByRole('button', { name: /^规则 (收起|展开)$/, exact: true })).toHaveCount(0);
-    const ruleToggle = () => ruleParent.getByRole('button', { name: /规则配置中心子菜单/ });
-    await expect(ruleToggle()).toHaveAttribute('aria-expanded', 'true');
+    // 侧栏只有模块入口，明细在页面内按需展开。
+    await expect(sidebar.getByRole('button', { name: /规则.*(收起|展开)/ })).toHaveCount(0);
     await ruleToggle().click();
-    await expect(ruleToggle()).toHaveAttribute('aria-expanded', 'false');
-    await expect(ruleSubmenu).not.toBeVisible();
+    await expect(ruleSubmenu).toBeHidden();
     await expect(ruleParentLink).toBeVisible();
     await ruleToggle().click();
-    await expect(ruleToggle()).toHaveAttribute('aria-expanded', 'true');
     await expect(ruleSubmenu).toBeVisible();
     await expect(
       sidebar.locator(
@@ -223,12 +203,13 @@ test.describe('automation smoke', () => {
 
     for (const route of canonicalPages) {
       await expect(
-        sidebar.getByRole('link', {
+        ruleSubmenu.getByRole('link', {
           name: route.label,
           exact: true,
         }),
       ).toHaveAttribute('href', route.navPath);
       await page.goto(route.path);
+      await ruleToggle().click();
       await expect(
         page.getByRole('heading', {
           name: route.heading,
@@ -255,13 +236,12 @@ test.describe('automation smoke', () => {
       await expectNoNextErrorOverlay(page);
     }
 
-    const activePayLink = sidebar.getByRole('link', {
+    const activePayLink = ruleSubmenu.getByRole('link', {
       name: '员工薪酬规则',
       exact: true,
     });
     await expect(activePayLink).toHaveAttribute('aria-current', 'page');
-    await expect(ruleParentLink).not.toHaveAttribute('aria-current', 'page');
-    await expect(ruleParent).toHaveAttribute('data-has-active-child', 'true');
+    await expect(ruleParentLink).toHaveAttribute('aria-current', 'page');
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(RULE_CENTER_HREFS.root);
@@ -283,22 +263,11 @@ test.describe('automation smoke', () => {
     ).toHaveCount(0);
     await expect(
       mobileSidebar.getByRole('link', {
-        name: '工作台',
+        name: '管理工作台',
         exact: true,
       }),
     ).toHaveAttribute('href', '/owner');
-    const mobileRuleParent = mobileSidebar.locator(
-      '[data-menu-level="parent"]:has(a[href="/owner/rules"])',
-    );
-    await expect(
-      mobileRuleParent.locator('[data-sidebar="menu-sub"]'),
-    ).toHaveCount(1);
-    await expect(
-      mobileSidebar.getByRole('link', { name: '空白封单价', exact: true }),
-    ).toHaveAttribute(
-      'href',
-      '/owner/rules/customer-pricing?section=blank',
-    );
+    await expect(mobileSidebar.getByRole('link', { name: '空白封单价', exact: true })).toHaveCount(0);
     await expect(
       mobileSidebar.getByRole('link', { name: '规则配置中心', exact: true }),
     ).toHaveAttribute('aria-current', 'page');
@@ -308,11 +277,13 @@ test.describe('automation smoke', () => {
     await expect(
       mobileSidebar.getByRole('link', { name: '客户计价', exact: true }),
     ).toHaveCount(0);
-    await mobileSidebar
-      .getByRole('link', { name: '价格版本', exact: true })
-      .click();
-    await expect(page).toHaveURL(new RegExp(`${RULE_CENTER_HREFS.priceVersions}$`));
+    await mobileSidebar.getByRole('link', { name: '规则配置中心', exact: true }).click();
     await expect(mobileSidebar).toBeHidden();
+    await page.getByRole('link', { name: '价格版本', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${RULE_CENTER_HREFS.priceVersions}$`));
+    await expect(ruleSubmenu).toBeHidden();
+    await ruleToggle().click();
+    await expect(ruleSubmenu.getByRole('link', { name: '价格版本', exact: true })).toHaveAttribute('aria-current', 'page');
   });
 
   test('ADMIN can open Pigsty readiness and search core ERP surfaces', async ({
@@ -456,6 +427,8 @@ test.describe('automation smoke', () => {
     // fixture is intentionally a DRAFT, so search it through the explicit
     // all-orders queue rather than weakening the queue boundary.
     await page.goto(`/orders?queue=all&q=${fixture.orderNo}`);
+    const productionGroup = page.locator('[data-sidebar="sidebar"]').getByRole('button', { name: /^生产与采购\s*(展开|收起)$/ });
+    if (await productionGroup.getAttribute('aria-expanded') === 'false') await productionGroup.click();
     await expect(
       page
         .locator('[data-sidebar="sidebar"]')

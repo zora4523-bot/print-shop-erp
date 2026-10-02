@@ -18,7 +18,7 @@ function record() {
     revision: 4, editVersion: 3, workOrderVersion: 2, priceRevision: 7,
     status: OrderStatus.PACKING, settlementType: OrderSettlementType.EXTERNAL_SALES,
     pricingStatus: OrderPricingStatus.ADMIN_CONFIRMED, isSfCollect: false,
-    settledAt: null, settledFee: null,
+    settledAt: null, settledFee: null, workflowDecisions: [],
     shipments: [{ id: 'shipment', sequence: 1, receiverName: '张先生', receiverAddress: '浙江杭州', trackingNo: null, weightKg: new Decimal('12.50'), destinationProvince: '浙江' }],
     customerCharges: [{ shipmentId: 'shipment', category: { code: 'SHIPPING_FEE' }, amount: new Decimal('18.20'), overrideReason: '物流报价' }],
   };
@@ -67,4 +67,22 @@ describe('administrator inline-operation DTO', () => {
     findFirst.mockResolvedValue({ ...record(), settlementType: OrderSettlementType.NO_CHARGE, pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION });
     expect((await getAdminOrderInlineOperations(actor, order))?.pricing).toBeNull();
   });
+});
+
+it.each([
+  [OrderStatus.CONFIRMED, null, null],
+  [OrderStatus.ON_HOLD, OrderStatus.CONFIRMED, null],
+  [OrderStatus.ON_HOLD, null, null],
+  [OrderStatus.ON_HOLD, OrderStatus.RELEASED, 'fulfillment'],
+] as const)('uses actual release facts for %s rather than button availability', async (status, heldFrom, pricing) => {
+  findFirst.mockResolvedValue({ ...record(), status, workflowDecisions: heldFrom ? [{ fromStatus: heldFrom }] : [], pricingStatus: OrderPricingStatus.PENDING_ADMIN_CONFIRMATION });
+  const data = await getAdminOrderInlineOperations(actor, { ...order, status, capabilities: { ...order.capabilities, ship: false, release: false } });
+  expect(data?.pricing).toBe(pricing);
+  if (pricing === null) expect(data?.fulfillment).toBeNull();
+});
+it('keeps a confirmed order with a pending change free of editable logistics to-dos', async () => {
+  expect(await getAdminOrderInlineOperations(actor, { ...order, status: OrderStatus.CONFIRMED,
+    pendingChangeRequest: { id: 'change', type: 'MODIFY', reason: '变更', createdAt: '' },
+    capabilities: { ...order.capabilities, release: false } })).toBeNull();
+  expect(findFirst).not.toHaveBeenCalled();
 });

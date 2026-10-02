@@ -50,7 +50,7 @@ export default async function OutsourceListPage({
           label="外协单列表"
           className="rounded-xl border bg-card shadow-sm"
         >
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[56rem] text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">工单号</th>
@@ -73,8 +73,8 @@ export default async function OutsourceListPage({
                       {r.order?.isUrgent ? <UrgentBadge /> : null}
                     </div>
                   </td>
-                  <td className="px-4 py-3">{r.supplierName}</td>
-                  <td className="px-4 py-3">{r.craftDescription ?? '—'}</td>
+                  <td className="min-w-48 max-w-64 break-words px-4 py-3">{r.supplierName}</td>
+                  <td className="min-w-40 max-w-64 break-words px-4 py-3">{r.craftDescription ?? '—'}</td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">
                     {r.totalQty?.toLocaleString() ?? '—'}
                   </td>

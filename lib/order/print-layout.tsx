@@ -1476,6 +1476,7 @@ tbody td{ border-bottom:.15mm solid var(--hair); font-size:10.5pt; font-weight:6
 .num{ text-align:right; font-weight:800; }
 tfoot td{ border-top:.4mm solid var(--rule); border-bottom:none; font-size:11.5pt; font-weight:800; padding-top:2.2mm; }
 .items tbody td{ height:7mm; }
+.items tbody td:nth-child(2),.items tbody td:nth-child(3){ overflow-wrap:anywhere; }
 .item-process,
 .item-material{ max-width:65mm; color:var(--mute); font-size:7.2pt; font-weight:600; line-height:1.35; margin-top:.7mm; }
 .empty-row{ height:14mm !important; text-align:center; }

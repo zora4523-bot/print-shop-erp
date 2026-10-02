@@ -2,7 +2,7 @@ name: Quality
 
 # Phase 1 of the CI speed-up (DECISIONS 2026-09-19): fast gates fail in minutes
 # instead of after the 40-minute E2E step, pull requests gate on two
-# representative viewports, and `main` runs all six after the merge.
+# representative viewports, and `main` runs all nine after the merge.
 on:
   pull_request:
     paths-ignore:
@@ -249,7 +249,7 @@ jobs:
   # both shells), sharded by measured duration: chromium ~12.6 min over three
   # shards, each administrator viewport ~3-4 min, worker + no-JS under 1 min.
   # Every shard owns its runner, database and server, so `workers: 1` and the
-  # shared-database constraint inside a shard are unchanged. All six viewports
+  # shared-database constraint inside a shard are unchanged. All nine viewports
   # run in `viewports-main` after the merge.
   e2e:
     if: github.event_name == 'pull_request'
@@ -407,6 +407,19 @@ jobs:
           E2E_CANDIDATE_SHA: ${{ github.sha }}
           NODE_OPTIONS: --max-old-space-size=4096
         run: pnpm test:release:durable
+
+      - name: CDR real worker and ZIP downloads
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_cdr_ci
+          E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_cdr_ci
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_cdr_ci'
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+          pnpm test:release:cdr
 
       - name: Upload review data
         if: always()
@@ -579,8 +592,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # After the merge: the full six-viewport gate for both shells, plus the
-  # development fixtures at all six administrator viewports.
+  # After the merge: the full nine-viewport gate for both shells, plus the
+  # development fixtures at all nine administrator viewports.
   viewports-main:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -625,19 +638,25 @@ jobs:
           DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
           pnpm test:e2e:prepare
 
-      - name: Production build and six-viewport gates
+      - name: Production build and nine-viewport gates
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: >-
           pnpm test:release
+          --project=worker-320x568
           --project=worker-375x667
+          --project=worker-390x844
           --project=worker-393x852
+          --project=worker-430x932
           --project=worker-768x1024
           --project=worker-1024x768
           --project=worker-1280x800
           --project=worker-1920x1080
+          --project=admin-320x568
           --project=admin-375x667
+          --project=admin-390x844
           --project=admin-393x852
+          --project=admin-430x932
           --project=admin-768x1024
           --project=admin-1024x768
           --project=admin-1280x800
@@ -657,7 +676,7 @@ jobs:
           echo "E2E_DATABASE_URL=$E2E_DATABASE_URL" >> "$GITHUB_ENV"
           echo "E2E_DATABASE_CONFIRM_DATABASE=$E2E_DATABASE_CONFIRM_DATABASE" >> "$GITHUB_ENV"
 
-      - name: Development-only visual fixtures (six viewports)
+      - name: Development-only visual fixtures (nine viewports)
         run: pnpm test:release:dev-fixtures
 
       - name: Upload review data

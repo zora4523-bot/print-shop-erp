@@ -108,7 +108,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
         />
       ) : (
         <TableScrollArea label="时薪月结列表" className="rounded-xl border bg-card shadow-sm">
-          <table className="w-full text-sm">
+          <table className="w-full whitespace-nowrap text-sm">
             <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 text-left">月份</th>
@@ -136,7 +136,7 @@ export default async function HourlySalaryPage({ searchParams }: PageProps) {
                 return (
                   <tr key={r.id}>
                     <td className="px-4 py-3 font-sans tabular-nums text-xs">{r.month}</td>
-                    <td className="px-4 py-3">{r.worker.displayName}</td>
+                    <td className="min-w-40 max-w-64 whitespace-normal break-words px-4 py-3">{r.worker.displayName}</td>
                     <td className="px-4 py-3 text-xs">
                       {wt ? (WORKER_TYPE_LABELS[wt] ?? '未识别岗位') : '—'}
                     </td>
