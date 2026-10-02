@@ -3,9 +3,9 @@ import { PDFDocument } from 'pdf-lib';
 import type { ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 const m = vi.hoisted(() => ({
   active: vi.fn(), user: vi.fn(), find: vi.fn(), update: vi.fn(), worker: vi.fn(), order: vi.fn(),
-  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), available: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(),
+  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), available: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(), booked: vi.fn(),
 }));
-vi.mock('@/lib/db', () => ({ db: { $transaction: m.transaction, user: { findUnique: m.user }, backgroundJob: { findFirst: m.active, findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
+vi.mock('@/lib/db', () => ({ db: { $transaction: m.transaction, orderPrintAttempt: { findMany: m.booked }, user: { findUnique: m.user }, backgroundJob: { findFirst: m.active, findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
 vi.mock('@/lib/background-jobs/repository', () => ({ enqueueBackgroundJob: m.enqueue, BackgroundJobLeaseLostError: class extends Error {} }));
 vi.mock('@/lib/background-jobs/clock', () => ({ databaseNow: async () => new Date('2026-09-13') }));
 vi.mock('@/lib/order/print-view', () => ({ getOrderForPrint: m.order }));
@@ -26,6 +26,7 @@ beforeEach(() => {
   m.user.mockResolvedValue({ isActive: true, role: 'ADMIN' });
   m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: 1 }));
   m.available.mockResolvedValue(undefined);
+  m.booked.mockResolvedValue([]);
   m.recordInTx.mockImplementation(async (_tx: unknown, _attempt: unknown, _actor: unknown, contentIsCurrent: () => Promise<boolean>) =>
     (await contentIsCurrent()) ? 'MARKED' : 'STALE');
   m.transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => callback('tx'));
@@ -197,6 +198,21 @@ describe('recordBatchPrint', () => {
     ]);
     // 锁内重新读取用同一事务连接。
     expect(m.order.mock.calls.filter((call) => call[3] === 'tx').map((call) => call[0])).toEqual(['a']);
+  });
+
+  // 记录成功后响应丢失再重试：账本已整批记过就直接返回原结果，不因之后内容变化或文件过期而失败。
+  it('replays a fully booked attempt before checking the file or the current content', async () => {
+    ready();
+    m.booked.mockResolvedValue([
+      { attemptKey: 'batch-print:attempt-1:a', orderId: 'a', outcome: 'MARKED' },
+      { attemptKey: 'batch-print:attempt-1:b', orderId: 'b', outcome: 'ALREADY_PRINTED' },
+    ]);
+    m.available.mockRejectedValue(new Error('PDF_ARTIFACT_EXPIRED'));
+    m.order.mockResolvedValue({ id: 'a', version: 9, workOrderVersion: 1 });
+    expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toEqual({ marked: 1 });
+    expect(m.booked).toHaveBeenCalledWith({ where: { attemptKey: { in: ['batch-print:attempt-1:a', 'batch-print:attempt-1:b'] } }, select: { attemptKey: true, orderId: true, outcome: true } });
+    expect(m.available).not.toHaveBeenCalled();
+    expect(m.transaction).not.toHaveBeenCalled();
   });
 
   it('does not record a file that has expired or cannot be read', async () => {

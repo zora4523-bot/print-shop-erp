@@ -345,6 +345,10 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(await receipts()).toBe(2);
     await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });
     expect(await receipts()).toBe(2);
+    // 记录成功后响应丢失、期间工单内容又变了：同一尝试的重试仍返回原结果，不当作首次记录失败。
+    await db.order.update({ where: { id: ids[1] }, data: { remark: '记录后才改的备注' } });
+    await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });
+    await db.order.update({ where: { id: ids[1] }, data: { remark: null } });
     // 同一文件之后再打开是新的尝试，会记录期间新建的补打任务；原尝试的重试不会。
     const reprint = await createNextOrderPrintRequest({ orderId: ids[0], workOrderVersion: printed[0].version, reason: '补打一份', idempotencyKey: randomUUID() }, admin);
     await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });

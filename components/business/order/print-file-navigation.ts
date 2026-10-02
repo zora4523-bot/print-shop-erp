@@ -10,11 +10,16 @@ export function openBlankPrintTab(): Window | null {
   return tab;
 }
 
+/** 合并文件最大约 100 MB，慢网也要能取完；超时或主动取消都会释放界面并允许重试。 */
+const PRINT_FILE_TIMEOUT_MS = 5 * 60_000;
+
 type FetchedPrintFile = { ok: true; blob: Blob } | { ok: false; message: string };
 
-export async function fetchPrintFile(url: string): Promise<FetchedPrintFile> {
+export async function fetchPrintFile(url: string, signal: AbortSignal): Promise<FetchedPrintFile> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), PRINT_FILE_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { cache: 'no-store' });
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.any([signal, timeout.signal]) });
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => null);
       const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : '打印文件暂不可用，请重新生成';
@@ -22,7 +27,11 @@ export async function fetchPrintFile(url: string): Promise<FetchedPrintFile> {
     }
     return { ok: true, blob: await response.blob() };
   } catch {
+    if (signal.aborted) return { ok: false, message: '已取消' };
+    if (timeout.signal.aborted) return { ok: false, message: '取得文件超时，请检查网络后重试' };
     return { ok: false, message: '网络异常' };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

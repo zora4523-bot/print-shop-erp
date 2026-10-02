@@ -59,7 +59,7 @@ describe('recordOrderPrintedAction', () => {
     ['extra fields', { ...rendered, state: 'PRINTED' }],
     ['blank order', { ...rendered, orderId: ' ' }],
   ])('rejects %s without writing', async (_label, input) => {
-    await expect(recordOrderPrintedAction(input)).resolves.toEqual({ status: 'error', message: '打印记录参数无效' });
+    await expect(recordOrderPrintedAction(input)).resolves.toEqual({ status: 'error', message: '页面已更新，请刷新后重新打印' });
     expect(mocks.recordPrintPage).not.toHaveBeenCalled();
   });
 
@@ -90,8 +90,10 @@ describe('recordBatchPrintAction', () => {
   });
 
   it('rejects a missing attempt or malformed job id without touching the file', async () => {
-    await expect(recordBatchPrintAction({ jobId: 'job_1' })).resolves.toEqual({ status: 'error', message: '打印任务无效' });
-    await expect(recordBatchPrintAction({ jobId: '../x', attemptId: batch.attemptId })).resolves.toEqual({ status: 'error', message: '打印任务无效' });
+    // 旧页面仍按 jobId 字符串调用：提示刷新，不临时补发尝试标识。
+    await expect(recordBatchPrintAction('job_1')).resolves.toEqual({ status: 'error', message: '页面已更新，请刷新后重新生成打印文件' });
+    await expect(recordBatchPrintAction({ jobId: 'job_1' })).resolves.toEqual({ status: 'error', message: '页面已更新，请刷新后重新生成打印文件' });
+    await expect(recordBatchPrintAction({ jobId: '../x', attemptId: batch.attemptId })).resolves.toEqual({ status: 'error', message: '页面已更新，请刷新后重新生成打印文件' });
     expect(mocks.recordBatchPrint).not.toHaveBeenCalled();
   });
 

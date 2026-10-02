@@ -170,17 +170,19 @@ it('fetches the file, records it, then hands the fetched file over and refreshes
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
   await page.getByRole('link', { name: '下载 PDF' }).click();
   await page.getByRole('link', { name: '打开 PDF' }).click();
-  await expect.element(page.getByText('正在准备打印文件…', { exact: true })).toBeVisible();
+  await expect.element(page.getByText('正在记为已打印…', { exact: true })).toBeVisible();
   expect(m.fetchFile).toHaveBeenCalledOnce();
-  expect(m.fetchFile).toHaveBeenCalledWith('/api/orders/batch-print/job-1?view=download');
-  await expect.poll(() => m.record.mock.calls.length).toBe(1);
+  expect(m.fetchFile).toHaveBeenCalledWith('/api/orders/batch-print/job-1?view=download', expect.any(AbortSignal));
   expect(m.record).toHaveBeenCalledWith({ jobId: 'job-1', attemptId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
   expect(m.fetchFile.mock.invocationCallOrder[0]).toBeLessThan(m.record.mock.invocationCallOrder[0]!);
+  // 交付进行中不能生成新一批，免得结果和重试落到另一批上。
+  await expect.element(page.getByRole('button', { name: '打印所选（2）' })).toBeDisabled();
   expect(m.deliverFile).not.toHaveBeenCalled();
   settle({ status: 'success', marked: 2 });
   await expect.element(page.getByText('已记为已打印 2 单。', { exact: true })).toBeVisible();
   expect(m.deliverFile).toHaveBeenCalledWith(pdf, 'download', null, 'orders-job-1.pdf');
-  expect(m.refresh).toHaveBeenCalledOnce();
+  await expect.poll(() => m.refresh.mock.calls.length, { timeout: 2000 }).toBe(1);
+  await expect.element(page.getByRole('button', { name: '打印所选（2）' })).toBeEnabled();
 });
 it('opens the preview tab during the click and offers a link when the browser blocks it', async () => {
   const tab = { close: vi.fn() };
@@ -198,7 +200,7 @@ it('opens the preview tab during the click and offers a link when the browser bl
   // 新的一次打开是新的打印尝试。
   expect(m.record.mock.calls[1]?.[0].attemptId).not.toBe(m.record.mock.calls[0]?.[0].attemptId);
 });
-it('keeps the page and does not record when the file cannot be fetched', async () => {
+it('keeps the page and does not record when the file cannot be fetched, and can be cancelled', async () => {
   const tab = { close: vi.fn() };
   m.openTab.mockReturnValue(tab);
   m.fetchFile.mockResolvedValueOnce({ ok: false, message: '打印文件暂不可用，请返回列表重新生成' });
@@ -208,9 +210,18 @@ it('keeps the page and does not record when the file cannot be fetched', async (
   expect(tab.close).toHaveBeenCalledOnce();
   expect(m.record).not.toHaveBeenCalled();
   expect(m.deliverFile).not.toHaveBeenCalled();
-  expect(m.refresh).not.toHaveBeenCalled();
+  // 取文件挂起时可以取消，取消后释放界面、可重试。
+  m.fetchFile.mockImplementationOnce((_url: string, signal: AbortSignal) => new Promise((done) => {
+    signal.addEventListener('abort', () => done({ ok: false, message: '已取消' }));
+  }));
+  await page.getByRole('button', { name: '重试打开', exact: true }).click();
+  await expect.element(page.getByText('正在取得打印文件…', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：已取消');
+  await expect.element(page.getByRole('button', { name: '打印所选（2）' })).toBeEnabled();
+  expect(m.record).not.toHaveBeenCalled();
 });
-it('retries a failed record with the same attempt, then delivers', async () => {
+it('retries a failed record with the same attempt, reusing the fetched file when the record may have gone through', async () => {
   m.record.mockResolvedValueOnce({ status: 'error', message: '工单内容已变化，请重新选择并生成' }).mockRejectedValueOnce(new Error('offline'));
   mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
   await page.getByRole('link', { name: '下载 PDF' }).click();
@@ -218,11 +229,15 @@ it('retries a failed record with the same attempt, then delivers', async () => {
   expect(m.deliverFile).not.toHaveBeenCalled();
   await page.getByRole('button', { name: '重试下载', exact: true }).click();
   await expect.element(page.getByRole('alert')).toHaveTextContent('未能取得打印文件：网络异常');
+  expect(m.fetchFile).toHaveBeenCalledTimes(2);
+  // 记录时网络中断（可能已记上）：重试只补记录，用已取得的文件，不再重新取。
   await page.getByRole('button', { name: '重试下载', exact: true }).click();
   await expect.poll(() => m.deliverFile.mock.calls.length).toBe(1);
+  expect(m.fetchFile).toHaveBeenCalledTimes(2);
   const attempts = m.record.mock.calls.map((call) => call[0].attemptId);
   expect(new Set(attempts).size).toBe(1);
   expect(m.record).toHaveBeenCalledTimes(3);
   expect(m.start).toHaveBeenCalledOnce();
-  expect(m.refresh).toHaveBeenCalledOnce();
+  // 刷新由页面级协调器合并：紧接上一次刷新时会在一秒内补一次尾随刷新。
+  await expect.poll(() => m.refresh.mock.calls.length, { timeout: 2000 }).toBe(1);
 });

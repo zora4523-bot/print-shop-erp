@@ -28,7 +28,8 @@ const batchInputSchema = z.object({
 export async function recordOrderPrintedAction(input: unknown): Promise<OrderPrintRecordResult> {
   const actor = await requirePermission('order:change:review');
   const parsed = inputSchema.safeParse(input);
-  if (!parsed.success) return { status: 'error', message: '打印记录参数无效' };
+  // 参数不符多半是页面停留在旧版本：提示刷新，不替旧页面临时生成尝试标识（否则重试会认领新任务）。
+  if (!parsed.success) return { status: 'error', message: '页面已更新，请刷新后重新打印' };
   try {
     const outcome = await recordPrintPage(parsed.data, actor, await derivePublicBaseUrl());
     if (outcome === 'MARKED') {
@@ -50,7 +51,7 @@ export async function recordOrderPrintedAction(input: unknown): Promise<OrderPri
 export async function recordBatchPrintAction(input: unknown): Promise<BatchPrintRecordResult> {
   const actor = await requirePermission('order:change:review');
   const parsed = batchInputSchema.safeParse(input);
-  if (!parsed.success) return { status: 'error', message: '打印任务无效' };
+  if (!parsed.success) return { status: 'error', message: '页面已更新，请刷新后重新生成打印文件' };
   try {
     const result = await recordBatchPrint(actor.id, parsed.data.jobId, parsed.data.attemptId);
     if (!result) return { status: 'error', message: '打印文件尚未就绪' };

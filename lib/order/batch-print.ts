@@ -231,6 +231,16 @@ export async function downloadBatchPrint(actorId: string, jobId: string) {
  */
 export async function recordBatchPrint(actorId: string, jobId: string, attemptId: string): Promise<{ marked: number } | null> {
   const { job, payload } = await ownedJob(actorId, jobId);
+  // 本尝试已整批记过（例如记录成功后响应丢失再重试）：直接返回原结果，不因之后的生产进度变化或
+  // 文件过期而当作首次记录失败。整批在一个事务里写入，账本要么全有、要么全无。
+  const attemptKeys = new Map(payload.orders.map((order) => [`batch-print:${attemptId}:${order.id}`, order.id]));
+  const booked = await db.orderPrintAttempt.findMany({
+    where: { attemptKey: { in: [...attemptKeys.keys()] } },
+    select: { attemptKey: true, orderId: true, outcome: true },
+  });
+  if (booked.length === attemptKeys.size && booked.every((entry) => attemptKeys.get(entry.attemptKey) === entry.orderId)) {
+    return { marked: booked.filter((entry) => entry.outcome === 'MARKED').length };
+  }
   const result = resultSchema.safeParse(job.result);
   if (job.status !== 'SUCCEEDED' || !result.success || result.data.issues.length || !result.data.artifactName) return null;
   try { await assertPdfArtifactAvailable(result.data.artifactName); }
