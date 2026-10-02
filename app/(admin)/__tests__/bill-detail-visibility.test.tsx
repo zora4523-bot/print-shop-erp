@@ -124,7 +124,7 @@ describe('bill detail visibility boundary', () => {
     const headers = [...html.matchAll(/<th class="p-3 text-left">([^<]*)<\/th>/g)].map((match) => match[1]);
     expect(headers).toEqual(['工单号', '工单名称', '结算日期', '状态']);
     expect(html).toContain('<th class="p-3 text-right">结算金额</th>');
-    expect(html.match(/>录入抵扣<\/a>/g)).toHaveLength(2);
+    expect(html.match(/>录入抵扣或补收<\/a>/g)).toHaveLength(2);
     expect(html).toContain('href="/owner/agent-bills/agent-bill-1/credits/item-1/new"');
     expect(html).toContain('href="/owner/agent-bills/agent-bill-1/credits/item-2/new"');
     const nameCells = [...html.matchAll(/<td[^>]*>([^<]*<span class="block text-xs text-muted-foreground">当前名称<\/span>)<\/td>/g)].map((match) => match[1].replace(/<[^>]+>/g, ""));
@@ -278,13 +278,15 @@ describe('bill detail visibility boundary', () => {
   });
 });
 
+// 业主 2026-10-01：已确认账单的工单总能补收，所以全额抵扣后入口仍在（页面会默认选补收）。
 it.each([
   ['CONFIRMED', false, '0.00', true],
   ['PAID', false, '-100.00', true],
-  ['CONFIRMED', false, '-500.00', false],
+  ['CONFIRMED', false, '-500.00', true],
+  ['CONFIRMED', false, '50.00', true],
   ['DRAFT', false, '0.00', false],
   ['CONFIRMED', true, '0.00', false],
-] as const)('preserves credit eligibility on %s bills, sales=%s, requested credit=%s', (billStatus, sales, requestedAmount, eligible) => {
+] as const)('offers credit / surcharge entry on %s bills, sales=%s, recorded adjustment=%s', (billStatus, sales, requestedAmount, eligible) => {
   const html = renderToStaticMarkup(<BillItemsList
     period="2026-08" billId="bill-1" billStatus={billStatus} sales={sales}
     items={[{
@@ -295,7 +297,7 @@ it.each([
     }]}
   />);
   expect(html.includes('href="/owner/agent-bills/bill-1/credits/item-1/new"')).toBe(eligible);
-  expect(html.includes('录入抵扣')).toBe(eligible);
+  expect(html.includes('录入抵扣或补收')).toBe(eligible);
   expect(html.match(/aria-label="查看 20260801-0001 明细"/g)).toHaveLength(1);
   expect(html).not.toContain('href="/orders/order-1"');
   expect(html).not.toContain('v7');

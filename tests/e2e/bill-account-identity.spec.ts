@@ -83,7 +83,7 @@ test('同名大表哥账号：未出账定位、排行、操作与销售隔离',
   const exportForm = page.locator('form').filter({ has: page.getByRole('button', { name: /导出当前结果/ }) });
   await expect(exportForm.locator('input[name="agentUserId"]')).toHaveValue(first.agentUserId);
   await page.getByRole('link', { name: '详情', exact: true }).click();
-  await page.getByRole('link', { name: '录入抵扣', exact: true }).click();
+  await page.getByRole('link', { name: '录入抵扣或补收', exact: true }).click();
   await expect(page.getByText(first.agentUsername, { exact: true })).toBeVisible();
   await expect(page.getByText(second.agentUsername, { exact: true })).toHaveCount(0);
 

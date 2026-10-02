@@ -192,7 +192,7 @@ export function buildBreadcrumbCrumbs(
     if (isBillCredit && (i === 3 || i === 4)) return;
     if (!isLast && SKIPPED_BREADCRUMB_PATHS.has(href)) return;
     const label =
-      (isBillCredit && isLast ? '录入抵扣' : undefined) ??
+      (isBillCredit && isLast ? '录入抵扣或补收' : undefined) ??
       BREADCRUMB_PATH_LABELS[href] ??
       (segments[0] === 'orders' && i === 1 && seg !== 'new' ? '工单详情' : undefined) ??
       resolveSegmentLabel(seg, entityLabel, isLast ? pageHeading : null, href, role);

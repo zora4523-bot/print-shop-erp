@@ -102,6 +102,8 @@ import {
 import { ReworkOrderForm } from '@/components/business/order/ReworkOrderForm';
 import { OrderPricingReviewForm } from '@/components/business/order/OrderPricingReviewForm';
 import { OrderCommercialDetailsManager } from '@/components/business/order/OrderCommercialDetailsManager';
+import { SettledOrderCorrectionForm } from '@/components/business/order/SettledOrderCorrectionForm';
+import { readSettledOrderCorrectionAvailability } from '@/lib/order/settled-correction';
 import { OrderChangeFieldDiff } from '@/components/business/order/OrderChangeFieldDiff';
 import { OrderCostEntryForm } from '@/components/business/bill/OrderCostEntryForm';
 import { formatReceiverInfo } from '@/lib/order/receiver-info';
@@ -286,6 +288,10 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   const canReviewFulfillmentPricing =
     billsLogistics &&
     isFulfillmentPricingStatus(order.status);
+  // 业主 2026-10-01：发货即结算后，月账单确认前仍可更正结算金额。
+  const settledCorrection = order.status === OrderStatus.SETTLED
+    ? await readSettledOrderCorrectionAvailability(order.id)
+    : null;
   // 补录（priceBookId 为 null）的快递费在标记顺丰到付时会被清零，见 setOrderSfCollect。
   const manualFreightToWaive = (() => {
     if (!canViewCommercialAmounts || billsLogistics || order.isSfCollect) return null;
@@ -480,6 +486,17 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
                 destinationProvince: shipment.destinationProvince,
                 weightKg: shipment.weightKg?.toString() ?? null,
               }))}
+            />
+          ) : null}
+          {settledCorrection?.allowed ? (
+            <SettledOrderCorrectionForm
+              // 按工单挂载：更正成功后页面刷新带来新修订号，表单不重建，成功回执与展开状态保留。
+              key={`settled-correction-${order.id}`}
+              orderId={order.id}
+              orderRevision={order.revision}
+              settledFee={settledCorrection.settledFee}
+              minimumSettledFee={settledCorrection.minimumSettledFee}
+              inDraftBill={settledCorrection.inDraftBill}
             />
           ) : null}
         </section>

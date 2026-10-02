@@ -31,7 +31,7 @@ import {
   StatCard,
   StatusBadge,
   TableScrollArea, FilterClearLink } from '@/components/ui-business';
-import { formatMoney } from '@/lib/dashboard/format';
+import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -195,7 +195,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                 <th className="px-4 py-2 text-left">外部销售</th>
                 <th className="px-4 py-2 text-right">工单</th>
                 <th className="px-4 py-2 text-right">工单合计</th>
-                <th className="px-4 py-2 text-right">抵扣</th>
+                <th className="px-4 py-2 text-right">抵扣 / 补收</th>
                 <th className="px-4 py-2 text-right">账单金额</th>
                 <th className="px-4 py-2 text-center">状态</th>
                 <th className="px-4 py-2 text-left">确认 / 结清</th>
@@ -212,7 +212,7 @@ export default async function AgentMonthlyBillsPage({ searchParams }: PageProps)
                   </td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">{bill._count.items}</td>
                   <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.memberSubtotal)}</td>
-                  <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoney(bill.adjustmentAmount)}</td>
+                  <td className="px-4 py-3 text-right font-sans tabular-nums">{formatMoneyDelta(bill.adjustmentAmount)}</td>
                   <td className="px-4 py-3 text-right font-sans font-semibold tabular-nums">{formatMoney(bill.totalAmount)}</td>
                   <td className="px-4 py-3 text-center">
                     <StatusBadge

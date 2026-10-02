@@ -2683,9 +2683,10 @@ model AgentMonthlyBillItem {
   @@index([billId, settledAtSnapshot])
 }
 
-// One immutable correction request against a frozen source member. Remaining
-// credit is derived as requestedAmount minus its allocation rows; it is never
-// stored as mutable balance state.
+// One immutable correction request against a frozen source member. The sign is
+// the direction: negative = 抵扣 (credit), positive = 补收 (surcharge, owner
+// 2026-10-01). Remaining amount is derived as requestedAmount minus its
+// allocation rows; it is never stored as mutable balance state.
 model AgentMonthlyBillCredit {
   id              String   @id @default(cuid())
   sourceItemId    String

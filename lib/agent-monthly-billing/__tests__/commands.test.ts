@@ -6,13 +6,14 @@ const { tx, dbMock, events, synchronizeMock, clockMock } = vi.hoisted(() => {
   const tx = {
     agentMonthlyBill: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
       findMany: vi.fn(),
     },
     agentMonthlyBillReceipt: { create: vi.fn() },
     agentMonthlyBillItem: { findUnique: vi.fn() },
-    agentMonthlyBillCredit: { findUnique: vi.fn(), create: vi.fn() },
-    agentMonthlyBillAdjustment: { deleteMany: vi.fn() },
+    agentMonthlyBillCredit: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    agentMonthlyBillAdjustment: { deleteMany: vi.fn(), count: vi.fn() },
   };
   return {
     events,
@@ -35,6 +36,7 @@ vi.mock('../locks', () => ({
   lockAgentPeriod: vi.fn(async () => events.push('period')),
   lockAgentBill: vi.fn(async () => events.push('bill')),
   lockAgentBillRequest: vi.fn(async () => events.push('request')),
+  lockAgentSurcharges: vi.fn(async () => events.push('surcharge-agent')),
 }));
 vi.mock('../generation', () => ({
   synchronizeDraftBillInTx: synchronizeMock,
@@ -242,6 +244,7 @@ describe('agent monthly bill commands', () => {
         {
           expectedBillId: 'source-bill',
           sourceItemId: 'item-1',
+          direction: 'CREDIT',
           amount: '30.00',
           reason: '错单部分调整',
           idempotencyKey: 'credit-request-1',
@@ -252,6 +255,7 @@ describe('agent monthly bill commands', () => {
       creditId: 'credit-1',
       requestedAmount: '-30.00',
       allocatedBillIds: [],
+      creditAllocated: false,
     });
     expect(events.indexOf('credit-created')).toBeLessThan(
       events.indexOf('future-draft-scan'),
@@ -263,6 +267,80 @@ describe('agent monthly bill commands', () => {
       }),
       select: { id: true, requestedAmount: true },
     });
+  });
+
+  // 业主 2026-10-01：少收了可补收。补收存正数，不受结算金额上限约束；抵扣的上限
+  // 按「结算金额 + 已录全部抵扣 / 补收」的净额计算，与数据库触发器同一规则。
+  function frozenSource(credits: Array<{ requestedAmount: string }>) {
+    tx.agentMonthlyBillItem.findUnique
+      .mockResolvedValueOnce({ id: 'item-1', billId: 'source-bill', bill: { agentUserId: 'agent-1', period: '2026-05' } })
+      .mockResolvedValueOnce({ settledFeeSnapshot: '100.00', bill: { status: AgentMonthlyBillStatus.CONFIRMED }, credits });
+    tx.agentMonthlyBillCredit.findUnique.mockResolvedValue(null);
+    tx.agentMonthlyBill.findMany.mockResolvedValue([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue(null);
+    tx.agentMonthlyBillCredit.findMany.mockResolvedValue([]);
+    tx.agentMonthlyBillCredit.create.mockImplementation(async ({ data }: { data: { requestedAmount: string } }) => ({ id: 'credit-new', requestedAmount: data.requestedAmount }));
+  }
+  const request = (direction: 'CREDIT' | 'SURCHARGE', amount: string) => createAgentMonthlyBillCredit(
+    { expectedBillId: 'source-bill', sourceItemId: 'item-1', direction, amount, reason: '核对后调整', idempotencyKey: `req-${direction}-${amount}` },
+    { id: 'admin-1', role: Role.ADMIN },
+  );
+
+  it('records a surcharge as a positive amount even after the source was fully credited', async () => {
+    frozenSource([{ requestedAmount: '-100.00' }]);
+    await expect(request('SURCHARGE', '15.00')).resolves.toMatchObject({ requestedAmount: '15.00' });
+    expect(tx.agentMonthlyBillCredit.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ requestedAmount: '15.00', reason: '核对后调整' }),
+    }));
+  });
+
+  it.each([
+    ['20.00', true],
+    ['20.01', false],
+  ] as const)('caps a credit of %s by the net of the settled fee and every earlier credit and surcharge', async (amount, allowed) => {
+    frozenSource([{ requestedAmount: '-100.00' }, { requestedAmount: '20.00' }]);
+    const pending = request('CREDIT', amount);
+    if (allowed) await expect(pending).resolves.toMatchObject({ requestedAmount: '-20.00' });
+    else await expect(pending).rejects.toThrow('累计抵扣不能超过来源工单的结算金额（含已补收）');
+  });
+
+  // Codex 审查 P2：补收根记录不可改，写入前确认来源净额与最早草稿账单合计都在存储范围内。
+  // 按最坏情况——该销售所有未进入已确认账单的补收都落进同一张草稿——校验，包括其他来源工单的补收。
+  it('refuses a surcharge that could overflow a draft together with every other pending surcharge of the agent', async () => {
+    frozenSource([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ memberSubtotal: '9999999999.00' });
+    await expect(request('SURCHARGE', '1.00')).rejects.toThrow('补收金额过大');
+    expect(tx.agentMonthlyBillCredit.create).not.toHaveBeenCalled();
+    // 另一张来源工单已录 60 亿补收、尚未入已确认账单；本笔 40 亿加上 100 元工单合计超限。
+    frozenSource([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ memberSubtotal: '100.00' });
+    tx.agentMonthlyBillCredit.findMany.mockResolvedValue([{ requestedAmount: '6000000000.00', allocations: [] }]);
+    await expect(request('SURCHARGE', '4000000000.00')).rejects.toThrow('补收金额过大');
+    // 已分摊进已确认账单的部分不再计入待分摊。
+    frozenSource([]);
+    tx.agentMonthlyBill.findFirst.mockResolvedValue({ memberSubtotal: '100.00' });
+    tx.agentMonthlyBillCredit.findMany.mockResolvedValue([{ requestedAmount: '6000000000.00', allocations: [{ amount: '6000000000.00' }] }]);
+    await expect(request('SURCHARGE', '4000000000.00')).resolves.toMatchObject({ requestedAmount: '4000000000.00' });
+    expect(events).toContain('surcharge-agent');
+    frozenSource([{ requestedAmount: '9999999990.00' }]);
+    await expect(request('SURCHARGE', '10.00')).rejects.toThrow('补收金额过大');
+  });
+
+  it.each([
+    [0, false],
+    [1, true],
+  ])('reports this credit as allocated only when an adjustment row exists for it (%s rows)', async (rows, allocated) => {
+    frozenSource([]);
+    tx.agentMonthlyBill.findMany.mockResolvedValue([{ id: 'draft-6', period: '2026-06' }]);
+    tx.agentMonthlyBillAdjustment.count.mockResolvedValue(rows);
+    await expect(request('SURCHARGE', '5.00')).resolves.toMatchObject({ allocatedBillIds: ['draft-6'], creditAllocated: allocated });
+    expect(tx.agentMonthlyBillAdjustment.count).toHaveBeenCalledWith({ where: { creditId: 'credit-new' } });
+  });
+
+  it('refuses a replayed key whose direction changed', async () => {
+    tx.agentMonthlyBillItem.findUnique.mockResolvedValueOnce({ id: 'item-1', billId: 'source-bill', bill: { agentUserId: 'agent-1', period: '2026-05' } });
+    tx.agentMonthlyBillCredit.findUnique.mockResolvedValue({ id: 'credit-1', sourceItemId: 'item-1', requestedAmount: '-15.00', reason: '核对后调整' });
+    await expect(request('SURCHARGE', '15.00')).rejects.toThrow('本次提交已失效');
   });
 
   it('rejects a credit source that belongs to another bound bill', async () => {
@@ -277,6 +355,7 @@ describe('agent monthly bill commands', () => {
         {
           expectedBillId: 'bound-bill',
           sourceItemId: 'item-from-another-bill',
+          direction: 'CREDIT',
           amount: '30.00',
           reason: '跨账单伪造请求',
           idempotencyKey: 'credit-cross-bill',
