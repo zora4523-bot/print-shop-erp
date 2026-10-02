@@ -546,7 +546,7 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 `GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
 
-202 HTML 每次查询结束后等待 3 秒再查询，单次网络查询上限 15 秒、页面自动查询上限两分钟；不刷新整页、不自动抢焦点。就绪后再次通过授权下载路由打开 PDF；离线、超时或错误停止自动查询。禁用 JS 时仍可手动查询。HTML 提供网页打印、返回工单，以及仅对 `ops:jobs:manage` 角色显示的后台任务入口；跳转目标仍独立授权。
+202 HTML 每次查询结束后等待 3 秒再查询，单次网络查询上限 15 秒、页面自动查询上限两分钟；不刷新整页、不自动抢焦点。就绪后再次通过授权下载路由打开 PDF；短暂网络异常每 10 秒重试，连续三次失败后停止；401/403 和业务终态立即停止。绑定 jobId 的 PDF_WORKER_UNAVAILABLE（503）页面及查询响应保留原任务，每 10 秒重试，仍受两分钟页面上限约束，HTTP/JSON 状态契约不变。批量打印对连续不可用或网络异常限制 120 秒，正常生成中的任务继续查询，手动刷新重启异常等待窗口。禁用 JS 时仍可手动查询。HTML 提供网页打印、返回工单，以及仅对 `ops:jobs:manage` 角色显示的后台任务入口；跳转目标仍独立授权。
 
 已知错误包括 PDF_WORKER_UNAVAILABLE、PDF_QUEUE_DELAYED、PDF_FONT_UNAVAILABLE、PDF_BROWSER_VERSION_MISMATCH、PDF_LAYOUT_OVERFLOW、PDF_ARTWORK_UNAVAILABLE、PDF_STORAGE_UNAVAILABLE、PDF_VERSION_CHANGED、PDF_RENDER_TIMEOUT；未知错误只显示 PDF_GENERATION_FAILED。inline 渲染失败现在与 durable 一致返回可恢复 HTML，而非只有 JSON 错误。
 

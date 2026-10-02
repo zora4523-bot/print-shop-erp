@@ -29,7 +29,7 @@ export default async function UnbilledOrdersPage({ searchParams }: { searchParam
     </tr></thead><tbody>{result.rows.map((row) => {
       const billPeriod = formatDateInputShanghai(row.settledAt!).slice(0, 7);
       return <tr key={row.id} className="border-t">
-        <td className="p-3"><Link href={`/orders/${row.id}`} className={buttonVariants({ variant: 'ghost' })}>{row.customName || row.orderNo}</Link></td>
+        <td className="p-3"><Link href={`/orders/${row.id}`} className={buttonVariants({ variant: 'ghost' })}>{row.customName?.trim() || row.orderNo}</Link></td>
         <td className="min-w-48 p-3">{row.submitter.displayName}<span className="block break-all text-xs text-muted-foreground">{row.submitter.username}</span></td><td className="p-3">{formatDateTimeShanghai(row.settledAt!)}</td>
         <td className="p-3 text-right tabular-nums">{formatMoney(row.settledFee!)}</td><td className="p-3">{billPeriod < currentPeriod ? <Link href={buildTableHref('/owner/agent-bills', {}, { period: billPeriod, agentUserId: row.submitter.id })} className={buttonVariants({ variant: 'outline' })}>处理 {billPeriod} 未出账工单</Link> : '本月结束后可出账'}</td>
       </tr>;

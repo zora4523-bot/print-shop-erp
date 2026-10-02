@@ -23,8 +23,8 @@ beforeEach(() => {
   });
 });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); vi.restoreAllMocks(); poll = undefined; });
-function mount(status: AgentMonthlyBillExportStatus = AgentMonthlyBillExportStatus.PENDING) {
-  flushSync(() => root.render(<AgentMonthlyBillExportControls requestKey="key" filter={{}} filteredTotal={1} recent={[{ id: 'export-a', status, fileName: 'bill.xlsx', matchedBillCount: 1, byteSize: null, expiresAt: '2026-10-02T00:00:00Z', completedAt: null, createdAt: '2026-10-01T00:00:00Z', lastErrorCode: null }]} />));
+function mount(status: AgentMonthlyBillExportStatus = AgentMonthlyBillExportStatus.PENDING, empty = false) {
+  flushSync(() => root.render(<AgentMonthlyBillExportControls requestKey="key" filter={{}} filteredTotal={1} recent={empty ? [] : [{ id: 'export-a', status, fileName: 'bill.xlsx', matchedBillCount: 1, byteSize: null, expiresAt: '2026-10-02T00:00:00Z', completedAt: null, createdAt: '2026-10-01T00:00:00Z', lastErrorCode: null }]} />));
 }
 
 it('pauses on a network failure and lets a manual refresh recover the status', async () => {
@@ -87,6 +87,21 @@ it.each([
   await expect.element(page.getByText(message, { exact: true })).toBeVisible();
   expect(host.textContent).not.toContain('正在生成导出文件');
   expect(host.textContent).not.toContain('月账单导出状态已更新');
+  if (status !== AgentMonthlyBillExportStatus.READY) {
+    await expect.element(page.getByRole('button', { name: '刷新', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    expect(refresh).toHaveBeenCalledTimes(2);
+  }
   const announcements = [...host.querySelectorAll('[role="status"], [role="alert"]')].filter((node) => node.textContent?.trim());
   expect(announcements.map((node) => node.textContent?.trim())).toEqual([message]);
+});
+
+it.each([false, true])('has one recovery action for an action error with empty list=%s', async empty => {
+  request.mockResolvedValue({ status: 'error', message: '导出失败，请重试。' });
+  mount(AgentMonthlyBillExportStatus.PENDING, empty);
+  await page.getByRole('button', { name: '导出当前结果（1 张）', exact: true }).click();
+  await expect.element(page.getByText('导出失败，请重试。', { exact: true })).toBeVisible();
+  const buttons = [...host.querySelectorAll('button')].filter(button => button.textContent?.trim().startsWith('刷新'));
+  expect(buttons).toHaveLength(1); buttons[0].click();
+  await expect.poll(() => refresh.mock.calls.length).toBe(1);
 });

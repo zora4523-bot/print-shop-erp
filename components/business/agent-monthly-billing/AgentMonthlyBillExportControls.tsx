@@ -177,13 +177,13 @@ export function AgentMonthlyBillExportControls({
       </div>
       {feedback ? <ActionFeedback state={feedback} /> : null}
       {pendingIds.length > 0 && pollingIssue?.signature === pendingSignature ? <p className="text-sm text-muted-foreground">{pollingIssue.message}</p> : null}
-      {state?.status === 'error' ? <Button type="button" variant="outline" onClick={refresh}>刷新导出记录</Button> : null}
+      {recent.length === 0 && feedback?.status === 'error' ? <Button type="button" variant="outline" onClick={refresh}>刷新导出记录</Button> : null}
 
       {recent.length > 0 ? (
         <div className="border-t pt-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-medium">最近导出</h3>
-            {pendingIds.length > 0 ? (
+            {pendingIds.length > 0 || feedback?.status === 'error' ? (
               <Button
                 type="button"
                 variant="ghost"

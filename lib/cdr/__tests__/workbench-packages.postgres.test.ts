@@ -21,21 +21,23 @@ pg('CDR latest usable package · PostgreSQL', () => {
     await client.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}", public`);
-    await client.query(`CREATE TABLE "DesignBundle" (id text PRIMARY KEY, status text, "zipFileUrl" text, "orderIds" text[], manifest jsonb, "revokedAt" timestamptz, "expiresAt" timestamptz, "createdAt" timestamptz)`);
+    await client.query(`CREATE TABLE "DesignBundle" (id text PRIMARY KEY, status text, "zipFileUrl" text, "orderIds" text[], manifest jsonb, "revokedAt" timestamptz, "expiresAt" timestamp(3), "createdAt" timestamp(3))`);
     mocks.order.count.mockResolvedValue(1); mocks.order.findMany.mockResolvedValue([row]);
     mocks.$queryRaw.mockImplementation(async (sql: Prisma.Sql) => (await client.query(sql.text, sql.values)).rows);
   });
   afterAll(async () => { await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await client.end(); });
-  it('ignores revoked, expired, failed and mock packages while retaining an older usable package', async () => {
+  it.each(['UTC', 'Asia/Shanghai'])('ignores unusable packages in %s while retaining an older usable package', async (zone) => {
+    await client.query(`SET TIME ZONE '${zone}'`);
+    await client.query('TRUNCATE "DesignBundle"');
     const manifest = JSON.stringify({ version: 1, orders: [{ id: row.id, fingerprint: workbenchOrderFacts(row).fingerprint }] });
     await client.query(`INSERT INTO "DesignBundle" VALUES
-      ('revoked', 'READY', 'https://example.com/a.zip', ARRAY['o1'], $1, now(), now()+interval '1 day', now()),
-      ('expired', 'READY', 'https://example.com/a.zip', ARRAY['o1'], $1, NULL, now()-interval '1 second', now()),
-      ('failed', 'FAILED', 'https://example.com/a.zip', ARRAY['o1'], $1, NULL, now()+interval '1 day', now()),
-      ('mock', 'READY', 'mock://a.zip', ARRAY['o1'], $1, NULL, now()+interval '1 day', now())`, [manifest]);
+      ('revoked', 'READY', 'https://example.com/a.zip', ARRAY['o1'], $1, now(), (now() AT TIME ZONE 'UTC')+interval '1 hour', now()),
+      ('expired', 'READY', 'https://example.com/a.zip', ARRAY['o1'], $1, NULL, (now() AT TIME ZONE 'UTC')-interval '1 second', now()),
+      ('failed', 'FAILED', 'https://example.com/a.zip', ARRAY['o1'], $1, NULL, (now() AT TIME ZONE 'UTC')+interval '1 hour', now()),
+      ('mock', 'READY', 'mock://a.zip', ARRAY['o1'], $1, NULL, (now() AT TIME ZONE 'UTC')+interval '1 hour', now())`, [manifest]);
     const state = async () => (await listWorkbenchOrders(cdrWorkbenchFilterSchema.parse({}))).orders[0].packageState;
     expect(await state()).toBe('new');
-    await client.query(`INSERT INTO "DesignBundle" VALUES ('usable', 'READY', 'https://example.com/a.zip', ARRAY['o1'], $1, NULL, now()+interval '1 day', now()-interval '1 hour')`, [manifest]);
+    await client.query(`INSERT INTO "DesignBundle" VALUES ('usable', 'READY', 'https://example.com/a.zip', ARRAY['o1'], $1, NULL, (now() AT TIME ZONE 'UTC')+interval '1 hour', (now() AT TIME ZONE 'UTC')-interval '1 hour')`, [manifest]);
     expect(await state()).toBe('unchanged');
     await client.query(`UPDATE "DesignBundle" SET "revokedAt"=now() WHERE id='usable'`);
     expect(await state()).toBe('new');

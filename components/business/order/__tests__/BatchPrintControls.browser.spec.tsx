@@ -150,3 +150,31 @@ it('ends manual refresh loading when the status request times out', async () => 
     await expect.element(page.getByRole('button', { name: '刷新进度' })).toBeEnabled();
   } finally { timeout.mockRestore(); }
 });
+
+it.each(['unavailable', 'network'] as const)('bounds %s retries and allows a manual restart', async kind => {
+  const now = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  const original = globalThis.setTimeout; let next: (() => void) | undefined;
+  const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation((handler, delay, ...args) => {
+    if (delay === 10_000 && typeof handler === 'function') { next = () => handler(); return original(() => undefined, 2147483647); }
+    return original(handler, delay, ...args);
+  });
+  try {
+    if (kind === 'network') m.fetch.mockRejectedValue(new Error('offline'));
+    else m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'unavailable', completed: 0, total: 2, issues: [] }) });
+    mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+    await expect.poll(() => Boolean(next)).toBe(true);
+    clock.mockReturnValue(now + 120000); const poll = next!; next = undefined; poll();
+    await expect.element(page.getByText('暂时无法获取进度，已停止自动查询。请点击刷新进度重试。')).toBeVisible();
+    expect(next).toBeUndefined(); expect(m.fetch).toHaveBeenCalledTimes(2);
+    m.fetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'ready', completed: 2, total: 2, issues: [] }) });
+    await page.getByRole('button', { name: '刷新进度' }).click();
+    await expect.element(page.getByRole('link', { name: '打开 PDF' })).toBeVisible();
+    expect(m.start).toHaveBeenCalledOnce();
+  } finally { timer.mockRestore(); clock.mockRestore(); }
+});
+it.each([401, 403])('stops polling after authorization status %i', async status => {
+  m.fetch.mockResolvedValue({ ok: false, status });
+  mount(); await page.getByRole('button', { name: '打印所选（2）' }).click();
+  await expect.element(page.getByText('登录已失效或无权查看，请重新登录后重试。')).toBeVisible();
+  expect(m.fetch).toHaveBeenCalledOnce();
+});

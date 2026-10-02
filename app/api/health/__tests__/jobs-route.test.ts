@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getBackgroundJobHealthMock, botDigest } = vi.hoisted(() => ({
+const { getBackgroundJobHealthMock, botDigest, mode } = vi.hoisted(() => ({
   getBackgroundJobHealthMock: vi.fn(),
-  botDigest: 'a'.repeat(64),
+  botDigest: 'a'.repeat(64), mode: vi.fn(() => 'durable'),
 }));
 
 // 本路由不碰 db，但 health.ts 会 import lib/db；桩掉避免建真实 PrismaClient。
@@ -15,7 +15,7 @@ vi.mock('@/lib/background-jobs/health', async (importOriginal) => {
   return { ...actual, getBackgroundJobHealth: getBackgroundJobHealthMock };
 });
 vi.mock('@/lib/background-jobs/mode', () => ({
-  backgroundJobsMode: () => 'durable',
+  backgroundJobsMode: mode,
 }));
 vi.mock('@/lib/notification/smart-bot-identity', () => ({
   configuredSmartBotIdDigest: () => botDigest,
@@ -68,7 +68,7 @@ function fixture(): BackgroundJobHealth {
 }
 
 beforeEach(() => {
-  getBackgroundJobHealthMock.mockReset();
+  getBackgroundJobHealthMock.mockReset(); mode.mockReturnValue('durable');
   vi.stubEnv('APP_VERSION', VERSION);
 });
 
@@ -238,4 +238,38 @@ describe('GET /api/health/jobs', () => {
     expect(JSON.stringify(body)).not.toMatch(/previous-release|lastSeenAt|workerId|group-1/);
     expect(JSON.stringify(body)).not.toContain(botDigest);
   });
+});
+
+it.each([true, false, null, undefined])('exposes actual durable PDF readiness: %s', async pdfReady => {
+  const health = fixture(); health.activeWorkers[1]!.pdfReady = pdfReady;
+  getBackgroundJobHealthMock.mockResolvedValue(health);
+  const response = await GET(); const body = await response.json();
+  expect(body.pdf.ready).toBe(pdfReady === true);
+  expect(response.status).toBe(pdfReady === true ? 200 : 503);
+  if (pdfReady !== true) expect(body.alerts).toContain('pdf-worker-unavailable');
+});
+it('does not accept an old ready worker as the current release capability', async () => {
+  const health = fixture(); health.activeWorkers[1]!.version = 'old';
+  getBackgroundJobHealthMock.mockResolvedValue(health);
+  const response = await GET(); const body = await response.json();
+  expect(response.status).toBe(503); expect(body.pdf.ready).toBe(false);
+  expect(body.alerts).toContain('pdf-worker-unavailable');
+});
+it('does not require a PDF worker in inline mode', async () => {
+  mode.mockReturnValue('inline'); const health = fixture(); health.activeWorkers = [];
+  getBackgroundJobHealthMock.mockResolvedValue(health);
+  const response = await GET(); const body = await response.json();
+  expect(response.status).toBe(200); expect(body.pdf.ready).toBeNull();
+  expect(body.alerts).not.toContain('pdf-worker-unavailable');
+});
+
+it.each([
+  ['old-ready-current-false', false], ['current-ready-old-false', true], ['no-heavy', false], ['light-only', false],
+] as const)('keeps capability scoped to current HEAVY: %s', async (scenario, expected) => {
+  const health = fixture(); const heavy = health.activeWorkers[1]!;
+  if (scenario === 'old-ready-current-false') { heavy.pdfReady = false; health.activeWorkers.push({ ...heavy, version: 'old', pdfReady: true }); }
+  if (scenario === 'current-ready-old-false') health.activeWorkers.push({ ...heavy, version: 'old', pdfReady: false });
+  if (scenario === 'no-heavy' || scenario === 'light-only') { health.activeWorkers = [health.activeWorkers[0]!]; health.activeWorkers[0].pdfReady = scenario === 'light-only'; }
+  getBackgroundJobHealthMock.mockResolvedValue(health);
+  expect((await (await GET()).json()).pdf.ready).toBe(expected);
 });

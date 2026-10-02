@@ -53,12 +53,17 @@ const message = document.getElementById('message');
 const code = document.getElementById('code');
 const started = Date.now();
 let stopped = false;
+let failures = 0;
 addEventListener('pagehide', () => { stopped = true; }, { once: true });
 async function poll() {
  if (stopped) return;
  try {
   const url = new URL(retry.href); url.searchParams.set('status', '1');
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+  if (response.status === 401 || response.status === 403) {
+   panel.removeAttribute('aria-busy');
+   message.textContent = '登录已失效或无权查看，请返回工单重新登录。'; return;
+  }
   const data = await response.json();
   if (stopped) return;
   if (!['ready', 'pending', 'failed'].includes(data.state)) throw new Error('status');
@@ -67,15 +72,19 @@ async function poll() {
    retry.textContent = '打开 PDF'; panel.removeAttribute('aria-busy');
    location.replace(retry.href); return;
   }
+  failures = 0;
   title.textContent = data.title; message.textContent = data.message;
   code.textContent = data.code ? '错误码：' + data.code : '';
   retry.href = data.retryUrl;
-  if (data.state === 'pending' && Date.now() - started < 120000) { setTimeout(poll, 3000); return; }
+  const recovering = response.status === 503 && data.code === 'PDF_WORKER_UNAVAILABLE';
+  if ((data.state === 'pending' || recovering) && Date.now() - started < 120000) { setTimeout(poll, recovering ? 10000 : 3000); return; }
   panel.removeAttribute('aria-busy');
   retry.textContent = '立即重试';
-  if (data.state === 'pending') message.textContent = '等待时间较长，已停止自动查询。可以手动查询或使用网页打印。';
+  if (data.state === 'pending' || recovering) message.textContent = '等待时间较长，已停止自动查询。可以手动查询或使用网页打印。';
  } catch {
   if (stopped) return;
+  failures += 1;
+  if (failures < 3 && Date.now() - started < 120000) { setTimeout(poll, 10000); return; }
   panel.removeAttribute('aria-busy');
   message.textContent = '暂时无法查询生成结果，请重试；登录过期时请返回工单重新登录。';
  }
@@ -89,11 +98,12 @@ export function pdfStatusResponse(input: PdfStatus, view: Presentation): Respons
   const headers = { 'Cache-Control': 'private, no-store', ...(input.requestId ? { 'X-Request-Id': input.requestId } : {}), ...(pending ? { 'Retry-After': '3' } : {}) };
   if (view.json) return Response.json(payload, { status: input.status, headers });
   const id = encodeURIComponent(view.orderId);
-  const script = pending ? `<script>${POLL_SCRIPT}</script>` : '';
+  const polling = pending || (input.status === 503 && input.code === 'PDF_WORKER_UNAVAILABLE' && new URL(input.retryUrl, 'https://local.invalid').searchParams.has('jobId'));
+  const script = polling ? `<script>${POLL_SCRIPT}</script>` : '';
   const hash = createHash('sha256').update(POLL_SCRIPT).digest('base64');
   return new Response(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title>
 <style>:root{color-scheme:light dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:Canvas;color:CanvasText;line-height:1.65;margin:0}main{max-width:44rem;margin:10vh auto;padding:1.5rem}h1{font-size:1.5rem}p{overflow-wrap:anywhere}nav{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1.5rem}a{display:inline-flex;align-items:center;min-height:44px;padding:.5rem .875rem;border:1px solid currentColor;border-radius:.5rem;color:LinkText;text-decoration:none}a:focus-visible{outline:3px solid Highlight;outline-offset:3px}.code{font-size:.875rem}</style></head>
-<body><main${pending ? ' aria-busy="true"' : ''}><div role="status" aria-live="polite"><h1 id="title">${escapeHtml(input.title)}</h1><p id="message">${escapeHtml(input.message)}</p><p id="code" class="code">${input.code ? `错误码：${escapeHtml(input.code)}` : ''}</p></div>
+<body><main${polling ? ' aria-busy="true"' : ''}><div role="status" aria-live="polite"><h1 id="title">${escapeHtml(input.title)}</h1><p id="message">${escapeHtml(input.message)}</p><p id="code" class="code">${input.code ? `错误码：${escapeHtml(input.code)}` : ''}</p></div>
 <nav aria-label="PDF 恢复操作"><a id="retry" href="${escapeHtml(input.retryUrl)}">${pending ? '查询生成结果' : '立即重试'}</a><a href="/print/orders/${id}">网页打印</a><a href="${view.worker ? '/worker/orders' : '/orders'}/${id}">返回工单</a>${view.operator ? '<a href="/owner/background-jobs">查看后台任务与服务状态</a>' : ''}</nav><noscript><p>请点击“查询生成结果”或“立即重试”手动查询。</p></noscript></main>${script}</body></html>`, {
     status: input.status,
     headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': `default-src 'none'; script-src 'sha256-${hash}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'`, 'X-Content-Type-Options': 'nosniff' },

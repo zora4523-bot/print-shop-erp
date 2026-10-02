@@ -82,6 +82,15 @@ function diffTone(diff: number): 'outline' | 'secondary' | 'destructive' {
   return diff > 0 ? 'outline' : 'destructive';
 }
 
+async function fetchCountMaterials(q: string): Promise<ApiResponse> {
+  const params = new URLSearchParams();
+  if (q.trim()) params.set('q', q.trim());
+  params.set('limit', '80');
+  const res = await fetch(`/api/admin/inventory-count/materials?${params}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`库存盘点数据读取失败（${res.status}）`);
+  return res.json();
+}
+
 export function InventoryCountClient({ action, initialIdempotencyKey, initialRows }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
@@ -118,14 +127,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
     startTransition(async () => {
       setError(null);
       try {
-        const params = new URLSearchParams();
-        if (q.trim()) params.set('q', q.trim());
-        params.set('limit', '80');
-        const res = await fetch(`/api/admin/inventory-count/materials?${params}`, {
-          cache: 'no-store',
-        });
-        if (!res.ok) throw new Error(`库存盘点数据读取失败（${res.status}）`);
-        const data = (await res.json()) as ApiResponse;
+        const data = await fetchCountMaterials(q);
         if (sequence !== fetchSequence.current) return;
         setRows(data.materials);
         setBookSnapshots(current => pinDisplayedBookQuantities(

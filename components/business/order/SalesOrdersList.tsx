@@ -252,7 +252,7 @@ function SalesOrdersTable({
       <TableHeader>
         <TableRow>
           <TableHead>工单号</TableHead>
-          <TableHead>下单日期</TableHead>
+          <TableHead>下单 / 交货</TableHead>
           <TableHead>工单名称</TableHead>
           <TableHead>工艺 / 纸张</TableHead>
           <TableHead className="text-right">数量</TableHead>
@@ -302,6 +302,7 @@ function SalesOrdersTable({
               </TableCell>
               <TableCell className="text-xs tabular-nums">
                 {formatDateShanghai(new Date(order.createdAt))}
+                <div className="mt-1"><DueDate order={order} /></div>
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-1">

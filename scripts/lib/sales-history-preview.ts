@@ -25,7 +25,8 @@ export function parseSalesHistoryPreview(input: unknown) {
     const parts = row.components.map((value) => value === null ? null : new Decimal(value).toFixed(2));
     const sum = parts.reduce<Decimal>((total, value) => total.plus(value ?? 0), new Decimal(0));
     const balanced = amount !== null && sum.eq(amount);
-    const totals = [row.h, row.g, row.quantity].flatMap(value => {
+    const totals = [row.h, row.g, row.quantity].flatMap(raw => {
+      const value = typeof raw === 'string' ? raw.trim() : raw;
       if (value === null) return [];
       // Descriptive quantity text (e.g. 各100) is not an explicit total.
       if (typeof value === 'string' && !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim()) && !/^[+-]?(?:NaN|Infinity)$/i.test(value.trim())) return [];
