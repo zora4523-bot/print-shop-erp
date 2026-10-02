@@ -191,6 +191,7 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_PRINTED: '确认已打印',
   ORDER_PRINT_REQUESTS_SUPERSEDED: '旧版打印任务失效',
   ORDER_SETTLED_V2: '工单结算',
+  ORDER_SETTLEMENT_CORRECTED: '结算更正',
   CHANGE_REQUEST_CREATED: '提交工单变更申请',
   CHANGE_REQUEST_WITHDRAWN: '撤回工单变更申请',
   CHANGE_REQUEST_DENIED: '驳回工单变更申请',

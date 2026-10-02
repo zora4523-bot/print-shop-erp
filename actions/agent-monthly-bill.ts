@@ -29,6 +29,8 @@ const creditSchema = z
   .object({
     idempotencyKey,
     sourceItemId: z.string().trim().min(1).max(128),
+    // 业主 2026-10-01：除抵扣外可补收；旧页面不带该字段时按抵扣处理。
+    direction: z.enum(['CREDIT', 'SURCHARGE']).default('CREDIT'),
     amount: z
       .string()
       .trim()
@@ -60,8 +62,9 @@ function invalid(error: z.ZodError): AgentMonthlyBillActionResult {
     paymentMethod: '收款方式无效，请填写 100 字以内的文字',
     referenceNo: '流水号无效，请填写 100 字以内的文字',
     sourceItemId: '账单明细无效，请刷新页面后重试',
-    amount: '抵扣金额无效，请填写最多两位小数的正数',
-    reason: '抵扣原因无效，请填写 1 至 500 字',
+    direction: '请选择抵扣或补收',
+    amount: '金额无效，请填写最多两位小数的正数',
+    reason: '原因无效，请填写 1 至 500 字',
   };
   return {
     status: 'invalid',
@@ -194,10 +197,12 @@ export async function createAgentMonthlyBillCreditAction(
     }
     return {
       status: 'success',
-      message:
-        result.allocatedBillIds.length > 0
-          ? '抵扣已记录，已用于后续账单'
-          : '抵扣已记录，余额待抵扣',
+      message: (() => {
+        const kind = parsed.data.direction === 'SURCHARGE' ? '补收' : '抵扣';
+        return result.creditAllocated
+          ? `${kind}已记录，已计入后续账单`
+          : `${kind}已记录，待计入后续账单`;
+      })(),
     };
   } catch (error) {
     const mapped = mappedError(error);

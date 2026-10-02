@@ -24,13 +24,16 @@ it('saves without confirming shipment and preserves failed input for retry', asy
   await page.getByRole('button', { name: '保存物流资料', exact: true }).click();
   expect(mocks.save.mock.calls[1][0].get('idempotencyKey')).toBe(key);
 });
-it('requires explicit confirmation and displays the receivable consequence', async () => {
+it('requires explicit confirmation and leads with the receivable that settlement locks', async () => {
   mocks.save.mockResolvedValue({ ok: true, message: '已发货' }); render();
   await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
   expect(mocks.save).not.toHaveBeenCalled();
-  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('25.00 元');
-  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('工单自动结算');
-  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('尚未收款');
+  const dialog = page.getByRole('alertdialog', { name: '确认发货并结算' });
+  await expect.element(dialog).toHaveTextContent('应收 25.00 元，计入当月账单；月账单确认前仍可更正');
+  await expect.element(dialog).toHaveTextContent('运单号 ZTO1');
+  // 业主 2026-10-01：不再写笼统的「结算后不可再编辑」「尚未收款」。
+  await expect.element(dialog).not.toHaveTextContent('不可再编辑');
+  await expect.element(dialog).not.toHaveTextContent('尚未收款');
   await page.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
   await vi.waitFor(() => expect(mocks.save).toHaveBeenCalled());
   expect(mocks.save.mock.calls[0][0].get('confirm')).toBe('true');
@@ -54,9 +57,41 @@ it('folds an untouched address form until it can ship, keeping the reason visibl
 it('explains free-order settlement without claiming a receivable will be created', async () => {
   render({ ...props, chargeable: false });
   await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
-  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('工单自动结算');
-  await expect.element(page.getByRole('alertdialog')).not.toHaveTextContent('生成应收');
+  await expect.element(page.getByRole('alertdialog')).toHaveTextContent('本单免收费，确认后工单结算');
+  await expect.element(page.getByRole('alertdialog')).not.toHaveTextContent('应收');
   expect(mocks.save).not.toHaveBeenCalled();
+});
+it('shows only what to check: a replaced tracking number as old → new, the auto-completion and the pending addresses', async () => {
+  render({ ...props, lastPending: false, autoCompletion: ['测试1（局部烫金 1000 个）'] });
+  await page.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO2');
+  await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+  const dialog = page.getByRole('alertdialog', { name: '确认该地址已发货' });
+  await expect.element(dialog).toHaveTextContent('运单号 ZTO1 → ZTO2');
+  await expect.element(dialog).toHaveTextContent('其余地址继续待发货');
+  await expect.element(dialog).toHaveTextContent('生产未报完，将按计划数量代师傅登记并计提成：测试1（局部烫金 1000 个）');
+  await expect.element(dialog).not.toHaveTextContent('应收');
+});
+// Codex 审查 P3：改运单号时金额也必须排在第一行，代登记次之，运单号最后。
+it('keeps the receivable first, then the auto-completion, then the changed tracking number', async () => {
+  render({ ...props, autoCompletion: ['测试1（局部烫金 1000 个）'] });
+  await page.getByRole('textbox', { name: '运单号', exact: true }).fill('ZTO2');
+  await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+  await expect.element(page.getByRole('alertdialog', { name: '确认发货并结算' })).toBeVisible();
+  const lines = [...document.querySelectorAll('[role="alertdialog"] ul[aria-label="本次影响"] > li')].map((node) => node.textContent ?? '');
+  expect(lines).toEqual([
+    '应收 25.00 元，计入当月账单；月账单确认前仍可更正',
+    '生产未报完，将按计划数量代师傅登记并计提成：测试1（局部烫金 1000 个）',
+    '运单号 ZTO1 → ZTO2',
+  ]);
+  expect(document.querySelector('[role="alertdialog"] dl[aria-label="本次变更"]')).toBeNull();
+});
+it('lists a first tracking number as a fact instead of 未填 → value', async () => {
+  render({ ...props, trackingNo: null });
+  await page.getByRole('textbox', { name: '运单号', exact: true }).fill('SF9');
+  await page.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+  const dialog = page.getByRole('alertdialog');
+  await expect.element(dialog).toHaveTextContent('运单号 SF9');
+  await expect.element(dialog).not.toHaveTextContent('未填');
 });
 it('accepts a pasted image and sends the prepared photo with the draft', async () => {
   mocks.save.mockResolvedValue({ ok: false, message: '保存失败，请重试' }); render();
