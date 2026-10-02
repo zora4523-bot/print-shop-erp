@@ -66,3 +66,16 @@ describe('师傅一键完成', () => {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(375);
   });
 });
+
+it('keeps the receipt in a stable parent after the completed row is removed', async () => {
+  const { WorkerCompletionFeedback } = await import('../WorkerCompletionFeedback');
+  action.mockImplementationOnce(async () => {
+    flushSync(() => root.render(<WorkerCompletionFeedback>{null}</WorkerCompletionFeedback>));
+    return { ok: true, message: '已登记完成' };
+  });
+  flushSync(() => root.render(<WorkerCompletionFeedback><WorkerQuickComplete job={job} /></WorkerCompletionFeedback>));
+  await page.getByRole('button', { name: '完成生产' }).click();
+  await page.getByRole('button', { name: '确认完成 1000 个' }).click();
+  await expect.element(page.getByText('已登记完成', { exact: true })).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '完成生产' })).not.toBeInTheDocument();
+});

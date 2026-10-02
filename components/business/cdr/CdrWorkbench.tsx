@@ -23,17 +23,6 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
 }) {
   const router = useRouter();
   const [clientNow, setClientNow] = useState(now);
-  useEffect(() => {
-    const update = () => setClientNow(new Date().toISOString());
-    const timer = setInterval(update, 1_000);
-    window.addEventListener('focus', update);
-    document.addEventListener('visibilitychange', update);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('focus', update);
-      document.removeEventListener('visibilitychange', update);
-    };
-  }, []);
   const [state, action, pending] = useActionState<CreateBundleResult | null, FormData>(createWorkbenchBundleAction, null);
   const [selected, setSelected] = useState<string[]>([]);
   const attempted = useRef<string | null>(null);
@@ -48,6 +37,31 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
   const [pollWarning, setPollWarning] = useState<{ state: CreateBundleResult; epoch: number; message: string } | null>(null);
   const pollMessage = !pending && pollWarning?.state === state && pollWarning.epoch === pollEpoch ? pollWarning.message : null;
   const { current, url, bundleId } = cdrClientProgress(state, bundles, polled, clientNow);
+  // Only wake at an expiry boundary; focus/visibility also catch suspended tabs.
+  const expiryKey = [...bundles, ...(current ? [current] : [])]
+    .filter(bundle => bundle.status === 'READY' && !bundle.revokedAt)
+    .map(bundle => bundle.expiresAt)
+    .concat(state?.status === 'success' ? [state.expiresAt] : []).sort().join('|');
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const update = () => {
+      clearTimeout(timer);
+      const timestamp = Date.now();
+      setClientNow(new Date(timestamp).toISOString());
+      const next = expiryKey.split('|').map(value => Date.parse(value)).filter(value => value > timestamp);
+      if (next.length && document.visibilityState !== 'hidden') {
+        timer = setTimeout(update, Math.min(Math.min(...next) - timestamp, 2_147_483_647));
+      }
+    };
+    update();
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, [expiryKey]);
   useEffect(() => {
     if (state?.status !== 'queued') return;
     const requestedId = state.bundleId;

@@ -150,6 +150,9 @@ export async function handleBatchPrintJob(job: ClaimedBackgroundJob) {
       // Infrastructure failures are not the order's fault: rethrow so the worker
       // invalidates PDF capability and the durable job retries (CLAUDE.md §15.4).
       if (isPdfInfrastructureFailure(error)) throw error;
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        return { completed: index, issues: [{ position: index + 1, message: '工单生成超时，请稍后重试或减少所选工单' }] };
+      }
       return { completed: index, issues: [{ position: index + 1, message: error instanceof Error && error.name === 'PrintArtworkUnavailableError'
         ? '图稿加载失败，请检查图稿后重试' : '工单生成失败，请检查打印内容后重试' }] };
     }

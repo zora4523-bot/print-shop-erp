@@ -175,3 +175,9 @@ it('reports unavailability for a crashed running worker when its heartbeat expir
   expect(m.worker).toHaveBeenCalledTimes(2);
   expect(m.worker).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ pdfReady: true }) }));
 });
+
+it('reports the render budget timeout without blaming order content', async () => {
+  m.render.mockRejectedValueOnce(new DOMException('budget exhausted', 'TimeoutError'));
+  expect(await handleBatchPrintJob(job)).toMatchObject({ completed: 0, issues: [{ position: 1, message: '工单生成超时，请稍后重试或减少所选工单' }] });
+  expect(m.write).not.toHaveBeenCalled();
+});

@@ -81,16 +81,16 @@ export async function completePlannedProductionInTx(tx: Prisma.TransactionClient
   if (plan.unassignedUnits) throw new PlannedCompletionError('UNASSIGNED_PRODUCTION', '仍有未安排师傅的生产，请先排单');
   const today = todayShanghai(await databaseClockNow(tx));
   const workDate = parseStrictYmd(today)!;
-  const workers = await tx.user.findMany({ where: { id: { in: [...new Set(plan.pending.map(job => job.workerId))] } },
-    select: { id: true, displayName: true, employmentStartDate: true, employmentEndDate: true } });
-  const departed = workers.filter(worker => !employmentCoversDate(workDate, worker));
-  if (departed.length) throw new PlannedCompletionError('WORKER_UNAVAILABLE', `${departed.map(worker => worker.displayName).join('、')} 今天不在雇佣期，请先改派生产任务`);
   // Every registration below takes worker lock → price-book → day gate → worker day.
   // Take all worker locks first (sorted, like dispatch) so a second worker's lock is never
   // requested while this transaction already holds the global day gate.
   for (const workerId of [...new Set(plan.pending.map(job => job.workerId))].sort()) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(workerId)}))`;
   }
+  const workers = await tx.user.findMany({ where: { id: { in: [...new Set(plan.pending.map(job => job.workerId))] } },
+    select: { id: true, displayName: true, isActive: true, role: true, employmentStartDate: true, employmentEndDate: true } });
+  const unavailable = workers.filter(worker => !worker.isActive || worker.role !== 'WORKER' || !employmentCoversDate(workDate, worker));
+  if (unavailable.length) throw new PlannedCompletionError('WORKER_UNAVAILABLE', `${unavailable.map(worker => worker.displayName).join('、')} 当前不能登记生产，请先改派生产任务`);
   let notification: ProductionCompletionNotification | undefined;
   for (const job of plan.pending) {
     try {

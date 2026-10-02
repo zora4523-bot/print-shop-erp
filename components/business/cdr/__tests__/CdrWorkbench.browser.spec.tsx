@@ -81,7 +81,25 @@ it('removes the active receipt download when its newly generated package expires
   await expect.element(page.getByText('下载包已就绪', { exact: true })).toBeVisible();
   await expect.element(page.getByRole('button', { name: '下载 ZIP', exact: true })).toBeVisible();
   vi.setSystemTime(new Date('2026-10-02T00:01:00Z'));
+  window.dispatchEvent(new Event('focus'));
   await expect.element(page.getByRole('button', { name: '下载 ZIP', exact: true })).not.toBeInTheDocument();
   await expect.element(page.getByText('打包记录已生成', { exact: true })).toBeVisible();
   expect(download).toHaveBeenCalledOnce();
+});
+
+it('schedules the next expiry once instead of polling the entire list every second', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
+  const schedule = vi.spyOn(globalThis, 'setTimeout');
+  const interval = vi.spyOn(globalThis, 'setInterval');
+  const ready = { ...old, status: 'READY', downloadUrl: '/api/cdr/bundles/expiry', expiresAt: '2026-10-02T00:01:00Z' };
+  flushSync(() => root.render(<CdrWorkbench orders={[]} bundles={[ready]} mock={false} now={new Date().toISOString()} />));
+  expect(schedule.mock.calls.some(([, delay]) => delay === 60_000)).toBe(true);
+  expect(interval.mock.calls.some(([, delay]) => delay === 1_000)).toBe(false);
+  const callback = schedule.mock.calls.find(([, delay]) => delay === 60_000)![0] as () => void;
+  vi.setSystemTime(new Date(ready.expiresAt));
+  flushSync(callback);
+  await page.getByText(/^下载记录（最近 1 条）/).click();
+  await expect.element(page.getByRole('button', { name: '按原工单重新生成', exact: true })).toBeVisible();
+  schedule.mockRestore(); interval.mockRestore();
 });

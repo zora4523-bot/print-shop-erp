@@ -38,7 +38,7 @@ type Props = {
   initialIdempotencyKey: string;
   /**
    * 服务端首屏已读出的库位行（与 /api/admin/inventory-count/materials 默认查询一致）。
-   * 传入后首帧就有表格，不再挂载后补请求造成布局跳动（CLS）。
+   * 传入后首帧就有表格，挂载/恢复时仍在后台核对最新库存。
    */
   initialRows?: InventoryCountMaterialRow[];
 };
@@ -85,6 +85,7 @@ function diffTone(diff: number): 'outline' | 'secondary' | 'destructive' {
 export function InventoryCountClient({ action, initialIdempotencyKey, initialRows }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
+  const restoredQuery = useRef('');
   const [rows, setRows] = useState<InventoryCountMaterialRow[]>(initialRows ?? []);
   // 账面基线在每个库位**首次展示**时钉住，不等到首次录入。
   // 否则操作员数完但还没输入时的一次刷新，会把基线推进到库存变动之后。
@@ -93,6 +94,8 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
   );
   // 值是 { value, book }；book 从上面的首次展示快照复制，提交时供服务端 CAS。
   const [counts, setCounts] = useState<Record<string, CountEntry>>({});
+  const touchedKeys = useRef(new Set<string>());
+  const fetchSequence = useRef(0);
   // 服务端点名「账面数已变动、没给你过账」的行，等操作员重新录入就消掉。
   const [staleKeys, setStaleKeys] = useState<string[]>([]);
   const [idempotencyKey, setIdempotencyKey] = useState(initialIdempotencyKey);
@@ -110,7 +113,8 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
   }
   const [confirmationOpen, setConfirmationOpen] = useState(false);
 
-  const fetchRows = useCallback((q: string) => {
+  const fetchRows = useCallback((q: string, restored = false) => {
+    const sequence = ++fetchSequence.current;
     startTransition(async () => {
       setError(null);
       try {
@@ -122,20 +126,30 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
         });
         if (!res.ok) throw new Error(`库存盘点数据读取失败（${res.status}）`);
         const data = (await res.json()) as ApiResponse;
+        if (sequence !== fetchSequence.current) return;
         setRows(data.materials);
-        setBookSnapshots((current) =>
-          pinDisplayedBookQuantities(current, data.materials),
-        );
+        setBookSnapshots(current => pinDisplayedBookQuantities(
+          restored ? Object.fromEntries(Object.entries(current).filter(([key]) => touchedKeys.current.has(key))) : current,
+          data.materials,
+        ));
       } catch (err) {
-        setError(err instanceof Error ? err.message : '库存盘点数据读取失败');
+        if (sequence === fetchSequence.current) setError(err instanceof Error ? err.message : '库存盘点数据读取失败');
       }
     });
   }, []);
 
-  const hasInitialRows = initialRows !== undefined;
+  const invalidatePendingFetch = useCallback(() => { fetchSequence.current++; }, []);
   useEffect(() => {
-    if (!hasInitialRows) fetchRows('');
-  }, [fetchRows, hasInitialRows]);
+    fetchRows(restoredQuery.current, true);
+    return invalidatePendingFetch;
+  }, [fetchRows, invalidatePendingFetch]);
+  useEffect(() => {
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) fetchRows(submittedQuery, true);
+    };
+    window.addEventListener('pageshow', restore);
+    return () => window.removeEventListener('pageshow', restore);
+  }, [fetchRows, submittedQuery]);
 
   const submitCount = useCallback(
     async (prev: InventoryCountMutationResult | null, formData: FormData) => {
@@ -147,6 +161,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
         // ——后者等于把守卫刚拦下的那次提交原样放行。
         setIdempotencyKey(window.crypto.randomUUID());
         setCounts({});
+        touchedKeys.current.clear();
         // 一次提交（包括部分过账）结束了当前盘点会话。下次
         // fetch 必须从新账面数重建基线，不能沿用已经过账的快照。
         setBookSnapshots({});
@@ -323,6 +338,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
         onSubmit={(event) => {
           event.preventDefault();
           setSubmittedQuery(query);
+          restoredQuery.current = query;
           fetchRows(query);
         }}
       >
@@ -464,6 +480,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
                             disabled={actionPending}
                             onChange={(event) => {
                               const value = event.target.value;
+                              touchedKeys.current.add(key);
                               setCounts((current) => {
                                 if (value.trim() === '') {
                                   // 清空只表示这一行尚未录入；盘点会话的首次展示

@@ -120,6 +120,27 @@ pg.sequential('planned completion (batch / ship implies completion) · real Post
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('PENDING');
   });
 
+  it.each([{ isActive: false }, { role: 'SALES' as const }])('rejects an unavailable worker account %j without recording wages', async data => {
+    const worker = await newWorker('待改派师傅');
+    const { order, job } = await released(worker);
+    await db.user.update({ where: { id: worker.id }, data });
+    await expect(completeOrderProductionAtPlan({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion }, admin))
+      .rejects.toMatchObject({ code: 'WORKER_UNAVAILABLE' });
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('PENDING');
+    expect(await wageOf(job.id)).toBeNull();
+  });
+
+  it('rolls back planned completion and shipment when required outsourcing is missing', async () => {
+    const worker = await newWorker();
+    const { order, job } = await released(worker);
+    const current = await db.order.update({ where: { id: order.id }, data: { requiresOutsource: true }, include: { shipments: { orderBy: { sequence: 'asc' } } } });
+    await expect(registerShipment(shipmentInput(current), admin)).rejects.toThrow(/外协/);
+    expect((await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('PENDING');
+    expect(await wageOf(job.id)).toBeNull();
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: order.shipments[0].id } })).status).toBe('PLANNED');
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).revision).toBe(current.revision);
+  });
+
   it('requires explicit settled-day handling and rolls back proxy completion and shipment', async () => {
     const worker = await newWorker();
     const paid = await released(worker);

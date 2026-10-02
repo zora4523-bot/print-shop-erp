@@ -1011,3 +1011,14 @@ describe('admin order workspace predicates', () => {
     expect(JSON.stringify(detail)).not.toContain('未填客户');
   });
 });
+
+it.each([50, 100])('uses the same outsource quantity coverage as the ship gate (%s)', async quantity => {
+  const base = adminOrderRecord();
+  const row = adminOrderRecord({ status: OrderStatus.PACKING, requiresOutsource: true, confirmedFee: new Prisma.Decimal('100'),
+    items: base.items.map(item => ({ ...item, crafts: ['outsource-craft'] })),
+    outsourceOrders: [{ status: 'RECEIVED', itemSnapshots: [{ orderItemId: 'item-1', quantity }] }] });
+  dbMock.craft.findMany.mockResolvedValue([{ id: 'outsource-craft', name: '外协工艺', isOutsource: true }]);
+  dbMock.order.findFirst.mockResolvedValue(row);
+  const result = await getAdminOrderByOrderNo(actor, row.orderNo);
+  expect(result?.capabilities.ship).toBe(quantity === 100);
+});

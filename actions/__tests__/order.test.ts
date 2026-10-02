@@ -913,6 +913,7 @@ describe('shipOrderAction', () => {
     const result = await shipOrderAction('order-1', null, formData);
 
     expect(result).toEqual({ status: 'success' });
+    for (const path of ['/orders/production', '/worker/tasks', '/worker/orders', '/worker/salary', '/owner/salary/piecework', '/worker/orders/order-1']) expect(revalidatePathMock).toHaveBeenCalledWith(path);
     expect(orderMock.shipOrder).toHaveBeenCalledWith(
       'order-1',
       salesActor,
