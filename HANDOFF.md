@@ -16,12 +16,13 @@
 
 ## 当前任务
 
-2026-10-02（三个 PR 待合并）：**本次会话的业主决定已实现并开 PR，均未合并、未部署。**
-- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) `claude/settled-correction`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。
+2026-10-02（三个 PR 待合并）：**本次会话的业主决定已实现并开 PR，均未合并、未部署。三个 PR 的 CI 均已全绿（#40 最新一次推送的 CI 以 PR 页为准）。**
+- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) `claude/settled-correction`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。CI 曾因销售账单导出合计行改名「抵扣 / 补收」而 E2E 失败，已改断言。
 - [#39](https://github.com/zora4523-bot/print-shop-erp/pull/39) `claude/order-detail-nav-layout`：二级页统一由面包屑负责返回（37 个路由，例外见 ui-规范 §8.3）、工单面包屑显示工单名称；Codex 2 轮 9.5；隔离库 Playwright 通过。
-- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) `claude/print-on-click-and-fold`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）。Codex 4 轮 6.5 → 7 → 7 → 8.0，第 4 轮问题已修在 `0cba193d`，**尚未复审**；第 1 轮修复后的 Playwright 未重跑。
-- **下一步**：等 CI；#40 做第 5 轮 Codex 复审并在隔离库重跑 `blank-price-only`、`sample-orders`、`admin-fees`、`commercial-fee-recovery` 与 `admin-responsive` 工单详情；三个 PR 合并时 DECISIONS / UI 规范 / HANDOFF 有文本冲突，两边都保留。开发库（:3003）未执行两条新迁移，切到这些分支看页面前需 `migrate deploy`（不要用 `migrate dev`）。
-- 本次建的隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`（已执行 #40 的迁移）用完后 `DROP DATABASE`；`erp_e2e_merge_1001` 也已执行 #40 迁移。
+- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) `claude/print-on-click-and-fold`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）。Codex 7 轮 6.5 → 7 → 7 → 8.0 → 8.4 → 8.5 → **9.2（可合并）**，最后两项 P3 已修。批量打印交付在列表外的 `BatchPrintDeliveryProvider`：先取文件 → 整批记录 → 成功或结果未知才交付；记录按尝试串行、尝试键绑定打印任务。隔离库 Playwright：相关 E2E、`admin-responsive` 两视口、release 配置打印视觉回归均通过。
+- **下一步**：业主审阅后按 #38 → #39 → #40 或任意顺序合并；后合并的 PR 在 DECISIONS / UI 规范 / HANDOFF 上有文本冲突，两边都保留。开发库（:3003）未执行两条新迁移，切到这些分支看页面前需 `migrate deploy`（不要用 `migrate dev`）。上线需按现行发布流程演练两条迁移。
+- 本次建的隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`、`erp_e2e_print40_1002`、`erp_e2e_print40r_1002`、`erp_e2e_print40c_1002` 用完后 `DROP DATABASE`；`erp_e2e_merge_1001` 也已执行 #40 迁移。
+- 本机负载高（30–40）时，`admin-workspace-pg-client-serialization.postgres.test.ts`（子进程 10 秒探测）会超时，与本次改动无关，CI 上通过。
 - 待业主决定：浏览器标签页标题仍是「工单号 · 工单」，是否也改成工单名称；`/orders/new` 点面包屑 / 侧栏离开不弹「保存草稿并离开」（原有问题）。
 
 2026-10-01（分支整理）：**按业主要求把本地未开 PR 的分支 / worktree 整理成 3 个 PR，均经 Codex `gpt-6-astra` 对抗审查到 9 分以上**（未部署）。PR #37 文档（842a3f87 生产发布补记 + 外部销售前端复审历史记录，2 轮，9.5 分，合并 `0238d327`）；PR #36 弹层浏览器测试等 Base UI 进场动画结束再量触控尺寸（共享 `tests/browser/wait-for-layout.ts` 的 `waitForStableLayout`，5 秒预算，9 个 spec 改用；3 轮，9.5 分，合并 `79ffda6a`）；PR #35 寄样首重默认（见下方 09-30 条），代码 8 轮审查 9.2 分；本条随 #35 一起合并，所以在功能分支上读到时 #35 尚未合入 main。审查追加的改动：寄样快递费快照的首重默认由 `lib/order/sample-weight-basis.ts` 统一维护，只按上一版快照与本次登记重量推进三态——寄付且登记重量等于默认首重带 `weightBasis` 标记；到付期间只暂存 `suspendedSampleDefaultWeightKg`；登记过别的重量（含到付期间）即作废、不再恢复。接入提交、履约费用确认与已确认履约发货、销售切换到付、变更申请 / 工厂确认重算物流、发货定稿；到付寄样不再写默认重量；取消到付时留空的地址更正不再清空已存重量 / 省份（main 上原有的计价与落库不一致）。标记只由这套三态维护函数读取，不参与金额计算或界面展示，作审计依据；规则见 DECISIONS 2026-09-30 影响一行。外部销售审查 worktree 的未提交文档收入 main 后已清掉（原文即 `1e272aca`）；PDF 半成品在本地分支 `archive/pdf-wip-2026-09-30`、旧 stash 在 `archive/stash-checkbox-ui-2026-08-31`，均未推送，是否继续待业主决定。验证：全量 Vitest 748 文件 / 8,234 项通过；#36 改动的 9 个 Browser Mode spec 208 项通过；lint / typecheck / architecture / dead-code / backup 通过。
