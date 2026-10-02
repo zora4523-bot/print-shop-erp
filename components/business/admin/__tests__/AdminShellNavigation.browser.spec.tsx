@@ -356,7 +356,7 @@ describe('breadcrumb text alignment in the real admin shell', () => {
       role: Role.ADMIN,
       path: '/owner/agent-bills/cabcdefghijklmnopqrstuvwx/credits/czyxwvutsrqponmlkjihgfedcb/new',
       parentHref: '/owner/agent-bills/cabcdefghijklmnopqrstuvwx',
-      current: '录入抵扣',
+      current: '录入抵扣或补收',
       entityLabel: '2026 年 8 月外部销售货款核对记录及补充说明超长标题',
     },
   ];

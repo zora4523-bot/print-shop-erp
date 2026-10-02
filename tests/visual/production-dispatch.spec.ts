@@ -169,7 +169,7 @@ test('confirming the first address ships and registers the unreported production
   await first.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('ZTO');
   await first.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
   const dialog = page.getByRole('alertdialog');
-  await expect(dialog).toContainText('将按计划数量代师傅登记生产完成并计提成：E2E 开机仔（局部烫金 1000 个）');
+  await expect(dialog).toContainText('生产未报完，将按计划数量代师傅登记并计提成：E2E 开机仔（局部烫金 1000 个）');
   await gates(page, info, 'ship-completes-production-confirm');
   await dialog.getByRole('button', { name: '确认发货', exact: true }).click();
   await expect.poll(() => withDb(async db => (await db.query<{ status: string }>('SELECT status FROM "OrderShipment" WHERE id=$1', [`${fixture.id}-ship-1`])).rows[0].status)).toBe('SHIPPED');

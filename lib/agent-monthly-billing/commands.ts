@@ -20,6 +20,7 @@ import {
   lockAgentBill,
   lockAgentBillRequest,
   lockAgentPeriod,
+  lockAgentSurcharges,
 } from './locks';
 import type { AgentMonthlyBillActor } from './types';
 
@@ -58,7 +59,7 @@ function positiveMoney(value: string): Decimal {
   try {
     parsed = new Decimal(value);
   } catch {
-    throw new AgentMonthlyBillingError('负项金额不合法');
+    throw new AgentMonthlyBillingError('调整金额不合法');
   }
   if (
     !parsed.isFinite() ||
@@ -66,7 +67,7 @@ function positiveMoney(value: string): Decimal {
     parsed.decimalPlaces() > 2 ||
     parsed.gt(MONEY_MAX)
   ) {
-    throw new AgentMonthlyBillingError('负项金额必须是大于 0 且最多两位小数的金额');
+    throw new AgentMonthlyBillingError('调整金额必须是大于 0 且最多两位小数的金额');
   }
   return parsed;
 }
@@ -282,9 +283,14 @@ export async function markAgentMonthlyBillPaid(
   });
 }
 
+/** 抵扣（多收了，冲减应收，负数入账）或补收（少收了，追加应收，正数入账）；业主 2026-10-01 增加补收。 */
+type AgentMonthlyBillAdjustmentDirection = 'CREDIT' | 'SURCHARGE';
+
 export type CreateAgentMonthlyBillCreditInput = {
   expectedBillId: string;
   sourceItemId: string;
+  direction: AgentMonthlyBillAdjustmentDirection;
+  /** 正数金额；方向由 direction 决定。 */
   amount: string;
   reason: string;
   idempotencyKey: string;
@@ -293,7 +299,8 @@ export type CreateAgentMonthlyBillCreditInput = {
 async function allocateCreditsAcrossOpenDrafts(
   agentUserId: string,
   afterPeriod: string,
-): Promise<string[]> {
+  creditId: string,
+): Promise<{ billIds: string[]; creditAllocated: boolean }> {
   return db.$transaction(async (tx) => {
     await lockSettlementCutoffShared(tx);
     const drafts = await tx.agentMonthlyBill.findMany({
@@ -323,7 +330,11 @@ async function allocateCreditsAcrossOpenDrafts(
         period: bill.period,
       });
     }
-    return drafts.map((bill) => bill.id);
+    // 重算的草稿不等于本笔已入账：补收可能因更早草稿或金额上限留待之后。
+    const creditAllocations = drafts.length > 0
+      ? await tx.agentMonthlyBillAdjustment.count({ where: { creditId } })
+      : 0;
+    return { billIds: drafts.map((bill) => bill.id), creditAllocated: creditAllocations > 0 };
   });
 }
 
@@ -338,13 +349,17 @@ export async function createAgentMonthlyBillCredit(
 ): Promise<{
   creditId: string;
   requestedAmount: string;
+  /** 本次重排过的草稿账单（用于刷新页面），不代表本笔都已计入。 */
   allocatedBillIds: string[];
+  /** 本笔抵扣 / 补收是否已有分摊落在草稿账单上。 */
+  creditAllocated: boolean;
 }> {
   assertAdmin(actor);
   const amount = positiveMoney(input.amount);
+  const signed = input.direction === 'SURCHARGE' ? amount : amount.negated();
   const reason = input.reason.trim();
   if (reason.length < 1 || reason.length > 500) {
-    throw new AgentMonthlyBillingError('负项原因必须为 1-500 字');
+    throw new AgentMonthlyBillingError('调整原因必须为 1-500 字');
   }
   const requestKey = normalizeIdempotencyKey(input.idempotencyKey);
 
@@ -380,10 +395,10 @@ export async function createAgentMonthlyBillCredit(
     if (replay) {
       if (
         replay.sourceItemId !== input.sourceItemId ||
-        !new Decimal(replay.requestedAmount).eq(amount.negated()) ||
+        !new Decimal(replay.requestedAmount).eq(signed) ||
         replay.reason !== reason
       ) {
-        throw new AgentMonthlyBillingError('本次提交已失效，请刷新后重新录入抵扣');
+        throw new AgentMonthlyBillingError('本次提交已失效，请刷新后重新录入');
       }
       return {
         creditId: replay.id,
@@ -407,21 +422,65 @@ export async function createAgentMonthlyBillCredit(
         freshSource.bill.status !== AgentMonthlyBillStatus.PAID)
     ) {
       throw new InvalidAgentMonthlyBillTransitionError(
-        '只能对已确认账单中的工单录入抵扣',
+        '只能对已确认账单中的工单录入抵扣或补收',
       );
     }
-    const requestedBefore = freshSource.credits.reduce(
-      (sum, credit) => sum.plus(new Decimal(credit.requestedAmount).abs()),
-      new Decimal(0),
+    // 与触发器 validate_agent_monthly_bill_credit 同一规则：结算金额加全部抵扣 / 补收后不能为负。
+    const netAfter = freshSource.credits.reduce(
+      (sum, credit) => sum.plus(credit.requestedAmount),
+      new Decimal(freshSource.settledFeeSnapshot).plus(signed),
     );
-    if (requestedBefore.plus(amount).gt(freshSource.settledFeeSnapshot)) {
-      throw new AgentMonthlyBillingError('累计抵扣不能超过来源工单的结算金额');
+    if (netAfter.isNegative()) {
+      throw new AgentMonthlyBillingError('累计抵扣不能超过来源工单的结算金额（含已补收）');
+    }
+    if (input.direction === 'SURCHARGE') {
+      // 补收一经写入不可改，必须保证它一定分摊得出去：按最坏情况——该销售所有尚未
+      // 进入已确认账单的补收都落进同一张草稿——校验工单合计加补收不超过金额字段上限。
+      // 同一销售的补收录入在此串行，避免并发请求读到同一个旧累计值。
+      await lockAgentSurcharges(tx, source.bill.agentUserId);
+      const [pendingCredits, earliestDraft] = await Promise.all([
+        tx.agentMonthlyBillCredit.findMany({
+          where: {
+            requestedAmount: { gt: 0 },
+            sourceItem: { bill: { agentUserId: source.bill.agentUserId } },
+          },
+          select: {
+            requestedAmount: true,
+            allocations: {
+              where: { bill: { status: { not: AgentMonthlyBillStatus.DRAFT } } },
+              select: { amount: true },
+            },
+          },
+        }),
+        tx.agentMonthlyBill.findFirst({
+          where: {
+            agentUserId: source.bill.agentUserId,
+            status: AgentMonthlyBillStatus.DRAFT,
+            period: { gt: source.bill.period },
+          },
+          orderBy: [{ period: 'asc' }, { id: 'asc' }],
+          select: { memberSubtotal: true },
+        }),
+      ]);
+      const pendingSurcharge = pendingCredits.reduce(
+        (sum, credit) => credit.allocations.reduce(
+          (left, allocation) => left.minus(allocation.amount.toString()),
+          sum.plus(credit.requestedAmount.toString()),
+        ),
+        new Decimal(0),
+      );
+      const worstDraftTotal = new Decimal(earliestDraft?.memberSubtotal.toString() ?? '0')
+        .plus(pendingSurcharge)
+        .plus(signed);
+      if (netAfter.gt(MONEY_MAX) || worstDraftTotal.gt(MONEY_MAX)) {
+        throw new AgentMonthlyBillingError('补收金额过大，超出账单金额上限，请核对后重新录入');
+      }
     }
 
     const created = await tx.agentMonthlyBillCredit.create({
       data: {
         sourceItemId: input.sourceItemId,
-        requestedAmount: amount.negated().toFixed(2),
+        requestedAmount: signed.toFixed(2),
         reason,
         idempotencyKey: requestKey,
         createdById: actor.id,
@@ -436,13 +495,15 @@ export async function createAgentMonthlyBillCredit(
     };
   });
 
-  const allocatedBillIds = await allocateCreditsAcrossOpenDrafts(
+  const allocation = await allocateCreditsAcrossOpenDrafts(
     root.agentUserId,
     root.sourcePeriod,
+    root.creditId,
   );
   return {
     creditId: root.creditId,
     requestedAmount: root.requestedAmount,
-    allocatedBillIds,
+    allocatedBillIds: allocation.billIds,
+    creditAllocated: allocation.creditAllocated,
   };
 }

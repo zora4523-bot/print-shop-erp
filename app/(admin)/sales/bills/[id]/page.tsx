@@ -10,7 +10,7 @@ import { ChevronDown } from 'lucide-react';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import { billItemPage } from '@/lib/agent-monthly-billing/item-list';
 import { buildTableHref } from '@/lib/admin/table';
-import { billListReturnHref, billScopedHref } from '@/lib/agent-monthly-billing/presentation';
+import { billAdjustmentKind, billListReturnHref, billScopedHref } from '@/lib/agent-monthly-billing/presentation';
 import { notFound } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/permissions';
 import { getSalesBillTitleRef } from '@/lib/page-title/refs';
@@ -19,7 +19,7 @@ import { Role } from '@/generated/prisma/enums';
 import { getSalesMonthlyBill } from '@/lib/agent-monthly-billing/sales-query';
 import { SALES_BILL_PAGE_TITLE } from '@/lib/agent-monthly-billing/labels';
 import { SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
-import { formatMoney } from '@/lib/dashboard/format';
+import { formatMoney, formatMoneyDelta } from '@/lib/dashboard/format';
 import { formatDateTimeShanghai } from '@/lib/format/dates';
 import { PageHeader, StatusBadge, EmptyState, FilterClearLink } from '@/components/ui-business';
 import { BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
@@ -48,7 +48,7 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
     />
     {bill.status === 'DRAFT' ? <p className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">金额未定稿</p> : null}
     <dl aria-label="整单合计" className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
-      <div><dt>工单合计</dt><dd>{formatMoney(bill.memberSubtotal)}</dd></div><div><dt>抵扣金额</dt><dd>{formatMoney(bill.adjustmentAmount)}</dd></div><div><dt>{bill.status === 'DRAFT' ? '整单暂计货款' : '整单应付货款'}</dt><dd className="font-semibold">{formatMoney(bill.totalAmount)}</dd></div>
+      <div><dt>工单合计</dt><dd>{formatMoney(bill.memberSubtotal)}</dd></div><div><dt>抵扣 / 补收</dt><dd>{formatMoneyDelta(bill.adjustmentAmount)}</dd></div><div><dt>{bill.status === 'DRAFT' ? '整单暂计货款' : '整单应付货款'}</dt><dd className="font-semibold">{formatMoney(bill.totalAmount)}</dd></div>
       {bill.confirmedAt ? <div><dt>确认时间</dt><dd>{formatDateTimeShanghai(bill.confirmedAt)}</dd></div> : null}
       {bill.paidAt ? <div><dt>结清时间</dt><dd>{formatDateTimeShanghai(bill.paidAt)}</dd></div> : null}
     </dl>
@@ -83,10 +83,10 @@ export default async function SalesBillDetailPage({ params, searchParams }: Prop
     {members.rows.length === 0 ? <EmptyState title="未找到匹配的工单" /> : <BillItemsList items={members.rows} period={bill.period} billId={bill.id} billStatus={bill.status} returnTo={returnTo} sales />}
     <AdminPagination basePath={basePath} page={members.page} pageCount={members.pageCount} total={members.total} pageSize={members.pageSize} queryParams={{ q: members.q || undefined, returnTo }} />
     </section>
-    {bill.adjustments.length ? <section className="space-y-3"><h2 className="font-semibold">抵扣明细</h2>{bill.adjustments.map((item) => <p key={item.id} className="flex flex-wrap justify-between gap-3"><span>{item.credit.sourceItem.orderNoSnapshot}<BillDetailDisclosure label="查看抵扣来源" title="抵扣来源" description={`${bill.period} 货款账单抵扣`}>
-        <p>本账单抵扣 {formatMoney(item.amount)}</p>
+    {bill.adjustments.length ? <section className="space-y-3"><h2 className="font-semibold">抵扣与补收明细</h2>{bill.adjustments.map((item) => <p key={item.id} className="flex flex-wrap justify-between gap-3"><span>{item.credit.sourceItem.orderNoSnapshot}<BillDetailDisclosure label={`查看${billAdjustmentKind(item.amount)}来源`} title={`${billAdjustmentKind(item.amount)}来源`} description={`${bill.period} 货款账单${billAdjustmentKind(item.amount)}`}>
+        <p>本账单{billAdjustmentKind(item.amount)} {formatMoneyDelta(item.amount)}</p>
         <p>来源工单 {item.credit.sourceItem.orderNoSnapshot}</p>
         <Link href={billScopedHref(`/sales/bills/${item.credit.sourceItem.bill.id}`, returnTo, true)} className={buttonVariants({ variant: 'outline' })}>{item.credit.sourceItem.bill.period} 货款账单</Link>
-      </BillDetailDisclosure></span><span>{formatMoney(item.amount)}</span></p>)}</section> : null}
+      </BillDetailDisclosure></span><span>{formatMoneyDelta(item.amount)}</span></p>)}</section> : null}
   </div>;
 }

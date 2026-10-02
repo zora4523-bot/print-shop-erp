@@ -572,7 +572,7 @@ it.each(['dabiaoge-a', 'dabiaoge-b'])('exports the frozen account %s on every de
     adjustments: [{ targetPeriod: '2026-08', targetAgentDisplayNameSnapshot: '大表哥', sourcePeriod: '2026-07', sourceOrderNoSnapshot: 'OLD-001', amount: '-5.00', reason: '质量调整', createdByDisplayName: '管理员', createdAt: NOW.toISOString() }],
     receipts: [{ period: '2026-08', agentDisplayNameSnapshot: '大表哥', amount: '95.00', receivedAt: NOW.toISOString(), paymentMethod: '转账', referenceNo: null, recordedByDisplayName: '管理员' }],
   }));
-  for (const name of ['工单明细', '跨月抵扣', '收款回执']) {
+  for (const name of ['工单明细', '跨月调整', '收款回执']) {
     expect(sheets.get(name)?.[0]?.at(-1)).toBe('销售账号');
     expect(sheets.get(name)?.[1]?.at(-1)).toBe(username);
   }

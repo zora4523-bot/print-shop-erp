@@ -195,7 +195,7 @@ export function buildBreadcrumbCrumbs(
     if (isBillCredit && (i === 3 || i === 4)) return;
     if (!isLast && SKIPPED_BREADCRUMB_PATHS.has(href)) return;
     const label =
-      (isBillCredit && isLast ? '录入抵扣' : undefined) ??
+      (isBillCredit && isLast ? '录入抵扣或补收' : undefined) ??
       BREADCRUMB_PATH_LABELS[href] ??
       // 工单 id 段显示工单名称（业主 2026-10-02：员工靠名称认单，工单号不重要），
       // 名称为空或首帧未交上来时回落「工单详情」，不显示工单号。

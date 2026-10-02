@@ -50,6 +50,20 @@ export async function lockAgentBillCredit(
   )}))`;
 }
 
+/** 串行化同一销售的补收录入，使累计待分摊补收的上限校验不被并发绕过。 */
+export function agentSurchargeLockKey(agentUserId: string): string {
+  return `print-shop-erp:agent-monthly-billing:surcharge:${agentUserId}`;
+}
+
+export async function lockAgentSurcharges(
+  tx: LockClient,
+  agentUserId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${agentSurchargeLockKey(
+    agentUserId,
+  )}))`;
+}
+
 export async function lockAgentBillRequest(
   tx: LockClient,
   kind: 'credit' | 'receipt' | 'confirm',

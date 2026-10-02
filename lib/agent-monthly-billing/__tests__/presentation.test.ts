@@ -17,8 +17,12 @@ it('splits allocations on frozen bills from provisional DRAFT allocations withou
     { amount: '-30.03', bill: { status: 'CONFIRMED' } },
     { amount: '-0.07', bill: { status: 'PAID' } },
     { amount: '-50.00', bill: { status: 'DRAFT' } },
-  ] })).toEqual({ requested: '100.10', confirmed: '30.10', pending: '50.00', remaining: '20.00' });
-  expect(creditAllocationSummary({ requestedAmount: '-10.00', allocations: [] })).toEqual({ requested: '10.00', confirmed: '0.00', pending: '0.00', remaining: '10.00' });
+  ] })).toEqual({ kind: '抵扣', requested: '100.10', confirmed: '30.10', pending: '50.00', remaining: '20.00' });
+  expect(creditAllocationSummary({ requestedAmount: '-10.00', allocations: [] })).toEqual({ kind: '抵扣', requested: '10.00', confirmed: '0.00', pending: '0.00', remaining: '10.00' });
+  // 补收（正数，业主 2026-10-01）同样按冻结 / 草稿拆分。
+  expect(creditAllocationSummary({ requestedAmount: '40.00', allocations: [
+    { amount: '40.00', bill: { status: 'DRAFT' } },
+  ] })).toEqual({ kind: '补收', requested: '40.00', confirmed: '0.00', pending: '40.00', remaining: '0.00' });
 });
 it('carries only a sanitized list scope onto bill links', () => {
   expect(billScopedHref('/owner/agent-bills/b1', '/owner/agent-bills?period=2026-08&page=2&x=1')).toBe(`/owner/agent-bills/b1?returnTo=${encodeURIComponent('/owner/agent-bills?period=2026-08&page=2')}`);
