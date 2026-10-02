@@ -58,7 +58,6 @@ export default async function EditAccountPage({ params, searchParams }: PageProp
         title={`编辑用户：${account.displayName}`}
         subtitle={<>用户名 <span className="font-mono">{account.username}</span></>}
         status={<ActiveStatusBadge active={account.isActive} />}
-        back={{ href: '/owner/accounts', label: '返回用户管理' }}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

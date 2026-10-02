@@ -20,6 +20,7 @@ vi.mock('next/link', () => ({
 }));
 vi.mock('@/actions/admin-order-workflow', () => ({ runAdminOrderBatchAction: batchAction }));
 vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: printAction }));
+vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: vi.fn(), recordOrderPrintedAction: vi.fn() }));
 vi.mock('@/actions/order-export', () => ({ requestOrderExportAction: vi.fn() }));
 
 import { AdminOrderBatchActions } from '../AdminOrderBatchActions';
@@ -99,15 +100,15 @@ describe('admin order batch review', () => {
 
     mount([{ ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-1',
       capabilities: { ...order.capabilities, release: false, markPrinted: true } }]);
-    await expect.element(toolbar.getByRole('button', { name: '确认已打印（1）', exact: true })).toBeVisible();
-    await expect.element(toolbar.getByRole('button', { name: /下发生产|批量结算|更多操作/ })).not.toBeInTheDocument();
+    // 业主 2026-10-02：打印即记已打印——待打印的工单只剩「打印所选」，没有单独的确认已打印。
+    expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['打印所选（1）', '导出所选', '取消选择']);
 
     mount([{ ...order, status: OrderStatus.SHIPPED,
       capabilities: { ...order.capabilities, release: false, settle: true } }]);
     await expect.element(toolbar.getByRole('button', { name: '批量结算（1）', exact: true })).toBeVisible();
-    await expect.element(toolbar.getByRole('button', { name: /下发生产|确认已打印|更多操作/ })).not.toBeInTheDocument();
+    await expect.element(toolbar.getByRole('button', { name: /下发生产|更多操作/ })).not.toBeInTheDocument();
 
-    // Incomplete print identity and missing confirmed money cannot create a shortcut.
+    // Missing confirmed money cannot create a settlement shortcut.
     mount([{ ...order, capabilities: { ...order.capabilities, release: false, markPrinted: true, settle: true },
       feeStages: { ...order.feeStages, confirmed: null } }]);
     expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['打印所选（1）', '导出所选', '取消选择']);
@@ -143,27 +144,6 @@ describe('admin order batch review', () => {
     await expect.poll(() => batchAction.mock.calls.length).toBe(1);
     expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'CREATE_PRINT', items: [
       { orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2 },
-    ] });
-  });
-
-  it('confirms printing only for selected orders with a current pending print request', async () => {
-    const order = batchOrder();
-    const printable = { ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-current',
-      capabilities: { ...order.capabilities, release: false, markPrinted: true } };
-    mount([printable, { ...printable, id: 'no-print-request', pendingPrintJobId: null }]);
-    await page.getByRole('button', { name: '确认已打印（1）', exact: true }).click();
-    const dialog = page.getByRole('alertdialog', { name: '确认已打印', exact: true });
-    await expect.element(dialog).toBeVisible();
-    await expect.element(dialog.getByText(/请确认纸质工单已实际打印/)).toBeVisible();
-    expect(batchAction).not.toHaveBeenCalled();
-    batchAction.mockResolvedValue({ status: 'success', result: {
-      command: 'MARK_PRINTED', successCount: 1, skippedCount: 0, failedCount: 0, notAttemptedCount: 0,
-      items: [{ orderId: order.id, status: 'success', code: 'OK' }],
-    } });
-    await dialog.getByRole('button', { name: '确认已打印', exact: true }).click();
-    await expect.poll(() => batchAction.mock.calls.length).toBe(1);
-    expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'MARK_PRINTED', items: [
-      { orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2, requestJobId: 'print-current' },
     ] });
   });
 
@@ -317,7 +297,7 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
         mount([batchOrder()], `${dark}-${state}`);
         if (state !== 'idle') {
           await page.getByRole('button', { name: '打印所选（1）' }).click();
-          if (state === 'ready') await expect.element(page.getByRole('link', { name: '打开 PDF' })).toBeVisible();
+          if (state === 'ready') await expect.element(page.getByRole('button', { name: '打开 PDF' })).toBeVisible();
           else await expect.element(page.getByText(state === 'failed'
             ? '未生成打印文件，请检查以下工单或减少所选数量后重试。'
             : state === 'unavailable' ? '等待打印服务恢复，将自动更新进度；如长时间未恢复，请联系管理员。'
@@ -337,8 +317,9 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
           expect(box.width).toBeGreaterThanOrEqual(44);
         }
         if (state === 'ready') {
-          const link = host.querySelector('a[href*="batch-print"]')!.getBoundingClientRect();
-          expect(link.top).toBeGreaterThanOrEqual(Math.max(...boxes.map((box) => box.bottom)));
+          // 打开 / 下载 PDF 是按钮（不用可被中键另开、绕过记录的链接），排在主操作行下方。
+          const open = buttons.find((button) => button.textContent === '打开 PDF')!.getBoundingClientRect();
+          expect(open.top).toBeGreaterThanOrEqual(Math.max(...boxes.map((box) => box.bottom)));
         }
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
         expect(await commands.checkShellAccessibility('[aria-label="工单批量操作"]')).toEqual([]);

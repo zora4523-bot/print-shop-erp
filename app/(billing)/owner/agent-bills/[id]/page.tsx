@@ -23,9 +23,10 @@ import {
   MarkAgentMonthlyBillPaidForm,
 } from '@/components/business/agent-monthly-billing/AgentMonthlyBillForms';
 import { PageHeader, StatusBadge, EmptyState, FilterClearLink } from '@/components/ui-business';
+import { BreadcrumbEntity, BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
 import { AGENT_MONTHLY_BILL_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { billListReturnHref, billScopedHref } from '@/lib/agent-monthly-billing/presentation';
+import { billAdjustmentKind, billListReturnHref, billScopedHref } from '@/lib/agent-monthly-billing/presentation';
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ returnTo?: string | string[]; q?: string | string[]; page?: string | string[] }> };
 
@@ -41,10 +42,13 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
 
   return (
     <div className="space-y-6">
+      {/* 返回外部销售月账单由面包屑父级承担，带上原列表的筛选与页码（returnTo）；
+          末段显示账单标题，与「录入抵扣」页的父级同名。 */}
+      <BreadcrumbEntity label={`${bill.period} · ${bill.agentDisplayNameSnapshot}`} />
+      <BreadcrumbParent href={returnHref} />
       <PageHeader
         title={`${bill.period} · ${bill.agentDisplayNameSnapshot}`}
         subtitle={`账单账号 ${bill.agentUsernameSnapshot} · 工单 ${bill.items.length} 单`}
-        back={{ href: returnHref, label: '返回外部销售月账单' }}
         status={
           <StatusBadge
             tone={AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].tone}
@@ -57,7 +61,7 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
 
       <section className="grid gap-4 rounded-xl border bg-card p-5 shadow-sm sm:grid-cols-3">
         <Amount label="工单合计" value={String(bill.memberSubtotal)} />
-        <Amount label="跨月抵扣" value={String(bill.adjustmentAmount)} />
+        <Amount label="跨月调整（抵扣 / 补收）" value={String(bill.adjustmentAmount)} />
         <Amount label={bill.status === 'DRAFT' ? '整单金额（未定稿）' : '整单金额'} value={String(bill.totalAmount)} strong />
         <p className="text-xs text-muted-foreground sm:col-span-3">
           {bill.paidAt
@@ -118,15 +122,15 @@ export default async function AgentMonthlyBillDetailPage({ params, searchParams 
 
       {bill.adjustments.length > 0 ? (
         <section className="space-y-3 rounded-xl border bg-card p-5 shadow-sm">
-          <h2 className="font-semibold">本月抵扣明细</h2>
+          <h2 className="font-semibold">本月抵扣与补收明细</h2>
           <ul className="divide-y text-sm">
             {bill.adjustments.map((row) => (
               <li key={row.id} className="flex flex-wrap justify-between gap-3 py-3">
                 <span>
                   来源 {row.credit.sourceItem.bill.period} ·{' '}
                   {row.credit.sourceItem.orderNoSnapshot}
-                  <BillDetailDisclosure label="查看抵扣来源" title="抵扣来源" description={`${bill.period} 月账单抵扣`}>
-                    <p>本账单抵扣 {formatMoneyDelta(row.amount)}</p>
+                  <BillDetailDisclosure label={`查看${billAdjustmentKind(row.amount)}来源`} title={`${billAdjustmentKind(row.amount)}来源`} description={`${bill.period} 月账单${billAdjustmentKind(row.amount)}`}>
+                    <p>本账单{billAdjustmentKind(row.amount)} {formatMoneyDelta(row.amount)}</p>
                     <p>来源工单 {row.credit.sourceItem.orderNoSnapshot}</p>
                     <Link href={billScopedHref(`/owner/agent-bills/${row.credit.sourceItem.bill.id}`, returnHref)} className={buttonVariants({ variant: 'outline' })}>{row.credit.sourceItem.bill.period} 月账单</Link>
                   </BillDetailDisclosure>

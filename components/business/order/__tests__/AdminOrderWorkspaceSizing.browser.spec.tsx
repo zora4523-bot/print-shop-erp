@@ -19,6 +19,7 @@ vi.mock('@/actions/order-fulfillment-pricing', () => ({ previewFulfillmentPricin
 // BatchPrintControls 引入的 server action；不 mock 会把 next-auth 拖进浏览器，
 // 其预打包 chunk 再去向已被 mock 的 next/navigation 要内部导出而报错。
 vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: vi.fn() }));
+vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: vi.fn(), recordOrderPrintedAction: vi.fn() }));
 vi.mock('@/actions/admin-order-workflow', () => ({
   runAdminOrderBatchAction: vi.fn(),
   confirmFactoryOrderAction: vi.fn(),
@@ -184,7 +185,7 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       // Current controls list eligible commands only; assert the capability
       // boundary rather than an obsolete disabled-reason wrapper.
       await expect.element(page.getByRole('button', { name: '下发生产（20）', exact: true })).toBeEnabled();
-      for (const unavailable of ['加入待打印', '确认已打印', '批量结算']) {
+      for (const unavailable of ['加入待打印', '批量结算']) {
         await expect.element(page.getByRole('button', { name: new RegExp(unavailable) })).not.toBeInTheDocument();
       }
       expect(await commands.checkShellAccessibility('[data-testid="order-sizing-fixture"]')).toEqual([]);

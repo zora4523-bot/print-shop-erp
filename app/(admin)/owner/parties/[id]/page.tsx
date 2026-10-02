@@ -65,7 +65,7 @@ export default async function EditOwnerPartyPage({ params, searchParams }: PageP
       <PageHeader
         title={`编辑客户/供应商：${party.name}`}
         subtitle={`${PARTY_TYPE_LABELS[party.type]} · 编码 ${party.code}`}
-        back={supplement ? { href: supplementReturnHref(supplement), label: '返回原录入' } : { href: '/owner/parties', label: '返回客户/供应商' }}
+        back={supplement ? { href: supplementReturnHref(supplement), label: '返回原录入' } : undefined}
         status={<ActiveStatusBadge active={party.isActive} />}
         actions={supplement && party.isActive && party.type !== 'CUSTOMER' ? <Link href={supplementReturnHref(supplement, party.id)} className={buttonVariants()}>选用该供应商并返回</Link> : undefined}
       />

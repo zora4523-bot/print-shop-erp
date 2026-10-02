@@ -167,6 +167,9 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
           .toBe('88.00');
         await expect(adminPage.locator('#pricing-review').getByText('管理员已确认', { exact: true })).toBeVisible();
       }
+      // 业主 2026-10-02：「计价与收费维护」没有待处理事项时默认收起，先展开再编辑收费。
+      const pricing = adminPage.locator('#detail-pricing-tools');
+      if (await pricing.getAttribute('open') === null) await pricing.locator(':scope > summary').click();
       await adminPage.getByRole('button', { name: '编辑全部收费', exact: true }).click();
       const fees = adminPage.locator('#admin-fee-editor');
       await expect(fees.getByLabel('收费金额（元）').first()).toBeVisible();

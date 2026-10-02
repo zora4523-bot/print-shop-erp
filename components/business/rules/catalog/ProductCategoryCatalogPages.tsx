@@ -114,7 +114,7 @@ export async function NewProductCategoryCatalogItem({
         lockBackWhilePending
         title="新建产品结构分类"
         effect="immediate"
-        back={{ href: backHref, label: supplement ? '返回原录入' : '返回产品结构分类' }}
+        back={supplement ? { href: backHref, label: '返回原录入' } : undefined}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">
@@ -155,11 +155,9 @@ export async function EditProductCategoryCatalogItem({
     <div className="space-y-6">
       <ReceiptNotice receipt={receipt} noun="产品结构分类" />
       <RuleCenterPageHeader
-        lockBackWhilePending
         title={`编辑产品结构分类：${node.name}`}
         effect="immediate"
         subtitle={`${node._count.products} 个产品资料`}
-        back={{ href: routeBase, label: '返回产品结构分类' }}
         status={
           <>
             <ActiveStatusBadge active={node.isActive} />

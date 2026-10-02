@@ -32,6 +32,9 @@ import type {
 
 type Tx = Prisma.TransactionClient;
 
+/** AgentMonthlyBill 金额列为 DECIMAL(12,2)。 */
+const BILL_AMOUNT_MAX = new Decimal('9999999999.99');
+
 const ELIGIBLE_ORDER_SELECT = {
   id: true,
   orderNo: true,
@@ -197,15 +200,26 @@ export async function allocateOutstandingCreditsInTx(
     throw new AgentMonthlyBillFrozenError();
   }
 
-  const credits = await tx.agentMonthlyBillCredit.findMany({
-    where: {
-      sourceItem: {
-        bill: {
-          agentUserId: input.agentUserId,
-          period: { lt: input.period },
+  // 先锁后读：已分摊额度必须在持有每条来源锁之后读取。同一销售不同月份的草稿可以
+  // 并发重排（如工单结算更正只锁本月），锁前读到的分摊会过期，导致多分并被触发器拒绝。
+  const creditIds = (
+    await tx.agentMonthlyBillCredit.findMany({
+      where: {
+        sourceItem: {
+          bill: {
+            agentUserId: input.agentUserId,
+            period: { lt: input.period },
+          },
         },
       },
-    },
+      select: { id: true },
+    })
+  ).map((credit) => credit.id).sort((a, b) => a.localeCompare(b));
+  for (const creditId of creditIds) {
+    await lockAgentBillCredit(tx, creditId);
+  }
+  const credits = await tx.agentMonthlyBillCredit.findMany({
+    where: { id: { in: creditIds } },
     select: {
       id: true,
       requestedAmount: true,
@@ -213,12 +227,24 @@ export async function allocateOutstandingCreditsInTx(
       allocations: {
         select: { billId: true, amount: true },
       },
+      sourceItem: { select: { bill: { select: { period: true } } } },
     },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
-  for (const credit of [...credits].sort((a, b) => a.id.localeCompare(b.id))) {
-    await lockAgentBillCredit(tx, credit.id);
-  }
+  // 补收只计入来源之后最早的草稿账单：更早的草稿还在时留给它，避免较晚月份先确认
+  // 把补收冻结在错误的月份。
+  const earlierDraftPeriods = (
+    await tx.agentMonthlyBill.findMany({
+      where: {
+        agentUserId: input.agentUserId,
+        status: AgentMonthlyBillStatus.DRAFT,
+        period: { lt: input.period },
+      },
+      select: { period: true },
+    })
+  ).map((draft) => draft.period);
+  const earlierDraftWaiting = (sourcePeriod: string) =>
+    earlierDraftPeriods.some((period) => period > sourcePeriod);
 
   // DRAFT allocations are projections of immutable credits, so rebuilding is
   // safe and prevents repeated generation from double-consuming a credit.
@@ -234,17 +260,43 @@ export async function allocateOutstandingCreditsInTx(
     memberAggregate._sum.settledFeeSnapshot ?? '0',
   );
 
-  for (const credit of credits) {
-    if (remainingCapacity.lte(0)) break;
-    const allocatedElsewhere = credit.allocations
-      .filter((allocation) => allocation.billId !== input.billId)
-      .reduce(
-        (sum, allocation) => sum.plus(decimal(allocation.amount).abs()),
-        new Decimal(0),
-      );
-    const unallocated = decimal(credit.requestedAmount)
+  const unallocatedOf = (credit: (typeof credits)[number]) =>
+    decimal(credit.requestedAmount)
       .abs()
-      .minus(allocatedElsewhere);
+      .minus(
+        credit.allocations
+          .filter((allocation) => allocation.billId !== input.billId)
+          .reduce(
+            (sum, allocation) => sum.plus(decimal(allocation.amount).abs()),
+            new Decimal(0),
+          ),
+      );
+
+  // 补收（正数，业主 2026-10-01）全额计入最早的草稿账单，同时提高本月可抵扣的额度。
+  for (const credit of credits) {
+    if (!decimal(credit.requestedAmount).isPositive()) continue;
+    if (earlierDraftWaiting(credit.sourceItem.bill.period)) continue;
+    const unallocated = unallocatedOf(credit);
+    if (unallocated.lte(0)) continue;
+    // 补收根记录不可改：放不进本账单的存储上限时整笔留待之后的账单，绝不让账单生成 /
+    // 确认因溢出失败（录入时已按最坏情况校验，这里兜住之后工单合计又增长的情况）。
+    if (remainingCapacity.plus(unallocated).gt(BILL_AMOUNT_MAX)) continue;
+    await tx.agentMonthlyBillAdjustment.create({
+      data: {
+        billId: input.billId,
+        creditId: credit.id,
+        amount: unallocated.toFixed(2),
+      },
+      select: { id: true },
+    });
+    remainingCapacity = remainingCapacity.plus(unallocated);
+  }
+
+  // 抵扣（负数）按录入先后在剩余额度内分摊，账单合计不会被抵成负数。
+  for (const credit of credits) {
+    if (!decimal(credit.requestedAmount).isNegative()) continue;
+    if (remainingCapacity.lte(0)) break;
+    const unallocated = unallocatedOf(credit);
     if (unallocated.lte(0)) continue;
 
     const allocated = Decimal.min(unallocated, remainingCapacity);

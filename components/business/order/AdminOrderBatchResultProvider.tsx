@@ -8,6 +8,9 @@ import { ActionNotice, BatchActionResult } from '@/components/ui-business';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BATCH_COMMAND_CONFIG, batchReceiptRows, type BatchOrderSnapshot } from './admin-order-batch-ui';
+import { BatchPrintDeliveryProvider } from './BatchPrintDelivery';
+import { PrintPageLink } from './PrintPageLink';
+import { useRefreshAfterPrint } from './use-refresh-after-print';
 
 type BatchReceipt = {
   command: AdminOrderBatchCommand;
@@ -27,6 +30,8 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
   const [receipt, setReceipt] = useState<BatchReceipt | null>(null);
   const [open, setOpen] = useState(false);
   const focusReturnRef = useRef<HTMLButtonElement | null>(null);
+  // 列表里任何工单在其他标签页打印并记录后刷新列表。
+  useRefreshAfterPrint();
   const rows = receipt && !receipt.pending
     ? batchReceiptRows(receipt.command, receipt.orders, receipt.response)
     : [];
@@ -52,7 +57,8 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
         setOpen(true);
       },
     }}>
-      {children}
+      {/* 批量打印文件的交付与回执同样放在随页面刷新重建的选择之外。 */}
+      <BatchPrintDeliveryProvider>{children}</BatchPrintDeliveryProvider>
       {receipt ? (
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2" data-slot="admin-order-batch-receipt-link">
           <p role="status" className="min-w-0 text-sm text-muted-foreground">
@@ -93,15 +99,13 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
                     </Link>
                     <span className="text-xs font-normal text-muted-foreground">{row.label}</span>
                     {row.outcome === 'success' && (receipt.command === 'RELEASE_AND_CREATE_PRINT' || receipt.command === 'CREATE_PRINT') ? (
-                      <a
-                        href={`/print/orders/${encodeURIComponent(row.order.id)}?autoprint=1`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <PrintPageLink
+                        orderId={row.order.id}
                         aria-label={`去打印工单 ${row.order.orderNo}`}
                         className={buttonVariants({ variant: 'outline', className: 'min-h-11 min-w-11' })}
                       >
                         去打印
-                      </a>
+                      </PrintPageLink>
                     ) : null}
                   </span>
                 ),

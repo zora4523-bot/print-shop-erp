@@ -50,7 +50,8 @@ vi.mock('../locks', () => ({
   lockAgentBillCredit: vi.fn(async () => events.push('credit')),
 }));
 
-import { generateAgentMonthlyBillsForPeriod, synchronizeDraftBillInTx } from '../generation';
+import { allocateOutstandingCreditsInTx, generateAgentMonthlyBillsForPeriod, synchronizeDraftBillInTx } from '../generation';
+import { lockAgentBillCredit } from '../locks';
 
 const ORDER = {
   id: 'order-1',
@@ -242,4 +243,70 @@ it('rejects an unpriced normal charge before any bill write', async () => {
   expect(result.errors).toHaveLength(1);
   expect(tx.agentMonthlyBill.create).not.toHaveBeenCalled();
   expect(tx.agentMonthlyBillItem.upsert).not.toHaveBeenCalled();
+});
+
+// 业主 2026-10-01：补收（正数）先全额计入草稿账单并提高可抵扣额度，抵扣（负数）再在额度内分摊。
+it('allocates surcharges in full before capping credits by the raised capacity', async () => {
+  tx.agentMonthlyBill.findUnique.mockReset().mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });
+  tx.agentMonthlyBillItem.aggregate.mockResolvedValue({ _sum: { settledFeeSnapshot: '50.00' } });
+  const source = { sourceItem: { bill: { period: '2026-05' } } };
+  tx.agentMonthlyBillCredit.findMany.mockResolvedValue([
+    { id: 'credit-a', requestedAmount: '-100.00', createdAt: new Date('2026-05-02'), allocations: [], ...source },
+    { id: 'surcharge-b', requestedAmount: '30.00', createdAt: new Date('2026-05-03'), allocations: [], ...source },
+    { id: 'surcharge-done', requestedAmount: '10.00', createdAt: new Date('2026-05-01'), allocations: [{ billId: 'older-bill', amount: '10.00' }], ...source },
+  ]);
+  tx.agentMonthlyBillAdjustment.aggregate.mockResolvedValue({ _sum: { amount: '-50.00' } });
+
+  await allocateOutstandingCreditsInTx(tx as never, { billId: 'bill-6', agentUserId: 'agent-1', period: '2026-06' });
+
+  expect(tx.agentMonthlyBillAdjustment.create.mock.calls.map(([args]) => args.data)).toEqual([
+    { billId: 'bill-6', creditId: 'surcharge-b', amount: '30.00' },
+    { billId: 'bill-6', creditId: 'credit-a', amount: '-80.00' },
+  ]);
+  expect(tx.agentMonthlyBill.update).toHaveBeenCalledWith(expect.objectContaining({
+    data: { memberSubtotal: '50.00', adjustmentAmount: '-50.00', totalAmount: '0.00' },
+  }));
+});
+
+// Codex 审查 P2：分摊额度在持有来源锁之后再读；补收只进来源之后最早的草稿账单。
+it('reads allocations only after locking every source, and leaves a surcharge for an earlier open draft', async () => {
+  tx.agentMonthlyBill.findUnique.mockReset().mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });
+  tx.agentMonthlyBillItem.aggregate.mockResolvedValue({ _sum: { settledFeeSnapshot: '50.00' } });
+  tx.agentMonthlyBillCredit.findMany
+    .mockResolvedValueOnce([{ id: 'surcharge-b' }, { id: 'credit-a' }])
+    .mockResolvedValueOnce([
+      { id: 'credit-a', requestedAmount: '-20.00', createdAt: new Date('2026-05-02'), allocations: [], sourceItem: { bill: { period: '2026-05' } } },
+      { id: 'surcharge-b', requestedAmount: '30.00', createdAt: new Date('2026-05-03'), allocations: [], sourceItem: { bill: { period: '2026-05' } } },
+    ]);
+  // 6 月草稿仍在：本次重排的是 7 月，补收要留给 6 月。
+  tx.agentMonthlyBill.findMany.mockResolvedValue([{ period: '2026-06' }]);
+  tx.agentMonthlyBillAdjustment.aggregate.mockResolvedValue({ _sum: { amount: '-20.00' } });
+
+  await allocateOutstandingCreditsInTx(tx as never, { billId: 'bill-7', agentUserId: 'agent-1', period: '2026-07' });
+
+  const lock = vi.mocked(lockAgentBillCredit);
+  expect(lock.mock.calls.map(([, id]) => id)).toEqual(['credit-a', 'surcharge-b']);
+  const allocationRead = tx.agentMonthlyBillCredit.findMany.mock.invocationCallOrder[1];
+  expect(Math.max(...lock.mock.invocationCallOrder)).toBeLessThan(allocationRead);
+  expect(tx.agentMonthlyBillCredit.findMany.mock.calls[1][0].where).toEqual({ id: { in: ['credit-a', 'surcharge-b'] } });
+  expect(tx.agentMonthlyBillAdjustment.create.mock.calls.map(([args]) => args.data)).toEqual([
+    { billId: 'bill-7', creditId: 'credit-a', amount: '-20.00' },
+  ]);
+});
+
+// Codex 审查 P2：录入后工单合计又增长（如结算更正）时，放不进本账单存储上限的补收整笔留待之后，
+// 账单生成 / 确认不能因溢出失败。
+it('defers a surcharge that would push the draft past the bill amount column limit', async () => {
+  tx.agentMonthlyBill.findUnique.mockReset().mockResolvedValue({ status: AgentMonthlyBillStatus.DRAFT });
+  tx.agentMonthlyBillItem.aggregate.mockResolvedValue({ _sum: { settledFeeSnapshot: '9999999000.00' } });
+  tx.agentMonthlyBillCredit.findMany.mockResolvedValue([
+    { id: 'surcharge-big', requestedAmount: '1000.00', createdAt: new Date('2026-05-02'), allocations: [], sourceItem: { bill: { period: '2026-05' } } },
+    { id: 'surcharge-small', requestedAmount: '999.99', createdAt: new Date('2026-05-03'), allocations: [], sourceItem: { bill: { period: '2026-05' } } },
+  ]);
+
+  await allocateOutstandingCreditsInTx(tx as never, { billId: 'bill-6', agentUserId: 'agent-1', period: '2026-06' });
+
+  expect(tx.agentMonthlyBillAdjustment.create.mock.calls.map(([args]) => args.data)).toEqual([
+    { billId: 'bill-6', creditId: 'surcharge-small', amount: '999.99' },
+  ]);
 });

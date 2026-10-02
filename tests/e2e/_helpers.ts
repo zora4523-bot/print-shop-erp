@@ -65,6 +65,11 @@ async function deletePrintableOrderFixture(db: Client, orderId: string): Promise
        SELECT 1 FROM "ProductionScanClaim" WHERE "orderId" = $1
        UNION ALL
        SELECT 1 FROM "OrderPricingRevision" WHERE "orderId" = $1
+       UNION ALL
+       -- 打印记录（含「点打印即记已打印」的尝试账本）是追加式事实，不能删，也就不能重建夹具。
+       SELECT 1 FROM "OrderPrintJob" WHERE "orderId" = $1
+       UNION ALL
+       SELECT 1 FROM "OrderPrintAttempt" WHERE "orderId" = $1
      ) AS "hasHistory"`,
     [orderId],
   );

@@ -9,7 +9,6 @@ import {
 } from './admin-workflow';
 import {
   createNextOrderPrintRequest,
-  markOrderPrintRequestPrinted,
   OrderPrintJobError,
 } from './print-jobs';
 import { InvalidOrderTransitionError } from './status-machine';
@@ -18,7 +17,6 @@ import { completeOrderProductionAtPlan, PlannedCompletionError } from '../produc
 export const ADMIN_ORDER_BATCH_COMMANDS = [
   'RELEASE_AND_CREATE_PRINT',
   'CREATE_PRINT',
-  'MARK_PRINTED',
   'SETTLE',
   'COMPLETE_PRODUCTION',
 ] as const;
@@ -184,18 +182,6 @@ export async function runAdminOrderBatch(
               reason: '管理端批量创建打印任务',
               idempotencyKey,
             },
-            actor,
-          );
-          break;
-        case 'MARK_PRINTED':
-          if (!item.requestJobId?.trim()) {
-            throw new OrderPrintJobError(
-              'INVALID_INPUT',
-              '当前版本没有可标记的待打印任务',
-            );
-          }
-          await markOrderPrintRequestPrinted(
-            { requestJobId: item.requestJobId, idempotencyKey },
             actor,
           );
           break;

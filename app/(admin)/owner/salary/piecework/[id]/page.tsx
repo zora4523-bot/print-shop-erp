@@ -22,6 +22,7 @@ import { MarkPieceworkSettlementPaidForm } from '@/components/business/salary/Pi
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader, TableScrollArea } from '@/components/ui-business';
+import { BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
 import { formatRate } from '@/lib/format/unit-price';
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -63,10 +64,11 @@ export default async function PieceworkSettlementDetailPage({
 
   return (
     <div className="space-y-6">
+      {/* 返回工序计件结算由面包屑父级承担，回到本单所在的结算日期。 */}
+      <BreadcrumbParent href={`/owner/salary/piecework?date=${workDate}`} />
       <PageHeader
         title={`${settlement.reporter.displayName} · ${workDate}`}
         subtitle="已结算报工明细"
-        back={{ href: `/owner/salary/piecework?date=${workDate}`, label: '返回工序计件结算' }}
         status={<SettlementStatus status={settlement.status} />}
         actions={
           <div className="flex flex-wrap gap-2">

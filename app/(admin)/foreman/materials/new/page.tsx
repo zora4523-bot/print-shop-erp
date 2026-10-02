@@ -14,7 +14,6 @@ export default async function NewForemanMaterialPage() {
   return (
     <FormPage>
       <PageHeader
-        back={{ href: '/foreman/materials', label: '返回车间用料' }}
         title="新建物料"
         subtitle="新物料默认启用；库存数量通过出入库单独维护。"
 

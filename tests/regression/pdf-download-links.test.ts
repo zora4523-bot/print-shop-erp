@@ -25,7 +25,9 @@ describe('PDF download navigation', () => {
     expect(hrefTags(file, (href) => href.includes('/api/orders/') && href.includes('/pdf'))).toEqual(['a']);
   });
 
+  // 业主 2026-10-02 点打印即记已打印：所有打印页入口统一走 PrintPageLink（原生 <a>，打印后回页刷新）。
   it('uses the prepared web-print route for printing batch results', () => {
-    expect(hrefTags('components/business/order/AdminOrderBatchResultProvider.tsx', (href) => href.includes('/print/orders/') && href.includes('autoprint=1'))).toEqual(['a']);
+    expect(readFileSync(path.resolve('components/business/order/AdminOrderBatchResultProvider.tsx'), 'utf8')).toMatch(/<PrintPageLink\b/);
+    expect(hrefTags('components/business/order/PrintPageLink.tsx', (href) => href.includes('/print/orders/') && href.includes('autoprint=1'))).toEqual(['a']);
   });
 });

@@ -68,7 +68,6 @@ export default async function OwnerPurchaseDetailPage({ params, searchParams }: 
       <PageHeader
         title={`采购单：${order.purchaseNo}`}
         subtitle={`${order.supplierName} · ${order.supplierCode}`}
-        back={{ href: '/owner/purchases', label: '返回采购单' }}
         status={<PurchaseOrderStatusBadge status={order.status} />}
       />
 

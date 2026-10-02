@@ -251,7 +251,6 @@ export async function NewProductCatalogItem({
       <RuleCenterPageHeader
         title="新建产品资料"
         effect="immediate"
-        back={{ href: routeBase, label: '返回产品资料' }}
       />
       <div className="rounded-xl border bg-card p-6 shadow-sm">
         <ProductForm
@@ -316,7 +315,6 @@ export async function EditProductCatalogItem({
           externalPriceBusinessText(product.name) || '未命名产品'
         }`}
         effect="immediate"
-        back={{ href: routeBase, label: '返回产品资料' }}
         status={
           <>
             <ActiveStatusBadge active={product.isActive} />

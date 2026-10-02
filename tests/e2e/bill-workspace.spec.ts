@@ -43,7 +43,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await page.getByLabel('收款方式', { exact: true }).fill('测试转账');
   await page.getByRole('button', { name: '标记已收', exact: true }).click();
   await expect(page.getByRole('heading', { name: '收款记录', exact: true })).toBeVisible();
-  await page.getByRole('link', { name: '录入抵扣', exact: true }).click();
+  await page.getByRole('link', { name: '录入抵扣或补收', exact: true }).click();
   for (const width of [320, 375, 390, 393, 430, 768, 944, 1024, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     for (const theme of ['light', 'dark'] as const) {
@@ -63,7 +63,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await expect(page.getByLabel(/^抵扣金额/)).toHaveAccessibleName(/70\.00/);
   const targetId = await generate(target.period);
   await page.goto(`/owner/agent-bills/${targetId}`);
-  await expect(page.getByText('本月抵扣明细')).toBeVisible();
+  await expect(page.getByText('本月抵扣与补收明细')).toBeVisible();
   await page.getByRole('button', { name: '确认账单', exact: true }).click();
   await expect(page.getByRole('heading', { name: '收款记录', exact: true })).toBeVisible();
   await expect(page.getByText('零元自动结清')).toBeVisible();
@@ -92,7 +92,9 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   sales.on('pageerror', (error) => pageErrors.push(error.message));
   await login(sales, { username: source.agentUsername, password: E2E_PASSWORD, from: `/sales/bills?period=${source.period}` });
   await sales.getByRole('link', { name: `查看 ${source.period} 账单详情`, exact: true }).click();
-  await expect(sales.getByRole('link', { name: '返回我的货款账单' })).toHaveAttribute('href', `/sales/bills?period=${source.period}`);
+  // 返回由顶栏面包屑父级承担，hydrate 后带上原列表的月份筛选（ui-规范 §8.3）。
+  await expect(sales.locator('[data-slot="admin-header"]').getByRole('link', { name: '我的货款账单', exact: true })).toHaveAttribute('href', `/sales/bills?period=${source.period}`);
+  await expect(sales.locator('[data-slot="page-header-back"]')).toHaveCount(0);
   const receiptToggle = sales.locator('summary').filter({ hasText: '工厂收款记录' });
   await expect(receiptToggle).toContainText('已收');
   await expect(sales.getByText('测试转账', { exact: true })).toBeHidden();

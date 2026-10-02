@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { PDFDocument } from 'pdf-lib';
+import type { Prisma } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import { Role, BackgroundJobQueue, BackgroundJobStatus } from '@/generated/prisma/enums';
 import { getOrderForPrint } from '@/lib/order/print-view';
@@ -8,13 +9,14 @@ import { buildPrintHtml } from '@/lib/order/print-html';
 import { getSetting } from '@/lib/settings';
 import { renderHtmlToPdf } from '@/lib/pdf/render';
 import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
-import { readPdfArtifact, writePdfArtifact, cleanupOldPdfArtifacts, PdfArtifactStorageError } from '@/lib/pdf/artifacts';
+import { assertPdfArtifactAvailable, readPdfArtifact, writePdfArtifact, cleanupOldPdfArtifacts, PdfArtifactStorageError } from '@/lib/pdf/artifacts';
 import { isPdfInfrastructureFailure } from '@/lib/pdf/capability';
 import { databaseNow } from '@/lib/background-jobs/clock';
 import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS } from '@/lib/background-jobs/heartbeat-policy';
 import { enqueueBackgroundJob, BackgroundJobLeaseLostError } from '@/lib/background-jobs/repository';
 import { BACKGROUND_JOB_TYPES, type ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 import { BATCH_PRINT_MAX, batchPrintRequestSchema, type BatchPrintIssue, type BatchPrintStatus } from './batch-print-contract';
+import { recordRenderedPrintInTx } from './print-jobs';
 
 const BATCH_PRINT_MAX_BYTES = 100 * 1024 * 1024;
 
@@ -33,34 +35,40 @@ export class BatchPrintAccessError extends Error {}
 export class BatchPrintSelectionError extends Error {
   constructor(public readonly issues: BatchPrintIssue[]) { super('Invalid batch print selection'); }
 }
+/** 打印文件已过期或读不到：不能把没拿到的文件记为已打印。 */
+export class BatchPrintArtifactUnavailableError extends Error {}
 
-async function requireAdmin(actorId: string) {
-  const account = await db.user.findUnique({ where: { id: actorId }, select: { isActive: true, role: true } });
+async function requireAdmin(actorId: string, client: Pick<Prisma.TransactionClient, 'user'> = db) {
+  const account = await client.user.findUnique({ where: { id: actorId }, select: { isActive: true, role: true } });
   if (!account?.isActive || account.role !== Role.ADMIN) throw new BatchPrintAccessError();
 }
 
-async function loadCurrent(payload: Payload, index: number) {
+async function loadCurrent(payload: Payload, index: number, client: Prisma.TransactionClient = db) {
   const expected = payload.orders[index];
-  const order = await getOrderForPrint(expected.id, { id: payload.actorId, role: Role.ADMIN }, payload.baseUrl);
+  const order = await getOrderForPrint(expected.id, { id: payload.actorId, role: Role.ADMIN }, payload.baseUrl, client);
   if (!order) throw new BatchPrintSelectionError([{ position: index + 1, message: '工单不存在或已无权打印，请取消选择后重试' }]);
-  const factoryName = (await getSetting('factory_name')).name;
+  const factoryName = (await getSetting('factory_name', client)).name;
   if (orderPdfSnapshotKey(order, factoryName) !== expected.key) {
     throw new BatchPrintSelectionError([{ position: index + 1, message: '工单内容已变化，请重新选择并生成' }]);
   }
   return { order, factoryName };
 }
 
-async function validateAll(payload: Payload) {
-  await requireAdmin(payload.actorId);
+async function validateAll(payload: Payload, client: Prisma.TransactionClient = db) {
+  await requireAdmin(payload.actorId, client);
   const issues: BatchPrintIssue[] = [];
+  const printed: { index: number; orderId: string; workOrderVersion: number }[] = [];
   for (let i = 0; i < payload.orders.length; i++) {
-    try { await loadCurrent(payload, i); }
-    catch (error) {
+    try {
+      const { order } = await loadCurrent(payload, i, client);
+      printed.push({ index: i, orderId: order.id, workOrderVersion: order.workOrderVersion });
+    } catch (error) {
       if (!(error instanceof BatchPrintSelectionError)) throw error;
       issues.push(...error.issues);
     }
   }
   if (issues.length) throw new BatchPrintSelectionError(issues);
+  return printed;
 }
 
 export async function requestBatchPrint(actorId: string, input: unknown, baseUrl: string) {
@@ -218,4 +226,66 @@ export async function downloadBatchPrint(actorId: string, jobId: string) {
   const bytes = await readPdfArtifact(result.data.artifactName);
   await validateAll(payload);
   return bytes;
+}
+
+/**
+ * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；浏览器先成功取得
+ * 文件，再由 Server Action 调这里记录：
+ *
+ * 1. 本尝试已整批记过 → 直接返回原结果（不再核对文件与当前内容）。
+ * 2. 在事务外探测文件仍可读（OSS 限时 10 秒），不让存储慢请求占住事务与连接。
+ * 3. 事务内先按本批次尝试加锁，同一尝试的并发请求（前一次断连但仍在执行时的重试）串行，并
+ *    再查一次账本：前一次已提交就重放，不会抢先走首次记录、也不受探测结果影响。
+ * 4. 首次记录：按工单 id 顺序（与批量排单同一比较方式）逐单加工单锁，锁内用同一事务连接读取
+ *    打印内容，完整快照摘要须与文件一致；任一工单不一致、已不在生产中都整批回滚，不留半截记录。
+ *
+ * 尝试键 `batch-print:<sha256(任务:尝试) 前 32 位>:<工单>` 绑定打印任务：换一个任务沿用旧尝试
+ * 标识也不会重放旧结果。同一打印文件之后再打开是新的尝试，会记录期间新建的补打任务。
+ */
+export async function recordBatchPrint(actorId: string, jobId: string, attemptId: string): Promise<{ marked: number } | null> {
+  const { job, payload } = await ownedJob(actorId, jobId);
+  const result = resultSchema.safeParse(job.result);
+  if (job.status !== 'SUCCEEDED' || !result.success || result.data.issues.length || !result.data.artifactName) return null;
+  const artifactName = result.data.artifactName;
+  const attempt = createHash('sha256').update(`${jobId}:${attemptId}`).digest('hex').slice(0, 32);
+  const attemptKeys = new Map(payload.orders.map((order) => [`batch-print:${attempt}:${order.id}`, order.id]));
+  const replay = async (client: Pick<Prisma.TransactionClient, 'orderPrintAttempt'>) => {
+    const booked = await client.orderPrintAttempt.findMany({
+      where: { attemptKey: { in: [...attemptKeys.keys()] } },
+      select: { attemptKey: true, orderId: true, outcome: true },
+    });
+    return booked.length === attemptKeys.size && booked.every((entry) => attemptKeys.get(entry.attemptKey) === entry.orderId)
+      ? { marked: booked.filter((entry) => entry.outcome === 'MARKED').length }
+      : null;
+  };
+  const earlier = await replay(db);
+  if (earlier) return earlier;
+  const available = await assertPdfArtifactAvailable(artifactName).then(() => true, () => false);
+  const actor = { id: actorId, role: Role.ADMIN };
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`batch-print-attempt:${attempt}`}))`;
+    const booked = await replay(tx);
+    if (booked) return booked;
+    if (!available) throw new BatchPrintArtifactUnavailableError();
+    await requireAdmin(actorId, tx);
+    const versions = new Map((await tx.order.findMany({
+      where: { id: { in: payload.orders.map((order) => order.id) } },
+      select: { id: true, workOrderVersion: true },
+    })).map((order) => [order.id, order.workOrderVersion]));
+    const ordered = payload.orders.map((order, index) => ({ index, orderId: order.id }))
+      .sort((a, b) => a.orderId.localeCompare(b.orderId));
+    let marked = 0;
+    for (const { index, orderId } of ordered) {
+      const workOrderVersion = versions.get(orderId);
+      if (workOrderVersion === undefined) throw new BatchPrintSelectionError([{ position: index + 1, message: '工单不存在或已无权打印，请取消选择后重试' }]);
+      // 版本先读后锁：锁前若又改单，锁内比较版本 / 内容会得到 STALE，整批回滚。
+      const outcome = await recordRenderedPrintInTx(tx, { orderId, workOrderVersion, attemptKey: `batch-print:${attempt}:${orderId}` }, actor,
+        async () => { await loadCurrent(payload, index, tx); return true; });
+      if (outcome === 'STALE' || outcome === 'NOT_PRINTABLE') {
+        throw new BatchPrintSelectionError([{ position: index + 1, message: outcome === 'STALE' ? '工单内容已变化，请重新选择并生成' : '工单已不在生产中，请取消选择后重新生成' }]);
+      }
+      if (outcome === 'MARKED') marked += 1;
+    }
+    return { marked };
+  }, { timeout: 30_000 });
 }

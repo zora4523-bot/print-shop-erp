@@ -22,7 +22,7 @@ describe('order detail UX regressions', () => {
   it.each([
     ['OPERATIONS_RELEASED', '下发生产'], ['OPERATIONS_MATERIALIZED', '生成生产工序'],
     ['OPERATIONS_REMATERIALIZED', '更新生产工序版本'], ['FACTORY_HELD', '暂停生产'],
-    ['ORDER_PRINT_REQUESTED', '创建打印任务'], ['ORDER_PRINTED', '确认已打印'],
+    ['ORDER_PRINT_REQUESTED', '创建打印任务'], ['ORDER_PRINTED', '已打印'],
     ['ORDER_PRINT_REQUESTS_SUPERSEDED', '旧版打印任务失效'], ['ORDER_SETTLED_V2', '工单结算'],
     ['CHANGE_REQUEST_CREATED', '提交工单变更申请'], ['REPORT_DISPUTE_REVIEWED', '回复报工异议'],
     ['BLANK_MATERIAL_PRICE_CONFIRMED', '确认历史材料单价'],

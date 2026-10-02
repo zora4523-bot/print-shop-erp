@@ -35,8 +35,10 @@ export type {
 
 export async function getSetting<K extends SettingKey>(
   key: K,
+  // 事务内读取（如打印记录持锁核对内容）传同一事务客户端，不另占连接。
+  client: Pick<typeof db, 'setting'> = db,
 ): Promise<SettingValue<K>> {
-  const row = await db.setting.findUnique({
+  const row = await client.setting.findUnique({
     where: { key },
     select: { value: true },
   });

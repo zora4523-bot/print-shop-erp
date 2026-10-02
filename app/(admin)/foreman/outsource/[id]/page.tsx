@@ -74,7 +74,6 @@ export default async function OutsourceDetailPage({ params }: PageProps) {
           不产生额外请求；组件自身不渲染任何 DOM。 */}
       <BreadcrumbEntity label={row.supplierName} />
       <PageHeader
-        back={{ href: '/foreman/outsource', label: '返回外协单' }}
         title={`外协单 · ${row.supplierName}`}
         subtitle={
           <>

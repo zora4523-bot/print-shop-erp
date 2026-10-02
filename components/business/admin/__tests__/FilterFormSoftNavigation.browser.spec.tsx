@@ -41,6 +41,7 @@ vi.mock('@/actions/order-workspace', () => ({ setOrderStarredAction: vi.fn() }))
 vi.mock('@/actions/order-export', () => ({ requestOrderExportAction: vi.fn() }));
 vi.mock('@/actions/order-fulfillment-pricing', () => ({ previewFulfillmentPricingAction: vi.fn(), finalizeFulfillmentPricingAction: vi.fn() }));
 vi.mock('@/actions/order-batch-print', () => ({ requestBatchPrintAction: vi.fn() }));
+vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: vi.fn(), recordOrderPrintedAction: vi.fn() }));
 vi.mock('@/actions/admin-order-workflow', () => ({
   runAdminOrderBatchAction: vi.fn(), confirmFactoryOrderAction: vi.fn(), holdFactoryOrderAction: vi.fn(),
   rejectFactoryOrderAction: vi.fn(), releaseFactoryOrderAction: vi.fn(), resumeFactoryOrderAction: vi.fn(), settleFactoryOrderAction: vi.fn(),

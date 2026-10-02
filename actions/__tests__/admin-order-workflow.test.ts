@@ -29,7 +29,6 @@ vi.mock('@/lib/order/admin-batch', () => ({
   ADMIN_ORDER_BATCH_COMMANDS: [
     'RELEASE',
     'CREATE_PRINT',
-    'MARK_PRINTED',
     'COMPLETE_PRODUCTION',
     'SETTLE',
   ],

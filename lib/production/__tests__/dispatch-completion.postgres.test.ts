@@ -6,7 +6,11 @@ import { createOrderChangeRequest, withdrawOrderChangeRequest, previewOrderChang
 import { reviewProductionFact } from '../fact-review';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { dispatchNotification } from '@/lib/notification/dispatch';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { Client } from 'pg';
+import { utimes } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { publishProductionDispatch } from '../dispatch';
@@ -15,7 +19,14 @@ import { registerProductionCompletion } from '../completion-registration';
 import { allocateProductionWages } from '@/lib/salary/production-wages';
 import { lockPieceworkSettlement } from '@/lib/salary/piecework-settlement';
 import { activateProductionOperationsInTx } from '../operation-materialization-service';
-import { markOrderPrintRequestPrinted } from '@/lib/order/print-jobs';
+import { newPrintPageAttempt, recordPrintPage } from '@/lib/order/print-record';
+import { getOrderForPrint } from '@/lib/order/print-view';
+import { getSetting } from '@/lib/settings';
+import { createNextOrderPrintRequest } from '@/lib/order/print-jobs';
+import { recordBatchPrint } from '@/lib/order/batch-print';
+import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
+import { writePdfArtifact } from '@/lib/pdf/artifacts';
+import { BACKGROUND_JOB_TYPES } from '@/lib/background-jobs/types';
 import { registerShipment } from '@/lib/order/shipment-registration';
 import { assertShipOrderReadinessInTx } from '@/lib/order';
 import { reportProductionOperation } from '../operation-reporting';
@@ -267,16 +278,134 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
 
   it('creates a reprint task when a printed but unproduced order changes owner', async () => {
     const f = await assigned();
-    const print = await db.orderPrintJob.findFirstOrThrow({ where: { orderId: f.order.id, state: 'PENDING' } });
-    await markOrderPrintRequestPrinted({ requestJobId: print.id, idempotencyKey: randomUUID() }, admin);
+    // 业主 2026-10-02 点打印即记已打印：走真实打印页的「渲染 → 记录」。
+    const baseUrl = 'http://localhost:3000';
+    const renderPage = async () => newPrintPageAttempt((await getOrderForPrint(f.order.id, admin, baseUrl))!, (await getSetting('factory_name')).name);
+    const firstPage = await renderPage();
+    await expect(recordPrintPage(firstPage, admin, baseUrl)).resolves.toBe('MARKED');
+    const stalePage = await renderPage();
     const current = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
     const newOwner = await newWorker();
+    // 纸上只印师傅姓名：换成不同姓名的师傅，纸面内容才真的不同。
+    await db.user.update({ where: { id: newOwner.id }, data: { displayName: '接手师傅' } });
     const request = { requestKey: randomUUID(), orders: [{ ...f.request.orders[0], revision: current.revision, assignments: Object.fromEntries(Object.keys(f.request.orders[0].assignments).map(key => [key, newOwner.id])) }] };
     await expect(publishProductionDispatch(request, admin)).rejects.toThrow('尚未生产');
     await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'UNPRODUCED', reason: '原师傅确认尚未开工', notActuallyProduced: true }, admin);
     await publishProductionDispatch(request, admin); await publishProductionDispatch(request, admin);
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } })).workerId).toBe(newOwner.id);
     expect(await db.orderPrintJob.count({ where: { orderId: f.order.id, state: 'PENDING', printKind: 'REPRINT' } })).toBe(1);
+    // 同版本换师傅：仍开着的旧打印页（纸上是原师傅）关闭打印对话框，不能把新的补打任务记为已打印；
+    // 第一页记录响应丢失后的重试只返回原结果，不认领新的补打任务；按新内容打开的打印页才能记录。
+    await expect(recordPrintPage(stalePage, admin, baseUrl)).resolves.toBe('STALE');
+    await expect(recordPrintPage(firstPage, admin, baseUrl)).resolves.toBe('MARKED');
+    const reprint = await db.orderPrintJob.findFirstOrThrow({ where: { orderId: f.order.id, state: 'PENDING', printKind: 'REPRINT' } });
+    expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.id } })).toBe(0);
+    const freshPage = await renderPage();
+    expect(freshPage.contentKey).not.toBe(stalePage.contentKey);
+    await expect(recordPrintPage(freshPage, admin, baseUrl)).resolves.toBe('MARKED');
+    expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.id, state: 'PRINTED' } })).toBe(1);
+    // 本版本已打印后再打开的打印页记为 ALREADY_PRINTED 并入账；之后新建的手动补打任务，
+    // 不会被这一页（或已记过的页）的重试认领，只有新打开的打印页才能记录它。
+    const reopened = await renderPage();
+    await expect(recordPrintPage(reopened, admin, baseUrl)).resolves.toBe('ALREADY_PRINTED');
+    const manual = await createNextOrderPrintRequest({ orderId: f.order.id, workOrderVersion: freshPage.workOrderVersion, reason: '补打一份', idempotencyKey: randomUUID() }, admin);
+    await expect(recordPrintPage(reopened, admin, baseUrl)).resolves.toBe('ALREADY_PRINTED');
+    await expect(recordPrintPage(freshPage, admin, baseUrl)).resolves.toBe('MARKED');
+    expect(await db.orderPrintJob.count({ where: { requestJobId: manual.jobId } })).toBe(0);
+    await expect(recordPrintPage(await renderPage(), admin, baseUrl)).resolves.toBe('MARKED');
+    expect(await db.orderPrintJob.count({ where: { requestJobId: manual.jobId, state: 'PRINTED' } })).toBe(1);
+  });
+
+  // 业主 2026-10-02 点打印即记已打印：批量打印文件按尝试整批记录，任一工单失败整批回滚（真实库事务）。
+  it('records a batch print file atomically per attempt and rolls back the whole batch on failure', async () => {
+    const baseUrl = 'http://localhost:3000';
+    const factoryName = (await getSetting('factory_name')).name;
+    const first = await assigned();
+    const second = await assigned();
+    const printed = await Promise.all([first.order.id, second.order.id].map(async (id) => {
+      const order = (await getOrderForPrint(id, admin, baseUrl))!;
+      return { id, key: orderPdfSnapshotKey(order, factoryName), version: order.workOrderVersion };
+    }));
+    printed.sort((a, b) => a.id.localeCompare(b.id));
+    const ids = printed.map((order) => order.id);
+    const artifactName = `${randomUUID()}.pdf`;
+    await writePdfArtifact(artifactName, Buffer.from('%PDF-batch-record-test'));
+    const job = await db.backgroundJob.create({ data: {
+      type: BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF, queue: 'HEAVY', dedupeKey: randomUUID(), status: 'SUCCEEDED',
+      payload: { actorId: admin.id, baseUrl, orders: printed.map(({ id, key }) => ({ id, key })) },
+      result: { completed: 2, issues: [], artifactName },
+    } });
+    const receipts = () => db.orderPrintJob.count({ where: { orderId: { in: ids }, state: 'PRINTED' } });
+
+    const attemptKey = (attemptId: string, orderId: string) =>
+      `batch-print:${createHash('sha256').update(`${job.id}:${attemptId}`).digest('hex').slice(0, 32)}:${orderId}`;
+    // 第二张工单的尝试键已被别的工单占用：第一张记完后在第二张抛错，整批回滚。
+    const failing = randomUUID();
+    await db.orderPrintAttempt.create({ data: { attemptKey: attemptKey(failing, ids[1]), orderId: ids[0], workOrderVersion: 1, outcome: 'STALE', actorId: admin.id } });
+    await expect(recordBatchPrint(admin.id, job.id, failing)).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    expect(await receipts()).toBe(0);
+    expect(await db.orderPrintAttempt.count({ where: { attemptKey: attemptKey(failing, ids[0]) } })).toBe(0);
+
+    // 同一尝试的两个请求同时到达（前一次断连但仍在执行时重试）：按尝试串行，后到的重放前一次的结果。
+    const attempt = randomUUID();
+    await expect(Promise.all([recordBatchPrint(admin.id, job.id, attempt), recordBatchPrint(admin.id, job.id, attempt)]))
+      .resolves.toEqual([{ marked: 2 }, { marked: 2 }]);
+    expect(await receipts()).toBe(2);
+    expect(await db.orderPrintAttempt.count({ where: { attemptKey: { in: ids.map((id) => attemptKey(attempt, id)) } } })).toBe(2);
+    await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });
+    expect(await receipts()).toBe(2);
+    // 记录成功后响应丢失、期间工单内容又变了：同一尝试的重试仍返回原结果，不当作首次记录失败。
+    await db.order.update({ where: { id: ids[1] }, data: { remark: '记录后才改的备注' } });
+    await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });
+    await db.order.update({ where: { id: ids[1] }, data: { remark: null } });
+    // 同一文件之后再打开是新的尝试，会记录期间新建的补打任务；原尝试的重试不会。
+    const reprint = await createNextOrderPrintRequest({ orderId: ids[0], workOrderVersion: printed[0].version, reason: '补打一份', idempotencyKey: randomUUID() }, admin);
+    await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });
+    expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.jobId } })).toBe(0);
+    await expect(recordBatchPrint(admin.id, job.id, randomUUID())).resolves.toEqual({ marked: 1 });
+    expect(await db.orderPrintJob.count({ where: { requestJobId: reprint.jobId, state: 'PRINTED' } })).toBe(1);
+
+    // 另一个打印任务沿用同一尝试标识：尝试键绑定任务，查的是另一组键，不重放旧任务的结果。
+    const otherJob = await db.backgroundJob.create({ data: {
+      type: BACKGROUND_JOB_TYPES.ORDER_BATCH_PDF, queue: 'HEAVY', dedupeKey: randomUUID(), status: 'SUCCEEDED',
+      payload: { actorId: admin.id, baseUrl, orders: printed.map(({ id, key }) => ({ id, key })) },
+      result: { completed: 2, issues: [], artifactName },
+    } });
+    await expect(recordBatchPrint(admin.id, otherJob.id, attempt)).resolves.toEqual({ marked: 0 });
+    const otherKey = (orderId: string) => `batch-print:${createHash('sha256').update(`${otherJob.id}:${attempt}`).digest('hex').slice(0, 32)}:${orderId}`;
+    expect(await db.orderPrintAttempt.count({ where: { attemptKey: { in: ids.map(otherKey) }, outcome: 'ALREADY_PRINTED' } })).toBe(2);
+
+    // 前一次请求还没提交时到达的重试（确定性复现）：外部连接先按尝试加锁；本请求锁前查账本为空、
+    // 文件探测也因过期失败，然后在锁上等待；外部连接写入「前一次」的账本、改工单内容并提交。本请求
+    // 拿到锁后必须重放原结果，不能按探测结果或首次核对报错。
+    const waiting = randomUUID();
+    const waitingAttempt = createHash('sha256').update(`${job.id}:${waiting}`).digest('hex').slice(0, 32);
+    const holder = new Client({ connectionString: process.env.DATABASE_URL });
+    await holder.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`batch-print-attempt:${waitingAttempt}`]);
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const expired = new Date(Date.now() - 2 * 60 * 60_000);
+      await utimes(join(process.env.PDF_ARTIFACT_DIR || join(tmpdir(), 'print-shop-erp-pdf-artifacts'), artifactName), expired, expired);
+      const pending = recordBatchPrint(admin.id, job.id, waiting);
+      // 只等「被本 holder 挡住」的连接，不受其他用例的锁等待干扰。
+      await expect.poll(async () => (await holder.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))', [holderPid],
+      )).rows[0].n, { timeout: 15_000 }).toBeGreaterThan(0);
+      for (const id of ids) {
+        await holder.query(
+          `INSERT INTO "OrderPrintAttempt" (id, "attemptKey", "orderId", "workOrderVersion", outcome, "actorId") VALUES ($1, $2, $3, 1, 'ALREADY_PRINTED', $4)`,
+          [randomUUID(), `batch-print:${waitingAttempt}:${id}`, id, admin.id],
+        );
+      }
+      await holder.query(`UPDATE "Order" SET remark = '等待期间改的备注' WHERE id = $1`, [ids[1]]);
+      await holder.query('COMMIT');
+      await expect(pending).resolves.toEqual({ marked: 0 });
+    } finally {
+      await holder.end();
+      await db.order.update({ where: { id: ids[1] }, data: { remark: null } });
+    }
   });
 
   it('approves a quantity while held and reconciles completion only on resume', async () => {

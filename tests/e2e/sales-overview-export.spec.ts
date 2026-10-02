@@ -76,7 +76,7 @@ test('销售总览联动列表、跨页账单导出和失败重试保持账号�
   // 表头 + 33 张工单 + 3 行账单合计（工单合计 / 抵扣 / 账单金额，取账单冻结值）。
   const csvLines = csv.trim().split('\r\n');
   expect(csvLines).toHaveLength(37);
-  expect(csvLines.filter((line) => line.startsWith('"合计"')).map((line) => line.split(',')[5])).toEqual(['"工单合计"', '"抵扣"', '"账单金额"']);
+  expect(csvLines.filter((line) => line.startsWith('"合计"')).map((line) => line.split(',')[5])).toEqual(['"工单合计"', '"抵扣 / 补收"', '"账单金额"']);
   expect(csv).toContain(`"${source.orderNo}"`);
   for (let n = 1; n <= 32; n += 1) expect(csv).toContain(`"${source.orderNo}-extra-${n}"`);
   await page.getByLabel('查找账单内工单', { exact: true }).fill('导出时的工单名称');

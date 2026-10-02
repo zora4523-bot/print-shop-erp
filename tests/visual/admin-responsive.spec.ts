@@ -61,7 +61,9 @@ test.describe('administrator workspace', () => {
   test('standalone return controls pass focused light and dark gates', async ({ page }, testInfo) => {
     const routes: AdminRoute[] = [
       { name: 'return-empty-dispatch', path: '/orders/production', readyHeading: '安排生产师傅', prepareGateState: async page => {
-        await expect(page.getByRole('link', { name: '返回工单列表', exact: true })).toHaveAttribute('href', '/orders');
+        // 二级页唯一返回入口是顶栏面包屑父级（ui-规范 §8.3，业主 2026-10-02「请保持一致性」）。
+        await expect(page.locator('[data-slot="admin-header"]').getByRole('link', { name: '工单列表', exact: true })).toHaveAttribute('href', '/orders');
+        await expect(page.locator('[data-slot="page-header-back"]')).toHaveCount(0);
       } },
       { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '新建外协单', prepareGateState: async page => {
         await expect(page.getByRole('link', { name: '返回工单详情', exact: true })).toHaveAttribute('href', `/orders/${fixture.orderId}`);
@@ -1595,20 +1597,28 @@ async function prepareOrderDetailDesignPreview(
   const records = page.locator('#admin-main [data-testid="admin-order-detail"]:visible');
   await expect(records).toBeVisible();
   await expect(records.locator('details[id^="detail-"]:not([id^="detail-design-item-"]):not(#detail-packaging)')).toHaveCount(6);
+  // 业主 2026-10-02：低频维护区（工厂成本、计价与收费维护）没有待处理事项时默认收起；
+  // 夹具工单价格已确认、没有金额待定的收费行，所以这两块先收起。
   const sections = [
-    ['detail-costs', '工厂成本'],
-    ['detail-pricing-tools', '计价与收费维护'],
-    ['detail-delivery-records', '配送与发货记录'],
-    ['detail-production-records', '生产、用料与计件记录'],
-    ['detail-business-records', '生产与业务资料'],
-    ['detail-audit-records', '工单动态'],
+    ['detail-costs', '工厂成本', false],
+    ['detail-pricing-tools', '计价与收费维护', false],
+    ['detail-delivery-records', '配送与发货记录', true],
+    ['detail-production-records', '生产、用料与计件记录', true],
+    ['detail-business-records', '生产与业务资料', true],
+    ['detail-audit-records', '工单动态', true],
   ] as const;
-  for (const [id, title] of sections) {
+  for (const [id, title, initiallyOpen] of sections) {
     const section = records.locator(`#${id}`);
-    await expect(section).toHaveAttribute('open', '');
     const summary = section.locator(':scope > summary');
     const content = section.locator(':scope > div');
     await expect(summary).toContainText(title);
+    if (!initiallyOpen) {
+      await expect(section).not.toHaveAttribute('open', '');
+      await expect(summary.getByText('展开', { exact: true })).toBeVisible();
+      await expect(content).toBeHidden();
+      await summary.click();
+    }
+    await expect(section).toHaveAttribute('open', '');
     await expect(summary.getByText('收起', { exact: true })).toBeVisible();
     await expect(content).toBeVisible();
     await summary.click();

@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { batchConfirmationImpact, batchFailureReason, batchReceiptRows, snapshotBatchSelection } from '../admin-order-batch-ui';
+import { BATCH_COMMAND_CONFIG, batchConfirmationImpact, batchFailureReason, batchReceiptRows, snapshotBatchSelection } from '../admin-order-batch-ui';
 import { batchOrder, batchSelection } from './admin-order-batch-fixture';
 
 describe('admin batch review and receipts', () => {
-  it('uses server capabilities, rejects missing print identity and retains reviewed versions', () => {
+  it('uses server capabilities and retains reviewed versions', () => {
     const released = batchOrder();
     const pending = batchOrder({ id: 'order-2', orderNo: 'GD-260907-002', capabilities: { ...released.capabilities, release: false } });
     const snapshot = snapshotBatchSelection('RELEASE_AND_CREATE_PRINT', batchSelection([released, pending]), [released, pending]);
     released.revision = 9;
     expect(snapshot.map((order) => order.eligible)).toEqual([true, false]);
     expect(snapshot[0].revision).toBe(4);
-    const printable = batchOrder({ capabilities: { ...released.capabilities, markPrinted: true } });
-    expect(snapshotBatchSelection('MARK_PRINTED', batchSelection([printable]), [printable])[0]).toMatchObject({ eligible: false, reason: '没有当前版待打印任务，请刷新后检查打印记录' });
+    // 业主 2026-10-02：点「打印」即记已打印，批量操作里不再有「确认已打印」。
+    expect(Object.keys(BATCH_COMMAND_CONFIG)).not.toContain('MARK_PRINTED');
   });
 
   it('shows an exact decimal settlement total and omits ineligible amounts', () => {

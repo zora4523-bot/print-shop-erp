@@ -18,12 +18,6 @@ export const BATCH_COMMAND_CONFIG = {
     impact: '将当前版本的工单加入待打印。',
     completed: '已加入待打印',
   },
-  MARK_PRINTED: {
-    label: '确认已打印', capability: 'markPrinted', prerequisite: '需有当前版待打印任务',
-    confirmLabel: '确认已打印',
-    impact: '将当前版本的待打印任务标记为已打印；请确认纸质工单已实际打印。',
-    completed: '已标记为打印完成',
-  },
   SETTLE: {
     label: '批量结算', capability: 'settle', prerequisite: '需已发货且费用已确认',
     confirmLabel: '确认批量结算',
@@ -66,8 +60,6 @@ export function snapshotBatchSelection(
       reason = order.pendingChangeRequest
         ? '存在待审批申请，请先打开工单处理变更'
         : `${BATCH_COMMAND_CONFIG[command].prerequisite}，请打开工单核对`;
-    } else if (command === 'MARK_PRINTED' && !order.pendingPrintJobId) {
-      reason = '没有当前版待打印任务，请刷新后检查打印记录';
     } else if (command === 'SETTLE' && order.feeStages.confirmed === null) {
       reason = '缺少已确认金额，请打开工单核定费用';
     }
@@ -116,7 +108,7 @@ export function batchFailureReason(code: string | undefined): string {
     case 'ORDER_NOT_PRINTABLE':
     case 'ORDER_STATUS_NOT_ACTIVATABLE': return '工单当前状态不支持此操作，请打开工单检查当前待办';
     case 'PRINT_REQUEST_NOT_FOUND': return '待打印任务已变化，请打开工单核对最新打印记录';
-    case 'PRINT_REQUEST_ALREADY_PENDING': return '已有待打印任务，请先打印并确认完成';
+    case 'PRINT_REQUEST_ALREADY_PENDING': return '已有待打印任务，打开工单打印即可';
     case 'PRICING_NOT_CONFIRMED':
     case 'ORDER_NOT_CHARGEABLE': return '费用尚未确认，请打开工单完成核价';
     case 'CANONICAL_FACTS_INCOMPLETE':

@@ -9,7 +9,7 @@ import { isAgentBillPeriod } from './period';
 import { agentBillWhere } from './list-filter';
 import { billItemName, filterBillItems } from './item-list';
 import { getSalesMonthlyBill } from './sales-query';
-import { billOrderStatus } from './presentation';
+import { billAdjustmentKind, billOrderStatus } from './presentation';
 import { readBillSettlementDetail } from './settlement-detail';
 
 type Actor = { id: string; role: Role };
@@ -45,7 +45,7 @@ export async function exportSalesBillList(actor: Actor, params: URLSearchParams)
     take: EXPORT_ROW_LIMIT + 1,
   });
   assertRowLimit(rows.length);
-  const cells: CsvCell[][] = [['账期', '状态', '金额口径', '工单数', '工单合计（元）', '抵扣金额（元）', '账单金额（元）', '确认时间', '结清时间']];
+  const cells: CsvCell[][] = [['账期', '状态', '金额口径', '工单数', '工单合计（元）', '抵扣 / 补收（元）', '账单金额（元）', '确认时间', '结清时间']];
   for (const bill of rows) cells.push([
     bill.period, SALES_AGENT_MONTHLY_BILL_STATUS_REGISTRY[bill.status].label,
     amountBasisLabel(bill.status), String(bill._count.items),
@@ -81,19 +81,20 @@ export async function exportSalesBillItems(actor: Actor, id: string, params: URL
   const summaryRow = (kind: string, label: string, amount: CsvCell, note: string | null = null): CsvCell[] =>
     [kind, bill.period, statusLabel, basis, null, label, note, null, null, null, amount, null, null];
   if (parsed.data) {
-    // 抵扣与账单合计是整张账单的口径，不能冒充筛选结果之和。
-    cells.push(summaryRow('说明', '筛选结果，非全账单', null, '抵扣与账单合计请清除筛选后导出完整账单明细'));
+    // 抵扣 / 补收与账单合计是整张账单的口径，不能冒充筛选结果之和。
+    cells.push(summaryRow('说明', '筛选结果，非全账单', null, '抵扣 / 补收与账单合计请清除筛选后导出完整账单明细'));
   } else {
     for (const adjustment of bill.adjustments) {
       const source = adjustment.credit.sourceItem;
+      const kind = billAdjustmentKind(adjustment.amount);
       cells.push([
-        '抵扣', bill.period, statusLabel, basis, source.orderNoSnapshot, '抵扣', `来源：${source.bill.period} 货款账单`,
+        kind, bill.period, statusLabel, basis, source.orderNoSnapshot, kind, `来源：${source.bill.period} 货款账单`,
         null, null, null, csvDecimal(adjustment.amount), null, null,
       ]);
     }
     // 合计直接取账单冻结值，不在导出端重算。
     cells.push(summaryRow('合计', '工单合计', csvDecimal(bill.memberSubtotal)));
-    cells.push(summaryRow('合计', '抵扣', csvDecimal(bill.adjustmentAmount)));
+    cells.push(summaryRow('合计', '抵扣 / 补收', csvDecimal(bill.adjustmentAmount)));
     cells.push(summaryRow('合计', '账单金额', csvDecimal(bill.totalAmount)));
   }
   return { csv: csvDocument(cells), fileName: `my-bill-${bill.period}${parsed.data ? '-filtered' : ''}.csv` };

@@ -16,6 +16,8 @@ import { cn } from '@/lib/utils';
 import { OrderDetailStickyScope } from './OrderDetailStickyScope';
 import type { AdminOrderDetailModel } from './admin-order-detail-model';
 import { revealOrderDetailTarget } from './order-detail-navigation';
+import { PrintPageLink } from './PrintPageLink';
+import { useRefreshAfterPrint } from './use-refresh-after-print';
 import styles from './AdminOrderDetailView.module.css';
 
 export type DetailPrintRecord = {
@@ -40,7 +42,8 @@ type Props = {
   decision: ReactNode;
   prints: DetailPrintRecord[];
   printHint?: string;
-  supplementary: Array<{ id: string; title: string; content: ReactNode }>;
+  /** `collapsed`：低频维护区没有待处理事项时首次打开收起（业主 2026-10-02）。 */
+  supplementary: Array<{ id: string; title: string; content: ReactNode; collapsed?: boolean }>;
   packaging?: ReactNode;
   itemDetails?: Array<{ itemId: string; content: ReactNode }>;
   printActions?: ReactNode;
@@ -48,6 +51,19 @@ type Props = {
 
 function amount(value: string | null, status: AdminOrderDetailModel['status'], estimated = false, pricingStatus?: AdminOrderDetailModel['pricingStatus'], incomplete = false) {
   return <OrderAmount status={status} amount={value} estimated={estimated} pricingStatus={pricingStatus} incomplete={incomplete} />;
+}
+
+/**
+ * 详情分区折叠。展开状态只在首次挂载时由 `collapsed` 决定，之后跟随管理员手动展开/收起
+ * 与锚点定位；保存后刷新不会因待处理事项消失而把正在看的分区（及其结果提示）收起。
+ */
+function DetailSection({ id, title, collapsed, highlighted, children }: {
+  id: string; title: string; collapsed?: boolean; highlighted: boolean; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(!collapsed);
+  return <Disclosure open={open} onToggle={(event) => setOpen(event.currentTarget.open)} id={id} tabIndex={-1} className={cn(styles.extra, highlighted && styles.highlight)}>
+    <DisclosureSummary className={styles.disclosureSummary}><h2>{title}</h2><ChevronDown aria-hidden="true" className={styles.disclosureChevron} /><span className={styles.expandLabel}>展开</span><span className={styles.collapseLabel}>收起</span></DisclosureSummary><div>{children}</div>
+  </Disclosure>;
 }
 
 function Progress({ label, done, total, unit = '个' }: {
@@ -66,6 +82,8 @@ function Progress({ label, done, total, unit = '个' }: {
 
 export function AdminOrderDetailView({ simpleProduction, productionOwners, model, canEdit, decision, prints, printHint, supplementary, packaging, itemDetails, printActions }: Props) {
   const { feedback: copyNotice, copy } = useCopyToClipboard();
+  // 业主 2026-10-02：本页任何打印入口打印并记录后（打印页在新标签页），本页刷新打印记录与待办。
+  useRefreshAfterPrint(model.id);
   const otherActions = supplementary.find(section => section.id === 'detail-other-actions');
   const [preview, setPreview] = useState<number | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
@@ -124,9 +142,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
   const placedSections = new Set(['detail-design-files', 'detail-pricing-tools', 'detail-delivery-records', 'detail-production-records', 'detail-business-records', 'detail-audit-records', 'detail-other-actions', 'detail-costs', 'detail-after-sales']);
   function renderSections(ids: string[]) {
     return supplementary.filter((section) => ids.includes(section.id)).map((section) => (
-      <Disclosure open key={section.id} id={section.id} tabIndex={-1} className={cn(styles.extra, highlighted === section.id && styles.highlight)}>
-        <DisclosureSummary className={styles.disclosureSummary}><h2>{section.title}</h2><ChevronDown aria-hidden="true" className={styles.disclosureChevron} /><span className={styles.expandLabel}>展开</span><span className={styles.collapseLabel}>收起</span></DisclosureSummary><div>{section.content}</div>
-      </Disclosure>
+      <DetailSection key={`${model.id}:${section.id}`} id={section.id} title={section.title} collapsed={section.collapsed} highlighted={highlighted === section.id}>{section.content}</DetailSection>
     ));
   }
   const navigation = [
@@ -152,7 +168,9 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
   }}>
     <OrderDetailStickyScope header={<div className={styles.header}>
       <div className={styles.identity}>
-        <PageHeader className="basis-full" back={{ href: '/orders', label: '返回工单列表' }}
+        {/* 不给 PageHeader back：返回工单列表由顶栏面包屑父级承担（吸顶、按角色命名、窄屏保留），
+            页内再放一个同目标的「返回工单列表」就是重复入口（UI-SYSTEM「工单页面导航与标题去重」）。 */}
+        <PageHeader className="basis-full"
           eyebrow={<OrderPurposeBadge purpose={model.purpose} />}
           title={model.name?.trim() || '未命名工单'}
           status={<><StatusBadge tone={ORDER_STATUS_REGISTRY[model.status].tone}>{ORDER_STATUS_REGISTRY[model.status].label}</StatusBadge>
@@ -190,7 +208,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
               {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : PRINT_HINT_STATUSES.has(model.status) ? <p className={styles.emptyHint}>尚未创建打印任务</p> : null}
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
-            {!otherActions ? <a href={`/print/orders/${model.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</a> : null}
+            {!otherActions ? <PrintPageLink orderId={model.id} className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</PrintPageLink> : null}
             {!otherActions ? <Link href={`/print/orders/${model.id}`} prefetch={false} target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>网页预览</Link> : null}
           </section>
 

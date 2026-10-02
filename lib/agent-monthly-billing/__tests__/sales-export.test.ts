@@ -94,8 +94,20 @@ it('reconciles to the payable amount with deduction rows and stored bill totals'
   expect(deduction).toContain('"来源：2026-07 货款账单"');
   expect(deduction).toContain('"-30.00"');
   expect(lines.slice(-3).map((row) => row.split(',').filter((cell) => /工单合计|抵扣|账单金额|\d+\.\d{2}/u.test(cell)))).toEqual([
-    ['"工单合计"', '"150.00"'], ['"抵扣"', '"-30.00"'], ['"账单金额"', '"120.00"'],
+    ['"工单合计"', '"150.00"'], ['"抵扣 / 补收"', '"-30.00"'], ['"账单金额"', '"120.00"'],
   ]);
+});
+
+it('labels a positive cross-month adjustment as 补收 (owner 2026-10-01)', async () => {
+  findFirst.mockResolvedValue(bill({
+    items: [{ ...item(1), settledFeeSnapshot: '100.00' }],
+    memberSubtotal: '100.00', adjustmentAmount: '15.00', totalAmount: '115.00',
+    adjustments: [{ id: 'adj-2', amount: '15.00', credit: { sourceItem: { orderNoSnapshot: 'GD-7', bill: { id: 'bill-7', period: '2026-07' } } } }],
+  }));
+  const { csv } = await exportSalesBillItems(actor, 'bill-a', new URLSearchParams());
+  const surcharge = rows(csv).find((row) => row.startsWith('"补收"'));
+  expect(surcharge).toContain('"15.00"');
+  expect(rows(csv).some((row) => row.startsWith('"抵扣"'))).toBe(false);
 });
 
 it('marks a filtered export as partial instead of printing whole-bill totals', async () => {

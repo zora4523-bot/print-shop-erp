@@ -37,7 +37,11 @@ export type PageHeaderProps = {
   subtitle?: React.ReactNode;
   // breadcrumb 槽——AdminBreadcrumb 已存在，业务侧塞进来即可。
   breadcrumb?: React.ReactNode;
-  /** 二级页（详情 / 新建 / 编辑 / 盘点 / 归档）唯一的返回入口，渲染在标题左上。 */
+  /**
+   * 二级页的返回入口是顶栏面包屑父级（ui-规范 §8.3，业主 2026-10-02「请保持一致性」），
+   * 默认不传。只在面包屑父级做不到时使用：离开保护（新建工单）、回到别的页面
+   * （返回原录入、返回新建采购单、返回纸张…）、父级不是链接的分组页、无面包屑的师傅端。
+   */
   back?: PageHeaderBack;
   /** 标题右侧的状态徽标（StatusBadge / ActiveStatusBadge），不写进副标题文字。 */
   status?: React.ReactNode;

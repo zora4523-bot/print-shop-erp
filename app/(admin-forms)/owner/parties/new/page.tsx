@@ -35,14 +35,19 @@ export default async function NewOwnerPartyPage({ searchParams }: PageProps) {
     firstSearchParam(query.returnTo) === PURCHASE_RETURN_TO
       ? PURCHASE_RETURN_TO
       : undefined;
-  const backHref = supplement ? supplementReturnHref(supplement) : returnTo ?? '/owner/parties';
+  // 返回客户/供应商列表由面包屑父级承担；只有回到别的录入（原录入、新建采购单）才保留页头返回。
+  const back = supplement
+    ? { href: supplementReturnHref(supplement), label: '返回原录入' }
+    : returnTo
+      ? { href: returnTo, label: '返回新建采购单' }
+      : undefined;
 
   return (
     <FormPage>
       <SupplementOwnership actorId={actor.id} context={supplement} />
       <PageHeader
         title="新建客户/供应商"
-        back={{ href: backHref, label: supplement ? '返回原录入' : returnTo ? '返回新建采购单' : '返回客户/供应商' }}
+        back={back}
       />
 
       <section className="rounded-xl border bg-card p-6 shadow-sm">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import {
   generateAgentMonthlyBillsAction,
 } from '@/actions/agent-monthly-bill';
@@ -136,16 +136,21 @@ export function CreateAgentMonthlyBillCreditForm({
   sourceItemId,
   sourceAmount,
   initialIdempotencyKey,
+  initialDirection = 'CREDIT',
 }: {
   submitAction: BillFormAction;
   sourceItemId: string;
   sourceAmount: string;
   initialIdempotencyKey: string;
+  initialDirection?: 'CREDIT' | 'SURCHARGE';
 }) {
   const [state, action, pending] = useActionState<
     AgentMonthlyBillActionResult | null,
     FormData
   >(submitAction, null);
+  // 业主 2026-10-01：多收了录抵扣（冲减应收），少收了录补收（追加应收）。
+  const [direction, setDirection] = useState<'CREDIT' | 'SURCHARGE'>(initialDirection);
+  const kind = direction === 'SURCHARGE' ? '补收' : '抵扣';
   return (
     <form
       action={action}
@@ -154,9 +159,34 @@ export function CreateAgentMonthlyBillCreditForm({
     >
       <input type="hidden" name="idempotencyKey" value={initialIdempotencyKey} />
       <input type="hidden" name="sourceItemId" value={sourceItemId} />
+      <fieldset className="sm:col-span-3">
+        <legend className="text-xs text-muted-foreground">类型</legend>
+        <div className="flex flex-wrap gap-x-4">
+          {([
+            ['CREDIT', '抵扣（多收了，冲减应收）'],
+            ['SURCHARGE', '补收（少收了，追加应收）'],
+          ] as const).map(([value, label]) => (
+            <label key={value} className="relative flex min-h-11 items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="direction"
+                value={value}
+                checked={direction === value}
+                onChange={() => setDirection(value)}
+                className="peer absolute inset-0 size-full cursor-pointer opacity-0"
+              />
+              <span
+                aria-hidden="true"
+                className="size-4 rounded-full border border-foreground peer-checked:bg-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <div className="space-y-1">
         <label htmlFor={`credit-amount-${sourceItemId}`} className="text-xs text-muted-foreground">
-          抵扣金额（剩余上限 {formatMoney(sourceAmount)}）
+          {direction === 'SURCHARGE' ? '补收金额' : `抵扣金额（剩余上限 ${formatMoney(sourceAmount)}）`}
         </label>
         <Input
           id={`credit-amount-${sourceItemId}`}
@@ -178,7 +208,7 @@ export function CreateAgentMonthlyBillCreditForm({
         />
       </div>
       <Button type="submit" variant="outline" disabled={pending} className="self-end">
-        {pending ? '正在记录…' : '录入抵扣'}
+        {pending ? '正在记录…' : `录入${kind}`}
       </Button>
       <div className="sm:col-span-3">
         <Feedback state={state} />

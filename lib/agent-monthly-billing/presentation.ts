@@ -27,6 +27,11 @@ export function billScopedHref(path: string, returnTo: string | string[] | undef
   return buildTableHref(path, {}, { returnTo: back === base ? undefined : back });
 }
 
+/** 账单调整的方向由金额符号决定：负数为抵扣，正数为补收（业主 2026-10-01）。 */
+export function billAdjustmentKind(amount: Decimal.Value): '抵扣' | '补收' {
+  return new Decimal(amount).isNegative() ? '抵扣' : '补收';
+}
+
 type CreditAllocationRow = { amount: Decimal.Value; bill: { status: string } };
 
 /**
@@ -39,6 +44,7 @@ export function creditAllocationSummary(credit: { requestedAmount: Decimal.Value
   const pending = credit.allocations.filter((row) => row.bill.status === 'DRAFT').reduce((sum, row) => sum.plus(new Decimal(row.amount).abs()), zero);
   const requested = new Decimal(credit.requestedAmount).abs();
   return {
+    kind: billAdjustmentKind(credit.requestedAmount),
     requested: requested.toFixed(2),
     confirmed: confirmed.toFixed(2),
     pending: pending.toFixed(2),

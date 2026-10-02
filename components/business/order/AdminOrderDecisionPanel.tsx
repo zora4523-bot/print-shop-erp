@@ -22,7 +22,7 @@ import {
 } from '@/actions/order';
 import type { CancellationSettlementPreview } from '@/lib/order/change-request';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
@@ -35,6 +35,7 @@ import {
 import { OrderChangeReviewForm } from './OrderChangeReviewForm';
 import { cancellationReviewIssue } from './admin-order-cancellation-review';
 import { AdminOrderInlineOperations } from './AdminOrderInlineOperations';
+import { PrintPageLink } from './PrintPageLink';
 
 type FormMode =
   | 'reject'
@@ -154,7 +155,7 @@ function AdminDecisionActions({
   order: AdminOrderWorkspaceRow;
   pending: boolean;
   run: (task: DecisionTask) => void;
-  runOneBatch: (command: 'CREATE_PRINT' | 'MARK_PRINTED') => void;
+  runOneBatch: (command: 'CREATE_PRINT') => void;
 }) {
   return (
     <div className="mt-3 flex flex-wrap gap-2">
@@ -196,15 +197,20 @@ function AdminDecisionActions({
           }
         />
       ) : null}
+      {/* 待打印时「打印」本身就会记录；「加入待打印」只留给已打印过、需要补打进队列的工单（见能力定义）。 */}
       {order.capabilities.createPrint ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('CREATE_PRINT')}>
           加入待打印
         </Button>
       ) : null}
       {order.capabilities.markPrinted ? (
-        <Button type="button" size="sm" variant={order.capabilities.release ? 'outline' : 'default'} disabled={pending} onClick={() => runOneBatch('MARK_PRINTED')}>
-          确认已打印
-        </Button>
+        // 业主 2026-10-02：点「打印」即记已打印——打印页关闭打印对话框后自动记录，不再单独确认。
+        <PrintPageLink
+          orderId={order.id}
+          className={buttonVariants({ size: 'sm', variant: order.capabilities.release ? 'outline' : 'default' })}
+        >
+          打印
+        </PrintPageLink>
       ) : null}
       {order.capabilities.settle ? (
         <DecisionConfirmation
@@ -727,7 +733,7 @@ function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onComplet
     setMode(nextMode);
   }
 
-  function runOneBatch(command: 'CREATE_PRINT' | 'MARK_PRINTED') {
+  function runOneBatch(command: 'CREATE_PRINT') {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     clearReceipt();
@@ -765,7 +771,7 @@ function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onComplet
           setMessage(item?.message ?? '该工单未执行');
           return;
         }
-        onCompleted(command === 'MARK_PRINTED' ? '已标记当前版本工单打印完成。' : '已创建当前版本的打印任务。');
+        onCompleted('已创建当前版本的打印任务。');
       } catch {
         setMessage('打印操作未完成，请刷新工单后重试。');
       } finally {
@@ -851,7 +857,7 @@ type RenderDecisionPanelOptions = {
   onCompleted: (text: string, tone?: DecisionReceipt['tone']) => void;
   openMode: (nextMode: Exclude<FormMode, null>) => void;
   run: (task: DecisionTask) => void;
-  runOneBatch: (command: 'CREATE_PRINT' | 'MARK_PRINTED') => void;
+  runOneBatch: (command: 'CREATE_PRINT') => void;
   mode: FormMode;
   reasonCode: ReasonCode;
   figs: string;

@@ -19,7 +19,7 @@ vi.mock('@/lib/background-jobs/clock', () => ({
 import {
   createNextOrderPrintRequest,
   createOrderPrintRequestInTx,
-  markOrderPrintRequestPrinted,
+  recordRenderedPrintInTx,
   markOrderPrintRequestPrintedInTx,
   OrderPrintJobError,
   supersedeOlderOrderPrintRequestsInTx,
@@ -40,6 +40,7 @@ function txMock() {
     },
     orderLog: { create: vi.fn() },
     orderWorkflowDecision: { findFirst: vi.fn() },
+    orderPrintAttempt: { findUnique: vi.fn(), create: vi.fn() },
   };
 }
 
@@ -500,37 +501,102 @@ describe('versioned order print jobs', () => {
     });
   });
 
-  it('locks the owning order before the public print confirmation', async () => {
-    const tx = txMock();
-    dbMock.$transaction.mockImplementationOnce(
-      async (callback: (client: typeof tx) => unknown) => callback(tx),
-    );
-    tx.orderPrintJob.findUnique
-      .mockResolvedValueOnce({ orderId: 'order-1' })
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: 'request-1',
-        orderId: 'order-1',
-        workOrderVersion: 3,
-        printKind: OrderPrintKind.INITIAL,
-        reason: '首次下发',
-        state: OrderPrintJobState.PENDING,
-        resolution: null,
-        order: { workOrderVersion: 3, status: OrderStatus.RELEASED },
+  // 业主 2026-10-02：点「打印」即记已打印。打印页关闭对话框 / 打开或下载批量打印文件时调用；
+  // 每次打印尝试的结果写入账本，纸上内容由调用方在锁内比较。
+  describe('recordRenderedPrintInTx', () => {
+    const attempt = { orderId: 'order-1', workOrderVersion: 3, attemptKey: 'print-page:attempt-1' };
+    const current = { id: 'order-1', status: OrderStatus.RELEASED, workOrderVersion: 3 };
+    const pendingRequest = (id: string) => ({
+      id, orderId: 'order-1', workOrderVersion: 3, printKind: OrderPrintKind.INITIAL, reason: '工单首次下发',
+      state: OrderPrintJobState.PENDING, resolution: null, order: { workOrderVersion: 3, status: OrderStatus.RELEASED },
+    });
+    const sameContent = () => vi.fn(async () => true);
+    const ledgerEntry = (tx: ReturnType<typeof txMock>) => tx.orderPrintAttempt.create.mock.calls[0]?.[0]?.data;
+
+    it('locks first, compares the content under the lock, records the pending request and books the attempt', async () => {
+      const tx = txMock();
+      const contentIsCurrent = sameContent();
+      tx.orderPrintAttempt.findUnique.mockResolvedValue(null);
+      tx.orderPrintJob.findUnique
+        .mockResolvedValueOnce(null) // receipt key inside markOrderPrintRequestPrintedInTx
+        .mockResolvedValueOnce(pendingRequest('request-1'));
+      tx.order.findUnique.mockResolvedValue(current);
+      tx.orderPrintJob.findFirst.mockResolvedValueOnce({ id: 'request-1' });
+      tx.orderPrintJob.create.mockResolvedValue({ id: 'receipt-1' });
+      await expect(recordRenderedPrintInTx(tx as never, attempt, admin, contentIsCurrent)).resolves.toBe('MARKED');
+      const sql = (tx.$executeRaw.mock.calls[0]?.[0] as TemplateStringsArray).join('?');
+      expect(sql).toContain('pg_advisory_xact_lock');
+      expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.orderPrintAttempt.findUnique.mock.invocationCallOrder[0]!);
+      expect(contentIsCurrent.mock.invocationCallOrder[0]).toBeLessThan(tx.orderPrintJob.findFirst.mock.invocationCallOrder[0]!);
+      expect(tx.orderPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ state: OrderPrintJobState.PRINTED, requestJobId: 'request-1', idempotencyKey: 'print-page:attempt-1' }),
+      }));
+      expect(ledgerEntry(tx)).toEqual({ attemptKey: 'print-page:attempt-1', orderId: 'order-1', workOrderVersion: 3, outcome: 'MARKED', receiptId: 'receipt-1', actorId: 'admin-1' });
+    });
+
+    it.each(['MARKED', 'ALREADY_PRINTED', 'STALE', 'NOT_PRINTABLE'] as const)(
+      'replays a booked %s attempt without reading the order or claiming a request created afterwards', async (outcome) => {
+        const tx = txMock();
+        const contentIsCurrent = sameContent();
+        tx.orderPrintAttempt.findUnique.mockResolvedValue({ orderId: 'order-1', outcome });
+        tx.orderPrintJob.findFirst.mockResolvedValue({ id: 'manual-reprint-created-later' });
+        await expect(recordRenderedPrintInTx(tx as never, attempt, admin, contentIsCurrent)).resolves.toBe(outcome);
+        expect(contentIsCurrent).not.toHaveBeenCalled();
+        expect(tx.order.findUnique).not.toHaveBeenCalled();
+        expect(tx.orderPrintJob.create).not.toHaveBeenCalled();
+        expect(tx.orderPrintAttempt.create).not.toHaveBeenCalled();
       });
-    tx.orderPrintJob.create.mockResolvedValue({ id: 'receipt-1' });
-    await markOrderPrintRequestPrinted(
-      {
-        requestJobId: 'request-1',
-        idempotencyKey: 'printed-request-1-v3',
-      },
-      admin,
-    );
-    expect(tx.$executeRaw).toHaveBeenCalledOnce();
-    const sql = (tx.$executeRaw.mock.calls[0]?.[0] as TemplateStringsArray).join(
-      '?',
-    );
-    expect(sql).toContain('pg_advisory_xact_lock');
+
+    it('refuses an attempt key booked for another order', async () => {
+      const tx = txMock();
+      tx.orderPrintAttempt.findUnique.mockResolvedValue({ orderId: 'order-2', outcome: 'MARKED' });
+      await expect(recordRenderedPrintInTx(tx as never, attempt, admin, sameContent())).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    });
+
+    it('creates and records the first print when release did not queue one', async () => {
+      const tx = txMock();
+      tx.orderPrintAttempt.findUnique.mockResolvedValue(null);
+      tx.order.findUnique.mockResolvedValue(current);
+      tx.orderPrintJob.findFirst.mockResolvedValue(null);
+      tx.orderPrintJob.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(pendingRequest('request-new'));
+      tx.orderPrintJob.create.mockResolvedValueOnce({ id: 'request-new' }).mockResolvedValueOnce({ id: 'receipt-1' });
+      await expect(recordRenderedPrintInTx(tx as never, attempt, admin, sameContent())).resolves.toBe('MARKED');
+      expect(tx.orderPrintJob.create.mock.calls[0]?.[0]).toMatchObject({ data: {
+        orderId: 'order-1', workOrderVersion: 3, printKind: OrderPrintKind.INITIAL, reason: '管理员直接打印',
+        state: OrderPrintJobState.PENDING, idempotencyKey: expect.stringMatching(/^print-request:/),
+      } });
+      expect(tx.orderPrintJob.create.mock.calls[1]?.[0]).toMatchObject({ data: {
+        state: OrderPrintJobState.PRINTED, requestJobId: 'request-new', idempotencyKey: 'print-page:attempt-1',
+      } });
+      expect(ledgerEntry(tx)).toMatchObject({ outcome: 'MARKED', receiptId: 'receipt-1' });
+    });
+
+    it.each([
+      ['an older work-order version', { ...current, workOrderVersion: 4 }, true, null, null, 'STALE'],
+      ['changed paper instructions (e.g. production worker reassigned)', current, false, { id: 'request-2' }, null, 'STALE'],
+      ['an order that left production', { ...current, status: OrderStatus.SHIPPED }, true, { id: 'request-1' }, null, 'NOT_PRINTABLE'],
+      ['a version already printed', current, true, null, { id: 'receipt-0' }, 'ALREADY_PRINTED'],
+      ['a paused order with nothing queued', { ...current, status: OrderStatus.ON_HOLD }, true, null, null, 'NOT_PRINTABLE'],
+    ])('books but does not print for %s', async (_label, order, contentMatches, pending, printed, outcome) => {
+      const tx = txMock();
+      tx.orderPrintAttempt.findUnique.mockResolvedValue(null);
+      tx.order.findUnique.mockResolvedValue(order);
+      tx.orderPrintJob.findFirst.mockResolvedValueOnce(pending).mockResolvedValueOnce(printed);
+      await expect(recordRenderedPrintInTx(tx as never, attempt, admin, vi.fn(async () => contentMatches))).resolves.toBe(outcome);
+      expect(tx.orderPrintJob.create).not.toHaveBeenCalled();
+      expect(tx.orderLog.create).not.toHaveBeenCalled();
+      // 账本记下这次结果：之后同一尝试的重试只返回它，不会认领之后新建的任务。
+      expect(ledgerEntry(tx)).toEqual({ attemptKey: 'print-page:attempt-1', orderId: 'order-1', workOrderVersion: 3, outcome, receiptId: null, actorId: 'admin-1' });
+    });
+
+    it('rejects non-admin writers before locking', async () => {
+      const tx = txMock();
+      await expect(recordRenderedPrintInTx(tx as never, attempt, { id: 'sales-1', role: Role.SALES }, sameContent())).rejects.toBeInstanceOf(OrderPrintJobError);
+      expect(tx.$executeRaw).not.toHaveBeenCalled();
+    });
   });
 
   it('rejects non-admin print writers', async () => {

@@ -1,3 +1,5 @@
+2026-10-02（集成主线）：PR #41 创建时 main 已更新至 `0d0d3020`，已合并最新主线以解除冲突。保留双方新增回归测试，批量打印沿用主线的取得文件后记录流程，保留 CDR 分支的超时与权限恢复。适配结算更正的可空快照和免收项目过滤，并补充两条回归。类型检查、lint、91 项组件浏览器测试及25项定向单测通过；远端 CI 以 PR Checks 为准。
+
 # 会话交接
 
 ## 当前生产状态（2026-09-27 更新）
@@ -27,6 +29,17 @@
 2026-10-01（UI 质量标准）：**完成 UI / UX Quality Standard 的规范审查与工程入口统一，应用功能未改**，基线 `e47f59e8`、独立干净工作树。`docs/ui-规范.md` §11 统一设计原则、功能前后对照、十项 Design QA、问题分级、验收与停止条件；AGENTS / CLAUDE / CONTRIBUTING / PR 模板共同引用，UI-SYSTEM 与设计覆盖文档的优先级对齐。现有自动门禁仍为六视口，320/390/430 为后续任务必须留证的补测；本次没有新增自动测试项目。审查与实际文档验证见 [记录](docs/audits/2026-10-01-ui-quality-standard-review.md)。**未做实屏 QA 或应用测试**（本工作树无 node_modules），不代表全站 UI 验收；后续 UI 任务按 §11 执行，不能沿用本次文档检查冒充页面通过。本次仅本地提交，未推送或部署。
 
 2026-10-02：管理工作台新增按外部销售分组的 CDR 批量下载，支持附件版本核对、异常工单、下载历史、重生成和撤销。两条前向迁移；预览 3107 未配置真实 OSS，专项测试使用隔离 HTTP 存储。Claude 对抗复审与最终验证记录见 [本次审计](docs/audits/2026-10-02-cdr-workbench.md)。本地开发，未发布。
+
+2026-10-02（三个 PR 待合并）：**本次会话的业主决定已实现并开 PR，均未合并、未部署。三个 PR 的 CI 均已全绿（#40 最新一次推送的 CI 以 PR 页为准）。**
+- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) `claude/settled-correction`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。CI 曾因销售账单导出合计行改名「抵扣 / 补收」而 E2E 失败，已改断言。
+- [#39](https://github.com/zora4523-bot/print-shop-erp/pull/39) `claude/order-detail-nav-layout`：二级页统一由面包屑负责返回（37 个路由，例外见 ui-规范 §8.3）、工单面包屑显示工单名称；Codex 2 轮 9.5；隔离库 Playwright 通过。
+- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) `claude/print-on-click-and-fold`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）。Codex 7 轮 6.5 → 7 → 7 → 8.0 → 8.4 → 8.5 → **9.2（可合并）**，最后两项 P3 已修。批量打印交付在列表外的 `BatchPrintDeliveryProvider`：先取文件 → 整批记录 → 成功或结果未知才交付；记录按尝试串行、尝试键绑定打印任务。隔离库 Playwright：相关 E2E、`admin-responsive` 两视口、release 配置打印视觉回归均通过。
+- **下一步**：业主审阅后按 #38 → #39 → #40 或任意顺序合并；后合并的 PR 在 DECISIONS / UI 规范 / HANDOFF 上有文本冲突，两边都保留。开发库（:3003）未执行两条新迁移，切到这些分支看页面前需 `migrate deploy`（不要用 `migrate dev`）。上线需按现行发布流程演练两条迁移。
+- 本次建的隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`、`erp_e2e_print40_1002`、`erp_e2e_print40r_1002`、`erp_e2e_print40c_1002` 用完后 `DROP DATABASE`；`erp_e2e_merge_1001` 也已执行 #40 迁移。
+- 本机负载高（30–40）时，`admin-workspace-pg-client-serialization.postgres.test.ts`（子进程 10 秒探测）会超时，与本次改动无关，CI 上通过。
+- 待业主决定：浏览器标签页标题仍是「工单号 · 工单」，是否也改成工单名称；`/orders/new` 点面包屑 / 侧栏离开不弹「保存草稿并离开」（原有问题）。
+
+2026-10-02（结算更正与补收）：**业主拍板「结算后金额更正分两段」并已实现**，分支 `claude/settled-correction`（基于 main `e47f59e8`，已合并为 #38 `16debfb1`，未部署）。① 发货确认弹窗只列应收金额（「月账单确认前仍可更正」）、代师傅登记提成、运单号；② 月账单确认前，工单详情「计价与收费维护 › 结算更正」以一行「结算更正」调整补收或少收，同步结算金额与草稿账单本单快照，最低到加工费（`Order_receivable_amounts_valid`）；③ 月账单确认后，账单工单行「录入抵扣或补收」，补收为正数，迁移 `20261001120000_agent_bill_surcharge` 放开只能为负的约束；分摊先锁后读，补收只进最早草稿、放不进金额上限时暂缓，录入按销售串行并按最坏情况校验上限。规则见 SPEC §J.5、DECISIONS 2026-10-01 最后一条。Codex `gpt-6-astra` 对抗审查 4 轮 7.5 → 8.5 → 8.5 → 9.1，末轮 P3 已修。验证：全量 Vitest 通过（满载时 7 个无关 postgres 用例 5 秒超时，放宽超时单跑通过）、相关 Browser Mode、真实库触发器与并发回归；**未跑** E2E（已同步 3 个账单 E2E 的文案断言）。开发库未执行新迁移（避免未合并时 `migrate dev` 要求重置），合并后需 `prisma migrate deploy`。同日另一 worktree `agent-a2f5802dd2b1ab435`（分支 `claude/order-detail-nav-layout`，提交 `a41abebb`）去掉工单详情与面包屑重复的「返回工单列表」并提了详情页布局方案，待业主看。
 
 2026-10-01（分支整理）：**按业主要求把本地未开 PR 的分支 / worktree 整理成 3 个 PR，均经 Codex `gpt-6-astra` 对抗审查到 9 分以上**（未部署）。PR #37 文档（842a3f87 生产发布补记 + 外部销售前端复审历史记录，2 轮，9.5 分，合并 `0238d327`）；PR #36 弹层浏览器测试等 Base UI 进场动画结束再量触控尺寸（共享 `tests/browser/wait-for-layout.ts` 的 `waitForStableLayout`，5 秒预算，9 个 spec 改用；3 轮，9.5 分，合并 `79ffda6a`）；PR #35 寄样首重默认（见下方 09-30 条），代码 8 轮审查 9.2 分；本条随 #35 一起合并，所以在功能分支上读到时 #35 尚未合入 main。审查追加的改动：寄样快递费快照的首重默认由 `lib/order/sample-weight-basis.ts` 统一维护，只按上一版快照与本次登记重量推进三态——寄付且登记重量等于默认首重带 `weightBasis` 标记；到付期间只暂存 `suspendedSampleDefaultWeightKg`；登记过别的重量（含到付期间）即作废、不再恢复。接入提交、履约费用确认与已确认履约发货、销售切换到付、变更申请 / 工厂确认重算物流、发货定稿；到付寄样不再写默认重量；取消到付时留空的地址更正不再清空已存重量 / 省份（main 上原有的计价与落库不一致）。标记只由这套三态维护函数读取，不参与金额计算或界面展示，作审计依据；规则见 DECISIONS 2026-09-30 影响一行。外部销售审查 worktree 的未提交文档收入 main 后已清掉（原文即 `1e272aca`）；PDF 半成品在本地分支 `archive/pdf-wip-2026-09-30`、旧 stash 在 `archive/stash-checkbox-ui-2026-08-31`，均未推送，是否继续待业主决定。验证：全量 Vitest 748 文件 / 8,234 项通过；#36 改动的 9 个 Browser Mode spec 208 项通过；lint / typecheck / architecture / dead-code / backup 通过。
 
@@ -599,6 +612,8 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 - 2026-10-01：审查并完善 UI / UX Quality Standard，统一 Codex / Claude Code 入口、功能保护、Design QA、验收和停止条件；仅文档验证，未做全站实屏验收，详见 `docs/audits/2026-10-01-ui-quality-standard-review.md`。
 
+
+- 2026-10-02：点打印即记已打印 + 低频维护区默认收起（#40）、二级页面包屑返回 + 工单名称（#39）、结算后更正与补收（#38）开 PR。
 - 2026-09-27：完成建单整款删除、规格选择与历史名称修复；Claude Code Opus 5.5 三轮审查及负控补测完成，本地提交，3000 开发服务保留。详见 [验收记录](docs/audits/2026-09-27-design-removal.md)。
 
 - 2026-09-21：按要求启动 3000 本地预览；日常开发库预检、备份及两条空白封迁移完成，价格页面实际打开，未改纸张资料或发布草稿；生产未操作。
@@ -712,3 +727,4 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-10-01（续）：客户计价实测不改；合并 #32 最新提交后开叠放 PR #33（目标 `codex/order-leave-recovery`）。
 - 2026-09-30：寄样品快递费默认按收件省份中通首重、提交即自动确认，超重由管理员在履约费用中更正（`b07e1f5c`）。
 - 2026-10-01：整理本地分支开 PR #35–#37，Codex gpt-6-astra 对抗审查均达 9 分以上；#36、#37 已合入 main，#35 随本条合并。寄样首重默认标记改为三态规则，覆盖全部写入口。
+- 2026-10-02：结算后金额更正两段（工单结算更正 / 账单补收）与发货确认文案，Codex 4 轮 9.1 分，分支 `claude/settled-correction` 未推送。
