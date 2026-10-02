@@ -23,9 +23,10 @@ export async function signInWithCredentials(
     username: formData.get('username'),
     password: formData.get('password'),
   };
+  const username = typeof raw.username === 'string' ? raw.username : '';
   const parsed = loginSchema.safeParse(raw);
   if (!parsed.success) {
-    return invalidFromIssuesDeep(parsed.error.issues);
+    return { ...invalidFromIssuesDeep(parsed.error.issues), username };
   }
 
   // Sanitize the post-login target so `/login?from=//evil.example` can't turn
@@ -41,14 +42,14 @@ export async function signInWithCredentials(
       redirectTo: from,
     });
     // Unreachable in practice.
-    return { status: 'error', message: '登录流程未触发跳转' };
+    return { status: 'error', message: '登录流程未触发跳转', username };
   } catch (err) {
     // Auth.js re-throws NEXT_REDIRECT as a special Error; let it bubble.
     if ((err as Error)?.message === 'NEXT_REDIRECT') {
       throw err;
     }
     const authErrorResult = loginAuthErrorResult(err);
-    if (authErrorResult) return authErrorResult;
+    if (authErrorResult) return { ...authErrorResult, username };
     throw err;
   }
 }

@@ -479,9 +479,9 @@ function SidebarMenuButton({
     tooltip?: string | React.ComponentProps<typeof TooltipContent>
   } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const { isMobile, state } = useSidebar()
-  // Hidden tooltip roots still consume Escape. Only mount them when their
-  // labels are actually needed, so mobile navigation dismisses in one press.
-  const showTooltip = Boolean(tooltip) && state === "collapsed" && !isMobile
+  // Keep desktop trigger identity stable across collapse; mobile tooltips must
+  // stay unmounted so Escape dismisses the navigation sheet in one press.
+  const hasTooltip = Boolean(tooltip) && !isMobile
   const comp = useRender({
     defaultTagName: "button",
     props: mergeProps<"button">(
@@ -490,7 +490,7 @@ function SidebarMenuButton({
       },
       props
     ),
-    render: showTooltip ? <TooltipTrigger render={render} /> : render,
+    render: hasTooltip ? <TooltipTrigger render={render} /> : render,
     state: {
       slot: "sidebar-menu-button",
       sidebar: "menu-button",
@@ -499,7 +499,7 @@ function SidebarMenuButton({
     },
   })
 
-  if (!showTooltip) {
+  if (!hasTooltip) {
     return comp
   }
 
@@ -510,7 +510,7 @@ function SidebarMenuButton({
   }
 
   return (
-    <Tooltip>
+    <Tooltip disabled={state !== "collapsed"}>
       {comp}
       <TooltipContent
         side="right"

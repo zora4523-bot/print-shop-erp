@@ -171,7 +171,7 @@ function assertMenuLinks(role: Role) {
 }
 
 const viewports = [
-  [375, 667], [393, 852], [768, 1024],
+  [320, 568], [375, 667], [390, 844], [393, 852], [430, 932], [768, 1024],
   [1024, 768], [1280, 800], [1920, 1080],
 ] as const;
 
@@ -371,5 +371,20 @@ describe('breadcrumb text alignment in the real admin shell', () => {
         }
       });
     }
+  }
+});
+
+
+it('折叠与展开侧栏保留导航节点和键盘焦点', async () => {
+  await page.viewport(1280, 800);
+  await renderShell(Role.ADMIN);
+  const link = host.querySelector<HTMLAnchorElement>('[data-sidebar="menu-button"][href="/orders/new"]')!;
+  expect(link).not.toBeNull();
+  link.focus();
+  for (const state of ['collapsed', 'expanded']) {
+    await userEvent.keyboard('{Control>}b{/Control}');
+    await expect.poll(() => host.querySelector('[data-slot="sidebar"]')?.getAttribute('data-state')).toBe(state);
+    expect(host.querySelector('[data-sidebar="menu-button"][href="/orders/new"]')).toBe(link);
+    expect(document.activeElement).toBe(link);
   }
 });

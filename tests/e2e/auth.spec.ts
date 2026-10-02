@@ -71,3 +71,30 @@ test.describe('登录闸口', () => {
     }
   });
 });
+
+
+test('水合前输入的用户名在失败提交后仍保留，修正密码可登录', async ({ page }) => {
+  let releaseScripts!: () => void;
+  const scriptsReady = new Promise<void>((resolve) => { releaseScripts = resolve; });
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() === 'script') await scriptsReady;
+    await route.continue();
+  });
+  try {
+    await page.goto('/login', { waitUntil: 'commit' });
+    await page.locator('#username').fill(ADMIN_USERNAME);
+    await page.locator('#password').fill('wrong-password');
+    releaseScripts();
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '登录', exact: true }).click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.locator('#username')).toHaveValue(ADMIN_USERNAME);
+    await page.locator('#password').fill(ADMIN_PASSWORD);
+    await page.locator('#password').press('Enter');
+    await expect(page).toHaveURL(/\/(owner|orders|foreman|sales)/);
+    await expectNoNextErrorOverlay(page);
+  } finally {
+    releaseScripts();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
+});

@@ -1,15 +1,12 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { signInWithCredentials, type LoginActionResult } from '@/actions/auth';
 
 export function LoginForm({ from }: { from: string }) {
-  // React resets uncontrolled fields after a server action resolves, including
-  // a rejected login. Keep the username so retry only requires a new password.
-  const [username, setUsername] = useState('');
   const [state, formAction, pending] = useActionState<LoginActionResult | null, FormData>(
     signInWithCredentials,
     null,
@@ -25,10 +22,10 @@ export function LoginForm({ from }: { from: string }) {
       <div className="space-y-2">
         <Label htmlFor="username">用户名</Label>
         <Input
+          key={state?.username ?? ''}
           id="username"
           name="username"
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
+          defaultValue={state?.username ?? ''}
           type="text"
           autoComplete="username"
           autoCapitalize="off"

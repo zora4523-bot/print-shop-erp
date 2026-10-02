@@ -62,6 +62,12 @@ it('keeps dev-only fixture tests in their own admin viewport configuration', asy
   vi.stubEnv('E2E_BASE_URL', undefined);
   const config = (await import('../../playwright.dev-fixtures.config')).default;
   expect(config.grep).toEqual(/deterministic external sales price tier fixture/);
-  expect(config.projects).toHaveLength(6);
+  expect(config.projects?.map((project) => project.use?.viewport)).toEqual([
+    { width: 320, height: 568 }, { width: 375, height: 667 },
+    { width: 390, height: 844 }, { width: 393, height: 852 },
+    { width: 430, height: 932 }, { width: 768, height: 1024 },
+    { width: 1024, height: 768 }, { width: 1280, height: 800 },
+    { width: 1920, height: 1080 },
+  ]);
   expect(config.projects?.every((project) => project.name?.startsWith('admin-'))).toBe(true);
 });

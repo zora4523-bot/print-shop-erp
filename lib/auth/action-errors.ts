@@ -1,8 +1,9 @@
 import { AuthError } from '@auth/core/errors';
 
-export type LoginActionResult =
+export type LoginActionResult = (
   | { status: 'error'; message: string }
-  | { status: 'invalid'; fieldErrors: Record<string, string[]> };
+  | { status: 'invalid'; fieldErrors: Record<string, string[]> }
+) & { username?: string };
 
 export function loginAuthErrorResult(error: unknown): LoginActionResult | null {
   // Auth.js can surface provider errors through either its re-export or the
