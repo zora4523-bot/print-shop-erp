@@ -38,13 +38,14 @@
 
 2026-10-02：管理工作台新增按外部销售分组的 CDR 批量下载，支持附件版本核对、异常工单、下载历史、重生成和撤销。两条前向迁移；预览 3107 未配置真实 OSS，专项测试使用隔离 HTTP 存储。Claude 对抗复审与最终验证记录见 [本次审计](docs/audits/2026-10-02-cdr-workbench.md)。本地开发，未发布。
 
-2026-10-02（三个 PR 待合并）：**本次会话的业主决定已实现并开 PR，均未合并、未部署。三个 PR 的 CI 均已全绿（#40 最新一次推送的 CI 以 PR 页为准）。**
-- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) `claude/settled-correction`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。CI 曾因销售账单导出合计行改名「抵扣 / 补收」而 E2E 失败，已改断言。
-- [#39](https://github.com/zora4523-bot/print-shop-erp/pull/39) `claude/order-detail-nav-layout`：二级页统一由面包屑负责返回（37 个路由，例外见 ui-规范 §8.3）、工单面包屑显示工单名称；Codex 2 轮 9.5；隔离库 Playwright 通过。
-- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) `claude/print-on-click-and-fold`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）。Codex 7 轮 6.5 → 7 → 7 → 8.0 → 8.4 → 8.5 → **9.2（可合并）**，最后两项 P3 已修。批量打印交付在列表外的 `BatchPrintDeliveryProvider`：先取文件 → 整批记录 → 成功或结果未知才交付；记录按尝试串行、尝试键绑定打印任务。隔离库 Playwright：相关 E2E、`admin-responsive` 两视口、release 配置打印视觉回归均通过。
-- **下一步**：业主审阅后按 #38 → #39 → #40 或任意顺序合并；后合并的 PR 在 DECISIONS / UI 规范 / HANDOFF 上有文本冲突，两边都保留。开发库（:3003）未执行两条新迁移，切到这些分支看页面前需 `migrate deploy`（不要用 `migrate dev`）。上线需按现行发布流程演练两条迁移。
-- 本次建的隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`、`erp_e2e_print40_1002`、`erp_e2e_print40r_1002`、`erp_e2e_print40c_1002` 用完后 `DROP DATABASE`；`erp_e2e_merge_1001` 也已执行 #40 迁移。
-- 本机负载高（30–40）时，`admin-workspace-pg-client-serialization.postgres.test.ts`（子进程 10 秒探测）会超时，与本次改动无关，CI 上通过。
+2026-10-03（三个 PR 已合并）：**#38、#39、#40 均已合并进 `main`，未部署。** 之后 Codex 的 #41（UI 与 CDR 集成）也已合并，`main` 现为 `e2aed6d6`，共 188 条迁移。
+- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) → `16debfb1`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。
+- [#39](https://github.com/zora4523-bot/print-shop-erp/pull/39) → `004832a5`：二级页统一由面包屑负责返回（37 个路由，例外见 ui-规范 §8.3）、工单面包屑显示工单名称；Codex 2 轮 9.5。
+- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) → `0d0d3020`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）；Codex 7 轮，终评 9.2。`0d0d3020` 的 main CI 全绿。
+- 开发库 `print_shop_erp` 已用 `migrate deploy` 执行到 188 条（开发服务 :3003 跑 `main` 最新）。临时隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`、`erp_e2e_print40_1002`、`erp_e2e_print40r_1002`、`erp_e2e_print40c_1002` 已删；`erp_e2e_merge_1001` 保留。三个分支的本地 / 远端分支及 #39 的 agent 工作区已清理。
+- 注意：`20261002100000_order_print_attempt` 与 #41 的 `20261002100000_agent_bill_cancellation_detail` 时间戳相同，两者互不依赖，按目录名排序执行；仓库没有拦截同时间戳的门禁。
+- **下一步（需业主授权）**：生产仍是 `b658328c`（166 条迁移），上线 `main` 需按现行发布流程在正式库副本演练全部新增迁移后由业主说「切」。未经授权不做任何生产操作。
+- 本机负载高（30–40）时，`admin-workspace-pg-client-serialization.postgres.test.ts`（子进程 10 秒探测）会超时，与这些改动无关，CI 上通过。
 - 待业主决定：浏览器标签页标题仍是「工单号 · 工单」，是否也改成工单名称；`/orders/new` 点面包屑 / 侧栏离开不弹「保存草稿并离开」（原有问题）。
 
 2026-10-02（结算更正与补收）：**业主拍板「结算后金额更正分两段」并已实现**，分支 `claude/settled-correction`（基于 main `e47f59e8`，已合并为 #38 `16debfb1`，未部署）。① 发货确认弹窗只列应收金额（「月账单确认前仍可更正」）、代师傅登记提成、运单号；② 月账单确认前，工单详情「计价与收费维护 › 结算更正」以一行「结算更正」调整补收或少收，同步结算金额与草稿账单本单快照，最低到加工费（`Order_receivable_amounts_valid`）；③ 月账单确认后，账单工单行「录入抵扣或补收」，补收为正数，迁移 `20261001120000_agent_bill_surcharge` 放开只能为负的约束；分摊先锁后读，补收只进最早草稿、放不进金额上限时暂缓，录入按销售串行并按最坏情况校验上限。规则见 SPEC §J.5、DECISIONS 2026-10-01 最后一条。Codex `gpt-6-astra` 对抗审查 4 轮 7.5 → 8.5 → 8.5 → 9.1，末轮 P3 已修。验证：全量 Vitest 通过（满载时 7 个无关 postgres 用例 5 秒超时，放宽超时单跑通过）、相关 Browser Mode、真实库触发器与并发回归；**未跑** E2E（已同步 3 个账单 E2E 的文案断言）。开发库未执行新迁移（避免未合并时 `migrate dev` 要求重置），合并后需 `prisma migrate deploy`。同日另一 worktree `agent-a2f5802dd2b1ab435`（分支 `claude/order-detail-nav-layout`，提交 `a41abebb`）去掉工单详情与面包屑重复的「返回工单列表」并提了详情页布局方案，待业主看。
@@ -622,6 +623,7 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 
 - 2026-10-02：点打印即记已打印 + 低频维护区默认收起（#40）、二级页面包屑返回 + 工单名称（#39）、结算后更正与补收（#38）开 PR。
+- 2026-10-03：#38–#40 合并进 main（#41 随后由 Codex 合并），开发库迁移到 188 条，清理临时隔离库、已合并分支与 agent 工作区；生产发布待业主授权。
 - 2026-09-27：完成建单整款删除、规格选择与历史名称修复；Claude Code Opus 5.5 三轮审查及负控补测完成，本地提交，3000 开发服务保留。详见 [验收记录](docs/audits/2026-09-27-design-removal.md)。
 
 - 2026-09-21：按要求启动 3000 本地预览；日常开发库预检、备份及两条空白封迁移完成，价格页面实际打开，未改纸张资料或发布草稿；生产未操作。
