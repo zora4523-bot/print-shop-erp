@@ -16,6 +16,14 @@
 
 ## 当前任务
 
+2026-10-02（三个 PR 待合并）：**本次会话的业主决定已实现并开 PR，均未合并、未部署。**
+- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) `claude/settled-correction`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。
+- [#39](https://github.com/zora4523-bot/print-shop-erp/pull/39) `claude/order-detail-nav-layout`：二级页统一由面包屑负责返回（37 个路由，例外见 ui-规范 §8.3）、工单面包屑显示工单名称；Codex 2 轮 9.5；隔离库 Playwright 通过。
+- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) `claude/print-on-click-and-fold`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）。Codex 4 轮 6.5 → 7 → 7 → 8.0，第 4 轮问题已修在 `0cba193d`，**尚未复审**；第 1 轮修复后的 Playwright 未重跑。
+- **下一步**：等 CI；#40 做第 5 轮 Codex 复审并在隔离库重跑 `blank-price-only`、`sample-orders`、`admin-fees`、`commercial-fee-recovery` 与 `admin-responsive` 工单详情；三个 PR 合并时 DECISIONS / UI 规范 / HANDOFF 有文本冲突，两边都保留。开发库（:3003）未执行两条新迁移，切到这些分支看页面前需 `migrate deploy`（不要用 `migrate dev`）。
+- 本次建的隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`（已执行 #40 的迁移）用完后 `DROP DATABASE`；`erp_e2e_merge_1001` 也已执行 #40 迁移。
+- 待业主决定：浏览器标签页标题仍是「工单号 · 工单」，是否也改成工单名称；`/orders/new` 点面包屑 / 侧栏离开不弹「保存草稿并离开」（原有问题）。
+
 2026-10-01（分支整理）：**按业主要求把本地未开 PR 的分支 / worktree 整理成 3 个 PR，均经 Codex `gpt-6-astra` 对抗审查到 9 分以上**（未部署）。PR #37 文档（842a3f87 生产发布补记 + 外部销售前端复审历史记录，2 轮，9.5 分，合并 `0238d327`）；PR #36 弹层浏览器测试等 Base UI 进场动画结束再量触控尺寸（共享 `tests/browser/wait-for-layout.ts` 的 `waitForStableLayout`，5 秒预算，9 个 spec 改用；3 轮，9.5 分，合并 `79ffda6a`）；PR #35 寄样首重默认（见下方 09-30 条），代码 8 轮审查 9.2 分；本条随 #35 一起合并，所以在功能分支上读到时 #35 尚未合入 main。审查追加的改动：寄样快递费快照的首重默认由 `lib/order/sample-weight-basis.ts` 统一维护，只按上一版快照与本次登记重量推进三态——寄付且登记重量等于默认首重带 `weightBasis` 标记；到付期间只暂存 `suspendedSampleDefaultWeightKg`；登记过别的重量（含到付期间）即作废、不再恢复。接入提交、履约费用确认与已确认履约发货、销售切换到付、变更申请 / 工厂确认重算物流、发货定稿；到付寄样不再写默认重量；取消到付时留空的地址更正不再清空已存重量 / 省份（main 上原有的计价与落库不一致）。标记只由这套三态维护函数读取，不参与金额计算或界面展示，作审计依据；规则见 DECISIONS 2026-09-30 影响一行。外部销售审查 worktree 的未提交文档收入 main 后已清掉（原文即 `1e272aca`）；PDF 半成品在本地分支 `archive/pdf-wip-2026-09-30`、旧 stash 在 `archive/stash-checkbox-ui-2026-08-31`，均未推送，是否继续待业主决定。验证：全量 Vitest 748 文件 / 8,234 项通过；#36 改动的 9 个 Browser Mode spec 208 项通过；lint / typecheck / architecture / dead-code / backup 通过。
 
 2026-10-01（合入性能分支）：**`claude/combined-2026-10-01` 已合入 `claude/feature-toggle-performance-review-9c66a6`（fac2a6ee，含 main 038655d1 的 PR #31 与 #32 的 0c0145c5）**，合并提交 `19180a38` + 测试修正 `c719186f`，未推送。补齐今天未合入的 29 个提交，含 2 条加索引迁移（`20261001100000_switch_performance_indexes`、`20261001110000_list_ordering_indexes`，在新副本库上 `migrate deploy` 通过）。8 个冲突：制版与其他费用区采用 main 新层级后重放「整单」与默认收起；成本脚注采用 #32 更短版本；其余保留本线；DECISIONS / HANDOFF 两边都留。main 的两个新测试与制版交互测试按默认收起先展开。验证：lint / typecheck / architecture / backup 通过；单测全量 747 文件、8,193 项通过；Browser Mode 78 文件 / 1,064 项通过（一次全量里 `ReworkOrderForm` 1280 触控尺寸 41.8px 失败，为弹窗缩放动画中途测量，单独 3/3 通过、复跑全量通过）。**未跑** E2E 与六视口页面门禁。仍未收：PDF 审查 worktree 10 个未提交文件（之后存档到本地分支 `archive/pdf-wip-2026-09-30`，未推送，是否继续待业主决定）；外部销售审查 worktree 的未提交文档已在 2026-10-01 收入 main（见下方 2026-09-30 条目）。
@@ -581,6 +589,7 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 ## 历史（追加式时间线）
 
+- 2026-10-02：点打印即记已打印 + 低频维护区默认收起（#40）、二级页面包屑返回 + 工单名称（#39）、结算后更正与补收（#38）开 PR。
 - 2026-09-27：完成建单整款删除、规格选择与历史名称修复；Claude Code Opus 5.5 三轮审查及负控补测完成，本地提交，3000 开发服务保留。详见 [验收记录](docs/audits/2026-09-27-design-removal.md)。
 
 - 2026-09-21：按要求启动 3000 本地预览；日常开发库预检、备份及两条空白封迁移完成，价格页面实际打开，未改纸张资料或发布草稿；生产未操作。
