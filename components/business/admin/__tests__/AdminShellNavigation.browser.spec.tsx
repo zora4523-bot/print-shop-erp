@@ -24,10 +24,12 @@ vi.mock('next/link', () => ({
   default: ({
     prefetch: _prefetch,
     scroll: _scroll,
+    onNavigate: _onNavigate,
     ...props
-  }: ComponentProps<'a'> & { prefetch?: boolean; scroll?: boolean }) => {
+  }: ComponentProps<'a'> & { prefetch?: boolean; scroll?: boolean; onNavigate?: unknown }) => {
     void _prefetch;
     void _scroll;
+    void _onNavigate;
     return <a {...props} />;
   },
   useLinkStatus: () => ({ pending: false }),
@@ -243,6 +245,32 @@ describe.each([Role.SALES, Role.ADMIN])('%s shared navigation', (role) => {
           await page.elementLocator(button).click();
         }
         assertMenuLinks(role);
+        const content = nav.querySelector<HTMLElement>('[data-sidebar="content"]')!;
+        expect(getComputedStyle(content).scrollbarWidth).toBe('none');
+        expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth);
+        if (width >= 768) {
+          await page.getByRole('button', { name: '打开/关闭侧边栏菜单' }).click();
+          await waitForStableLayout(host);
+          const sidebar = host.querySelector<HTMLElement>('[data-sidebar="sidebar"]')!;
+          const bounds = sidebar.getBoundingClientRect();
+          for (const link of sidebar.querySelectorAll<HTMLAnchorElement>('a[data-sidebar="menu-button"]')) {
+            link.focus();
+            const box = link.getBoundingClientRect();
+            const clip = link.closest('[data-sidebar="content"]')?.getBoundingClientRect() ?? bounds;
+            expect(box.width).toBeGreaterThanOrEqual(44);
+            expect(box.height).toBeGreaterThanOrEqual(44);
+            expect(box.left).toBeGreaterThanOrEqual(clip.left + 2);
+            expect(box.right).toBeLessThanOrEqual(clip.right - 2);
+            expect(box.top).toBeGreaterThanOrEqual(clip.top - 1);
+            expect(box.bottom).toBeLessThanOrEqual(clip.bottom + 1);
+            const icon = link.querySelector('svg')!.getBoundingClientRect();
+            expect(Math.abs(icon.left + icon.width / 2 - (box.left + box.width / 2))).toBeLessThanOrEqual(1);
+            expect(link.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2))).toBe(true);
+          }
+          expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth);
+          expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+        }
+        await page.screenshot({ path: `__screenshots__/sidebar-scroll-${role}-${theme}-${width}.png` });
         expect(await commands.checkShellAccessibility()).toEqual([]);
         if (width < 768) {
           const sidebar = document.querySelector<HTMLElement>('[data-mobile="true"]')!;
@@ -477,5 +505,26 @@ it('折叠与展开侧栏保留导航节点和键盘焦点', async () => {
     await expect.poll(() => host.querySelector('[data-slot="sidebar"]')?.getAttribute('data-state')).toBe(state);
     expect(host.querySelector('[data-sidebar="menu-button"][href="/orders/new"]')).toBe(link);
     expect(document.activeElement).toBe(link);
+  }
+});
+
+
+it('减少动态效果时折叠菜单立即稳定且焦点边框可见', async () => {
+  await commands.setReducedMotion(true);
+  try {
+    await page.viewport(1280, 800);
+    await renderShell(Role.ADMIN);
+    const link = host.querySelector<HTMLAnchorElement>('a[data-sidebar="menu-button"]')!;
+    link.focus();
+    await userEvent.keyboard('{Control>}b{/Control}');
+    await waitForStableLayout(host);
+    expect(host.querySelector('[data-slot="sidebar"]')?.getAttribute('data-state')).toBe('collapsed');
+    const container = host.querySelector<HTMLElement>('[data-slot="sidebar-container"]')!;
+    expect(parseFloat(getComputedStyle(container).transitionDuration)).toBeLessThanOrEqual(0.001);
+    expect(link.matches(':focus-visible')).toBe(true);
+    expect(getComputedStyle(link).boxShadow).not.toBe('none');
+    expect(document.activeElement).toBe(link);
+  } finally {
+    await commands.setReducedMotion(false);
   }
 });
