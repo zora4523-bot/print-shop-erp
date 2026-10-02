@@ -208,6 +208,7 @@ vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {
     throw new Error('NEXT_NOT_FOUND');
   }),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 
 import OrderDetailPage from '@/app/(admin)/orders/[id]/page';
@@ -612,6 +613,29 @@ describe('order detail commercial visibility', () => {
     getOrderDetailMock.mockResolvedValue({ ...orderFixture(), settlementType: OrderSettlementType.NO_CHARGE, customerCharges: [] });
     const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: 'order-1' }) }));
     expect(html).not.toContain('id="detail-pricing-tools"');
+  });
+
+  // 业主 2026-10-02：低频维护区默认收起，有待处理时展开；工厂成本没有待处理事项，始终先收起。
+  it.each([
+    { name: '价格已确认、无待定收费', pricingStatus: 'ADMIN_CONFIRMED', chargeStatus: 'FINAL', blankPrice: undefined, open: false },
+    { name: '价格待管理员确认', pricingStatus: 'PENDING_ADMIN_CONFIRMATION', chargeStatus: 'ESTIMATED', blankPrice: undefined, open: true },
+    { name: '有金额待定的收费行', pricingStatus: 'ADMIN_CONFIRMED', chargeStatus: 'PENDING_AMOUNT', blankPrice: undefined, open: true },
+    { name: '历史材料单价待核价', pricingStatus: 'ADMIN_CONFIRMED', chargeStatus: 'FINAL', blankPrice: null, open: true },
+    { name: '历史材料单价已有', pricingStatus: 'ADMIN_CONFIRMED', chargeStatus: 'FINAL', blankPrice: '0.3251', open: false },
+  ])('$name 时计价与收费维护 open=$open', async ({ pricingStatus, chargeStatus, blankPrice, open }) => {
+    requireSessionMock.mockResolvedValue({ user: { id: 'admin-1', role: Role.ADMIN } });
+    const order = { ...orderFixture(), pricingRevisions: [], priceRevision: 1, status: OrderStatus.RELEASED, pricingStatus };
+    order.customerCharges.forEach((charge) => Object.assign(charge, { status: chargeStatus }));
+    getOrderDetailMock.mockResolvedValue(order);
+    if (blankPrice !== undefined) readHistoricalBlankPriceEditorMock.mockResolvedValueOnce({ orderId: order.id, orderRevision: 1, priceRevision: 1,
+      items: [{ id: 'item-1', label: '第 1 款', unitPrice: blankPrice }] });
+    const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
+    const sectionTag = (id: string) => html.match(new RegExp(`<details[^>]*id="${id}"[^>]*>`))?.[0];
+    expect(sectionTag('detail-pricing-tools')).toBeDefined();
+    expect(/\sopen=""/.test(sectionTag('detail-pricing-tools')!)).toBe(open);
+    expect(sectionTag('detail-costs')).toBeDefined();
+    expect(sectionTag('detail-costs')).not.toMatch(/\sopen=""/);
+    expect(sectionTag('detail-delivery-records')).toMatch(/\sopen=""/);
   });
 
   it('只有无计件进度时仍阻止提前发货并保留可达恢复区', async () => {

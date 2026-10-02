@@ -188,7 +188,7 @@ const ACTION_LABELS: Record<string, string> = {
   FACTORY_HELD: '暂停生产',
   FACTORY_RESUMED: '恢复生产',
   ORDER_PRINT_REQUESTED: '创建打印任务',
-  ORDER_PRINTED: '确认已打印',
+  ORDER_PRINTED: '已打印',
   ORDER_PRINT_REQUESTS_SUPERSEDED: '旧版打印任务失效',
   ORDER_SETTLED_V2: '工单结算',
   ORDER_SETTLEMENT_CORRECTED: '结算更正',

@@ -290,6 +290,32 @@ describe('admin order decisions require review before mutation', () => {
     expect(actions.preview).not.toHaveBeenCalled();
   });
 
+  // 业主 2026-10-02：点「打印」即记已打印。待打印时只给「打印」（打开打印页，关闭打印对话框即记录），
+  // 「加入待打印」只留给已打印过、要补打进队列的工单；点过打印回到本页刷新一次。
+  it('offers one print entry while printing is pending and refreshes once on return', async () => {
+    const order = baseOrder();
+    order.status = OrderStatus.RELEASED;
+    order.printPending = true;
+    order.capabilities = { ...order.capabilities, createPrint: false, markPrinted: true };
+    renderOrder(order);
+    const link = page.getByRole('link', { name: '打印', exact: true });
+    await expect.element(link).toHaveAttribute('href', '/print/orders/order-1?autoprint=1');
+    await expect.element(link).toHaveAttribute('target', '_blank');
+    await expect.element(page.getByRole('button', { name: '加入待打印', exact: true })).not.toBeInTheDocument();
+    window.dispatchEvent(new Event('focus'));
+    expect(actions.refresh).not.toHaveBeenCalled();
+    const stay = (event: MouseEvent) => event.preventDefault();
+    document.addEventListener('click', stay, true);
+    try { await link.click(); } finally { document.removeEventListener('click', stay, true); }
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('focus'));
+    await expect.poll(() => actions.refresh.mock.calls.length, { timeout: 2000 }).toBe(1);
+
+    renderOrder({ ...order, printPending: false, capabilities: { ...order.capabilities, createPrint: true, markPrinted: false } });
+    await expect.element(page.getByRole('button', { name: '加入待打印', exact: true })).toBeVisible();
+    await expect.element(page.getByRole('link', { name: '打印', exact: true })).not.toBeInTheDocument();
+  });
+
   it('keeps the shipping blocker and recovery path visible without an enabled shipping action', () => {
     const order = baseOrder();
     order.status = OrderStatus.PACKING;

@@ -51,8 +51,8 @@ export type ConfirmActionDialogProps = {
   /** 确认按钮是否用破坏色。只由它决定——L3 只意味着要填理由，不意味着红色。 */
   danger?: boolean;
   /**
-   * 可选的确认勾选（如「我已核对打印稿」）。传入后必须勾选才能确认，
-   * 用于「确认已打印」这类需要显式自证的场景，替代普通 Dialog 当确认层。
+   * 可选的确认勾选（如「我已通知客户」）。传入后必须勾选才能确认，
+   * 用于需要显式自证的场景，替代普通 Dialog 当确认层。
    */
   acknowledgement?: string;
   /** Reject JSX children even when other props are spread (TypeScript excess-property loophole). */

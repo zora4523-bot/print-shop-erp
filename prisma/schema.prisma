@@ -126,6 +126,7 @@ model User {
   orderStars                     UserOrderStar[]
   createdOrderPrintJobs          OrderPrintJob[]               @relation("OrderPrintJobCreator")
   printedOrderPrintJobs          OrderPrintJob[]               @relation("OrderPrintJobPrinter")
+  orderPrintAttempts             OrderPrintAttempt[]           @relation("OrderPrintAttemptActor")
   agentMonthlyBills              AgentMonthlyBill[]            @relation("AgentMonthlyBillAgent")
   confirmedAgentBills            AgentMonthlyBill[]            @relation("AgentMonthlyBillConfirmer")
   paidAgentBills                 AgentMonthlyBill[]            @relation("AgentMonthlyBillPayer")
@@ -494,6 +495,7 @@ model Order {
   productionScanClaims        ProductionScanClaim[]
   stars                       UserOrderStar[]
   printJobs                   OrderPrintJob[]
+  printAttempts               OrderPrintAttempt[]
   workflowDecisions           OrderWorkflowDecision[]
   agentMonthlyBillItem        AgentMonthlyBillItem?
   exportSelections            OrderExportSelection[]
@@ -778,14 +780,42 @@ model OrderPrintJob {
   printedAt        DateTime?          @db.Timestamptz(3)
   createdAt        DateTime           @default(now()) @db.Timestamptz(3)
 
-  order      Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  createdBy  User?          @relation("OrderPrintJobCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  printedBy  User?          @relation("OrderPrintJobPrinter", fields: [printedById], references: [id], onDelete: Restrict)
-  requestJob OrderPrintJob? @relation("OrderPrintJobResolution", fields: [requestJobId], references: [id], onDelete: Restrict)
-  resolution OrderPrintJob? @relation("OrderPrintJobResolution")
+  order        Order              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdBy    User?              @relation("OrderPrintJobCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  printedBy    User?              @relation("OrderPrintJobPrinter", fields: [printedById], references: [id], onDelete: Restrict)
+  requestJob   OrderPrintJob?     @relation("OrderPrintJobResolution", fields: [requestJobId], references: [id], onDelete: Restrict)
+  resolution   OrderPrintJob?     @relation("OrderPrintJobResolution")
+  printAttempt OrderPrintAttempt? @relation("OrderPrintAttemptReceipt")
 
   @@index([orderId, state, createdAt(sort: Desc)])
   @@index([printedById, printedAt])
+}
+
+/// 「点打印即记已打印」的打印尝试账本（业主 2026-10-02，DECISIONS 同日）。打印页每次渲染、批量
+/// 打印文件每次打开 / 下载，每张工单各一个尝试；结果落库后，同一尝试的重试只返回原结果，
+/// 不会认领之后才新建的打印任务。MARKED 时 receiptId 指向本次写入的 PRINTED 回执。
+model OrderPrintAttempt {
+  id               String                   @id @default(cuid())
+  attemptKey       String                   @unique @db.VarChar(128)
+  orderId          String
+  workOrderVersion Int
+  outcome          OrderPrintAttemptOutcome
+  receiptId        String?                  @unique
+  actorId          String
+  createdAt        DateTime                 @default(now()) @db.Timestamptz(3)
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  actor   User           @relation("OrderPrintAttemptActor", fields: [actorId], references: [id], onDelete: Restrict)
+  receipt OrderPrintJob? @relation("OrderPrintAttemptReceipt", fields: [receiptId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt(sort: Desc)])
+}
+
+enum OrderPrintAttemptOutcome {
+  MARKED
+  ALREADY_PRINTED
+  STALE
+  NOT_PRINTABLE
 }
 
 enum ShipmentStatus {

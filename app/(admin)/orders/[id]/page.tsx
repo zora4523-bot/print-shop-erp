@@ -18,6 +18,7 @@ import { getLegacyProductionFactsRepair } from '@/lib/order/legacy-production-fa
 import { LegacyProductionFactsRepairForm } from '@/components/business/order/LegacyProductionFactsRepairForm';
 import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
+import { PrintPageLink } from '@/components/business/order/PrintPageLink';
 import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -402,6 +403,11 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     priceRevision: 'priceRevision' in order && typeof order.priceRevision === 'number' ? order.priceRevision : undefined,
   });
   const inlineOperations = presentation?.workspace.inlineOperations;
+  // 业主 2026-10-02：低频维护区默认收起，有待处理时展开——待核价 / 待确认物流费
+  // （价格待确认、金额待定的收费行）或历史空白单价未补。工厂成本没有待处理事项，始终先收起。
+  const pricingNeedsAttention = isPricingPending ||
+    order.customerCharges.some((charge) => charge.status === 'PENDING_AMOUNT') ||
+    Boolean(historicalBlankPrices?.items.some((item) => item.unitPrice === null));
   const hasPricingDetails = Boolean(isChargeableOrder && pricingStatus) ||
     (canAdminManageCommercialDetails && priceRevision !== null) ||
     (canViewCommercialAmounts && order.customerCharges.length > 0);
@@ -545,14 +551,9 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         />
       ) : null}</Fragment>),
     printActions: (<Fragment key="printActions"><div className="flex min-w-0 flex-wrap items-center gap-2">
-            <a
-              href={`/print/orders/${order.id}?autoprint=1`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
+            <PrintPageLink orderId={order.id} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               打印
-            </a>
+            </PrintPageLink>
             <a
               href={`/api/orders/${order.id}/pdf`}
               className={buttonVariants({ variant: 'outline', size: 'sm' })}
@@ -1431,11 +1432,11 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
       itemDetails={detailSections.itemDetails}
       printActions={detailSections.printActions}
       supplementary={[
-        ...(hasPricingDetails ? [{ id: 'detail-pricing-tools', title: '计价与收费维护', content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> }] : []),
+        ...(hasPricingDetails ? [{ id: 'detail-pricing-tools', title: '计价与收费维护', collapsed: !pricingNeedsAttention, content: <>{detailSections.pricing}{detailSections.commercial}{detailSections.customerCharges}</> }] : []),
         { id: 'detail-delivery-records', title: '配送与发货记录', content: <>{detailSections.shipments}{detailSections.shippingForm}{detailSections.shippingBlock}{detailSections.settlementBlock}</> },
         { id: 'detail-production-records', title: '生产、用料与计件记录', content: <><ProductionJobPanel key="production-jobs" orderId={order.id} />{detailSections.readiness}{detailSections.payrollPass}{detailSections.material}{detailSections.piecework}{detailSections.disputes}{detailSections.completionBlock}</> },
         { id: 'detail-business-records', title: '生产与业务资料', content: detailSections.basics },
-        { id: 'detail-costs', title: '工厂成本', content: detailSections.costs },
+        { id: 'detail-costs', title: '工厂成本', collapsed: true, content: detailSections.costs },
         ...(canCreateRework || order.sourceOrder || order.reworkOrders.length > 0 ? [{ id: 'detail-after-sales', title: '售后与重做', content: <>{detailSections.rework}{detailSections.reworkForm}</> }] : []),
         { id: 'detail-audit-records', title: '工单动态', content: <>{adminActivity ? <OrderActivity key={`${order.id}:${adminActivity.events[0]?.id ?? "empty"}`} orderId={order.id} initialPage={adminActivity} /> : null}{detailSections.changeHistory}</> },
         { id: 'detail-other-actions', title: '其他工单操作', content: detailSections.otherActions },

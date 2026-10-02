@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { requestBatchPrintAction } from '@/actions/order-batch-print';
+import { useBatchPrintDelivery, type BatchPrintTask } from './BatchPrintDelivery';
 import { BATCH_PRINT_MAX, type BatchPrintIssue, type BatchPrintStatus } from '@/lib/order/batch-print-contract';
 import type { OrderListSelectionItem } from './OrderListBatchSelection';
 
-type Task = { id: string; labels: string[]; orderIds: string[] };
+type Task = BatchPrintTask;
 
 export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   selectedItems: readonly OrderListSelectionItem[];
@@ -24,6 +25,9 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   const [refreshFeedback, setRefreshFeedback] = useState('');
   const refreshInFlight = useRef(false);
   const inFlight = useRef(false);
+  // 业主 2026-10-02：打开 / 下载打印文件即记已打印。交付（取文件 → 整批记录 → 交付）与其进度、
+  // 失败重试放在列表外的 BatchPrintDeliveryProvider，不随选择与队列刷新重建；交付进行中不生成新文件。
+  const { busy: delivering, deliver } = useBatchPrintDelivery();
 
   useEffect(() => {
     if (!task) return;
@@ -69,7 +73,7 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   }, [task, pollKey]);
 
   async function start() {
-    if (inFlight.current) return;
+    if (inFlight.current || delivering) return;
     inFlight.current = true;
     setPending(true);
     setMessage('');
@@ -95,7 +99,7 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
   const tooMany = selectedItems.length > BATCH_PRINT_MAX;
   const generating = task !== null && (status?.status === 'pending' || status?.status === 'unavailable');
   const action = (
-    <Button type="button" variant="secondary" className="min-h-11" disabled={disabled || pending || generating || tooMany || !selectedItems.length} onClick={() => void start()}>
+    <Button type="button" variant="secondary" className="min-h-11" disabled={disabled || pending || generating || delivering || tooMany || !selectedItems.length} onClick={() => void start()}>
       {pending ? '正在提交…' : status?.status === 'unavailable' ? '等待打印服务恢复' : generating ? '正在准备打印…' : `打印所选（${selectedItems.length}）`}
     </Button>
   );
@@ -105,8 +109,9 @@ export function BatchPrintControls({ selectedItems, disabled, renderLayout }: {
       {task ? <>
         <span role="status" className="text-sm">已生成 {status?.completed ?? 0} / {status?.total ?? task.labels.length} 单</span>
         {status?.status === 'ready' ? <>
-          <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=download`} />} nativeButton={false} variant="secondary" className="min-h-11">下载 PDF</Button>
-          <Button role="link" render={<a href={`/api/orders/batch-print/${task.id}?view=inline`} target="_blank" rel="noopener noreferrer" />} nativeButton={false} variant="secondary" className="min-h-11">打开 PDF</Button>
+          {/* 按钮而不是链接：中键 / 右键在新标签页打开链接会绕过「打开即记已打印」，所以统一经交付流程。 */}
+          <Button type="button" variant="secondary" className="min-h-11" disabled={delivering} onClick={() => deliver('download', task)}>下载 PDF</Button>
+          <Button type="button" variant="secondary" className="min-h-11" disabled={delivering} onClick={() => deliver('inline', task)}>打开 PDF</Button>
         </> : status?.status !== 'failed' ? (
           <Button type="button" variant="secondary" className="min-h-11" disabled={refreshing} aria-busy={refreshing} onClick={() => {
             if (refreshInFlight.current) return;

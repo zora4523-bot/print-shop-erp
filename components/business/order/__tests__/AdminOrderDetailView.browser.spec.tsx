@@ -86,7 +86,7 @@ function detailModel(overrides: Partial<AdminOrderDetailModel> = {}): AdminOrder
   };
 }
 
-function renderDetail(model = detailModel(), canEdit = true, simpleProduction = false) {
+function renderDetail(model = detailModel(), canEdit = true, simpleProduction = false, extraSections: ComponentProps<typeof AdminOrderDetailView>['supplementary'] = []) {
   flushSync(() => root.render(<AdminOrderDetailView
     model={model}
     canEdit={canEdit}
@@ -94,7 +94,7 @@ function renderDetail(model = detailModel(), canEdit = true, simpleProduction = 
     printHint={printHint}
     decision={<div><p>当前待办：核对本版打印</p><Button type="button">核对打印任务</Button><a href="#pricing-review" className="inline-flex min-h-11 min-w-11 items-center p-3">前往核价</a></div>}
     prints={[{ id: 'print-1', version: 1, state: 'SUPERSEDED', at: '2026-09-07T02:00:00Z' }, { id: 'print-2', version: 2, state: 'PENDING', at: '2026-09-08T02:00:00Z' }]}
-    supplementary={[{ id: 'detail-other-actions', title: '其他工单操作', content: <div className="flex flex-wrap gap-2"><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf?view=inline`}>打印</a><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf`}>下载 PDF</a>{canEdit ? <a className="inline-flex min-h-11 items-center p-2" href={`/orders/${model.id}/edit`}>编辑工单</a> : null}<Button variant="outline" disabled>发货</Button></div> }, { id: 'detail-audit-records', title: '完整审核记录', content: <section data-testid="embedded-audit" className="rounded-xl border bg-card p-6 shadow-sm"><p>该记录来自已保存的审核结果。</p><section data-testid="nested-card" className="rounded-xl border bg-card p-4"><label htmlFor="audit-note">记录备注</label><Input id="audit-note" className="block min-h-11 w-full rounded-md border bg-background" /></section></section> }, { id: 'detail-design-files', title: '设计文件管理', content: <p>设计原稿与生产文件记录。</p> }, { id: 'detail-pricing-tools', title: '计价与核价', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> }]}
+    supplementary={[{ id: 'detail-other-actions', title: '其他工单操作', content: <div className="flex flex-wrap gap-2"><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf?view=inline`}>打印</a><a className="inline-flex min-h-11 items-center p-2" href={`/api/orders/${model.id}/pdf`}>下载 PDF</a>{canEdit ? <a className="inline-flex min-h-11 items-center p-2" href={`/orders/${model.id}/edit`}>编辑工单</a> : null}<Button variant="outline" disabled>发货</Button></div> }, { id: 'detail-audit-records', title: '完整审核记录', content: <section data-testid="embedded-audit" className="rounded-xl border bg-card p-6 shadow-sm"><p>该记录来自已保存的审核结果。</p><section data-testid="nested-card" className="rounded-xl border bg-card p-4"><label htmlFor="audit-note">记录备注</label><Input id="audit-note" className="block min-h-11 w-full rounded-md border bg-background" /></section></section> }, { id: 'detail-design-files', title: '设计文件管理', content: <p>设计原稿与生产文件记录。</p> }, { id: 'detail-pricing-tools', title: '计价与核价', content: <Disclosure data-testid="nested-pricing"><DisclosureSummary>核价明细</DisclosureSummary><section id="pricing-review"><h3>待核价费用明细</h3></section></Disclosure> }, ...extraSections]}
     packaging={<section data-testid="embedded-packaging" className="rounded-xl border bg-card p-6 shadow-sm"><p>分袋明细：300 袋，每袋 10 个。</p></section>}
   />));
 }
@@ -362,6 +362,27 @@ describe('admin order detail design and interaction gates', () => {
     await expectHashTargetUnobscured(target);
     await expect.element(page.getByRole('heading', { name: '待核价费用明细', exact: true })).toBeVisible();
     expect(geometryFailures(host, 393)).toEqual([]);
+  });
+
+  // 业主 2026-10-02：低频维护区没有待处理事项时首次收起；链接仍能展开，之后刷新不改管理员的选择。
+  it('starts a low-frequency section collapsed, opens it from a link and keeps the admin’s choice across refreshes', async () => {
+    await page.viewport(1280, 900);
+    host.style.paddingBottom = '100vh';
+    const costs = (collapsed: boolean) => [{ id: 'detail-costs', title: '工厂成本', collapsed, content: <section id="cost-entries"><h3>成本补录与调整</h3></section> }];
+    renderDetail(detailModel(), true, false, costs(true));
+    const section = document.getElementById('detail-costs') as HTMLDetailsElement;
+    expect(section.open).toBe(false);
+    expect((document.getElementById('detail-pricing-tools') as HTMLDetailsElement).open).toBe(true);
+    location.hash = '#cost-entries';
+    await expect.poll(() => section.open).toBe(true);
+    await expectHashTargetUnobscured(document.getElementById('cost-entries')!);
+    renderDetail(detailModel(), true, false, costs(true));
+    expect(section.open).toBe(true);
+    await page.getByText('工厂成本', { exact: true }).click();
+    await expect.poll(() => section.open).toBe(false);
+    renderDetail(detailModel(), true, false, costs(false));
+    await new Promise((done) => requestAnimationFrame(done));
+    expect(section.open).toBe(false);
   });
 
   it('reveals a pricing target when the hash changes after the page is mounted', async () => {

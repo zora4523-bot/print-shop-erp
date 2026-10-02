@@ -9,6 +9,10 @@ import type { BatchOrderSnapshot } from '../admin-order-batch-ui';
 import { waitForStableLayout } from '@/tests/browser/wait-for-layout';
 import '@/app/globals.css';
 
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+// 批量打印交付（BatchPrintDeliveryProvider）引入的 server action；不 mock 会把服务端依赖拖进浏览器。
+vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: vi.fn(), recordOrderPrintedAction: vi.fn() }));
 vi.mock('next/link', () => ({
   __esModule: true,
   default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => (
@@ -119,9 +123,27 @@ describe('batch receipt print handoff', () => {
     await expect.poll(() => document.activeElement?.textContent).toBe('查看批量结果');
     await page.getByRole('button', { name: '查看批量结果', exact: true }).click();
     await expect.element(page.getByRole('link', { name: '去打印工单 GD-260910-001', exact: true })).toBeVisible();
+
+    // 业主 2026-10-02：打印在新标签页完成并记录；点过「去打印」后回到本页刷新一次。
+    refresh.mockClear();
+    window.dispatchEvent(new Event('focus'));
+    expect(refresh).not.toHaveBeenCalled();
+    const stay = (event: MouseEvent) => event.preventDefault();
+    document.addEventListener('click', stay, true);
+    try {
+      await page.getByRole('link', { name: '去打印工单 GD-260910-001', exact: true }).click();
+    } finally {
+      document.removeEventListener('click', stay, true);
+    }
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('focus'));
+    // 页面级协调器一秒内合并刷新：紧接上一次刷新时以尾随刷新补上，只刷一次。
+    await expect.poll(() => refresh.mock.calls.length, { timeout: 2000 }).toBe(1);
+    await new Promise((done) => setTimeout(done, 1100));
+    expect(refresh).toHaveBeenCalledOnce();
   });
 
-  it.each(['MARK_PRINTED', 'SETTLE'] as const)('%s does not offer printing from its successful receipt', async (command) => {
+  it.each(['SETTLE'] as const)('%s does not offer printing from its successful receipt', async (command) => {
     mount();
     finish(command);
     await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();

@@ -92,6 +92,10 @@ async function createAndSubmitSalesOrder(browser: Browser, paperName: string, or
 
 async function openHistoricalPriceEditor(page: Page, orderId: string) {
   await page.goto(`/orders/${orderId}`);
+  // 业主 2026-10-02：「计价与收费维护」没有待处理事项时默认收起；已有单价的历史材料核价在里面。
+  const pricing = page.locator('#detail-pricing-tools');
+  if (await pricing.getAttribute('open') === null) await pricing.locator(':scope > summary').click();
+  await expect(pricing).toHaveAttribute('open', '');
   const summary = page.getByRole('main').locator('summary:visible').filter({ hasText: /^历史材料单价/ });
   await summary.click();
   return summary.locator('..');

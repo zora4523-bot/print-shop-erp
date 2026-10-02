@@ -1,0 +1,67 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
+import { requirePermission } from '@/lib/auth/permissions';
+import { BatchPrintAccessError, BatchPrintArtifactUnavailableError, BatchPrintSelectionError, recordBatchPrint } from '@/lib/order/batch-print';
+import { OrderPrintJobError } from '@/lib/order/print-jobs';
+import { recordPrintPage } from '@/lib/order/print-record';
+import { derivePublicBaseUrl } from '@/lib/public-base-url';
+import type { BatchPrintRecordResult, OrderPrintRecordResult } from './order-print-record.types';
+
+const inputSchema = z.object({
+  orderId: z.string().trim().min(1).max(128),
+  workOrderVersion: z.number().int().min(1),
+  contentKey: z.string().regex(/^[0-9a-f]{64}$/),
+  attemptKey: z.string().regex(/^print-page:[0-9a-f-]{36}$/),
+}).strict();
+
+const batchInputSchema = z.object({
+  jobId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+  attemptId: z.string().uuid(),
+}).strict();
+
+/**
+ * 点「打印」即记已打印（业主 2026-10-02）：打印页关闭浏览器打印对话框后调用，
+ * 只记录打印页渲染时的那份内容（生产指令摘要），重试只重放本次打印尝试。
+ */
+export async function recordOrderPrintedAction(input: unknown): Promise<OrderPrintRecordResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = inputSchema.safeParse(input);
+  // 参数不符多半是页面停留在旧版本：提示刷新，不替旧页面临时生成尝试标识（否则重试会认领新任务）。
+  if (!parsed.success) return { status: 'error', message: '页面已更新，请刷新后重新打印' };
+  try {
+    const outcome = await recordPrintPage(parsed.data, actor, await derivePublicBaseUrl());
+    if (outcome === 'MARKED') {
+      revalidatePath('/orders');
+      revalidatePath(`/orders/${parsed.data.orderId}`);
+    }
+    return { status: 'success', outcome };
+  } catch (error) {
+    if (error instanceof OrderPrintJobError) return { status: 'error', message: error.message };
+    throw error;
+  }
+}
+
+/**
+ * 浏览器取得批量打印文件后调用：确认文件仍可取、内容仍是当前内容后，文件里的工单整批记为
+ * 已打印，任一工单不符整批不记。浏览器在成功或结果未知（网络中断）时交付已取得的文件，明确
+ * 失败不交付；`attemptId` 每次打开 / 下载一个，同一次的重试沿用（结果未知时只重试记录）。
+ */
+export async function recordBatchPrintAction(input: unknown): Promise<BatchPrintRecordResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = batchInputSchema.safeParse(input);
+  if (!parsed.success) return { status: 'error', message: '页面已更新，请刷新后重新生成打印文件' };
+  try {
+    const result = await recordBatchPrint(actor.id, parsed.data.jobId, parsed.data.attemptId);
+    if (!result) return { status: 'error', message: '打印文件尚未就绪' };
+    if (result.marked > 0) revalidatePath('/orders');
+    return { status: 'success', marked: result.marked };
+  } catch (error) {
+    if (error instanceof BatchPrintAccessError) return { status: 'error', message: '打印任务不存在或无权访问' };
+    if (error instanceof BatchPrintSelectionError) return { status: 'error', message: '工单内容已变化，请重新选择并生成' };
+    if (error instanceof BatchPrintArtifactUnavailableError) return { status: 'error', message: '打印文件已过期，请重新生成' };
+    if (error instanceof OrderPrintJobError) return { status: 'error', message: error.message };
+    throw error;
+  }
+}
