@@ -12,7 +12,13 @@ export const metadata = {
 export default async function OwnerMaterialInventoryCountPage() {
   await requirePermission('material:manage');
   // 首屏行由服务端给出，避免挂载后补请求把页面往下顶（CLS）。limit 与客户端检索一致。
-  const initialRows = await listInventoryCountMaterials({ limit: 80 });
+  let initialRows: Awaited<ReturnType<typeof listInventoryCountMaterials>> | undefined;
+  try {
+    initialRows = await listInventoryCountMaterials({ limit: 80 });
+  } catch {
+    // Keep the page usable: the client fetch owns its inline error and retry UI.
+    initialRows = undefined;
+  }
 
   return (
     <div className="space-y-6">

@@ -183,4 +183,18 @@ pg.sequential('planned completion (batch / ship implies completion) · real Post
     await expect(shipOrder(order.id, admin, command)).resolves.toMatchObject({ idempotentReplay: true });
     expect(await db.productionWage.count({ where: { jobId: job.id } })).toBe(1);
   });
+  it('reports no pending jobs honestly and leaves an unreconciled released order unshipped', async () => {
+    const order = await db.order.create({ data: { orderNo: `PLANNED-EMPTY-${randomUUID()}`, submitterId: `${prefix}_sales`, createdById: admin.id,
+      submitterRole: 'SALES', settlementType: 'EXTERNAL_SALES', simpleProduction: true, status: 'RELEASED',
+      pricingStatus: 'ADMIN_CONFIRMED', pricingConfirmedAt: new Date(), pricingConfirmedById: admin.id, confirmedFee: '100', totalAmount: '100',
+      shipments: { create: { sequence: 1, receiverName: '测试', receiverPhone: '13800138000', receiverAddress: '测试地址' } } }, include: { shipments: true } });
+    await expect(shipOrder(order.id, admin, { expectedRevision: order.revision, expectedEditVersion: order.editVersion,
+      expectedWorkOrderVersion: order.workOrderVersion, expectedPriceRevision: order.priceRevision, idempotencyKey: randomUUID(),
+      trackingNo: 'ZTEMPTY', shipments: [{ shipmentId: order.shipments[0].id, trackingNo: 'ZTEMPTY', weightKg: null }] }))
+      .rejects.toThrow('没有待登记的生产任务，工单仍未完工，暂不能发货');
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('RELEASED');
+    expect(await db.productionWage.count({ where: { job: { orderId: order.id } } })).toBe(0);
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: order.shipments[0].id } })).shippedAt).toBeNull();
+  });
+
 });

@@ -22,6 +22,18 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
   orders: CdrWorkbenchOrder[]; bundles: CdrHistoryRow[]; mock: boolean; now: string;
 }) {
   const router = useRouter();
+  const [clientNow, setClientNow] = useState(now);
+  useEffect(() => {
+    const update = () => setClientNow(new Date().toISOString());
+    const timer = setInterval(update, 1_000);
+    window.addEventListener('focus', update);
+    document.addEventListener('visibilitychange', update);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', update);
+      document.removeEventListener('visibilitychange', update);
+    };
+  }, []);
   const [state, action, pending] = useActionState<CreateBundleResult | null, FormData>(createWorkbenchBundleAction, null);
   const [selected, setSelected] = useState<string[]>([]);
   const attempted = useRef<string | null>(null);
@@ -35,7 +47,7 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
   const [pollEpoch, setPollEpoch] = useState(0);
   const [pollWarning, setPollWarning] = useState<{ state: CreateBundleResult; epoch: number; message: string } | null>(null);
   const pollMessage = !pending && pollWarning?.state === state && pollWarning.epoch === pollEpoch ? pollWarning.message : null;
-  const { current, url, bundleId } = cdrClientProgress(state, bundles, polled, now);
+  const { current, url, bundleId } = cdrClientProgress(state, bundles, polled, clientNow);
   useEffect(() => {
     if (state?.status !== 'queued') return;
     const requestedId = state.bundleId;
@@ -136,7 +148,7 @@ export function CdrWorkbench({ orders, bundles, mock, now }: {
     <Disclosure className="border-t pt-2">
       <DisclosureSummary>下载记录（最近 {bundles.length} 条）<DisclosureIndicator /></DisclosureSummary>
       <Button type="button" variant="outline" onClick={() => router.refresh()}>刷新记录</Button>
-      <div className="divide-y">{bundles.map((bundle) => <BundleHistory key={bundle.id} bundle={bundle} now={now} action={action} pending={pending} />)}</div>
+      <div className="divide-y">{bundles.map((bundle) => <BundleHistory key={bundle.id} bundle={bundle} now={clientNow} action={action} pending={pending} />)}</div>
       {!bundles.length && <EmptyState kind="no-data" noun="下载记录" />}
     </Disclosure>
   </div>;

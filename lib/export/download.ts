@@ -4,12 +4,31 @@ export class ExportDownloadError extends Error {}
 /** Keep HTTP errors and login HTML on the page instead of saving them as files. */
 export async function fetchExportFile(href: string, signal?: AbortSignal) {
   const timeout = AbortSignal.timeout(60_000);
+  let combined = timeout;
+  let dispose = () => {};
+  if (signal) {
+    if (typeof AbortSignal.any === 'function') combined = AbortSignal.any([signal, timeout]);
+    else {
+      const controller = new AbortController();
+      const abortCaller = () => controller.abort(signal.reason);
+      const abortTimeout = () => controller.abort(timeout.reason);
+      if (signal.aborted) abortCaller();
+      else signal.addEventListener('abort', abortCaller, { once: true });
+      if (timeout.aborted) abortTimeout();
+      else timeout.addEventListener('abort', abortTimeout, { once: true });
+      combined = controller.signal;
+      dispose = () => {
+        signal.removeEventListener('abort', abortCaller);
+        timeout.removeEventListener('abort', abortTimeout);
+      };
+    }
+  }
   try {
-    return await readExportFile(href, signal ? AbortSignal.any([signal, timeout]) : timeout);
+    return await readExportFile(href, combined);
   } catch (error) {
     if (timeout.aborted && !signal?.aborted) throw new ExportDownloadError('下载等待超时，请稍后重试。');
     throw error;
-  }
+  } finally { dispose(); }
 }
 
 async function readExportFile(href: string, signal: AbortSignal) {

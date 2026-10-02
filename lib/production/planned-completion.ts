@@ -137,7 +137,7 @@ export async function completePlannedProductionBeforeShipInTx(tx: Prisma.Transac
   if (!order.simpleProduction || (order.status !== 'RELEASED' && order.status !== 'FOILING')) return null;
   if (order.revision !== expected.expectedRevision || order.editVersion !== expected.expectedEditVersion
     || order.workOrderVersion !== expected.expectedWorkOrderVersion || order.priceRevision !== expected.expectedPriceRevision) return null;
-  const { notification } = await completePlannedProductionInTx(tx, order.id, actor, 'SHIPMENT_AUTO');
+  const { notification, completedJobs } = await completePlannedProductionInTx(tx, order.id, actor, 'SHIPMENT_AUTO');
   const after = await tx.order.findUniqueOrThrow({ where: { id: order.id }, select: { status: true, revision: true, editVersion: true, workOrderVersion: true, priceRevision: true } });
-  return { notification, status: after.status, versions: { revision: after.revision, editVersion: after.editVersion, workOrderVersion: after.workOrderVersion, priceRevision: after.priceRevision } };
+  return { notification, completedJobCount: completedJobs.length, status: after.status, versions: { revision: after.revision, editVersion: after.editVersion, workOrderVersion: after.workOrderVersion, priceRevision: after.priceRevision } };
 }

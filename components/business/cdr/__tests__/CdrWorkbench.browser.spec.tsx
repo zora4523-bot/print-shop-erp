@@ -21,7 +21,7 @@ beforeEach(() => {
   m.create.mockResolvedValue({ status: 'queued', bundleId: 'new' });
   flushSync(() => root.render(<CdrWorkbench orders={[]} bundles={[old]} mock={false} now="2026-10-02T00:00:00Z" />));
 });
-afterEach(() => { flushSync(() => root.unmount()); host.remove(); download.mockRestore(); });
+afterEach(() => { flushSync(() => root.unmount()); host.remove(); download.mockRestore(); vi.useRealTimers(); });
 async function regenerate() {
   await page.getByText(/^下载记录（最近 1 条）/).click();
   await page.getByRole('button', { name: '按原工单重新生成', exact: true }).click();
@@ -55,4 +55,33 @@ it('replaces a prior progress warning when a new history submission is accepted'
   await expect.poll(() => m.progress.mock.calls.length).toBe(2);
   expect(m.progress).toHaveBeenLastCalledWith('newer');
   await expect.element(page.getByText('进度读取失败，请刷新进度重试')).not.toBeInTheDocument();
+});
+
+it('expires an open history row without a route refresh and offers regeneration', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
+  const now = new Date().toISOString();
+  const ready = { ...old, status: 'READY', failureMessage: null, downloadUrl: '/api/cdr/bundles/history-token', expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  flushSync(() => root.render(<CdrWorkbench orders={[]} bundles={[ready]} mock={false} now={now} />));
+  await page.getByText(/^下载记录（最近 1 条）/).click();
+  await expect.element(page.getByRole('button', { name: '下载 ZIP', exact: true })).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '复制分享链接', exact: true })).toBeVisible();
+  vi.setSystemTime(new Date(ready.expiresAt));
+  window.dispatchEvent(new Event('focus'));
+  await expect.element(page.getByRole('button', { name: '按原工单重新生成', exact: true })).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '下载 ZIP', exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByRole('button', { name: '复制分享链接', exact: true })).not.toBeInTheDocument();
+  expect(m.router.refresh).not.toHaveBeenCalled();
+});
+it('removes the active receipt download when its newly generated package expires', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
+  m.progress.mockResolvedValue({ ...pendingRow, status: 'READY', downloadUrl: '/api/cdr/bundles/new-token', expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  await regenerate();
+  await expect.element(page.getByText('下载包已就绪', { exact: true })).toBeVisible();
+  await expect.element(page.getByRole('button', { name: '下载 ZIP', exact: true })).toBeVisible();
+  vi.setSystemTime(new Date('2026-10-02T00:01:00Z'));
+  await expect.element(page.getByRole('button', { name: '下载 ZIP', exact: true })).not.toBeInTheDocument();
+  await expect.element(page.getByText('打包记录已生成', { exact: true })).toBeVisible();
+  expect(download).toHaveBeenCalledOnce();
 });

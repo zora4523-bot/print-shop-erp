@@ -83,6 +83,7 @@ export async function listWorkbenchOrders(filter: CdrWorkbenchFilter) {
     JOIN LATERAL (
       SELECT manifest FROM "DesignBundle"
       WHERE status = 'READY' AND "zipFileUrl" NOT LIKE 'mock://%'
+        AND "revokedAt" IS NULL AND "expiresAt" > CURRENT_TIMESTAMP
         AND "orderIds" @> ARRAY[requested.id]::text[]
       ORDER BY "createdAt" DESC, id DESC LIMIT 1
     ) latest ON true
