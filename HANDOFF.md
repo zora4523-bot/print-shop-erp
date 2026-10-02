@@ -589,6 +589,10 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 ## 历史（追加式时间线）
 
+- 2026-10-02：全站表格与状态可读性补查，修复共享徽章、表头和金额列挤压断行；入口覆盖、隔离数据与验证边界见 [补查记录](docs/audits/2026-10-02-table-readability-qa.md)。
+- 2026-10-02：根据用户标注修复 944px 账单状态文字穿出徽章，并更正此前过度的验收结论；见 [业务实页 QA 记录](docs/audits/2026-10-01-business-design-qa.md)。
+- 2026-10-01—02：业务实页 Design QA，检查多角色页面并修复布局、反馈与可访问性问题；实际覆盖和未验收边界见 [业务实页 QA 记录](docs/audits/2026-10-01-business-design-qa.md)。
+
 - 2026-10-01：审查并完善 UI / UX Quality Standard，统一 Codex / Claude Code 入口、功能保护、Design QA、验收和停止条件；仅文档验证，未做全站实屏验收，详见 `docs/audits/2026-10-01-ui-quality-standard-review.md`。
 
 - 2026-09-27：完成建单整款删除、规格选择与历史名称修复；Claude Code Opus 5.5 三轮审查及负控补测完成，本地提交，3000 开发服务保留。详见 [验收记录](docs/audits/2026-09-27-design-removal.md)。

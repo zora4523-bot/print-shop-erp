@@ -348,7 +348,7 @@ PageHeader
 |---|---|---|---|
 | `tests/visual/order-print.spec.ts` | 8 个打印 fixture 像素基线 | 相同环境下打印布局未发生非预期像素变化 | Web 全站与设计稿一致 |
 | `tests/visual/admin-responsive.spec.ts` | 九视口、light/dark、geometry、touch、axe | 被覆盖管理页面不触发已定义的裁切/无障碍门禁 | 与 `.dc.html` 自动像素匹配 |
-| `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx` | 管理员/销售共享导航六视口、明暗主题、overflow、touch、axe；销售平铺与菜单键盘操作 | 隔离于业务数据的导航布局、角色入口和交互契约 | 完整业务页面的截图或端到端授权 |
+| `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx` | 管理员/销售共享导航九视口、明暗主题、overflow、touch、axe；销售平铺与菜单键盘操作 | 隔离于业务数据的导航布局、角色入口和交互契约 | 完整业务页面的截图或端到端授权 |
 | `tests/visual/worker-responsive.spec.ts` | 九视口、light/dark、师傅端路由与历史/缺失状态、geometry、touch、axe | 被覆盖师傅端路由满足当前门禁 | 所有师傅端业务状态已逐像素审查 |
 | `/dev/showcase` | 人工组件检查 | token、状态和原子件在主题/尺寸下可目视比较 | 自动回归或页面采用率 |
 
