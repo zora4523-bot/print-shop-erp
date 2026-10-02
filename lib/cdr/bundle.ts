@@ -1,3 +1,4 @@
+import { cdrPackingDiagnostic } from './diagnostics';
 import { CdrBundleError, CdrBundleStaleError } from './errors';
 export { CdrBundleError } from './errors';
 import { collectWorkbenchSelection, validateWorkbenchManifest } from './workbench';
@@ -262,7 +263,7 @@ export async function createBundle(
     // 看到清晰失败状态，并把原因翻译成 CdrBundleError 给表单展示。
     await db.designBundle.delete({ where: { id: bundle.id } }).catch(() => {});
     if (error instanceof CdrBundleError) throw error;
-    console.error('[cdr] bundle generation failed', { code: 'CdrZipError' });
+    console.error('[cdr] bundle generation failed', { bundleId: bundle.id, ...cdrPackingDiagnostic(error) });
     throw new CdrBundleError('CDR 文件读取或打包失败，请核对附件后重试');
   }
 

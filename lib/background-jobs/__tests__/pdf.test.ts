@@ -375,7 +375,7 @@ describe('PDF queue availability', () => {
     expect(dbMock.backgroundWorkerHeartbeat.findFirst).not.toHaveBeenCalled();
   });
   it('trusts a fresh owning worker heartbeat even while PDF capability is stale', async () => {
-    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.RUNNING, lockedBy: 'owner' });
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.RUNNING, lockedBy: 'owner:1' });
     dbMock.backgroundWorkerHeartbeat.findFirst.mockImplementation(async ({ where }) => where.workerId === 'owner' ? { workerId: 'owner' } : null);
     await expect(waitForOrderPdfJob('j', { expected, timeoutMs: 1_000 })).resolves.toEqual({ status: 'timeout', phase: 'running' });
     expect(dbMock.backgroundWorkerHeartbeat.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ workerId: 'owner', lastSeenAt: { gte: expect.any(Date) } }) }));

@@ -193,7 +193,7 @@ export async function batchPrintStatus(actorId: string, jobId: string): Promise<
   // A claimed job may continue during a capability probe, but only with a live owner.
   const owner = job.status === 'RUNNING' && job.lockedBy
     ? await db.backgroundWorkerHeartbeat.findFirst({
-        where: { workerId: job.lockedBy, queue: BackgroundJobQueue.HEAVY,
+        where: { workerId: job.lockedBy.replace(/:\d+$/, ''), queue: BackgroundJobQueue.HEAVY,
           lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) } },
         select: { workerId: true },
       }) : null;

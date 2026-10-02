@@ -51,6 +51,8 @@ describe('unbilled order page', () => {
     expect(html).toContain('/owner/agent-bills?period=2026-08&amp;agentUserId=sales-a');
     expect(html).not.toContain('agentUserId=sales-b');
     expect(html).toContain('本月结束后可出账');
+    expect(html).toContain('处理 2026-08 未出账工单');
+    expect(html).not.toContain('查看 2026-08 账单');
     expect(html).toContain('/owner/agent-bills/unbilled?period=2026-08&amp;page=3');
   });
   it('rejects access before querying orders', async () => {

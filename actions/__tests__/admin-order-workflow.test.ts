@@ -30,6 +30,7 @@ vi.mock('@/lib/order/admin-batch', () => ({
     'RELEASE',
     'CREATE_PRINT',
     'MARK_PRINTED',
+    'COMPLETE_PRODUCTION',
     'SETTLE',
   ],
   runAdminOrderBatch: mocks.batch,
@@ -224,4 +225,22 @@ it('validates and forwards independent release without enabling print creation',
   expect(mocks.release).toHaveBeenCalledWith(input, actor);
   await expect(releaseFactoryOrderAction({ ...input, createPrint: 'false' })).resolves.toMatchObject({ status: 'invalid' });
   expect(mocks.release).toHaveBeenCalledTimes(1);
+});
+
+const completeInput = { requestId: 'complete-production-request', command: 'COMPLETE_PRODUCTION', items: [{ orderId: 'order-1', expectedRevision: 4, expectedWorkOrderVersion: 2 }] };
+it('requires production permission before invoking batch completion', async () => {
+  const denied = new Error('Forbidden');
+  mocks.requirePermission.mockResolvedValueOnce(actor).mockRejectedValueOnce(denied);
+  await expect(runAdminOrderBatchAction(completeInput)).rejects.toBe(denied);
+  expect(mocks.requirePermission.mock.calls).toEqual([['order:change:review'], ['production:manage']]);
+  expect(mocks.batch).not.toHaveBeenCalled();
+  expect(mocks.revalidatePath).not.toHaveBeenCalled();
+});
+it('refreshes production and wage surfaces and only successful order details', async () => {
+  mocks.batch.mockResolvedValueOnce({ command: 'COMPLETE_PRODUCTION', successCount: 1, skippedCount: 1, failedCount: 1, notAttemptedCount: 0,
+    items: [{ orderId: 'order-1', status: 'success' }, { orderId: 'order-2', status: 'skipped' }, { orderId: 'order-3', status: 'failed' }] });
+  await expect(runAdminOrderBatchAction(completeInput)).resolves.toMatchObject({ status: 'partial_failure' });
+  expect(mocks.requirePermission.mock.calls).toEqual([['order:change:review'], ['production:manage']]);
+  expect(mocks.batch).toHaveBeenCalledWith(completeInput, actor);
+  expect(mocks.revalidatePath.mock.calls.map(([path]) => path).sort()).toEqual(['/orders', '/orders/production', '/worker/tasks', '/worker/orders', '/worker/salary', '/owner/salary/piecework', '/orders/order-1'].sort());
 });

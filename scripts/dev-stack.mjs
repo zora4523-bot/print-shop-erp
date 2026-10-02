@@ -16,16 +16,37 @@ export function devProcesses(mode, args = []) {
   ] : [web];
 }
 
+/** Keep the preflight address aligned with every Next CLI flag spelling. */
+/** @param {string[]} args @param {{ PORT?: string }} env */
+export function devListenOptions(args, env = process.env) {
+  let portValue;
+  let hostnameValue;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--') break;
+    if (arg === '--port' || arg === '-p') portValue = args[++index] ?? '';
+    else if (arg.startsWith('--port=')) portValue = arg.slice(7);
+    else if (arg.startsWith('-p') && !arg.startsWith('--')) portValue = arg.slice(2);
+    else if (arg === '--hostname' || arg === '-H') hostnameValue = args[++index] ?? '';
+    else if (arg.startsWith('--hostname=')) hostnameValue = arg.slice(11);
+    else if (arg.startsWith('-H')) hostnameValue = arg.slice(2);
+  }
+  const port = Number(portValue ?? env.PORT ?? 3000);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('INVALID_PORT');
+  const host = hostnameValue ?? '127.0.0.1';
+  if (!host || host.startsWith('-')) throw new Error('INVALID_HOSTNAME');
+  const defaults = [...(portValue === undefined ? ['--port', String(port)] : []), ...(hostnameValue === undefined ? ['--hostname', host] : [])];
+  const separator = args.indexOf('--');
+  const webArgs = separator < 0 ? [...args, ...defaults] : [...args.slice(0, separator), ...defaults, ...args.slice(separator)];
+  return { port, host, webArgs };
+}
+
 export async function startDevStack(args = process.argv.slice(2)) {
   if (process.env.NODE_ENV === 'production') throw new Error('DEV_REQUIRES_DEVELOPMENT');
   loadEnvConfig(process.cwd(), true);
   const mode = process.env.BACKGROUND_JOBS_MODE || 'durable';
   if (!['durable', 'inline'].includes(mode)) throw new Error('INVALID_BACKGROUND_MODE');
-  const portFlag = args.findIndex((arg) => arg === '--port' || arg === '-p');
-  const port = Number(portFlag >= 0 ? args[portFlag + 1] : process.env.PORT || 3000);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('INVALID_PORT');
-  const hostnameFlag = args.findIndex((arg) => arg === '--hostname' || arg === '-H');
-  const host = hostnameFlag >= 0 ? args[hostnameFlag + 1] : '127.0.0.1';
+  const { port, host, webArgs } = devListenOptions(args);
   await checkPort(port, host);
   const version = `dev-${randomUUID()}`;
   const env = { ...process.env, NODE_ENV: 'development', BACKGROUND_JOBS_MODE: mode, APP_VERSION: version, NOTIFICATION_MOCK_MODE: 'true' };
@@ -54,7 +75,7 @@ export async function startDevStack(args = process.argv.slice(2)) {
     return child;
   }
   try {
-    const configs = devProcesses(mode, [...args, ...(portFlag < 0 ? ['--port', String(port)] : []), ...(hostnameFlag < 0 ? ['--hostname', host] : [])]);
+    const configs = devProcesses(mode, webArgs);
     if (mode === 'durable') {
       for (const config of configs.slice(0, -1)) launch(config);
       await waitForWorkers(env, () => stopping);

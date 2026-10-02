@@ -383,6 +383,7 @@ describe('createBundle', () => {
     expect(dbMock.designBundle.delete).toHaveBeenCalledWith({
       where: { id: 'b1' },
     });
+    expect(consoleSpy).toHaveBeenCalledWith(expect.any(String), { bundleId: 'b1', code: 'CdrZipError', cause: 'AccessDenied' });
     consoleSpy.mockRestore();
   });
 });

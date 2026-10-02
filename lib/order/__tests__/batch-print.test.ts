@@ -98,7 +98,7 @@ describe('batch PDF invariants', () => {
     await batchPrintStatus('admin', 'j');
     expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', pdfReady: true, version: process.env.APP_VERSION || 'dev' });
     m.worker.mockImplementation(async ({ where }) => where.workerId === 'owner' ? { workerId: 'owner' } : null);
-    m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'owner', result: { completed: 1, issues: [] } });
+    m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'owner:1', result: { completed: 1, issues: [] } });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending', phase: 'rendering' });
   });
   it('rechecks contents even after reading the finished artifact', async () => {
@@ -169,7 +169,7 @@ it.each(['TargetCloseError', 'ProtocolError'])('reports a page-level %s without 
   expect(m.write).not.toHaveBeenCalled();
 });
 it('reports unavailability for a crashed running worker when its heartbeat expires', async () => {
-  m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'dead-owner', result: { completed: 1, issues: [] } });
+  m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'dead-owner:1', result: { completed: 1, issues: [] } });
   m.worker.mockResolvedValue(null);
   expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'unavailable' });
   expect(m.worker).toHaveBeenCalledTimes(2);

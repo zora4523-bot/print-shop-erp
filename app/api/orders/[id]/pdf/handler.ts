@@ -1,3 +1,4 @@
+import { Role } from '@/generated/prisma/enums';
 import { PERMISSIONS } from '@/lib/auth/permissions-dict';
 import { pdfFailure, pdfRetryUrl, pdfStatusResponse, type PdfStatus } from '@/lib/pdf/status-response';
 import { orderPdfMode } from '@/lib/pdf/mode.mjs';
@@ -58,7 +59,7 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   }
   const { id } = await ctx.params;
   const statusOnly = statuses.length === 1;
-  const pdfStatusPage = (input: PdfStatus) => pdfStatusResponse(input, { orderId: id, json: statusOnly, operator: PERMISSIONS['ops:jobs:manage'].some((role) => role === session.user.role) });
+  const pdfStatusPage = (input: PdfStatus) => pdfStatusResponse(input, { orderId: id, json: statusOnly, worker: session.user.role === Role.WORKER, operator: PERMISSIONS['ops:jobs:manage'].some((role) => role === session.user.role) });
   const baseUrl = await derivePublicBaseUrl();
   const order = await getOrderForPrint(
     id,

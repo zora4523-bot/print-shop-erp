@@ -420,3 +420,7 @@ pnpm db:studio
 `20261002093000_cdr_bundle_order_membership` 增加 `orderIds` GIN 索引。工作台以
 LATERAL 查询每个候选工单最新真实 READY 包，仅返回最多100条指纹，不将所有历史
 清单加载到应用内存。旧包无清单仍显示待核对，不把不确定版本当成已打包当前文件。
+
+### 取消工单结算凭据
+
+`20261002100000_agent_bill_cancellation_detail` 前向扩展 `AgentMonthlyBillItem_detail_object_check`，允许版本 2 的取消结算凭据保存结算金额与当时工单名称。版本 1 的加工费及对客收费分项继续可读，已确认账单不改写。取消结算按已确认的 `settledFee` 核对，不使用取消前尚未定价的收费；正常结算分项排除 `WAIVED`，非免收的缺失金额仍阻止入账。先应用迁移，再部署新写入代码。

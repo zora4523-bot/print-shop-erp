@@ -34,7 +34,7 @@ export function BillItemEvidence({ item, period, sales = false, returnTo }: {
     <section className="space-y-3">
       <h3 className="font-semibold">结算费用明细</h3>
       {detail ? <dl className="space-y-2">
-        <div className="flex justify-between gap-4"><dt>加工费</dt><dd className="tabular-nums">{formatMoney(detail.processingAmount)}</dd></div>
+        {detail.processingAmount !== null && <div className="flex justify-between gap-4"><dt>加工费</dt><dd className="tabular-nums">{formatMoney(detail.processingAmount)}</dd></div>}
         {detail.charges.map((charge, index) => <div key={index} className="flex justify-between gap-4"><dt>{charge.description}</dt><dd className="shrink-0 tabular-nums">{formatMoney(charge.amount)}</dd></div>)}
       </dl> : <p className="text-muted-foreground">该账单未保留完整费用分项，请按结算总额核对。</p>}
     </section>

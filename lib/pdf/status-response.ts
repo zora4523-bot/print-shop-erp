@@ -31,7 +31,7 @@ export type PdfStatus = {
   code?: string;
   requestId?: string;
 };
-type Presentation = { orderId: string; operator: boolean; json: boolean };
+type Presentation = { orderId: string; operator: boolean; json: boolean; worker?: boolean };
 
 export function pdfRetryUrl(requestUrl: string, jobId?: string): string {
   const url = new URL(requestUrl);
@@ -94,7 +94,7 @@ export function pdfStatusResponse(input: PdfStatus, view: Presentation): Respons
   return new Response(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title>
 <style>:root{color-scheme:light dark}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:Canvas;color:CanvasText;line-height:1.65;margin:0}main{max-width:44rem;margin:10vh auto;padding:1.5rem}h1{font-size:1.5rem}p{overflow-wrap:anywhere}nav{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1.5rem}a{display:inline-flex;align-items:center;min-height:44px;padding:.5rem .875rem;border:1px solid currentColor;border-radius:.5rem;color:LinkText;text-decoration:none}a:focus-visible{outline:3px solid Highlight;outline-offset:3px}.code{font-size:.875rem}</style></head>
 <body><main${pending ? ' aria-busy="true"' : ''}><div role="status" aria-live="polite"><h1 id="title">${escapeHtml(input.title)}</h1><p id="message">${escapeHtml(input.message)}</p><p id="code" class="code">${input.code ? `错误码：${escapeHtml(input.code)}` : ''}</p></div>
-<nav aria-label="PDF 恢复操作"><a id="retry" href="${escapeHtml(input.retryUrl)}">${pending ? '查询生成结果' : '立即重试'}</a><a href="/print/orders/${id}">网页打印</a><a href="/orders/${id}">返回工单</a>${view.operator ? '<a href="/owner/background-jobs">查看后台任务与服务状态</a>' : ''}</nav><noscript><p>请点击“查询生成结果”或“立即重试”手动查询。</p></noscript></main>${script}</body></html>`, {
+<nav aria-label="PDF 恢复操作"><a id="retry" href="${escapeHtml(input.retryUrl)}">${pending ? '查询生成结果' : '立即重试'}</a><a href="/print/orders/${id}">网页打印</a><a href="${view.worker ? '/worker/orders' : '/orders'}/${id}">返回工单</a>${view.operator ? '<a href="/owner/background-jobs">查看后台任务与服务状态</a>' : ''}</nav><noscript><p>请点击“查询生成结果”或“立即重试”手动查询。</p></noscript></main>${script}</body></html>`, {
     status: input.status,
     headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': `default-src 'none'; script-src 'sha256-${hash}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'self'`, 'X-Content-Type-Options': 'nosniff' },
   });

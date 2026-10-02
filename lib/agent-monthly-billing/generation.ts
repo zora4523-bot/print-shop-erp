@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { createBillSettlementDetail } from './settlement-detail';
-import type { Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import {
   AgentMonthlyBillStatus,
   OrderBillingMode,
@@ -45,7 +45,7 @@ const ELIGIBLE_ORDER_SELECT = {
   settledFee: true,
   processingAmount: true,
   totalAmount: true,
-  customerCharges: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { amount: true, description: true } },
+  customerCharges: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { amount: true, description: true, status: true } },
   settledAt: true,
 } satisfies Prisma.OrderSelect;
 
@@ -110,8 +110,11 @@ async function readEligibleOrders(
   });
   return orders.filter((order) => {
     try {
+      // Cancellation freezes its own agreed amount; unpriced original charges
+      // are no longer the basis of that settlement.
+      if (order.status === OrderStatus.CANCELLED) { decimal(order.settledFee); return true; }
       const total = decimal(order.totalAmount);
-      const charges = order.customerCharges.reduce((sum, charge) => sum.plus(decimal(charge.amount)), new Decimal(0));
+      const charges = order.customerCharges.filter(charge => charge.status !== 'WAIVED').reduce((sum, charge) => sum.plus(decimal(charge.amount)), new Decimal(0));
       if (!decimal(order.processingAmount).plus(charges).eq(total)) {
         throw new AgentMonthlyBillingError('工单总额与加工费及对客收费明细不一致');
       }
@@ -326,7 +329,7 @@ export async function synchronizeDraftBillInTx(
         orderStatusSnapshot: order.status,
         customerRefSnapshot: order.customerRef,
         settledFeeSnapshot: money(order.settledFee),
-        settlementDetailSnapshot: createBillSettlementDetail(order),
+        settlementDetailSnapshot: createBillSettlementDetail(order) ?? Prisma.DbNull,
         settledAtSnapshot: order.settledAt,
       },
       update: {
@@ -335,7 +338,7 @@ export async function synchronizeDraftBillInTx(
         orderStatusSnapshot: order.status,
         customerRefSnapshot: order.customerRef,
         settledFeeSnapshot: money(order.settledFee),
-        settlementDetailSnapshot: createBillSettlementDetail(order),
+        settlementDetailSnapshot: createBillSettlementDetail(order) ?? Prisma.DbNull,
         settledAtSnapshot: order.settledAt,
       },
       select: { id: true },
