@@ -30,7 +30,6 @@ export default async function OwnerAttentionPage({ searchParams }: Props) {
     <div className="min-w-0 space-y-4">
       <PageHeader
         title="关注事项"
-        back={{ href: '/owner', label: '返回工作台' }}
       />
       <nav aria-label="关注事项分类" className="flex flex-wrap gap-2">
         {ATTENTION_KINDS.map((item) => (

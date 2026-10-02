@@ -61,7 +61,9 @@ test.describe('administrator workspace', () => {
   test('standalone return controls pass focused light and dark gates', async ({ page }, testInfo) => {
     const routes: AdminRoute[] = [
       { name: 'return-empty-dispatch', path: '/orders/production', readyHeading: '安排生产师傅', prepareGateState: async page => {
-        await expect(page.getByRole('link', { name: '返回工单列表', exact: true })).toHaveAttribute('href', '/orders');
+        // 二级页唯一返回入口是顶栏面包屑父级（ui-规范 §8.3，业主 2026-10-02「请保持一致性」）。
+        await expect(page.locator('[data-slot="admin-header"]').getByRole('link', { name: '工单列表', exact: true })).toHaveAttribute('href', '/orders');
+        await expect(page.locator('[data-slot="page-header-back"]')).toHaveCount(0);
       } },
       { name: 'return-outsource', path: `/foreman/outsource/new?orderId=${fixture.orderId}`, readyHeading: '新建外协单', prepareGateState: async page => {
         await expect(page.getByRole('link', { name: '返回工单详情', exact: true })).toHaveAttribute('href', `/orders/${fixture.orderId}`);

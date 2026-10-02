@@ -176,6 +176,8 @@ describe('admin order detail design and interaction gates', () => {
         expect(getComputedStyle(input).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
         referenceInput.remove();
         expect(geometryFailures(host, width)).toEqual([]);
+        // 返回列表由顶栏面包屑承担，页头不再放同目标的返回链接（UI-SYSTEM「工单页面导航与标题去重」）。
+        expect(host.querySelector('[data-slot="page-header-back"]')).toBeNull();
         const surface = host.querySelector<HTMLElement>('[data-testid="admin-order-detail"]')!;
         const actions = document.getElementById('order-detail-actions')!;
         expect(actions.querySelector('#detail-other-actions')).not.toBeNull();

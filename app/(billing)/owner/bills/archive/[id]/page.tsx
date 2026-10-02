@@ -26,7 +26,6 @@ export default async function LegacyBillArchiveDetailPage({ params, searchParams
       <PageHeader
         title={`${bill.period} · #${bill.sequence} · ${bill.salesUser.displayName}`}
         subtitle={`发单 ${formatDateTimeShanghai(bill.issuedAt)} · 结清 ${formatDateTimeShanghai(bill.paidAt)}`}
-        back={{ href: '/owner/bills/archive', label: '返回历史账单归档' }}
         status={<BillStatusBadge status={bill.status} />}
       />
       <section className="grid gap-4 rounded-xl border bg-card p-5 shadow-sm sm:grid-cols-3">

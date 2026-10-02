@@ -27,7 +27,7 @@ export default async function EditChannelPage({
   if (channel.transport !== 'WECOM_SMART_BOT') {
     return (
       <FormPage>
-        <PageHeader title="旧版通知目标" back={{ href: '/owner/notifications', label: '返回推送配置' }} />
+        <PageHeader title="旧版通知目标" />
         <LegacyNotificationChannels
           open
           channels={[{
@@ -50,7 +50,6 @@ export default async function EditChannelPage({
       <PageHeader
         title="编辑通知目标"
         subtitle="修改展示名称和启停状态。通知目标标识与传输方式不可修改。"
-        back={{ href: '/owner/notifications', label: '返回推送配置' }}
       />
       <ChannelForm
         mode="edit"

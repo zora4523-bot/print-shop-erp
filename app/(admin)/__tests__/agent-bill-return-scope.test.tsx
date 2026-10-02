@@ -25,6 +25,17 @@ import OwnerDetailPage from '@/app/(billing)/owner/agent-bills/[id]/page';
 import CreditPage from '@/app/(billing)/owner/agent-bills/[id]/credits/[itemId]/new/page';
 import SalesDetailPage from '@/app/(admin)/sales/bills/[id]/page';
 import { BillItemEvidence } from '@/components/business/agent-monthly-billing/BillItemEvidence';
+import { BreadcrumbParent } from '@/components/business/admin/breadcrumb-entity';
+import { isValidElement, type ReactNode } from 'react';
+
+// 返回入口是顶栏面包屑父级（业主 2026-10-02「请保持一致性」）：页面把带范围的地址交给
+// BreadcrumbParent（不渲染 DOM），这里从元素树里取它的 href。
+function breadcrumbParentHref(node: ReactNode): string | undefined {
+  if (Array.isArray(node)) return node.map(breadcrumbParentHref).find(Boolean);
+  if (!isValidElement<{ href?: string; children?: ReactNode }>(node)) return undefined;
+  if (node.type === BreadcrumbParent) return node.props.href;
+  return breadcrumbParentHref(node.props.children);
+}
 
 const OWNER_SCOPE = '/owner/agent-bills?period=2026-08&status=CONFIRMED&page=2';
 const OWNER_SCOPE_PARAM = `returnTo=${encodeURIComponent(OWNER_SCOPE)}`.replaceAll('&', '&amp;');
@@ -107,11 +118,26 @@ describe('owner return scope', () => {
   it('returns from the credit page to the scoped bill detail', async () => {
     permission.mockResolvedValue({ id: 'admin', role: Role.ADMIN });
     ownerDetail.mockResolvedValue({ ...ownerBill, status: 'DRAFT' });
-    const scoped = renderToStaticMarkup(await CreditPage({ params: Promise.resolve({ id: 'bill-aug', itemId: 'item-1' }), searchParams: Promise.resolve({ returnTo: OWNER_SCOPE }) }));
-    expect(scoped).toContain(`href="/owner/agent-bills/bill-aug?${OWNER_SCOPE_PARAM}"`);
-    const unsafe = renderToStaticMarkup(await CreditPage({ params: Promise.resolve({ id: 'bill-aug', itemId: 'item-1' }), searchParams: Promise.resolve({ returnTo: '/sales/bills?period=2026-08' }) }));
-    expect(unsafe).toContain('href="/owner/agent-bills/bill-aug"');
-    expect(unsafe).not.toContain('/sales/bills');
+    const scoped = await CreditPage({ params: Promise.resolve({ id: 'bill-aug', itemId: 'item-1' }), searchParams: Promise.resolve({ returnTo: OWNER_SCOPE }) });
+    expect(breadcrumbParentHref(scoped)).toBe(`/owner/agent-bills/bill-aug?${OWNER_SCOPE_PARAM.replaceAll('&amp;', '&')}`);
+    expect(renderToStaticMarkup(scoped)).not.toContain('data-slot="page-header-back"');
+    const unsafe = await CreditPage({ params: Promise.resolve({ id: 'bill-aug', itemId: 'item-1' }), searchParams: Promise.resolve({ returnTo: '/sales/bills?period=2026-08' }) });
+    expect(breadcrumbParentHref(unsafe)).toBe('/owner/agent-bills/bill-aug');
+    expect(renderToStaticMarkup(unsafe)).not.toContain('/sales/bills');
+  });
+
+  it('returns from the bill detail to the scoped list through the breadcrumb parent', async () => {
+    permission.mockResolvedValue({ id: 'admin', role: Role.ADMIN });
+    const scoped = await OwnerDetailPage({ params: Promise.resolve({ id: 'bill-aug' }), searchParams: Promise.resolve({ returnTo: `${OWNER_SCOPE}&unknown=x` }) });
+    const href = breadcrumbParentHref(scoped)!;
+    expect(href).toMatch(/^\/owner\/agent-bills\?/);
+    expect(new URLSearchParams(href.split('?')[1]).get('period')).toBe('2026-08');
+    expect(new URLSearchParams(href.split('?')[1]).get('status')).toBe('CONFIRMED');
+    expect(new URLSearchParams(href.split('?')[1]).get('page')).toBe('2');
+    expect(href).not.toContain('unknown');
+    expect(renderToStaticMarkup(scoped)).not.toContain('data-slot="page-header-back"');
+    const unsafe = await OwnerDetailPage({ params: Promise.resolve({ id: 'bill-aug' }), searchParams: Promise.resolve({ returnTo: 'https://evil.example/owner/agent-bills?period=2026-08' }) });
+    expect(breadcrumbParentHref(unsafe)).toBe('/owner/agent-bills');
   });
 });
 

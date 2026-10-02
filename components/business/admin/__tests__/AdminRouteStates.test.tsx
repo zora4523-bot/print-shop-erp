@@ -2,6 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminRouteError } from '../AdminRouteError';
 import { AdminRouteLoading } from '../AdminRouteLoading';
+import OrderDetailLoading from '@/app/(admin)/orders/[id]/loading';
+import OrderEditLoading from '@/app/(admin)/orders/[id]/edit/loading';
+import OrderNewLoading from '@/app/(admin)/orders/new/loading';
 
 describe('admin route states', () => {
   it('uses the shared page error fallback inside real error.tsx boundaries', () => {
@@ -55,5 +58,28 @@ describe('admin route states', () => {
     expect(html).toContain('正在加载采购单');
     expect(html).not.toContain('正在加载正在加载');
     if (variant === 'form') expect(html).toContain('max-w-3xl');
+  });
+
+  // 骨架形状与目标页一致（审查 #26）：二级页返回由顶栏面包屑承担，页头默认没有返回入口，
+  // 骨架也不能先画一条返回占位再在内容到达时消失；只有保留页头返回的例外页传 withBack。
+  it.each(['detail', 'form'] as const)('%s 骨架默认不画返回占位，withBack 时才画', (variant) => {
+    const backPlaceholder = /data-slot="skeleton" class="[^"]*\bh-5 w-24\b/g;
+    const withoutBack = renderToStaticMarkup(<AdminRouteLoading variant={variant} label="正在加载采购单" />);
+    const withBack = renderToStaticMarkup(
+      <AdminRouteLoading variant={variant} label="正在加载新建工单" withBack />,
+    );
+    expect(withoutBack.match(backPlaceholder)).toBeNull();
+    expect(withBack.match(backPlaceholder)).toHaveLength(1);
+    expect(withoutBack).toContain(`data-variant="${variant}"`);
+  });
+
+  // 实际路由的骨架与页头一致：保留页头返回的例外页（新建、编辑工单）画返回占位，详情页不画。
+  it.each([
+    ['工单详情', OrderDetailLoading, 0],
+    ['编辑工单', OrderEditLoading, 1],
+    ['新建工单', OrderNewLoading, 1],
+  ] as const)('%s 路由骨架的返回占位与页头一致', (_label, Loading, expected) => {
+    const html = renderToStaticMarkup(<Loading />);
+    expect(html.match(/data-slot="skeleton" class="[^"]*\bh-5 w-24\b/g)?.length ?? 0).toBe(expected);
   });
 });

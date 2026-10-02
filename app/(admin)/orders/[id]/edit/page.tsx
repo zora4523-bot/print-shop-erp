@@ -254,7 +254,7 @@ function AdministratorOrderEdit({order, external, pending, pricingPending, canPr
       hasShippedShipment(order.shipments);
     return (
       <>
-        <BreadcrumbEntity label={order.orderNo} />
+        <BreadcrumbEntity label={order.customName} />
         {canRepairProductionFacts && repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}
         <AdminOrderEditor
           key={`${order.id}:${order.editVersion}`}
