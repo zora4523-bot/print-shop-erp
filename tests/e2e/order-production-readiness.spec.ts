@@ -45,10 +45,20 @@ test.describe('自动准备与显式生产下发', () => {
     expect(released).toMatchObject({ operations: 2, prints: 0, readiness: 1, totalAmount: '12.30', confirmedFee: '12.30', settledFee: null });
     await page.reload();
     expect(await state(id)).toEqual(released);
-    // 单张下发不自动打印；独立打印仍须创建当前版本任务。
-    await page.getByRole('button', { name: '加入待打印', exact: true }).click();
-    await expect.poll(async () => (await state(id)).prints).toBe(1);
-    expect(await state(id)).toEqual({ ...released, prints: 1 });
+    // 业主 2026-10-02 点打印即记已打印：单张下发不建打印任务；当前版本未打印时待办直接给「打印」，
+    // 不再给「加入待打印」。打印页关闭打印对话框后才在同一事务里建任务并记已打印（任务 + 回执两行）。
+    await expect(page.getByRole('button', { name: '加入待打印', exact: true })).toHaveCount(0);
+    await expect(page.locator(`a[href="/print/orders/${encodeURIComponent(id)}?autoprint=1"]`).first()).toBeVisible();
+    expect(await state(id)).toEqual(released);
+    const printPage = await page.context().newPage();
+    await printPage.addInitScript(() => {
+      window.print = () => { document.documentElement.dataset.e2ePrinted = 'true'; };
+    });
+    await printPage.goto(`/print/orders/${encodeURIComponent(id)}?autoprint=1`);
+    await expect(printPage.locator('html')).toHaveAttribute('data-e2e-printed', 'true', { timeout: 30_000 });
+    await printPage.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+    await expect.poll(async () => (await state(id)).prints).toBe(2);
+    expect(await state(id)).toEqual({ ...released, prints: 2 });
   });
   test('旧待确认单可直接下发，错误合计展示原因且没有写入', async ({ page }) => {
     test.setTimeout(120_000);

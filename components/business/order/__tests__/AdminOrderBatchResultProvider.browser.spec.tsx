@@ -11,6 +11,8 @@ import '@/app/globals.css';
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+// 批量打印交付（BatchPrintDeliveryProvider）引入的 server action；不 mock 会把服务端依赖拖进浏览器。
+vi.mock('@/actions/order-print-record', () => ({ recordBatchPrintAction: vi.fn(), recordOrderPrintedAction: vi.fn() }));
 vi.mock('next/link', () => ({
   __esModule: true,
   default: ({ prefetch, ...props }: ComponentProps<'a'> & { prefetch?: boolean }) => (
@@ -135,6 +137,9 @@ describe('batch receipt print handoff', () => {
     }
     window.dispatchEvent(new Event('focus'));
     window.dispatchEvent(new Event('focus'));
+    // 页面级协调器一秒内合并刷新：紧接上一次刷新时以尾随刷新补上，只刷一次。
+    await expect.poll(() => refresh.mock.calls.length, { timeout: 2000 }).toBe(1);
+    await new Promise((done) => setTimeout(done, 1100));
     expect(refresh).toHaveBeenCalledOnce();
   });
 

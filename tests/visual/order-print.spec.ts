@@ -346,7 +346,11 @@ test.describe('OrderPrintLayout 截图回归', () => {
   test('自动打印等待图稿和分页完成后只触发一次', async ({ page }) => {
     const salesId = await getUserIdByUsername(E2E_USERS.sales!.username);
     const { orderId } = await seedPrintableOrder({ submitterId: salesId, designCount: 1 });
+    // 业主 2026-10-02 点打印即记已打印：管理员的打印页在打印对话框关闭后记录。本用例只验证触发时机，
+    // 而下面 page.pdf() 的截取也会让 Chromium 派发 afterprint——那不是真实打印，先于页面拦下，免得
+    // 共享的确定性夹具留下不可删除的打印记录（记录路径由 order-production-readiness E2E 覆盖）。
     await page.addInitScript(() => {
+      window.addEventListener('afterprint', (event) => event.stopImmediatePropagation(), true);
       window.print = () => {
         const html = document.documentElement;
         html.dataset.printInvocationCount = String(Number(html.dataset.printInvocationCount ?? 0) + 1);

@@ -309,7 +309,7 @@ describe('admin order decisions require review before mutation', () => {
     try { await link.click(); } finally { document.removeEventListener('click', stay, true); }
     window.dispatchEvent(new Event('focus'));
     window.dispatchEvent(new Event('focus'));
-    expect(actions.refresh).toHaveBeenCalledOnce();
+    await expect.poll(() => actions.refresh.mock.calls.length, { timeout: 2000 }).toBe(1);
 
     renderOrder({ ...order, printPending: false, capabilities: { ...order.capabilities, createPrint: true, markPrinted: false } });
     await expect.element(page.getByRole('button', { name: '加入待打印', exact: true })).toBeVisible();
