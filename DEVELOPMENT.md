@@ -266,7 +266,7 @@ OrderLog 与 BusinessAuditLog 的 before。生产执行步骤（dry-run → 业�
 
 ### PDF 开发与回归（2026-09-30）
 
-`pnpm dev` 使用 `scripts/dev-stack.mjs`。未设置后台模式时默认 durable，先启动 LIGHT/HEAVY；HEAVY 必须完成真实中文 PDF 与私有产物读写检查，两类 worker 的本次启动心跳均就绪后才启动 Web。默认监听 127.0.0.1:3000，支持 `--port`、`--hostname`。端口冲突在 worker 启动前拒绝；任一子进程异常退出会停止整组，Ctrl-C 统一收尾。此开发入口固定模拟通知，不用于生产。显式 `BACKGROUND_JOBS_MODE=inline` 只启动 Web，但仍先检查 PDF 运行时。
+`pnpm dev` 使用 `scripts/dev-stack.mjs`。未设置后台模式时默认 durable，先启动 LIGHT/HEAVY；HEAVY 必须完成真实中文 PDF 与私有产物读写检查，两类 worker 的本次启动心跳均就绪后才启动 Web。就绪检查复用后台心跳的 180 秒有效窗口，并预留最长 60 秒心跳间隔，总等待上限 240 秒。默认监听 127.0.0.1:3000，支持 `--port`、`--hostname`。端口冲突在 worker 启动前拒绝；任一子进程异常退出会停止整组，Ctrl-C 统一收尾。此开发入口固定模拟通知，不用于生产。显式 `BACKGROUND_JOBS_MODE=inline` 只启动 Web，但仍先检查 PDF 运行时。
 
 `pnpm dev:web` 保留仅 Web 入口，适用于外部进程管理或手动控制 worker 的测试；它本身不保证 durable PDF 可用。`pnpm check:pdf` 使用当前环境、当前 Chromium 与内嵌字体，实际生成一页中文 PDF，并验证存储往返；只操作自己的随机探针产物。
 

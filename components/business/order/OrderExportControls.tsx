@@ -215,7 +215,7 @@ export function OrderExportControls({
                       </p>
                     </div>
                     {item.status === OrderExportStatus.READY ? (
-                      <SalesBillExportButton href={`/api/orders/exports/${item.id}`} label="下载" />
+                      <SalesBillExportButton href={`/api/orders/exports/${item.id}`} label="下载" pendingLabel="正在下载…" />
                     ) : null}
                   </li>
                 ))}

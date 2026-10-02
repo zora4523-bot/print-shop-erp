@@ -3,36 +3,30 @@ export class ExportDownloadError extends Error {}
 
 /** Keep HTTP errors and login HTML on the page instead of saving them as files. */
 export async function fetchExportFile(href: string, signal?: AbortSignal) {
-  const timeout = AbortSignal.timeout(60_000);
-  let combined = timeout;
-  let dispose = () => {};
-  if (signal) {
-    if (typeof AbortSignal.any === 'function') combined = AbortSignal.any([signal, timeout]);
-    else {
-      const controller = new AbortController();
-      const abortCaller = () => controller.abort(signal.reason);
-      const abortTimeout = () => controller.abort(timeout.reason);
-      if (signal.aborted) abortCaller();
-      else signal.addEventListener('abort', abortCaller, { once: true });
-      if (timeout.aborted) abortTimeout();
-      else timeout.addEventListener('abort', abortTimeout, { once: true });
-      combined = controller.signal;
-      dispose = () => {
-        signal.removeEventListener('abort', abortCaller);
-        timeout.removeEventListener('abort', abortTimeout);
-      };
-    }
-  }
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortCaller = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abortCaller();
+  else signal?.addEventListener('abort', abortCaller, { once: true });
+  // Bound server response latency, not the transfer of a potentially large file.
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException('Response headers timed out', 'TimeoutError'));
+  }, 60_000);
   try {
-    return await readExportFile(href, combined);
+    const response = await fetch(href, { cache: 'no-store', signal: controller.signal });
+    clearTimeout(timer);
+    return await readExportFile(response);
   } catch (error) {
-    if (timeout.aborted && !signal?.aborted) throw new ExportDownloadError('下载等待超时，请稍后重试。');
+    if (timedOut && !signal?.aborted) throw new ExportDownloadError('下载等待超时，请稍后重试。');
     throw error;
-  } finally { dispose(); }
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abortCaller);
+  }
 }
 
-async function readExportFile(href: string, signal: AbortSignal) {
-  const response = await fetch(href, { cache: 'no-store', signal });
+async function readExportFile(response: Response) {
   if (!response.ok) {
     const message = response.status === 401 || response.status === 403
       ? '登录已失效或没有导出权限，请重新登录后重试。'

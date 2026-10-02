@@ -226,6 +226,8 @@ export async function waitForOrderPdfJob(
       return { status: 'failed', errorCode: job.lastErrorCode };
     }
     // Check only after the actor/order binding and completed-state checks.
+    // Claims are not release-bound; legacy workers have null capability until upgraded.
+    // A live worker not explicitly marked incapable may still claim during rollout.
     // Database time keeps queue age and remote worker heartbeats comparable.
     const at = await databaseNow();
     // An active owner can finish its claimed job even while its next PDF probe
@@ -239,8 +241,7 @@ export async function waitForOrderPdfJob(
     const worker = owner ?? await db.backgroundWorkerHeartbeat.findFirst({
       where: {
         queue: BackgroundJobQueue.HEAVY,
-        pdfReady: true,
-        version: process.env.APP_VERSION || 'dev',
+        OR: [{ pdfReady: true }, { pdfReady: null }],
         lastSeenAt: { gte: new Date(at.getTime() - WORKER_HEARTBEAT_ACTIVE_WINDOW_MS) },
       },
       select: { workerId: true },

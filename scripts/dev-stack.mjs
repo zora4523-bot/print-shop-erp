@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import nextEnv from '@next/env';
 const { loadEnvConfig } = nextEnv;
 import pg from 'pg';
+import { WORKER_HEARTBEAT_ACTIVE_WINDOW_MS, WORKER_HEARTBEAT_MAX_INTERVAL_MS } from '../lib/background-jobs/heartbeat-timing.mjs';
 
 export function devProcesses(mode, args = []) {
   const web = { name: 'web', args: ['node_modules/next/dist/bin/next', 'dev', ...args] };
@@ -94,16 +95,16 @@ export async function startDevStack(args = process.argv.slice(2)) {
   } catch (error) { stop(1); throw error; }
 }
 
-async function waitForWorkers(env, stopped) {
+export async function waitForWorkers(env, stopped) {
   const client = new pg.Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 5000, query_timeout: 5000 });
   try {
     await client.connect();
     // Heartbeat columns contain UTC wall time, matching databasePoolConfig.
     // Do not inherit the operator/database default time zone for comparisons.
     await client.query("SET TIME ZONE 'UTC'");
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + WORKER_HEARTBEAT_ACTIVE_WINDOW_MS + WORKER_HEARTBEAT_MAX_INTERVAL_MS;
     while (!stopped() && Date.now() < deadline) {
-      const result = await client.query('SELECT DISTINCT queue FROM "BackgroundWorkerHeartbeat" WHERE version = $1 AND (queue != \'HEAVY\' OR "pdfReady" IS TRUE) AND "lastSeenAt" > now() - interval \'30 seconds\'', [env.APP_VERSION]);
+      const result = await client.query('SELECT DISTINCT queue FROM "BackgroundWorkerHeartbeat" WHERE version = $1 AND (queue != \'HEAVY\' OR "pdfReady" IS TRUE) AND "lastSeenAt" > now() - ($2 * interval \'1 millisecond\')', [env.APP_VERSION, WORKER_HEARTBEAT_ACTIVE_WINDOW_MS]);
       if (result.rows.some((row) => row.queue === 'LIGHT') && result.rows.some((row) => row.queue === 'HEAVY')) return;
       await new Promise((resolveWait) => setTimeout(resolveWait, 500));
     }

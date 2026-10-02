@@ -17,7 +17,7 @@ it.each([401, 404, 410])('shows the reason for HTTP %s in the order export drawe
     id: 'export1', status: OrderExportStatus.READY, scope: 'all', fileName: '工单.xlsx', matchedOrderCount: 1, byteSize: '100', expiresAt: '2026-10-05T00:00:00Z', completedAt: '2026-10-02T00:00:00Z', createdAt: '2026-10-02T00:00:00Z',
   }]} />));
   await page.getByRole('button', { name: '导出工单', exact: true }).click();
-  await page.getByRole('link', { name: '下载', exact: true }).click();
+  await page.getByRole('button', { name: '下载', exact: true }).click();
   await expect.element(page.getByRole('alert')).toHaveTextContent(status === 401 ? '请重新登录后重试' : '请重新生成');
   expect(create).not.toHaveBeenCalled();
 });

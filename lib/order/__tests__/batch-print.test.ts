@@ -94,9 +94,9 @@ describe('batch PDF invariants', () => {
     m.worker.mockResolvedValue({ workerId: 'w' });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending' });
   });
-  it('only counts HEAVY workers that can currently render PDFs, unless the job is already running', async () => {
+  it('counts live claim-capable HEAVY workers across release versions, unless a live owner already holds the job', async () => {
     await batchPrintStatus('admin', 'j');
-    expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', pdfReady: true, version: process.env.APP_VERSION || 'dev' });
+    expect(m.worker.mock.calls[0][0].where).toMatchObject({ queue: 'HEAVY', OR: [{ pdfReady: true }, { pdfReady: null }] });
     m.worker.mockImplementation(async ({ where }) => where.workerId === 'owner' ? { workerId: 'owner' } : null);
     m.find.mockResolvedValue({ ...job, status: 'RUNNING', lockedBy: 'owner:1', result: { completed: 1, issues: [] } });
     expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending', phase: 'rendering' });
@@ -173,11 +173,19 @@ it('reports unavailability for a crashed running worker when its heartbeat expir
   m.worker.mockResolvedValue(null);
   expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'unavailable' });
   expect(m.worker).toHaveBeenCalledTimes(2);
-  expect(m.worker).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ pdfReady: true }) }));
+  expect(m.worker).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ OR: [{ pdfReady: true }, { pdfReady: null }] }) }));
 });
 
 it('reports the render budget timeout without blaming order content', async () => {
   m.render.mockRejectedValueOnce(new DOMException('budget exhausted', 'TimeoutError'));
   expect(await handleBatchPrintJob(job)).toMatchObject({ completed: 0, issues: [{ position: 1, message: '工单生成超时，请稍后重试或减少所选工单' }] });
   expect(m.write).not.toHaveBeenCalled();
+});
+
+it.each([true, null])('keeps queued batch PDFs pending across releases with capability %s', async pdfReady => {
+  m.worker.mockImplementation(async ({ where }) => {
+    expect(where.version).toBeUndefined();
+    return where.OR.some((entry: { pdfReady: boolean | null }) => entry.pdfReady === pdfReady) ? { workerId: 'old-release' } : null;
+  });
+  expect(await batchPrintStatus('admin', 'j')).toMatchObject({ status: 'pending' });
 });

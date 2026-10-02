@@ -359,6 +359,14 @@ describe('PDF queue availability', () => {
       where: expect.objectContaining({ queue: 'HEAVY', lastSeenAt: { gte: expect.any(Date) } }),
     }));
   });
+  it.each([true, null])('waits for claim-capable older-release workers with capability %s', async pdfReady => {
+    dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, createdAt: new Date('2026-09-10T23:58:00Z') });
+    dbMock.backgroundWorkerHeartbeat.findFirst.mockImplementation(async ({ where }) => {
+      expect(where.version).toBeUndefined();
+      return where.OR.some((entry: { pdfReady: boolean | null }) => entry.pdfReady === pdfReady) ? { workerId: 'old-release' } : null;
+    });
+    await expect(waitForOrderPdfJob('j', { expected })).resolves.toEqual({ status: 'delayed' });
+  });
   it('caps waiting by persisted job age across requests without cancelling work', async () => {
     dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, createdAt: new Date('2026-09-10T23:58:00Z') });
     dbMock.backgroundWorkerHeartbeat.findFirst.mockResolvedValue({ workerId: 'w' });
@@ -384,7 +392,7 @@ describe('PDF queue availability', () => {
     dbMock.backgroundJob.findUnique.mockResolvedValue({ ...pending, status: BackgroundJobStatus.RUNNING, lockedBy });
     dbMock.backgroundWorkerHeartbeat.findFirst.mockResolvedValue(null);
     await expect(waitForOrderPdfJob('j', { expected })).resolves.toEqual({ status: 'unavailable' });
-    expect(dbMock.backgroundWorkerHeartbeat.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ pdfReady: true }) }));
+    expect(dbMock.backgroundWorkerHeartbeat.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ OR: [{ pdfReady: true }, { pdfReady: null }] }) }));
   });
 
 });

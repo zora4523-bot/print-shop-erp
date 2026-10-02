@@ -15,9 +15,9 @@ applies_to: repository source at last_verified
 
 - `GET /api/sales/bills/export`：当前数据库校验的 `bill:view:self` 会话（仅 SALES）；接受 `period=YYYY-MM`、`status=DRAFT|CONFIRMED|PAID`，空值表示全部，非法值返回 400。账号范围强制来自会话，忽略传入 `agentUserId`；忽略 `page`，导出全部筛选结果而非当前分页。
 - `GET /api/sales/bills/[id]/export`：相同授权；只读取本人账单及其结算快照。可选 `q`（去首尾空格，最多 100 字）与详情页共用工单号/历史名称匹配函数，忽略 `page`；不合法 ID 或非本人账单统一 404。历史费用证据不足时，仅名称允许使用当前名称并标注依据，金额仍使用原结算快照，绝不补当前价格。
-- 两个接口成功返回含 BOM 的 UTF-8 CSV，`Content-Disposition: attachment`、`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`；金额通过 Decimal 输出两位十进制，用户文本进行 CSV 转义和公式注入防护。整理中账单明确标注暂计、未定稿。结果超过 10,000 条返回 400 并要求缩小范围，不静默截断。会话/角色无权限 401，服务异常 503，错误响应不含内部信息。
+- 两个接口成功返回含 BOM 的 UTF-8 CSV，`Content-Disposition: attachment`、`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`；金额通过 Decimal 输出两位十进制，用户文本进行 CSV 转义和公式注入防护。整理中账单明确标注暂计、未定稿。结果超过 10,000 条返回 400 并要求缩小范围，不静默截断。会话/角色无权限 401；未知异常交给框架错误处理与监控，客户端仅显示通用失败提示。
 - 明细 CSV 包含结算时工单状态，明确区分正常结算与“已取消（取消费）”；同时输出有效结算快照中的加工费和其他费用说明；快照缺失或费用合计不符时标记“费用明细待补”，不从现价补算。
-- `SalesBillExportButton` 使用原生下载链接，增强后先检查状态码与 CSV/XLSX 文件类型，再保存文件；下载等待最多一分钟，失败在原页显示并可重试，不保存 JSON/登录页。管理员月账单 XLSX 仍沿用原权限、请求快照和持久化异步任务；生成失败返回结构化结果，状态检查最多两分钟，网络失败暂停并提供手动刷新，下载过期/失败明确要求重新生成。
+- `SalesBillExportButton` 使用按钮先检查状态码与 CSV/XLSX 文件类型，再保存文件；未启用 JavaScript 时提供普通链接。等待响应头最多一分钟，文件传输不受该时限限制，失败在原页显示并可重试，不保存 JSON/登录页。管理员月账单 XLSX 仍沿用原权限、请求快照和持久化异步任务；生成失败返回结构化结果，状态检查最多两分钟，网络失败暂停并提供手动刷新，下载过期/失败明确要求重新生成。
 - 销售工单列表新增 `createdMonth=YYYY-MM`，按上海时区下单月份过滤；状态数量与当前 `q`、月份保持相同范围。`GET /api/orders/sales/[orderNo]` 的本人投影新增 `createdAt`、可空 `shippedAt` 及 `shipments` 完整已登记运单；不返回其他销售或内部成本。
 
 ## 2026-09-28 单负责人排单与完工提成
@@ -552,7 +552,7 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 ### PDF 能力与诊断补强（2026-09-30）
 
-`/api/health/jobs` 新增 `pdf: {ready: boolean | null}`：durable 仅在当前发布版本的活跃 HEAVY 心跳明确上报 PDF 可用时为 true；inline 为 null（不代表 Web 渲染已检查）。失能产生 `pdf-worker-unavailable` 告警，jobs 返回 503，但不单独使 Web ready 失败。发布 jobs gate 在能力未知/失能时拒绝放行。PDF 等待端点要求相同版本和有效能力；已生成产物仍先按原授权规则读取。
+`/api/health/jobs` 新增 `pdf: {ready: boolean | null}`：durable 仅在当前发布版本的活跃 HEAVY 心跳明确上报 PDF 可用时为 true；inline 为 null（不代表 Web 渲染已检查）。失能产生 `pdf-worker-unavailable` 告警，jobs 返回 503，但不单独使 Web ready 失败。发布 jobs gate 在能力未知/失能时拒绝放行。PDF 等待端点按实际领取条件判断：任意版本的活跃 HEAVY、且能力未明确为 false（含升级前 null）均可继续等待；部署 gate 仍要求目标版本且能力为 true；已生成产物仍先按原授权规则读取。
 
 direct 生成失败返回 `X-Request-Id`，与只包含随机关联号、白名单错误码、模式、阶段和耗时的日志对应。容量、浏览器、字体、版本、产物存储不可用返回 503；其他渲染失败保留 500。图稿不完整时继续提供含原有警告的 PDF，但不保存到 direct 完成缓存；批量打印原有严格图稿校验不变。
 
