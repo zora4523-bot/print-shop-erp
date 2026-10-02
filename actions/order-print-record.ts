@@ -45,8 +45,8 @@ export async function recordOrderPrintedAction(input: unknown): Promise<OrderPri
 
 /**
  * 浏览器取得批量打印文件后调用：确认文件仍可取、内容仍是当前内容后，文件里的工单整批记为
- * 已打印，任一工单不符整批不记；成功后浏览器才把文件交给管理员。`attemptId` 每次打开 / 下载
- * 一个，同一次的重试沿用。
+ * 已打印，任一工单不符整批不记。浏览器在成功或结果未知（网络中断）时交付已取得的文件，明确
+ * 失败不交付；`attemptId` 每次打开 / 下载一个，同一次的重试沿用（结果未知时只重试记录）。
  */
 export async function recordBatchPrintAction(input: unknown): Promise<BatchPrintRecordResult> {
   const actor = await requirePermission('order:change:review');

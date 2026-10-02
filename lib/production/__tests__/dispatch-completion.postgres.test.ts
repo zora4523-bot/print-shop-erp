@@ -385,11 +385,13 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     try {
       await holder.query('BEGIN');
       await holder.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`batch-print-attempt:${waitingAttempt}`]);
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
       const expired = new Date(Date.now() - 2 * 60 * 60_000);
       await utimes(join(process.env.PDF_ARTIFACT_DIR || join(tmpdir(), 'print-shop-erp-pdf-artifacts'), artifactName), expired, expired);
       const pending = recordBatchPrint(admin.id, job.id, waiting);
+      // 只等「被本 holder 挡住」的连接，不受其他用例的锁等待干扰。
       await expect.poll(async () => (await holder.query<{ n: number }>(
-        "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
+        'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))', [holderPid],
       )).rows[0].n, { timeout: 15_000 }).toBeGreaterThan(0);
       for (const id of ids) {
         await holder.query(
