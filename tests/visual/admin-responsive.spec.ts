@@ -1452,7 +1452,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   );
   await expect(filters).toBeVisible();
   const views = filters.getByRole('navigation', { name: '销售工单视图' });
-  for (const label of ['全部', '需关注', '进行中', '已发货', '已结算', '已取消', '草稿']) {
+  for (const label of ['全部', '需关注', '进行中', '已发货', '已完成', '已取消', '草稿']) {
     await expect(views.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
   }
   await expect(

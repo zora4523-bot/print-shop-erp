@@ -427,6 +427,8 @@ test.describe('automation smoke', () => {
     // fixture is intentionally a DRAFT, so search it through the explicit
     // all-orders queue rather than weakening the queue boundary.
     await page.goto(`/orders?queue=all&q=${fixture.orderNo}`);
+    const productionGroup = page.locator('[data-sidebar="sidebar"]').getByRole('button', { name: /^生产与采购\s*(展开|收起)$/ });
+    if (await productionGroup.getAttribute('aria-expanded') === 'false') await productionGroup.click();
     await expect(
       page
         .locator('[data-sidebar="sidebar"]')

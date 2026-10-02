@@ -48,6 +48,10 @@ test('工作台真实 worker 打包下载、旧版本拒绝、更新标记、分
     await expect(section.getByText('下载包已就绪', { exact: true })).toBeVisible();
     await section.locator('summary').filter({ hasText: '工单明细' }).click();
     await expect(section.getByText('已打包当前文件', { exact: true })).toBeVisible();
+    await withDb((db) => db.query(`UPDATE "OrderItemDesign" SET "fileName"='latest.cdr' WHERE "orderItemId"='e2e-cdr-1-item'`));
+    await page.reload();
+    await section.locator('summary').filter({ hasText: '工单明细' }).click();
+    await expect(section.getByText('文件已更新', { exact: true })).toBeVisible();
     await section.locator('summary').filter({ hasText: '下载记录' }).click();
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await section.getByRole('button', { name: '复制分享链接' }).click();
@@ -58,10 +62,9 @@ test('工作台真实 worker 打包下载、旧版本拒绝、更新标记、分
     await section.getByRole('button', { name: '撤销下载链接' }).click();
     await page.getByRole('button', { name: '确认撤销链接' }).click();
     await expect.poll(async () => (await request.get(href!)).status()).toBe(404);
-    await withDb((db) => db.query(`UPDATE "OrderItemDesign" SET "fileName"='latest.cdr' WHERE "orderItemId"='e2e-cdr-1-item'`));
     await page.reload();
     await section.locator('summary').filter({ hasText: '工单明细' }).click();
-    await expect(section.getByText('文件已更新', { exact: true })).toBeVisible();
+    await expect(section.getByText('尚未打包', { exact: true })).toBeVisible();
     const nextDownload = page.waitForEvent('download');
     await section.getByRole('button', { name: '一键下载本页', exact: true }).click();
     await nextDownload;
