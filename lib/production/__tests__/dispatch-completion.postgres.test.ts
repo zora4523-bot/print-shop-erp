@@ -6,7 +6,7 @@ import { createOrderChangeRequest, withdrawOrderChangeRequest, previewOrderChang
 import { reviewProductionFact } from '../fact-review';
 import { getPieceworkSettlementDay } from '@/lib/salary/piecework-settlement';
 import { dispatchNotification } from '@/lib/notification/dispatch';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { publishProductionDispatch } from '../dispatch';
@@ -333,16 +333,21 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     } });
     const receipts = () => db.orderPrintJob.count({ where: { orderId: { in: ids }, state: 'PRINTED' } });
 
+    const attemptKey = (attemptId: string, orderId: string) =>
+      `batch-print:${createHash('sha256').update(`${job.id}:${attemptId}`).digest('hex').slice(0, 32)}:${orderId}`;
     // 第二张工单的尝试键已被别的工单占用：第一张记完后在第二张抛错，整批回滚。
     const failing = randomUUID();
-    await db.orderPrintAttempt.create({ data: { attemptKey: `batch-print:${failing}:${ids[1]}`, orderId: ids[0], workOrderVersion: 1, outcome: 'STALE', actorId: admin.id } });
+    await db.orderPrintAttempt.create({ data: { attemptKey: attemptKey(failing, ids[1]), orderId: ids[0], workOrderVersion: 1, outcome: 'STALE', actorId: admin.id } });
     await expect(recordBatchPrint(admin.id, job.id, failing)).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
     expect(await receipts()).toBe(0);
-    expect(await db.orderPrintAttempt.count({ where: { attemptKey: `batch-print:${failing}:${ids[0]}` } })).toBe(0);
+    expect(await db.orderPrintAttempt.count({ where: { attemptKey: attemptKey(failing, ids[0]) } })).toBe(0);
 
+    // 同一尝试的两个请求同时到达（前一次断连但仍在执行时重试）：按尝试串行，后到的重放前一次的结果。
     const attempt = randomUUID();
-    await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });
+    await expect(Promise.all([recordBatchPrint(admin.id, job.id, attempt), recordBatchPrint(admin.id, job.id, attempt)]))
+      .resolves.toEqual([{ marked: 2 }, { marked: 2 }]);
     expect(await receipts()).toBe(2);
+    expect(await db.orderPrintAttempt.count({ where: { attemptKey: { in: ids.map((id) => attemptKey(attempt, id)) } } })).toBe(2);
     await expect(recordBatchPrint(admin.id, job.id, attempt)).resolves.toEqual({ marked: 2 });
     expect(await receipts()).toBe(2);
     // 记录成功后响应丢失、期间工单内容又变了：同一尝试的重试仍返回原结果，不当作首次记录失败。

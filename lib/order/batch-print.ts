@@ -38,8 +38,8 @@ export class BatchPrintSelectionError extends Error {
 /** 打印文件已过期或读不到：不能把没拿到的文件记为已打印。 */
 export class BatchPrintArtifactUnavailableError extends Error {}
 
-async function requireAdmin(actorId: string) {
-  const account = await db.user.findUnique({ where: { id: actorId }, select: { isActive: true, role: true } });
+async function requireAdmin(actorId: string, client: Pick<Prisma.TransactionClient, 'user'> = db) {
+  const account = await client.user.findUnique({ where: { id: actorId }, select: { isActive: true, role: true } });
   if (!account?.isActive || account.role !== Role.ADMIN) throw new BatchPrintAccessError();
 }
 
@@ -54,13 +54,13 @@ async function loadCurrent(payload: Payload, index: number, client: Prisma.Trans
   return { order, factoryName };
 }
 
-async function validateAll(payload: Payload) {
-  await requireAdmin(payload.actorId);
+async function validateAll(payload: Payload, client: Prisma.TransactionClient = db) {
+  await requireAdmin(payload.actorId, client);
   const issues: BatchPrintIssue[] = [];
   const printed: { index: number; orderId: string; workOrderVersion: number }[] = [];
   for (let i = 0; i < payload.orders.length; i++) {
     try {
-      const { order } = await loadCurrent(payload, i);
+      const { order } = await loadCurrent(payload, i, client);
       printed.push({ index: i, orderId: order.id, workOrderVersion: order.workOrderVersion });
     } catch (error) {
       if (!(error instanceof BatchPrintSelectionError)) throw error;
@@ -220,44 +220,47 @@ export async function downloadBatchPrint(actorId: string, jobId: string) {
 
 /**
  * 业主 2026-10-02：打开或下载批量打印文件即记已打印。下载本身是只读 GET；浏览器先成功取得
- * 文件，再由 Server Action 调这里记录，记录成功后才把文件交给管理员：
+ * 文件，再由 Server Action 调这里记录，记录成功后才把文件交给管理员。一个事务里：
  *
- * 1. 文件仍在有效期内可读，否则不记。
- * 2. 一个事务里按工单 id 顺序（与批量排单同一比较方式）加锁，锁内用同一事务连接重新读取每张
- *    工单，完整快照摘要须与文件一致；任一工单不一致、已不在生产中都整批回滚，不留半截记录。
- * 3. 每次打开 / 下载一个尝试（`attemptId`，同一次的重试沿用），每张工单的尝试键为
- *    `batch-print:<尝试>:<工单>`：重试只重放这一次的结果；同一打印文件之后再打开是新的尝试，
- *    会记录期间新建的补打任务。
+ * 1. 按本批次尝试加锁：同一尝试的并发请求（前一次断连但仍在执行时的重试）串行，后到的等前一次
+ *    提交后再判断，不会在账本还空着时抢先走首次记录。
+ * 2. 本尝试已整批记过 → 直接返回原结果（不再核对文件与当前内容）。
+ * 3. 首次记录：文件仍在有效期内可读；用同一事务连接重新读取每张工单，再按工单 id 顺序（与批量
+ *    排单同一比较方式）加工单锁，锁内完整快照摘要须与文件一致；任一工单不一致、已不在生产中
+ *    都整批回滚，不留半截记录。
+ *
+ * 尝试键 `batch-print:<任务与尝试的摘要>:<工单>` 绑定打印任务：换一个任务沿用旧尝试标识也不会
+ * 重放旧结果。同一打印文件之后再打开是新的尝试，会记录期间新建的补打任务。
  */
 export async function recordBatchPrint(actorId: string, jobId: string, attemptId: string): Promise<{ marked: number } | null> {
   const { job, payload } = await ownedJob(actorId, jobId);
-  // 本尝试已整批记过（例如记录成功后响应丢失再重试）：直接返回原结果，不因之后的生产进度变化或
-  // 文件过期而当作首次记录失败。整批在一个事务里写入，账本要么全有、要么全无。
-  const attemptKeys = new Map(payload.orders.map((order) => [`batch-print:${attemptId}:${order.id}`, order.id]));
-  const booked = await db.orderPrintAttempt.findMany({
-    where: { attemptKey: { in: [...attemptKeys.keys()] } },
-    select: { attemptKey: true, orderId: true, outcome: true },
-  });
-  if (booked.length === attemptKeys.size && booked.every((entry) => attemptKeys.get(entry.attemptKey) === entry.orderId)) {
-    return { marked: booked.filter((entry) => entry.outcome === 'MARKED').length };
-  }
   const result = resultSchema.safeParse(job.result);
   if (job.status !== 'SUCCEEDED' || !result.success || result.data.issues.length || !result.data.artifactName) return null;
-  try { await assertPdfArtifactAvailable(result.data.artifactName); }
-  catch { throw new BatchPrintArtifactUnavailableError(); }
-  const printed = (await validateAll(payload)).sort((a, b) => a.orderId.localeCompare(b.orderId));
+  const artifactName = result.data.artifactName;
+  const attempt = createHash('sha256').update(`${jobId}:${attemptId}`).digest('hex').slice(0, 32);
+  const attemptKeys = new Map(payload.orders.map((order) => [`batch-print:${attempt}:${order.id}`, order.id]));
   const actor = { id: actorId, role: Role.ADMIN };
-  const outcomes = await db.$transaction(async (tx) => {
-    const recorded = [];
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`batch-print-attempt:${attempt}`}))`;
+    const booked = await tx.orderPrintAttempt.findMany({
+      where: { attemptKey: { in: [...attemptKeys.keys()] } },
+      select: { attemptKey: true, orderId: true, outcome: true },
+    });
+    if (booked.length === attemptKeys.size && booked.every((entry) => attemptKeys.get(entry.attemptKey) === entry.orderId)) {
+      return { marked: booked.filter((entry) => entry.outcome === 'MARKED').length };
+    }
+    try { await assertPdfArtifactAvailable(artifactName); }
+    catch { throw new BatchPrintArtifactUnavailableError(); }
+    const printed = (await validateAll(payload, tx)).sort((a, b) => a.orderId.localeCompare(b.orderId));
+    let marked = 0;
     for (const { index, orderId, workOrderVersion } of printed) {
-      const outcome = await recordRenderedPrintInTx(tx, { orderId, workOrderVersion, attemptKey: `batch-print:${attemptId}:${orderId}` }, actor,
+      const outcome = await recordRenderedPrintInTx(tx, { orderId, workOrderVersion, attemptKey: `batch-print:${attempt}:${orderId}` }, actor,
         async () => { await loadCurrent(payload, index, tx); return true; });
       if (outcome === 'STALE' || outcome === 'NOT_PRINTABLE') {
         throw new BatchPrintSelectionError([{ position: index + 1, message: outcome === 'STALE' ? '工单内容已变化，请重新选择并生成' : '工单已不在生产中，请取消选择后重新生成' }]);
       }
-      recorded.push(outcome);
+      if (outcome === 'MARKED') marked += 1;
     }
-    return recorded;
+    return { marked };
   }, { timeout: 30_000 });
-  return { marked: outcomes.filter((outcome) => outcome === 'MARKED').length };
 }

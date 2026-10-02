@@ -8,6 +8,7 @@ import { ActionNotice, BatchActionResult } from '@/components/ui-business';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { BATCH_COMMAND_CONFIG, batchReceiptRows, type BatchOrderSnapshot } from './admin-order-batch-ui';
+import { BatchPrintDeliveryProvider } from './BatchPrintDelivery';
 import { PrintPageLink } from './PrintPageLink';
 import { useRefreshAfterPrint } from './use-refresh-after-print';
 
@@ -56,7 +57,8 @@ export function AdminOrderBatchResultProvider({ children }: { children: ReactNod
         setOpen(true);
       },
     }}>
-      {children}
+      {/* 批量打印文件的交付与回执同样放在随页面刷新重建的选择之外。 */}
+      <BatchPrintDeliveryProvider>{children}</BatchPrintDeliveryProvider>
       {receipt ? (
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2" data-slot="admin-order-batch-receipt-link">
           <p role="status" className="min-w-0 text-sm text-muted-foreground">

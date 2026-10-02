@@ -108,7 +108,7 @@ export function batchFailureReason(code: string | undefined): string {
     case 'ORDER_NOT_PRINTABLE':
     case 'ORDER_STATUS_NOT_ACTIVATABLE': return '工单当前状态不支持此操作，请打开工单检查当前待办';
     case 'PRINT_REQUEST_NOT_FOUND': return '待打印任务已变化，请打开工单核对最新打印记录';
-    case 'PRINT_REQUEST_ALREADY_PENDING': return '已有待打印任务，请先打印并确认完成';
+    case 'PRINT_REQUEST_ALREADY_PENDING': return '已有待打印任务，打开工单打印即可';
     case 'PRICING_NOT_CONFIRMED':
     case 'ORDER_NOT_CHARGEABLE': return '费用尚未确认，请打开工单完成核价';
     case 'CANONICAL_FACTS_INCOMPLETE':

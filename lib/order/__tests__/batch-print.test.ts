@@ -3,8 +3,9 @@ import { PDFDocument } from 'pdf-lib';
 import type { ClaimedBackgroundJob } from '@/lib/background-jobs/types';
 const m = vi.hoisted(() => ({
   active: vi.fn(), user: vi.fn(), find: vi.fn(), update: vi.fn(), worker: vi.fn(), order: vi.fn(),
-  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), available: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(), booked: vi.fn(),
+  enqueue: vi.fn(), html: vi.fn(), render: vi.fn(), write: vi.fn(), read: vi.fn(), available: vi.fn(), recordInTx: vi.fn(), transaction: vi.fn(), booked: vi.fn(), lock: vi.fn(),
 }));
+const tx = { $executeRaw: m.lock, orderPrintAttempt: { findMany: m.booked }, user: { findUnique: m.user } };
 vi.mock('@/lib/db', () => ({ db: { $transaction: m.transaction, orderPrintAttempt: { findMany: m.booked }, user: { findUnique: m.user }, backgroundJob: { findFirst: m.active, findUnique: m.find, updateMany: m.update }, backgroundWorkerHeartbeat: { findFirst: m.worker } } }));
 vi.mock('@/lib/background-jobs/repository', () => ({ enqueueBackgroundJob: m.enqueue, BackgroundJobLeaseLostError: class extends Error {} }));
 vi.mock('@/lib/background-jobs/clock', () => ({ databaseNow: async () => new Date('2026-09-13') }));
@@ -16,6 +17,7 @@ vi.mock('@/lib/pdf/artifacts', () => ({ readPdfArtifact: m.read, writePdfArtifac
   PdfArtifactStorageError: class extends Error { constructor() { super('PDF artifact storage unavailable'); this.name = 'PdfArtifactStorageError'; } } }));
 vi.mock('@/lib/pdf/order-snapshot', () => ({ orderPdfSnapshotKey: (order: { id: string; version: number }) => `${order.id}:${order.version}` }));
 vi.mock('@/lib/order/print-jobs', () => ({ recordRenderedPrintInTx: m.recordInTx }));
+import { createHash } from 'node:crypto';
 import { BatchPrintAccessError, BatchPrintArtifactUnavailableError, BatchPrintSelectionError, requestBatchPrint, handleBatchPrintJob, batchPrintStatus, downloadBatchPrint, recordBatchPrint } from '../batch-print';
 const payload = { actorId: 'admin', baseUrl: 'https://example.test', orders: [{ id: 'a', key: 'a:1' }, { id: 'b', key: 'b:1' }] };
 const job = { id: 'j', type: 'ORDER_BATCH_PDF', payload, workerId: 'worker', attempts: 1, assertLease: vi.fn() } as unknown as ClaimedBackgroundJob;
@@ -29,7 +31,7 @@ beforeEach(() => {
   m.booked.mockResolvedValue([]);
   m.recordInTx.mockImplementation(async (_tx: unknown, _attempt: unknown, _actor: unknown, contentIsCurrent: () => Promise<boolean>) =>
     (await contentIsCurrent()) ? 'MARKED' : 'STALE');
-  m.transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => callback('tx'));
+  m.transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => callback(tx));
   m.enqueue.mockResolvedValue({ job: { id: 'j' } });
   m.update.mockResolvedValue({ count: 1 });
   m.worker.mockResolvedValue({ workerId: 'w' });
@@ -176,56 +178,71 @@ it('classifies a raw cache write failure (ENOSPC) as storage infrastructure and 
   await expect(handleBatchPrintJob(job)).rejects.toMatchObject({ name: 'PdfArtifactStorageError' });
 });
 
-// 业主 2026-10-02：打开或下载批量打印文件即记已打印——点击时先由 Server Action 调用，文件可取、
-// 内容未变才整批记录，任一工单不符整批回滚；成功后浏览器再取文件。
+// 业主 2026-10-02：打开或下载批量打印文件即记已打印——浏览器取得文件后由 Server Action 调用；
+// 同一尝试串行，先查账本重放，首次记录才核对文件与内容，任一工单不符整批回滚。
 describe('recordBatchPrint', () => {
   const ready = (orders = payload.orders) => m.find.mockResolvedValue({
     ...job, payload: { ...payload, orders }, status: 'SUCCEEDED', result: { completed: orders.length, issues: [], artifactName: 'j.pdf' },
   });
+  const attemptOf = (jobId: string, attemptId: string) => createHash('sha256').update(`${jobId}:${attemptId}`).digest('hex').slice(0, 32);
+  const key = (orderId: string, jobId = 'j', attemptId = 'attempt-1') => `batch-print:${attemptOf(jobId, attemptId)}:${orderId}`;
 
-  it('checks the file, then records every order in id order inside one transaction with per-batch attempt keys', async () => {
+  it('serializes the attempt, checks the file, then records every order in id order on the same transaction', async () => {
     ready([{ id: 'b', key: 'b:1' }, { id: 'a', key: 'a:1' }]);
     m.order.mockImplementation(async (id: string) => ({ id, version: 1, workOrderVersion: id === 'a' ? 3 : 1 }));
     m.recordInTx.mockImplementationOnce(async (_tx: unknown, _attempt: unknown, _actor: unknown, check: () => Promise<boolean>) => (await check()) ? 'MARKED' : 'STALE')
       .mockResolvedValueOnce('ALREADY_PRINTED');
     expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toEqual({ marked: 1 });
+    expect(m.transaction).toHaveBeenCalledOnce();
+    const sql = (m.lock.mock.calls[0]?.[0] as TemplateStringsArray).join('?');
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(m.lock.mock.calls[0]?.[1]).toBe(`batch-print-attempt:${attemptOf('j', 'attempt-1')}`);
+    expect(m.lock.mock.invocationCallOrder[0]).toBeLessThan(m.booked.mock.invocationCallOrder[0]!);
+    expect(m.booked.mock.invocationCallOrder[0]).toBeLessThan(m.available.mock.invocationCallOrder[0]!);
     expect(m.available).toHaveBeenCalledWith('j.pdf');
     expect(m.read).not.toHaveBeenCalled();
-    expect(m.transaction).toHaveBeenCalledOnce();
     expect(m.recordInTx.mock.calls.map((call) => call.slice(0, 3))).toEqual([
-      ['tx', { orderId: 'a', workOrderVersion: 3, attemptKey: 'batch-print:attempt-1:a' }, { id: 'admin', role: 'ADMIN' }],
-      ['tx', { orderId: 'b', workOrderVersion: 1, attemptKey: 'batch-print:attempt-1:b' }, { id: 'admin', role: 'ADMIN' }],
+      [tx, { orderId: 'a', workOrderVersion: 3, attemptKey: key('a') }, { id: 'admin', role: 'ADMIN' }],
+      [tx, { orderId: 'b', workOrderVersion: 1, attemptKey: key('b') }, { id: 'admin', role: 'ADMIN' }],
     ]);
-    // 锁内重新读取用同一事务连接。
-    expect(m.order.mock.calls.filter((call) => call[3] === 'tx').map((call) => call[0])).toEqual(['a']);
+    // 核对与锁内重新读取都用同一事务连接，不另占连接池。
+    expect(m.order.mock.calls.every((call) => call[3] === tx)).toBe(true);
   });
 
   // 记录成功后响应丢失再重试：账本已整批记过就直接返回原结果，不因之后内容变化或文件过期而失败。
   it('replays a fully booked attempt before checking the file or the current content', async () => {
     ready();
     m.booked.mockResolvedValue([
-      { attemptKey: 'batch-print:attempt-1:a', orderId: 'a', outcome: 'MARKED' },
-      { attemptKey: 'batch-print:attempt-1:b', orderId: 'b', outcome: 'ALREADY_PRINTED' },
+      { attemptKey: key('a'), orderId: 'a', outcome: 'MARKED' },
+      { attemptKey: key('b'), orderId: 'b', outcome: 'ALREADY_PRINTED' },
     ]);
     m.available.mockRejectedValue(new Error('PDF_ARTIFACT_EXPIRED'));
     m.order.mockResolvedValue({ id: 'a', version: 9, workOrderVersion: 1 });
     expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toEqual({ marked: 1 });
-    expect(m.booked).toHaveBeenCalledWith({ where: { attemptKey: { in: ['batch-print:attempt-1:a', 'batch-print:attempt-1:b'] } }, select: { attemptKey: true, orderId: true, outcome: true } });
+    expect(m.booked).toHaveBeenCalledWith({ where: { attemptKey: { in: [key('a'), key('b')] } }, select: { attemptKey: true, orderId: true, outcome: true } });
     expect(m.available).not.toHaveBeenCalled();
-    expect(m.transaction).not.toHaveBeenCalled();
+    expect(m.recordInTx).not.toHaveBeenCalled();
+  });
+
+  // 尝试键绑定打印任务：另一个任务沿用旧的尝试标识，查的是另一组键，不会重放旧结果。
+  it('binds attempt keys to the batch job', async () => {
+    ready();
+    await recordBatchPrint('admin', 'j', 'attempt-1');
+    expect(key('a', 'other-job')).not.toBe(key('a'));
+    expect(m.booked.mock.calls[0]?.[0].where.attemptKey.in).toEqual([key('a'), key('b')]);
   });
 
   it('does not record a file that has expired or cannot be read', async () => {
     ready();
     m.available.mockRejectedValue(new Error('PDF_ARTIFACT_EXPIRED'));
     await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintArtifactUnavailableError);
-    expect(m.transaction).not.toHaveBeenCalled();
+    expect(m.recordInTx).not.toHaveBeenCalled();
   });
 
   it('rolls the whole batch back when any order changed under the lock or left production', async () => {
     ready();
     let reads = 0;
-    // 第一轮核对（锁外）全部一致；锁内重新读取时第二张已变。
+    // 首次核对全部一致；记录时锁内重新读取第二张已变。
     m.order.mockImplementation(async (id: string) => ({ id, version: id === 'b' && ++reads > 1 ? 2 : 1, workOrderVersion: 1 }));
     await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toMatchObject({ issues: [{ position: 2, message: '工单内容已变化，请重新选择并生成' }] });
     m.recordInTx.mockResolvedValueOnce('MARKED').mockResolvedValueOnce('NOT_PRINTABLE');
@@ -237,10 +254,11 @@ describe('recordBatchPrint', () => {
 
   it('records nothing when the file is not ready or its orders changed since generation', async () => {
     expect(await recordBatchPrint('admin', 'j', 'attempt-1')).toBeNull();
+    expect(m.transaction).not.toHaveBeenCalled();
     ready();
     m.order.mockResolvedValueOnce({ id: 'a', version: 2, workOrderVersion: 1 });
     await expect(recordBatchPrint('admin', 'j', 'attempt-1')).rejects.toBeInstanceOf(BatchPrintSelectionError);
-    expect(m.transaction).not.toHaveBeenCalled();
+    expect(m.recordInTx).not.toHaveBeenCalled();
   });
 
   it('refuses another actor’s job before touching orders', async () => {

@@ -37,9 +37,9 @@ export async function fetchPrintFile(url: string, signal: AbortSignal): Promise<
 
 /**
  * 交付已取得的文件：下载直接保存；预览打开到点击当下开好的标签页。标签页被浏览器拦截或已被
- * 关闭时返回文件地址，由页面给出「打开打印文件」链接（用户再点一次即可打开）。
+ * 关闭时返回 false，由页面给出「打开打印文件」按钮（再点一次在点击当下打开）。
  */
-export function deliverPrintFile(blob: Blob, delivery: 'download' | 'inline', tab: Window | null, fileName: string): string | null {
+export function deliverPrintFile(blob: Blob, delivery: 'download' | 'inline', tab: Window | null, fileName: string): boolean {
   const url = URL.createObjectURL(blob);
   setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
   if (delivery === 'download') {
@@ -49,11 +49,18 @@ export function deliverPrintFile(blob: Blob, delivery: 'download' | 'inline', ta
     document.body.append(link);
     link.click();
     link.remove();
-    return null;
+    return true;
   }
   if (tab && !tab.closed) {
     tab.location.href = url;
-    return null;
+    return true;
   }
-  return url;
+  return false;
+}
+
+/** 「打开打印文件」按钮：在点击当下用已取得的文件打开新标签页。 */
+export function openPrintFileBlob(blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
