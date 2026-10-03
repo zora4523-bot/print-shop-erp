@@ -66,3 +66,9 @@
 - 资料齐全、需派工的旧待处理单仍按存储状态计入“待完善”，主操作可以是“安排生产”。只影响存量信号标签。
 
 - 最终复核补充观察项：上线后检查 `/orders` 的 EXPLAIN 与延迟、统计信息维护，不增加事务超时；保留原打样分支“不再是 DRAFT”的较宽断言（寄样另有 PACKING 精确断言）。
+
+## 仓库合并验收补充
+
+用户随后授权推送并合并主分支。以远程 main 建立 `codex/production-entry-merge`，仅移入本任务实现提交，未包含原分支上另一任务的部署记录；候选 `74594132` 的应用代码与上述本地验收代码一致。PR 为 #46。
+
+首轮远程 static 门禁发现 `ProductionReadinessResult` 仍留在未使用导出基线，但已由 `lib/order/legacy-production-facts.ts` 和 `lib/order/commercial-details.ts` 实际导入并使用。仅删除这一条已解决的候选记录，不修改检测器、不批量刷新清单。修正后 `pnpm check:dead-code --check` 通过（136 个 knip issue groups、541 个 ts-prune candidates、0 cycles），日志 `/tmp/erp-production-entry-dead-code-merge2.log`。完整 PR CI 以修正后的远程候选重新执行；合并不代表生产部署。
