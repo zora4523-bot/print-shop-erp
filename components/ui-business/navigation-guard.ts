@@ -17,6 +17,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
  * 为真的守卫独自决定这次导航——只有它的 onBlocked 被调用、只弹一个确认层；它若已
  * release() 则直接放行，不再询问更早的守卫。beforeunload 是浏览器统一的原生确认，
  * 任一守卫需要即拦。
+ *
+ * 确认后的放行是一次性的、绑定到那一次导航（全局，所有守卫都认）：`resume()` 重放的
+ * 那一次点击、按 key 恢复的那一次 traverse、`leaveDocument()` 发起的那一次整页加载。
+ * 重放被链接自己取消、traverse 结束 / 失败 / 被中止后，守卫照常布防。`release()` 则是
+ * 「内容已安全」（例如保存成功）的整体解除，持续到 `when` 再次由 false 变 true。
  */
 
 export type BlockedNavigationKind = 'link' | 'traverse';
@@ -27,7 +32,10 @@ export type BlockedNavigation = {
   href: string;
   /** 被拦下的链接；后退 / 前进为 null。确认层取消后用于焦点返回。 */
   source: HTMLAnchorElement | null;
-  /** 放行本守卫并按原样继续：链接重放原点击（保留 Next Link 的 replace / scroll），历史按原条目 key 回到目标。 */
+  /**
+   * 只放行这一次并按原样继续：链接重放原点击（保留 Next Link 的 replace / scroll 与 pending 状态），
+   * 历史按原条目 key 回到目标。之后的导航仍受保护。
+   */
   resume: () => void;
 };
 
@@ -46,7 +54,7 @@ export type NavigationGuardOptions = {
 };
 
 export type NavigationGuard = {
-  /** 放行：之后的链接、后退 / 前进与 beforeunload 都不再拦截，直到 `when` 重新由 false 变 true。 */
+  /** 内容已安全时整体解除：之后的链接、后退 / 前进与 beforeunload 都不再拦截，直到 `when` 重新由 false 变 true。 */
   release: () => void;
   isReleased: () => boolean;
 };
@@ -81,6 +89,38 @@ export function isGuardedNavigationDestination(current: string, next: string): b
 
 const registry: GuardEntry[] = [];
 let detach: (() => void) | null = null;
+/** One-shot passes for an already confirmed navigation, honoured by every guard. */
+let linkPass: HTMLAnchorElement | null = null;
+let traversePass: string | null = null;
+let unloadPasses = 0;
+
+/** Run a confirmed navigation; any beforeunload it fires in this task is not prompted again. */
+function withUnloadPass(run: () => void) {
+  unloadPasses += 1;
+  try {
+    run();
+  } finally {
+    setTimeout(() => {
+      unloadPasses -= 1;
+    }, 0);
+  }
+}
+
+/** True while a confirmed link is being replayed (its own onNavigate guard should let it through). */
+export function isConfirmedNavigationInProgress(): boolean {
+  return linkPass !== null;
+}
+
+/**
+ * Full-document navigation after the user confirmed leaving: no guard (of any
+ * component) prompts again for this navigation. `assign` is injectable for tests.
+ */
+export function leaveDocument(
+  href: string,
+  assign: (href: string) => void = (target) => window.location.assign(target),
+): void {
+  withUnloadPass(() => assign(href));
+}
 
 function decidingGuard(): GuardEntry | null {
   for (let index = registry.length - 1; index >= 0; index -= 1) {
@@ -118,7 +158,7 @@ function guardedLink(event: MouseEvent): HTMLAnchorElement | null {
 function attachDocumentListeners(): () => void {
   const onClick = (event: MouseEvent) => {
     const link = guardedLink(event);
-    if (!link) return;
+    if (!link || link === linkPass) return;
     const entry = decidingGuard();
     if (!entry || entry.released) return;
     event.preventDefault();
@@ -128,8 +168,12 @@ function attachDocumentListeners(): () => void {
       href: link.href,
       source: link,
       resume: () => {
-        entry.released = true;
-        link.click();
+        linkPass = link;
+        try {
+          withUnloadPass(() => link.click());
+        } finally {
+          linkPass = null;
+        }
       },
     });
   };
@@ -146,6 +190,10 @@ function attachDocumentListeners(): () => void {
     ) {
       return;
     }
+    if (traversePass !== null && event.destination.key === traversePass) {
+      traversePass = null;
+      return;
+    }
     const entry = decidingGuard();
     if (!entry || entry.released) return;
     event.preventDefault();
@@ -155,13 +203,15 @@ function attachDocumentListeners(): () => void {
       href: url,
       source: null,
       resume: () => {
-        entry.released = true;
+        // The pass names this history entry only and is consumed by its
+        // navigate event; any other destination stays guarded meanwhile.
+        traversePass = key;
         const result = navigation!.traverseTo(key);
-        // A second user navigation can abort these promises; re-arm instead of
-        // surfacing an unhandled rejection or leaving the page unguarded.
+        // A second user navigation can abort these promises; never surface an
+        // unhandled rejection, and drop the pass when the traversal fails.
         void result.committed.catch(() => undefined);
         void result.finished.catch(() => {
-          entry.released = false;
+          if (traversePass === key) traversePass = null;
         });
       },
     });
@@ -205,6 +255,8 @@ export function useNavigationGuard({
       if (registry.length === 0) {
         detach?.();
         detach = null;
+        // No guard left: an unconsumed pass must not carry over to the next page.
+        traversePass = null;
       }
     };
   }, []);
@@ -219,7 +271,7 @@ export function useNavigationGuard({
     if (!listenUnload) return;
     const entry = entryRef.current;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (entry.released || (unloadRef.current && !unloadRef.current())) return;
+      if (entry.released || unloadPasses > 0 || (unloadRef.current && !unloadRef.current())) return;
       event.preventDefault();
       // Legacy signal still required by some browsers before showing the native prompt.
       event.returnValue = '';

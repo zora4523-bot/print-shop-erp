@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   NAVIGATION_GUARD_SKIP_ATTRIBUTE,
+  leaveDocument,
   useNavigationGuard,
   type BlockedNavigation,
   type NavigationGuard,
@@ -189,6 +190,20 @@ describe('link interception', () => {
     expect(followed).toHaveBeenCalledExactlyOnceWith('/orders');
     expect(blocked).toHaveLength(1);
   });
+
+  it('a confirmed link only passes once: when its own handler cancels the replay, the guard stays armed', async () => {
+    // The fixture links cancel their own default action, like Next Link onNavigate.preventDefault().
+    render(<Guard name="A" />);
+    click(link('工单列表'));
+    blocked[0].resume();
+    expect(followed).toHaveBeenCalledOnce();
+    click(link('工单列表'));
+    expect(blocked).toHaveLength(2);
+    expect(traversal('prev', at('/orders')).defaultPrevented).toBe(true);
+    // The replay's own reload pass only covers the task that replayed it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(unload()).toBe(true);
+  });
 });
 
 describe('browser back / forward (Navigation API)', () => {
@@ -202,6 +217,29 @@ describe('browser back / forward (Navigation API)', () => {
     expect(navigation.traverseTo).toHaveBeenCalledExactlyOnceWith('prev');
     expect(traversal('prev', at('/orders')).defaultPrevented).toBe(false);
     finished.resolve();
+  });
+
+  it('a confirmed same-page query change does not disarm later edits, leaves or reloads', async () => {
+    // e.g. price workspace: back from ?section=b to ?section=a keeps the editor mounted and dirty.
+    render(<Guard name="A" />);
+    expect(traversal('prev', at('?section=a')).defaultPrevented).toBe(true);
+    blocked[0].resume();
+    expect(traversal('prev', at('?section=a')).defaultPrevented).toBe(false);
+    finished.resolve();
+    await Promise.resolve();
+    expect(traversal('prev-2', at('?section=z')).defaultPrevented).toBe(true);
+    click(link('工单列表'));
+    expect(blocked).toHaveLength(3);
+    expect(unload()).toBe(true);
+  });
+
+  it('a confirmed traversal only lets its own history entry through', () => {
+    render(<Guard name="A" />);
+    traversal('prev', at('/orders'));
+    blocked[0].resume();
+    expect(traversal('other-entry', at('/orders/other')).defaultPrevented).toBe(true);
+    expect(traversal('prev', at('/orders')).defaultPrevented).toBe(false);
+    expect(traversal('prev', at('/orders')).defaultPrevented).toBe(true);
   });
 
   it('re-arms when the resumed traversal is aborted', async () => {
@@ -261,6 +299,24 @@ describe('beforeunload, release and re-arm', () => {
     render(<Guard name="A" when={false} />);
     render(<Guard name="A" when />);
     expect(guards.get('A')!.isReleased()).toBe(false);
+    click(link('工单列表'));
+    expect(blocked).toHaveLength(1);
+  });
+});
+
+describe('leaving the document after a confirmation', () => {
+  it('leaveDocument() suppresses every guard’s reload prompt for that one navigation', () => {
+    render(<><Guard name="A" /><Guard name="B" blockUnload={() => true} /></>);
+    let promptedDuringLeave: boolean | null = null;
+    leaveDocument('/orders', () => { promptedDuringLeave = unload(); });
+    expect(promptedDuringLeave).toBe(false);
+  });
+
+  it('the pass ends with the task that started the navigation', async () => {
+    render(<><Guard name="A" /><Guard name="B" /></>);
+    leaveDocument('/orders', () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(unload()).toBe(true);
     click(link('工单列表'));
     expect(blocked).toHaveLength(1);
   });

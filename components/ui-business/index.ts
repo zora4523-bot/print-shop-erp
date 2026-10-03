@@ -54,7 +54,9 @@ export { LinkPendingHint } from './LinkPendingHint';
 export type { PendingLinkProps } from './PendingLink';
 export {
   NAVIGATION_GUARD_SKIP_ATTRIBUTE,
+  isConfirmedNavigationInProgress,
   isGuardedNavigationDestination,
+  leaveDocument,
   useNavigationGuard,
 } from './navigation-guard';
 export type {

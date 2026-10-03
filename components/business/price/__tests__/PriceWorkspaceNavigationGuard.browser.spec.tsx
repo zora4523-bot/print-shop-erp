@@ -77,6 +77,26 @@ it('cancels browser back with unsaved tiers and resumes the same history entry o
   expect(m.push).not.toHaveBeenCalled();
 });
 
+it('after confirming a same-section back the editor stays guarded for later leaves and reloads', async () => {
+  // A real traversal settles only after its navigate event; keep it pending here.
+  navigation.traverseTo.mockImplementation(() => ({ committed: new Promise(() => undefined), finished: new Promise(() => undefined) }));
+  mount(2);
+  await expect.poll(() => traversal('previous-entry', '?section=tiers&group=a').defaultPrevented).toBe(true);
+  await page.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+  expect(navigation.traverseTo).toHaveBeenCalledExactlyOnceWith('previous-entry');
+  // The browser then performs that traversal (only the query string changes; the editor stays dirty).
+  expect(traversal('previous-entry', '?section=tiers&group=a').defaultPrevented).toBe(false);
+  await Promise.resolve();
+  expect(traversal('older-entry', '/owner/rules').defaultPrevented).toBe(true);
+  await expect.element(page.getByRole('alertdialog')).toBeVisible();
+  await page.getByRole('button', { name: '继续编辑', exact: true }).click();
+  await sidebar().click();
+  await expect.element(page.getByRole('alertdialog')).toBeVisible();
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
+});
+
 it('does not interfere without unsaved tiers', async () => {
   mount(0);
   await expect.element(page.getByText('阶梯编辑')).toBeVisible();
