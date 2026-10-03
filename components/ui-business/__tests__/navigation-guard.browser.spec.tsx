@@ -430,6 +430,22 @@ describe('a replayed link that the client router takes over', () => {
     }
   });
 
+  it('without the Navigation API, a committed client navigation still ends the pass (next reload is prompted)', async () => {
+    Object.defineProperty(window, 'navigation', { configurable: true, value: undefined });
+    const original = location.href;
+    try {
+      render(<><Guard name="A" /><RouterLink /></>);
+      click(link('路由链接'));
+      blocked[0].resume();
+      // Next commits the new URL in this document (query-string change, dirty form still mounted).
+      history.pushState(history.state, '', '?section=committed');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(unload()).toBe(true);
+    } finally {
+      history.replaceState(history.state, '', original);
+    }
+  });
+
   it('ends the pass once the client navigation commits in the same document', async () => {
     render(<><Guard name="A" /><RouterLink /></>);
     click(link('路由链接'));

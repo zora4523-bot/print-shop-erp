@@ -106,13 +106,16 @@ let traversePass: { key: string } | null = null;
  *   back/forward-cache restore (pageshow persisted); pagehide ends it too;
  * - once the client router has taken the confirmed navigation over (link
  *   replay or navigateConfirmed()), the pass is bound to that navigation only:
- *   it ends when the new URL commits in this document, when its full-load
+ *   it ends when the new URL commits in this document (Navigation API event,
+ *   or a URL check every URL_COMMIT_POLL_MS where that API is missing), when its full-load
  *   fallback (e.g. RSC failure → location.assign) consumes the first
  *   beforeunload, or when the page evidently stays — never on a timer;
  * - before / without a takeover, UNLOAD_PASS_FALLBACK_MS bounds it as a safety net if none of these happen
  *   (e.g. a download or a 204 response that keeps the page without input).
  */
 const UNLOAD_PASS_FALLBACK_MS = 10_000;
+/** How often a taken-over navigation checks whether its URL has committed. */
+const URL_COMMIT_POLL_MS = 100;
 let unloadPass: { event: Event | null; revoke: () => void; hold: () => void } | null = null;
 
 function revokeUnloadPass() {
@@ -129,10 +132,22 @@ function grantUnloadPass() {
   };
   const timer = setTimeout(() => revoke(), UNLOAD_PASS_FALLBACK_MS);
   // Lifecycle-bound from now on: the router has taken this navigation over.
-  const hold = () => clearTimeout(timer);
+  // The client router commits a successful navigation by changing the URL in
+  // this document. Watch for that without relying on the Navigation API (not
+  // available in every browser): once the URL path or query changes, the
+  // confirmed navigation is over and the next reload must be prompted again.
+  let commitWatch: ReturnType<typeof setInterval> | undefined;
+  const hold = () => {
+    clearTimeout(timer);
+    const from = location.href;
+    commitWatch = setInterval(() => {
+      if (isGuardedNavigationDestination(from, location.href)) revoke();
+    }, URL_COMMIT_POLL_MS);
+  };
   const pass = { event: null as Event | null, revoke, hold };
   function revoke() {
     clearTimeout(timer);
+    clearInterval(commitWatch);
     document.removeEventListener('pointerdown', revoke, true);
     document.removeEventListener('keydown', revoke, true);
     document.removeEventListener('visibilitychange', onVisibility);
