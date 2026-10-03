@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useRef } from 'react';
 import { ChevronDown, KeyRound, LogOut, UserCircle } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,26 +16,33 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { signOutAction } from '@/actions/account';
 
-// Admin shell 顶栏右侧的用户下拉菜单——把&ldquo;用户名 / 角色 / 修改密码 /
-// 退出登录&rdquo;收进一个 dropdown，替代之前一字排开的 inline links。
-//
-// 客户端组件：DropdownMenu 用 Base UI primitives 需要 hover/click 状态。
-// signOutAction 是 server action，从 client 直调是 Next 16 标准模式。
-//
-// **a11y**：trigger 用 button + aria-label；DropdownMenu 内置 keyboard nav。
-// 头像 fallback 取 displayName 第一个字符，无图也能识别。
-
 export type UserMenuProps = {
   displayName: string;
   roleLabel: string;
 };
 
 export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusOnClose = useRef(false);
   const initial = displayName.trim().charAt(0) || '·';
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open, details) => {
+        // 关闭动画结束前保留 Escape 的关闭原因。
+        if (open || details.reason !== 'trigger-hover') {
+          restoreFocusOnClose.current = !open && details.reason === 'escape-key';
+        }
+      }}
+      onOpenChangeComplete={(open) => {
+        if (!open && restoreFocusOnClose.current) {
+          triggerRef.current?.focus({ preventScroll: true });
+          restoreFocusOnClose.current = false;
+        }
+      }}
+    >
       <DropdownMenuTrigger
+        ref={triggerRef}
         aria-label={`用户菜单：${displayName}`}
         className={buttonVariants({
           variant: 'ghost',
@@ -58,9 +66,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        {/* DropdownMenuLabel 是 Base UI 的 MenuPrimitive.GroupLabel，必
-            须在 <DropdownMenuGroup> 内（否则 MenuGroupRootContext 缺失，
-            页面跑成 Runtime Error）。 */}
+        {/* DropdownMenuGroup 为标签提供 Base UI 分组上下文。 */}
         <DropdownMenuGroup>
           <DropdownMenuLabel className="flex items-center gap-2">
             <UserCircle aria-hidden className="size-4 text-muted-foreground" />
@@ -76,21 +82,18 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
           <span>修改密码</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        {/* signOutAction 进 form：禁 JS / 慢网络也能登出（保留 LogoutButton
-            核心特性）。**不**包进 DropdownMenuItem——Base UI 的 MenuItem
-            会和 form > button 嵌套互相劫持事件 + 弄丢 a11y role（实测
-            E2E 找不到 menuitem name=退出登录）。直接平铺统一 Button，视觉
-            对齐 DropdownMenuItem 的 padding/hover。 */}
-        <form action={signOutAction} className="p-1">
-          <Button
-            type="submit"
-            variant="ghost"
+        {/* 提交期间保留菜单和表单，直到 signOutAction 完成页面跳转。 */}
+        <form action={signOutAction}>
+          <DropdownMenuItem
+            nativeButton
+            render={<button type="submit" />}
+            closeOnClick={false}
             data-slot="user-menu-logout"
-            className="min-h-11 w-full cursor-default justify-start rounded-sm px-2 hover:bg-muted focus-visible:bg-muted active:translate-y-0"
+            className="w-full"
           >
             <LogOut aria-hidden className="size-4" />
             <span>退出登录</span>
-          </Button>
+          </DropdownMenuItem>
         </form>
       </DropdownMenuContent>
     </DropdownMenu>

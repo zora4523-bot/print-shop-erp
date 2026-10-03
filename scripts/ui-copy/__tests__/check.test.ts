@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { inspectUiCopy, scan, policy } from '../check.mjs';
 
@@ -28,7 +27,7 @@ describe('user-visible copy gate', () => {
 
   it('does not flag comments, logs, enum comparisons, code keys or routes', () => {
     expect(check(`
-      // Prisma revision is internal.
+      // Prisma revision 仅供内部使用。
       console.error('Prisma migration failed');
       const field = <input type="hidden" value="DRAFT" />;
       const status = 'DRAFT';
@@ -58,10 +57,11 @@ describe('user-visible copy gate', () => {
 });
 
 
-// This creates a real TypeScript program and resolves imported source files.
-// Cold compiler startup on the hosted runner is not a five-second SLA.
+// 创建实际的 TypeScript 程序并解析导入文件，编译器启动需要足够的执行时间。
 it('traces imported display helpers and labels to their defining file', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'ui-copy-import-'));
+  const outputDirectory = path.join(process.cwd(), 'test-results', 'ui-copy');
+  mkdirSync(outputDirectory, { recursive: true });
+  const root = mkdtempSync(path.join(outputDirectory, 'imports-'));
   try {
     mkdirSync(path.join(root, 'components'));
     mkdirSync(path.join(root, 'lib'));
@@ -85,9 +85,32 @@ it('traces imported display helpers and labels to their defining file', () => {
 
 it('keeps every documented internal mapping in the gate and wires the required lint command', () => {
   const doc = readFileSync(path.join(process.cwd(), 'docs/ui-规范.md'), 'utf8');
-  const mappings = doc.split('### 业务词映射')[1].split('### 文案门禁')[0];
-  for (const row of mappings.split('\n').filter(line => line.startsWith('| ') && !line.startsWith('| 内部词'))) {
-    expect(policy.banned).toContain(row.split('|')[1].trim());
+  const mappings = [
+    ['PER_UNIT', '按件计费'],
+    ['DRAFT', '草稿'],
+    ['settledAt', '结算时间'],
+    ['DailyWorkerSalary', '历史工资记录'],
+    ['revision', '版本（仅有业务意义时展示）'],
+    ['HourlyWorkerPayroll', '历史时薪记录'],
+    ['ProductionReport', '报工记录'],
+    ['ProductionTask', '生产任务'],
+    ['同步', '更新（仅有业务意义时展示）'],
+    ['null', '待录 / 待定（按字段）'],
+    ['快照', '已保存金额 / 历史记录（按业务事实）'],
+    ['只读', '已归档 / 不可编辑（仅在需要解释状态时）'],
+  ];
+  const documentedMappings = [
+    '### 业务词映射',
+    '',
+    '| 内部词 | 用户文案 |',
+    '|---|---|',
+    ...mappings.map(([internal, display]) => `| ${internal} | ${display} |`),
+    '',
+    '',
+  ].join('\n');
+  expect(doc).toContain(documentedMappings);
+  for (const [internal] of mappings) {
+    expect(policy.banned).toContain(internal);
   }
   const pkg = JSON.parse(readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
   expect(pkg.scripts.lint).toContain('node scripts/ui-copy/check.mjs');

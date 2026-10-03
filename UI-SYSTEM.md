@@ -90,13 +90,14 @@ app/
 
 - 管理员与外部销售共用同一顶栏：左侧显示侧栏开关与当前位置，右侧仅保留环境提示、主题与账号操作；页面入口统一放在侧边栏。
 - 顶栏操作使用同一套轻量按钮，不叠加胶囊边框或阴影。非生产环境显示中文提示，角色详情保留在侧栏与账号菜单内。
+- 账号菜单支持键盘打开；按 Escape 关闭后恢复账号按钮焦点。管理员与销售共用 `UserMenu`，通过真实登录验证窄屏、桌面和明暗主题下的菜单可访问性、焦点返回及退出登录。
 - 普通「新建工单」独立放在侧栏顶部，不随目录滚动；销售工作台与管理工作台不重复此通用入口，报价区保留带入当前款式的新建入口。工单列表的上下文操作保留。
 - 不超过五个入口的角色直接平铺；管理员常用区固定管理工作台、销售工作台、工单列表、经营概览。其他入口按业务模块、生产与采购、财务结算、基础资料和系统管理组织，系统管理置底。
 - 生产与采购、财务结算、基础资料、系统管理默认收起；记忆用户折叠偏好并兼容旧分组键。进入分组内页面时自动展开，当前页仍可手动收起；图标模式展示所有授权入口，保证可达。
 - 全局只展示「规则配置中心」入口；总览使用已有分类卡片，子页提供默认收起的「规则目录」，沿用同一授权菜单的 11 个明细入口与查询参数选中规则。版本与发布栏、未保存修改离开保护保留。
 - 保留菜单权限、唯一选中态、按需预取、移动端抽屉和键盘操作；顶栏交互目标不小于 44×44 CSS px。
 - 面包屑链接使用居中的 44px 点击区，长文字在内部独立省略；不能用 `block truncate` 覆盖链接的居中布局。父级、当前页及不可点击的分组名称按真实文字行盒对齐，中心差不超过 2px。导航组件测试使用真实 `admin-viewport` 外壳，并覆盖窄屏、长标题、明暗主题与键盘焦点；通用几何门禁独立检查面包屑文字，不能仅以容器对齐或无溢出代替验收。
-- 二级页统一由面包屑父级负责返回（业主 2026-10-02「请保持一致性」，规则见 [UI 规范 §8.3](docs/ui-规范.md)）：页头不再放与父级同目标的「返回 X」。页面经 `components/business/admin/breadcrumb-entity.tsx` 的 `BreadcrumbParent` 把列表上下文交给父级（`href` 只接受同路径加查询串 / hash，`resolveBreadcrumbParentHref` 拒绝换路径与外站），`FormPendingScope` 把提交中状态交给父级（按 `PendingLink` 语义锁定）。`FormPendingScope.browser.spec.tsx` 覆盖父级锁定 / 解锁与同路径上下文，`AdminShellNavigation.browser.spec.tsx` 覆盖六视口明暗下父级可见、≥44px、可聚焦。页头仍保留 `back` 的例外只有：离开保护、回到的不是父级、父级是不可点击分组、没有面包屑的师傅端。
+- 二级页通过面包屑父级返回，规则见 [UI 规范 §8.3](docs/ui-规范.md)。页面经 `components/business/admin/breadcrumb-entity.tsx` 的 `BreadcrumbParent` 把列表上下文交给父级（`href` 只接受同路径加查询串 / hash，`resolveBreadcrumbParentHref` 拒绝换路径与外站），`FormPendingScope` 把提交中状态交给父级。`FormPendingScope.browser.spec.tsx` 覆盖父级禁止操作、恢复操作与同路径上下文，`tests/e2e/admin-shell-navigation.spec.ts` 通过真实页面检查九视口明暗主题下的父级可见性、≥44px 点击区域与键盘焦点。页头的 `back` 用于离开保护、返回其他来源页面、父级为不可点击分组以及没有面包屑的师傅端。
 
 侧栏沿用 shadcn/ui Base Nova、Base UI 与 Tailwind CSS，字体继承全站系统无衬线字体栈。后台导航的字号集中在 `AppSidebar` 管理，不按页面或菜单层级另设字号。
 
@@ -351,7 +352,7 @@ PageHeader
 |---|---|---|---|
 | `tests/visual/order-print.spec.ts` | 8 个打印 fixture 像素基线 | 相同环境下打印布局未发生非预期像素变化 | Web 全站与设计稿一致 |
 | `tests/visual/admin-responsive.spec.ts` | 九视口、light/dark、geometry、touch、axe | 被覆盖管理页面不触发已定义的裁切/无障碍门禁 | 与 `.dc.html` 自动像素匹配 |
-| `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx` | 管理员/销售共享导航九视口、明暗主题、overflow、touch、axe；销售平铺与菜单键盘操作 | 隔离于业务数据的导航布局、角色入口和交互契约 | 完整业务页面的截图或端到端授权 |
+| `tests/e2e/admin-shell-navigation.spec.ts` | 管理员/销售真实页面导航九视口、明暗主题、overflow、touch、axe 与键盘操作 | 真实登录和页面中的导航、角色入口及交互行为 | 全部业务流程与图像验收 |
 | `tests/visual/worker-responsive.spec.ts` | 九视口、light/dark、师傅端路由与历史/缺失状态、geometry、touch、axe | 被覆盖师傅端路由满足当前门禁 | 所有师傅端业务状态已逐像素审查 |
 | `/dev/showcase` | 人工组件检查 | token、状态和原子件在主题/尺寸下可目视比较 | 自动回归或页面采用率 |
 
@@ -454,7 +455,7 @@ PageHeader
 
 ### 工单页面导航与标题去重
 
-- 顶部面包屑承担层级导航：工单列表 → 工单名称 → 编辑。工单 id 段显示工单名称（业主 2026-10-02：员工靠名称认单，工单号不重要），名称为空或首帧未交上来时显示「工单详情」，任何时候都不显示工单号；末段在吸顶顶栏内省略、完整名称放在 `title`，H1 滚走后仍能看出是哪张单。窄屏仍保留工单列表入口。详情页头不放「返回工单列表」（与面包屑父级同目标、同行为，按二级页统一规则），`order-detail-commercial-visibility.test.tsx`、`AdminOrderDetailView.browser.spec.tsx` 与 `AdminShellNavigation.browser.spec.tsx` 锁住两种角色无页头返回、面包屑父级六视口可见可聚焦。
+- 顶部面包屑承担层级导航：工单列表 → 工单名称 → 编辑。工单 id 段显示工单名称，名称为空或首帧未提供名称时显示「工单详情」；末段在吸顶顶栏内省略、完整名称放在 `title`。窄屏保留工单列表入口。详情页头通过面包屑父级返回，`order-detail-commercial-visibility.test.tsx`、`AdminOrderDetailView.browser.spec.tsx` 与 `tests/e2e/admin-shell-navigation.spec.ts` 检查两种角色的返回入口及父级可见性与键盘焦点。
 - 工单详情标题以中文名称和状态为主，业务员（工单归属的外部销售，免费重做显示原单外部销售；2026-09-27 起不再显示客户）与工艺作辅助信息；编号和版本在“工单信息”中按需展开，PDF、编辑保留。标题随正文滚动，侧栏及页内锚点只避让全局导航。
 - 管理端编辑、旧版详情、销售详情采用相同的名称优先原则。编辑页返回按钮保留未保存检查，保存/核价行为不变；不将有功能用途的底部保存栏、规则切换栏或表格固定列作为重复导航移除。
 

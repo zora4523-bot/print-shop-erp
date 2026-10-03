@@ -204,7 +204,6 @@ jobs:
 
   # One release build shared by every E2E shard (phase 2, DECISIONS 2026-09-19).
   build:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -354,6 +353,67 @@ jobs:
             test-results/
           include-hidden-files: true
           if-no-files-found: ignore
+          retention-days: 14
+
+  navigation:
+    name: 真实页面导航检查
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: print_shop_erp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d print_shop_erp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      E2E_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/erp_e2e_navigation_ci
+      E2E_DATABASE_CONFIRM_DATABASE: erp_e2e_navigation_ci
+      E2E_PREBUILT: "1"
+      NOTIFICATION_MOCK_MODE: "false"
+      CDR_BUNDLE_MOCK_MODE: "false"
+      WECOM_SMART_BOT_ID: ""
+      WECOM_SMART_BOT_SECRET: ""
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 配置 Node、pnpm 和 Prisma Client
+        uses: ./.github/actions/setup
+      - name: 安装 Chromium
+        uses: ./.github/actions/browsers
+        with:
+          playwright: chromium
+      - name: 下载生产构建
+        uses: actions/download-artifact@v4
+        with:
+          name: next-release-${{ github.sha }}
+      - name: 解压生产构建
+        run: tar -xzf next-release.tar.gz
+      - name: 准备导航测试数据库
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE erp_e2e_navigation_ci'
+          pnpm test:e2e:preflight
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm exec prisma migrate deploy
+          DATABASE_URL="$E2E_DATABASE_URL" pnpm db:seed
+          pnpm test:e2e:prepare
+      - name: 验证真实登录与页面导航
+        run: pnpm exec playwright test --config=playwright.navigation.config.ts
+      - name: 上传导航测试结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-${{ github.sha }}
+          path: .review/playwright-release.json
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
 
   # Business E2E deliberately publishes successor wage books, so the durable

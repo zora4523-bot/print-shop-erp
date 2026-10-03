@@ -54,17 +54,9 @@ const MS_PER_HOUR = 60 * 60 * 1000;
 const DEFAULT_EXPIRE_HOURS = SETTING_DEFINITIONS.cdr_link_expire_hours.fallback.hours;
 
 export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  const cfg = readOssConfig(env);
   if (env.CDR_BUNDLE_MOCK_MODE === 'true') return true;
   if (env.CDR_BUNDLE_MOCK_MODE === 'false') return false;
-  // OSS 未配齐 → 强制 mock；不能真打包。malformed OSS_ENDPOINT 会让
-  // readOssConfig throw——视同未配齐，页面（/foreman/cdr 渲染时调本
-  // 函数）降级到 mock 告警条而不是 500。
-  let cfg: ReturnType<typeof readOssConfig>;
-  try {
-    cfg = readOssConfig(env);
-  } catch {
-    return true;
-  }
   if (!cfg.configured) return true;
   // 留空 + 已配齐：非生产默认 mock——dev/E2E 会自动触发打包流程，
   // 不能因为 .env 里有真实凭证就往生产 bucket 写测试包
@@ -94,18 +86,18 @@ function deriveObjectKey(fileUrl: string, cfg: OssConfig): string {
   return key;
 }
 
-/** Use the same object-key rules as the actual packer, without touching storage. */
+/** 校验设计文件地址，使用打包器的 object key 规则。 */
 export function isBundleSourceAddressValid(fileUrl: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const config = readOssConfig(env);
   try {
     const url = new URL(fileUrl);
     if (!['http:', 'https:'].includes(url.protocol)) return false;
-    const config = readOssConfig(env);
     if (config.configured) { deriveObjectKey(fileUrl, config.cfg); return true; }
     return decodeURIComponent(url.pathname).replace(/^\/+/, '').startsWith('design/');
   } catch { return false; }
 }
 
-// Keep directory components compact; filenames use a separate, larger limit.
+// 目录和文件名分别限制长度。
 export function safeArchiveFolder(value: string, maxBytes = 50): string {
   let cleaned = stripUnsafeFileNameChars(value.replace(/[/\\<>:"|?*]/g, '_'))
     .replace(/^[. ]+|[. ]+$/g, '');
