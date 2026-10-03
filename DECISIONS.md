@@ -1711,3 +1711,10 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - **理由**：业主 2026-10-02 选择「默认收起，有待处理时展开」：这两块是低频维护，常驻展开把详情页拉得很长。
 - **影响范围**：`app/(admin)/orders/[id]/page.tsx` 计算 `pricingNeedsAttention` 并给 supplementary 栏目传 `collapsed`；`AdminOrderDetailView` 的分区折叠改为首次挂载决定、随 `toggle` 同步的 `DetailSection`。E2E 中直接操作这两块里控件的用例（历史材料单价、样品「编辑全部收费」）先展开分区；带锚点进入的用例不受影响。无迁移。
 - **相关文档**：`docs/ui-规范.md`「管理员工单详情布局」2026-10-02 补充、`UI-SYSTEM.md`「管理与业务记录默认展开」。
+
+## 2026-10-04：离开保护统一为全应用共享导航守卫
+
+- **决策**：所有「有未保存内容 / 正在提交时离开」的保护统一走 `components/ui-business/navigation-guard.ts` 的 `useNavigationGuard`：document capture 拦截同源站内链接（侧栏、面包屑父级、顶栏菜单、正文链接），Navigation API 取消浏览器后退 / 前进，beforeunload 拦刷新与关闭。原语只判定、拦截并回调，确认层由各业务用 `ConfirmActionController`（L2）渲染；同一时刻多个守卫以最后挂载且当前需要拦截者为准，确认一次只放行这一次导航（不连弹两个确认层）。新建工单接入后，侧栏、面包屑与后退 / 前进与页头返回同一判定（未上传文件「放弃修改并离开」，仅未保存文字「保存草稿并离开」，草稿保存失败不离开）；上传 / 提交中照旧直接拦下、不弹确认。管理员改单、销售改单、价格工作台和 `PendingButton` 的各自监听迁到同一原语，删除重复实现。
+- **理由**：业主决定本轮做「全应用导航守卫」。新建工单此前只拦页头返回和若干程序化跳转，侧栏、面包屑（2026-10-02 起是二级页唯一的返回入口）和浏览器后退会绕过离开保护，未上传设计文件与打样填写静默丢失；beforeunload 拦不住 Next 客户端导航。仓库里另有 4 套各自实现的 document 级拦截，规则略有出入、共存时谁先处理取决于监听注册先后。
+- **影响范围**：新增原语与浏览器测试；`order-creation-leave.tsx` 改用原语（删去 `useOrderFormLeaveGuard`）；`use-admin-order-leave-guard.ts` 变为薄适配层，`SalesOrderEditGuard` 的刷新保护并入原语；价格工作台与 `PendingButton` 额外获得后退 / 前进确认，`PendingButton` 确认离开后先放行再整页跳转（不再被浏览器二次询问），外链改由浏览器原生 beforeunload 确认；`PriceWorkspaceLink` 自带确认，经 `data-navigation-guard-skip` 跳过文档级拦截。无数据库、权限、金额、Server Action 变更；零 JS 三条硬约束（登录、登出、改密码）不涉及。不支持 Navigation API 的浏览器后退 / 前进仍不受保护（只剩链接与刷新保护）。
+- **相关文档**：`docs/ui-规范.md` §8.3、[全应用导航守卫审查记录](docs/audits/2026-10-04-global-navigation-guard.md)、[建单离开保护复审](docs/audits/2026-09-30-order-leave-recovery.md)。
