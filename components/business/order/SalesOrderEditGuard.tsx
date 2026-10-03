@@ -27,7 +27,10 @@ export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
   const [isSaving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ navigation?: PendingOrderEditorNavigation } | null>(null);
   const blockNavigation = useCallback((navigation: PendingOrderEditorNavigation) => setNotice({ navigation }), []);
-  useAdminOrderLeaveGuard({ protectedLeave: dirty && !isSaving, onBlocked: blockNavigation });
+  // Reload/close stays protected while saving or while any region is busy; in-app navigation is
+  // only offered a confirmation when nothing is being saved.
+  const blockUnload = useCallback(() => dirtyForms.current.size > 0 || Boolean(busyRegion.current), []);
+  useAdminOrderLeaveGuard({ protectedLeave: dirty && !isSaving, onBlocked: blockNavigation, blockUnload });
 
   useEffect(() => {
     const owner = (target: Element): HTMLElement | null => target.closest('form,[role="dialog"],[role="alertdialog"]');
@@ -105,10 +108,6 @@ export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
       if (!(event.target instanceof Element) || isNotice(event.target) || event.key === 'Tab' || event.metaKey || event.ctrlKey) return;
       if (event.target.closest('input,select,textarea,button,[role=checkbox],[role=switch]') && hasOtherDraft(owner(event.target))) stop(event);
     };
-    const unload = (event: BeforeUnloadEvent) => {
-      if (!dirtyForms.current.size && !busyRegion.current) return;
-      event.preventDefault(); event.returnValue = '';
-    };
     const paste = (event: ClipboardEvent) => {
       if (event.target instanceof Element && hasOtherDraft(owner(event.target)) && event.clipboardData?.files.length) stop(event);
     };
@@ -124,8 +123,7 @@ export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
     document.addEventListener('beforeinput', beforeInput, true);
     document.addEventListener('keydown', keyboard, true);
     document.addEventListener('pointerdown', dismiss, true);
-    window.addEventListener('beforeunload', unload);
-    return () => { observer.disconnect(); document.removeEventListener('drop', drop, true); document.removeEventListener('paste', paste, true); document.removeEventListener('input', changed, true); document.removeEventListener('change', changed, true); document.removeEventListener('click', click, true); document.removeEventListener('submit', submit, true); document.removeEventListener('beforeinput', beforeInput, true); document.removeEventListener('keydown', keyboard, true); document.removeEventListener('pointerdown', dismiss, true); window.removeEventListener('beforeunload', unload); };
+    return () => { observer.disconnect(); document.removeEventListener('drop', drop, true); document.removeEventListener('paste', paste, true); document.removeEventListener('input', changed, true); document.removeEventListener('change', changed, true); document.removeEventListener('click', click, true); document.removeEventListener('submit', submit, true); document.removeEventListener('beforeinput', beforeInput, true); document.removeEventListener('keydown', keyboard, true); document.removeEventListener('pointerdown', dismiss, true); };
   }, []);
 
   return <div ref={root} className="space-y-4">
