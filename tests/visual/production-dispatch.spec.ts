@@ -179,3 +179,63 @@ test('confirming the first address ships and registers the unreported production
   expect((await withDb(async db => (await db.query<{ status: string }>('SELECT status FROM "Order" WHERE id=$1', [fixture.id])).rows[0])).status).toBe('PACKING');
   expect(errors).toEqual([]);
 });
+
+
+test('incomplete dispatch orders show recovery without partial publication', async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const valid = await seedProductionDispatchFixture();
+  const incomplete = await seedProductionDispatchFixture({ incomplete: true });
+  const name = '待完善工单-ABCDEFGHIJKLMNOPQRSTUVWXYZ-包装与工艺资料需要核对';
+  await withDb(db => db.query('UPDATE "Order" SET "customName"=$2 WHERE id=$1', [incomplete.id, name]));
+  await login(page, { from: `/orders/production?ids=${valid.id},${incomplete.id}` });
+  await expect(page.getByRole('status')).toContainText('工单资料不完整，暂不能安排本批生产');
+  const blocked = page.getByRole('list', { name: '待完善工单' });
+  await expect(blocked).toContainText('款式 #1：生产工艺不明确，请完善工艺资料。');
+  await expect(blocked).toContainText('未填写包装组，请完善包装资料。');
+  await expect(blocked).not.toContainText('canonical');
+  await expect(page.getByRole('button', { name: '核对排单' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '发布排单', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('combobox')).toHaveCount(0);
+  expect(await withDb(async db => (await db.query('SELECT id FROM "ProductionJob" WHERE "orderId"=ANY($1::text[])', [[valid.id, incomplete.id]])).rowCount)).toBe(0);
+  await gates(page, info, 'dispatch-incomplete');
+  if ([390, 1280].includes(info.project.use.viewport!.width)) {
+    await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+    await page.evaluate(() => { document.documentElement.style.zoom = ''; });
+  }
+  const details = blocked.getByRole('link', { name, exact: true });
+  await details.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/orders/${incomplete.id}$`));
+  await page.goBack();
+  await page.getByRole('link', { name: '返回工单列表', exact: true }).click();
+  await expect(page).toHaveURL(/\/orders$/);
+  await page.goto(`/orders/production?ids=${valid.id}`);
+  await expect(page.getByRole('combobox', { name: '局部烫金 · 1000 个' })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+
+test('dispatch invalidated after review rejects the complete batch with a safe reason', async ({ page }, info) => {
+  const fixtures = [await seedProductionDispatchFixture(), await seedProductionDispatchFixture()].sort((a, b) => a.id.localeCompare(b.id));
+  const ids = fixtures.map(row => row.id);
+  const snapshot = () => withDb(async db => (await db.query('SELECT id, status, revision, "simpleProduction" FROM "Order" WHERE id=ANY($1::text[]) ORDER BY id', [ids])).rows);
+  const before = await snapshot();
+  await login(page, { from: `/orders/production?ids=${ids.join(',')}` });
+  await expect(page.getByRole('combobox', { name: '局部烫金 · 1000 个' })).toHaveCount(2);
+  for (const select of await page.getByRole('combobox', { name: '局部烫金 · 1000 个' }).all()) await select.selectOption(fixtures[0].workerId);
+  await page.getByRole('button', { name: '核对排单', exact: true }).click();
+  await expect(page.getByRole('button', { name: '发布排单', exact: true })).toBeVisible();
+  // Invalidate the second order after review, so the transaction must roll back
+  // the first order's already attempted release and assignment writes as well.
+  await withDb(db => db.query('UPDATE "OrderItem" SET craft=NULL, crafts=ARRAY[]::text[] WHERE "orderId"=$1', [ids[1]]));
+  await page.getByRole('button', { name: '发布排单', exact: true }).click();
+  await expect(page.getByRole('alert', { name: /^排单扫码验收：/ })).toContainText('排单扫码验收：款式 #1：生产工艺不明确，请完善工艺资料。');
+  await expect(page.getByRole('alert', { name: /^排单扫码验收：/ })).not.toContainText('canonical');
+  await gates(page, info, 'dispatch-invalidated');
+  expect(await snapshot()).toEqual(before);
+  expect(await withDb(async db => (await db.query('SELECT id FROM "ProductionJob" WHERE "orderId"=ANY($1::text[])', [ids])).rowCount)).toBe(0);
+  expect(await withDb(async db => (await db.query('SELECT id FROM "ProductionOperation" WHERE "orderId"=ANY($1::text[])', [ids])).rowCount)).toBe(0);
+  expect(await withDb(async db => (await db.query('SELECT id FROM "OrderLog" WHERE "orderId"=ANY($1::text[]) AND action=\'PRODUCTION_ASSIGNED\'', [ids])).rowCount)).toBe(0);
+});

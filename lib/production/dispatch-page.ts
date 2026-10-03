@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { currentDispatchTargets } from '@/lib/production/dispatch-targets';
 import { operationTypeForReporterAccount } from '@/lib/production/reporter-operation-lane';
 import { progressCraftIdsForReporter } from '@/lib/production/progress-reporter-lane';
+import { DispatchPlanValidationError } from './dispatch-plan-error';
 
 type Client = typeof db;
 
@@ -20,6 +21,7 @@ type DispatchPageOrder = {
   revision: number;
   version: number;
   tasks: DispatchPageTask[];
+  issues?: string[];
 };
 
 /**
@@ -37,7 +39,15 @@ export async function loadDispatchPageOrders(ids: string[], client: Client = db)
 
   const rows: DispatchPageOrder[] = [];
   for (const id of ids) {
-    const { order, targets } = await currentDispatchTargets(client, id);
+    let current;
+    try {
+      current = await currentDispatchTargets(client, id);
+    } catch (error) {
+      if (!(error instanceof DispatchPlanValidationError)) throw error;
+      rows.push({ ...error.order, tasks: [], issues: error.issues });
+      continue;
+    }
+    const { order, targets } = current;
     const jobs = await client.productionJob.findMany({ where: { orderId: id, workOrderVersion: order.workOrderVersion } });
     rows.push({
       id,

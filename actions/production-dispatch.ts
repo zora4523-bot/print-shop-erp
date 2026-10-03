@@ -1,5 +1,6 @@
 'use server';
 
+import { DispatchPlanValidationError } from '@/lib/production/dispatch-plan-error';
 import { PieceworkPricingError } from '@/lib/salary/piecework-pricing';
 import { AdminOrderWorkflowError } from '@/lib/order/admin-workflow';
 import { ProductionOperationMaterializationError } from '@/lib/production/operation-materialization-service';
@@ -25,6 +26,7 @@ function refreshProduction(orderIds: string[]) {
 function failure(error: unknown): ProductionActionState {
   if (error instanceof z.ZodError || error instanceof SyntaxError) return { ok: false, message: '填写内容不完整，请核对后重试' };
   if (error instanceof PieceworkPricingError || error instanceof AdminOrderWorkflowError || error instanceof ProductionOperationMaterializationError) return { ok: false, message: error.message };
+  if (error instanceof DispatchPlanValidationError) return { ok: false, message: `${error.order.name}：${error.issues.join('；')}` };
   // Domain errors are curated; database errors must never expose SQL or internals.
   if (error instanceof Error && error.constructor === Error && !/[\n]|Prisma|SELECT |INSERT |UPDATE /i.test(error.message)) return { ok: false, message: error.message };
   return { ok: false, message: '本次未保存，请刷新核对后重试' };
