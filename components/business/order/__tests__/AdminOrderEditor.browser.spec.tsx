@@ -46,6 +46,7 @@ vi.mock('@/components/business/order/DesignUploadPanel', () => ({
   ),
 }));
 import { AdminOrderEditor } from '../AdminOrderEditor';
+import { noteRouterTransitionStart } from '@/components/ui-business/navigation-guard-transition';
 import { AdminHeader } from '@/components/business/admin/AdminHeader';
 let host: HTMLDivElement;
 let root: Root;
@@ -505,6 +506,26 @@ describe('administrator edit design', () => {
     } finally {
       shell.remove();
     }
+  });
+
+  it.each(['返回工单详情', '放弃'])('%s: a confirmed leave the router takes over is not prompted again by its full-load fallback', async (action) => {
+    // Next's router.push() reports the transition start synchronously
+    // (instrumentation-client onRouterTransitionStart); an RSC failure then
+    // falls back to location.assign(), which fires beforeunload later.
+    mocks.push.mockImplementation((href: string) => noteRouterTransitionStart(new URL(href, location.href).href));
+    mount();
+    await page.getByRole('spinbutton', { name: '数量（个）', exact: true }).fill('2000');
+    await page.getByRole('button', { name: action, exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/orders/order-1');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const fallback = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(fallback);
+    expect(fallback.defaultPrevented).toBe(false);
+    // Only that navigation: a later reload of the still-dirty page is guarded.
+    const later = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(later);
+    expect(later.defaultPrevented).toBe(true);
   });
 
   it('restores every changed field in a style and returns the draft to clean', async () => {

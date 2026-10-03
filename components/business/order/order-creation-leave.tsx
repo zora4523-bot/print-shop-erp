@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ActionNotice, ConfirmActionController, ConfirmActionDialog, isConfirmedNavigationInProgress, useNavigationGuard, type BlockedNavigation, type PageHeaderBack } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog, isConfirmedNavigationInProgress, navigateConfirmed, useNavigationGuard, type BlockedNavigation, type PageHeaderBack } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
 
 export type LocalDraftSaveFailure = 'unserializable' | 'storage' | 'unavailable';
@@ -129,12 +129,12 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
   }
   const guard = (href: string) => (event: { preventDefault(): void }) => {
     // A confirmed replay of a link that carries this guard keeps its own target.
-    if (isConfirmedNavigationInProgress()) { event.preventDefault(); router.push(href); return; }
+    if (isConfirmedNavigationInProgress()) { event.preventDefault(); navigateConfirmed(() => router.push(href)); return; }
     const latest = currentPlan();
     if (latest.busy) { event.preventDefault(); return; }
     if (!latest.guarded) return;
     event.preventDefault();
-    openLeave({ href, go: () => router.push(href) });
+    openLeave({ href, go: () => navigateConfirmed(() => router.push(href)) });
   };
   const navigate = (href: string) => {
     let prevented = false;

@@ -49,6 +49,7 @@ import {
   ConfirmActionController,
   ConfirmActionDialog,
   PageHeader,
+  navigateConfirmed,
 } from '@/components/ui-business';
 import { OrderStatusBadge } from './OrderStatusBadge';
 import { EditOrderForm } from './EditOrderForm';
@@ -919,7 +920,7 @@ function EditorActionsSection({
             disabled={pending || fileBusy || auxiliary.pending}
             onClick={(event) => {
               destinationRef.current = `/orders/${props.orderId}`;
-              pendingNavigationRef.current = () => router.push(destinationRef.current);
+              pendingNavigationRef.current = () => navigateConfirmed(() => router.push(destinationRef.current));
               if (dirty || auxiliary.dirty) {
                 leaveSourceRef.current = event.currentTarget;
                 setLeaving(true);
@@ -959,7 +960,7 @@ function EditorActionsSection({
           disabled={!dirty || locked}
           onClick={(event) => {
             destinationRef.current = `/orders/${props.orderId}`;
-            pendingNavigationRef.current = () => router.push(destinationRef.current);
+            pendingNavigationRef.current = () => navigateConfirmed(() => router.push(destinationRef.current));
             leaveSourceRef.current = event.currentTarget;
             setLeaving(true);
           }}

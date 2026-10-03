@@ -18,6 +18,7 @@ import {
   ConfirmActionController,
   ConfirmActionDialog,
   NAVIGATION_GUARD_SKIP_ATTRIBUTE,
+  navigateConfirmed,
   useNavigationGuard,
 } from '@/components/ui-business';
 
@@ -252,13 +253,17 @@ export function PriceWorkspaceLink({
           // state); the confirmation covers this one click only.
           const link = linkRef.current;
           if (!link) {
-            if (replace) router.replace(href, { scroll });
-            else router.push(href, { scroll });
+            navigateConfirmed(() => {
+              if (replace) router.replace(href, { scroll });
+              else router.push(href, { scroll });
+            });
             return;
           }
           confirmedRef.current = true;
           try {
-            link.click();
+            navigateConfirmed(() =>
+              link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })),
+            );
           } finally {
             confirmedRef.current = false;
           }
@@ -322,7 +327,7 @@ export function PriceWorkspaceFilterForm({
         focusReturnRef={submitterRef}
         cancelLabel="继续编辑"
         onConfirm={() => {
-          if (pendingHref) router.push(pendingHref);
+          if (pendingHref) navigateConfirmed(() => router.push(pendingHref));
         }}>
         <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
           `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
