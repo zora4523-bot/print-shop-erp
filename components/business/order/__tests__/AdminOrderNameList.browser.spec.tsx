@@ -121,7 +121,7 @@ describe('admin name-first order list', () => {
     expect(host.textContent).not.toContain('OTHER-ID');
     expect(router.push).not.toHaveBeenCalled();
     expect(second.querySelector('a[href="/orders/order-2"]')).not.toBeNull();
-    expect(page.getByRole('link', { name: '下发生产', exact: true }).nth(1).element().getAttribute('href')).toBe('/orders/order-2');
+    expect(page.getByRole('link', { name: '安排生产', exact: true }).nth(1).element().getAttribute('href')).toBe('/orders/order-2');
     second.click();
     expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders/order-2');
     expect(fetch).not.toHaveBeenCalled();
@@ -173,12 +173,13 @@ function row(): AdminOrderWorkspaceRow {
     priceComparison: null,
     priceComparisonError: null,
     confirmationPreflight: { ok: false, issues: ['当前不是待工厂确认状态'] },
+    canAssignProduction: true,
     capabilities: {
       confirm: false,
       reject: false,
       hold: true,
       resume: false,
-      release: true,
+      release: false,
       ship: false,
       settle: false,
       createPrint: false,

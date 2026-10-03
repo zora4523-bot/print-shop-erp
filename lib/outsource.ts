@@ -1,3 +1,4 @@
+import { ProductionOperationMaterializationError } from './production/operation-materialization-service';
 import Decimal from 'decimal.js';
 import { OrderStatus, OutsourceStatus, Role } from '../generated/prisma/enums';
 import { db } from './db';
@@ -13,6 +14,7 @@ import {
   dispatchProductionCompletionNotification,
   maybeCompleteProductionOrder,
   type ProductionCompletionTx,
+  type ProductionCompletionNotification,
 } from './production-completion';
 import type {
   CreateOutsourceInput,
@@ -21,6 +23,8 @@ import type {
   RecordOutsourcePaymentInput,
 } from './auth/schemas';
 import { readFrozenOutsourceTotal } from './outsource/frozen-total';
+import { prepareOrderForProductionInTx } from './order/production-readiness';
+import { dispatchPreparedProduction, type PreparedProductionNotification } from './production/preparation-notification';
 
 export class OutsourceError extends Error {
   constructor(message: string) {
@@ -163,7 +167,9 @@ export async function createOutsourceOrder(
   input: CreateOutsourceInput,
   actor: AuditActor,
 ): Promise<CreatedOutsource> {
-  return db.$transaction(async (tx) => {
+  let preparationNotification: ProductionCompletionNotification | undefined;
+  let scheduledNotification: PreparedProductionNotification | undefined;
+  const result = await db.$transaction(async (tx) => {
     const txClient = tx as unknown as OutsourceTxClient;
     // Per-order advisory lock makes the "order is attachable?" check
     // and the outsource INSERT atomic relative to ANY other Order-
@@ -318,6 +324,19 @@ export async function createOutsourceOrder(
       },
       select: { id: true },
     });
+    if (['PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED'].includes(order.status)) {
+      // 外协建单独立成立；旧工序不一致时只回滚可选的自动准备。
+      await tx.$executeRaw`SAVEPOINT outsource_production_prepare`;
+      try {
+        const prepared = await prepareOrderForProductionInTx(tx, input.orderId, actor, new Date());
+        preparationNotification = prepared.notification;
+        scheduledNotification = prepared.scheduledNotification;
+      } catch (error) {
+        if (!(error instanceof ProductionOperationMaterializationError)) throw error;
+        await tx.$executeRaw`ROLLBACK TO SAVEPOINT outsource_production_prepare`;
+      }
+      await tx.$executeRaw`RELEASE SAVEPOINT outsource_production_prepare`;
+    }
     await writeAuditLogInTx(tx, {
       actor,
       action: 'CREATE',
@@ -344,6 +363,9 @@ export async function createOutsourceOrder(
     });
     return row;
   });
+  await dispatchProductionCompletionNotification(preparationNotification);
+  await dispatchPreparedProduction(scheduledNotification);
+  return result;
 }
 
 export type ConfirmedOutsourceAmount = {

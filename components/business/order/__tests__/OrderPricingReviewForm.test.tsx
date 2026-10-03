@@ -208,7 +208,7 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     value.productionReadiness = { ready: false, issues: ['工单没有包装组'] };
     harness.previewState = { status: 'success', preview: value };
     const html = renderToStaticMarkup(<OrderPricingReviewForm orderId="order-1" />);
-    expect(html).toContain('确认费用后，工单仍需补录以下资料');
+    expect(html).toContain('确认费用后，请补齐以下工单资料');
     expect(harness.confirmDisabled).toBe(false);
   });
 
@@ -216,7 +216,7 @@ describe('OrderPricingReviewForm snapshot confirmation contract', () => {
     harness.finalizeState = { status: 'success', orderId: 'order-1', priceRevision: 4, packagingAmount: '20.00', processingAmount: '130.00', totalAmount: '165.00', confirmedFee: '165.00', productionReadiness: { ready: false, issues: ['工单没有包装组'] } };
     const onSuccess = vi.fn();
     const html = renderToStaticMarkup(<OrderPricingReviewForm orderId="order-1" onSuccess={onSuccess} />);
-    expect(html).toContain('费用已确认，工单仍需补录以下资料');
+    expect(html).toContain('费用已确认，请补齐以下工单资料');
     expect(harness.refresh).not.toHaveBeenCalled(); expect(onSuccess).not.toHaveBeenCalled();
   });
 

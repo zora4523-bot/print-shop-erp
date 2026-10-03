@@ -21,6 +21,13 @@ const ISSUE_COPY: Record<string, string> = {
   INACTIVE_CRAFT: '所选工艺已停用，请核对并选择可用工艺。',
 };
 
+export function productionPlanIssueMessages(issues: readonly { code: string; message: string }[]): string[] {
+  return [...new Set(issues.map(issue => {
+    const subject = issue.message.match(/^(?:款式|包装组) #\d+/)?.[0];
+    return `${subject ? `${subject}：` : ''}${ISSUE_COPY[issue.code] ?? '生产资料不完整，请核对工单资料。'}`;
+  }))];
+}
+
 /** Expected planning failures remain errors for write callers, but can be shown by the read page. */
 export class DispatchPlanValidationError extends Error {
   readonly order: { id: string; name: string; revision: number; version: number };
@@ -30,9 +37,6 @@ export class DispatchPlanValidationError extends Error {
     super(issues.map(issue => issue.message).join('；'));
     this.name = 'DispatchPlanValidationError';
     this.order = { id: order.id, name: order.customName || order.orderNo, revision: order.revision, version: order.workOrderVersion };
-    this.issues = [...new Set(issues.map(issue => {
-      const subject = issue.message.match(/^(?:款式|包装组) #\d+/)?.[0];
-      return `${subject ? `${subject}：` : ''}${ISSUE_COPY[issue.code] ?? '生产资料不完整，请核对工单资料。'}`;
-    }))];
+    this.issues = productionPlanIssueMessages(issues);
   }
 }

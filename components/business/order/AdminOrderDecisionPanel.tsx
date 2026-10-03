@@ -10,7 +10,6 @@ import Link from 'next/link';
 import {
   holdFactoryOrderAction,
   rejectFactoryOrderAction,
-  releaseFactoryOrderAction,
   resumeFactoryOrderAction,
   runAdminOrderBatchAction,
   settleFactoryOrderAction,
@@ -92,11 +91,12 @@ const DECISION_CANCEL_LABELS: Partial<Record<NonNullable<FormMode>, string>> = {
 };
 
 function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow }) {
-  if (order.status !== 'PENDING_FACTORY' && order.status !== 'SUBMITTED') {
+  if (order.status !== 'PENDING_FACTORY' && order.status !== 'SUBMITTED' && order.status !== 'CONFIRMED') {
     return null;
   }
   const issues = order.confirmationPreflight.issues;
-  const ok = issues.length === 0 && order.capabilities.release;
+  if (issues.length === 0 && !order.canAssignProduction && !order.capabilities.ship) return null;
+  const ok = issues.length === 0 && (order.canAssignProduction || order.capabilities.ship);
   return (
     <div
       id="admin-order-confirmation-preflight"
@@ -107,7 +107,7 @@ function ConfirmationPreflightNotice({ order }: { order: AdminOrderWorkspaceRow 
       }`}
     >
       {ok ? (
-        <p className="font-medium">可下发生产</p>
+        <p className="font-medium">{order.canAssignProduction ? '可安排生产' : '可处理发货'}</p>
       ) : (
         <>
           <p className="font-medium">待处理事项</p>
@@ -174,29 +174,7 @@ function AdminDecisionActions({
           恢复生产
         </Button>
       ) : null}
-      {order.capabilities.release ? (
-        <DecisionConfirmation
-          label="下发生产"
-          title="下发生产"
-          changes={[{label: order.customName ?? "未命名工单", old: "待下发", new: `${order.totalQuantity.toLocaleString("zh-CN")} 个待生产`}]}
-          impactItems={[
-            '下发后车间可开始生产。',
-          ]}
-          confirmLabel="确认下发生产"
-          disabled={pending}
-          onConfirm={() =>
-            run(() =>
-              releaseFactoryOrderAction({
-                orderId: order.id,
-                expectedRevision: order.revision,
-                expectedWorkOrderVersion: order.workOrderVersion,
-                printIdempotencyKey: operationKey('drawer-release'),
-                createPrint: false,
-              }),
-            )
-          }
-        />
-      ) : null}
+      {order.canAssignProduction ? <Link className={buttonVariants({ size: 'sm' })} href={`/orders/production?ids=${encodeURIComponent(order.id)}`}>安排生产师傅</Link> : null}
       {/* 待打印时「打印」本身就会记录；「加入待打印」只留给已打印过、需要补打进队列的工单（见能力定义）。 */}
       {order.capabilities.createPrint ? (
         <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runOneBatch('CREATE_PRINT')}>
@@ -207,7 +185,7 @@ function AdminDecisionActions({
         // 业主 2026-10-02：点「打印」即记已打印——打印页关闭打印对话框后自动记录，不再单独确认。
         <PrintPageLink
           orderId={order.id}
-          className={buttonVariants({ size: 'sm', variant: order.capabilities.release ? 'outline' : 'default' })}
+          className={buttonVariants({ size: 'sm', variant: order.canAssignProduction ? 'outline' : 'default' })}
         >
           打印
         </PrintPageLink>
@@ -659,6 +637,7 @@ function AdminOrderDecisionPanelContent({ order, compact, hideHeading, onComplet
   const settlementBlockedByMissingFee =
     order.status === 'SHIPPED' && order.feeStages.confirmed === null;
   const hasAnyAction =
+    order.canAssignProduction ||
     Object.values(order.capabilities).some(Boolean) ||
     awaitingConfirmation ||
     settlementBlockedByMissingFee || Boolean(order.shipDisabledReason);
@@ -939,13 +918,13 @@ function DecisionPanelSection({
                   ? '变更申请'
                   : '取消申请'
                 : awaitingConfirmation
-                  ? '下发前检查'
+                  ? '待处理事项'
                   : order.status === 'ON_HOLD'
                     ? '暂停处理'
-                    : order.capabilities.release
-                      ? '下发生产'
-                      : order.capabilities.ship
-                        ? '录运单发货'
+                    : order.capabilities.ship
+                      ? '录运单发货'
+                      : order.canAssignProduction
+                        ? '安排生产'
                         : order.capabilities.settle || settlementBlockedByMissingFee
                           ? '结算'
                           : '工单处理'}

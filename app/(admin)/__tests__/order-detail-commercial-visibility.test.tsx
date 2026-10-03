@@ -323,7 +323,7 @@ describe('order detail amount consistency', () => {
     getOrderDetailMock.mockResolvedValue(order);
     readinessQuery.mockResolvedValueOnce({ ready: false, issues: ['工单没有包装组'] });
     const html = renderToStaticMarkup(await OrderDetailPage({ params: Promise.resolve({ id: order.id }) }));
-    expect(html).toContain('费用已确认，工单仍需补录以下资料');
+    expect(html).toContain('费用已确认，请补齐以下工单资料');
     expect(html).toContain('工单没有包装组'); expect(html).toContain('补录生产资料');
     expect(html).not.toContain('factory-pricing-review');
   });

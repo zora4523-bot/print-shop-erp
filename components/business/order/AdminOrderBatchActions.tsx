@@ -21,7 +21,7 @@ import {
 import type { AdminOrderBatchCommand } from '@/lib/order/admin-batch';
 import type { AdminOrderWorkspaceRow } from '@/lib/order/admin-workspace';
 import type { OrderListSelectionItem } from './OrderListBatchSelection';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
 import { useAdminOrderBatchResult } from './AdminOrderBatchResultProvider';
@@ -58,6 +58,10 @@ export function AdminOrderBatchActions({
     FormData
   >(requestOrderExportAction, null);
   const busy = pending || batchResult.pending || exportPending;
+  const hasAssignableSelection = selectedItems.some(item => { const order = orders.find(order => order.id === item.id); return !order || order.canAssignProduction; });
+  const assignmentBlocker = selectedItems.length > 20 ? '每批最多安排 20 张工单'
+    : selectedItems.some(item => orders.some(order => order.id === item.id && !order.canAssignProduction))
+      ? '所选工单包含无需排单或暂不能排单的工单，请重新选择' : null;
 
   // A completed export request has fulfilled its idempotency key. The action
   // revalidates /orders on every queued/success branch, so its response
@@ -100,6 +104,7 @@ export function AdminOrderBatchActions({
   }
 
   const commandOptions = (Object.keys(BATCH_COMMAND_CONFIG) as AdminOrderBatchCommand[])
+    .filter(command => command !== 'RELEASE_AND_CREATE_PRINT')
     .map((command) => {
       const reviewedOrders = snapshotBatchSelection(command, selectedItems, orders);
       return {
@@ -116,6 +121,7 @@ export function AdminOrderBatchActions({
     <BatchPrintControls selectedItems={selectedItems} disabled={busy} renderLayout={(printAction, printResult) => (
       <div className="flex min-w-0 flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {hasAssignableSelection && (assignmentBlocker || busy ? <div><Button variant="secondary" disabled>安排生产师傅</Button>{assignmentBlocker && <p className="text-xs">{assignmentBlocker}</p>}</div> : <Link className={buttonVariants({ variant: 'secondary', className: 'min-h-11' })} href={`/orders/production?ids=${selectedItems.map(item => encodeURIComponent(item.id)).join(',')}`}>安排生产师傅</Link>)}
           {primaryOptions.map(({ command, config, reviewedOrders, count }) => (
             <Button
               key={command}
@@ -183,7 +189,6 @@ export function AdminOrderBatchActions({
   return (
     <>
       <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">{controls}</div>
-      {selectedItems.length > 0 && selectedItems.length <= 20 && <Link className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium" href={`/orders/production?ids=${selectedItems.map(item => encodeURIComponent(item.id)).join(',')}`}>安排生产师傅</Link>}
       <ConfirmActionController level="L2"
         open={confirmation !== null}
         onOpenChange={(open) => { if (!open) setConfirmation(null); }}

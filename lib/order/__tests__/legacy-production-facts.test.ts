@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('server-only', () => ({}));
 import { OrderCraft, OrderPackagingMode, OrderStatus, Role } from '@/generated/prisma/enums';
 const { append, tx } = vi.hoisted(() => ({ append: vi.fn(), tx: {
   $executeRaw: vi.fn(), $transaction: vi.fn(),
@@ -9,6 +10,10 @@ const { append, tx } = vi.hoisted(() => ({ append: vi.fn(), tx: {
 } }));
 vi.mock('../pricing-revision', () => ({ appendOrderPricingRevisionInTx: append }));
 vi.mock('@/lib/db', () => ({ db: tx }));
+// 补录分配/金额细节在本套验证；自动流转由真实 PostgreSQL 集成用例验证。
+vi.mock('../production-readiness', async importOriginal => { const original = await importOriginal<typeof import('../production-readiness')>(); return { ...original, prepareOrderForProductionInTx: original.inspectOrderProductionReadinessInTx }; });
+vi.mock('@/lib/production-completion', () => ({ dispatchProductionCompletionNotification: vi.fn() }));
+vi.mock('@/lib/production/preparation-notification', () => ({ dispatchPreparedProduction: vi.fn() }));
 import { buildTrustedAdminItemPricingSnapshot, isTrustedAdminItemPricingSnapshot } from '../admin-pricing-snapshot';
 import { repairLegacyProductionFacts } from '../legacy-production-facts';
 import { getLegacyProductionFactsRepair, legacyPackagingMode } from '../legacy-production-facts-presentation';
@@ -31,6 +36,7 @@ const input = () => ({ orderId: 'order-1', expectedOrderRevision: 2, items: [{ i
 beforeEach(() => {
   vi.resetAllMocks(); order = fixture();
   tx.$transaction.mockImplementation(async (fn) => fn(tx));
+  tx.order.update.mockImplementation(async ({ data }) => { if (data.revision?.increment) order.revision += data.revision.increment; return order; });
   tx.order.findUnique.mockImplementation(async () => order);
   tx.order.findUniqueOrThrow.mockImplementation(async () => order);
   tx.craft.findMany.mockResolvedValue([]);
@@ -60,7 +66,7 @@ describe('repairLegacyProductionFacts', () => {
     await expect(repairLegacyProductionFacts(input(), actor)).resolves.toMatchObject({ ready: true });
     expect(tx.orderPackagingGroup.create).not.toHaveBeenCalled();
   });
-  it.each([OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.CONFIRMED])('允许 %s 补录但不改变状态', async (status) => {
+  it.each([OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.CONFIRMED])('允许 %s 补录；本套只隔离验证补录事实', async (status) => {
     order.status = status;
     await repairLegacyProductionFacts(input(), actor);
     expect(order.status).toBe(status);

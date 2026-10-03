@@ -3,7 +3,6 @@ import { Role } from '../../generated/prisma/enums';
 import { ProductionOperationMaterializationError } from '../production/operation-materialization-service';
 import {
   AdminOrderWorkflowError,
-  releaseFactoryOrder,
   settleFactoryOrder,
   type AdminWorkflowActor,
 } from './admin-workflow';
@@ -164,16 +163,7 @@ export async function runAdminOrderBatch(
     try {
       switch (input.command) {
         case 'RELEASE_AND_CREATE_PRINT':
-          await releaseFactoryOrder(
-            {
-              orderId: item.orderId,
-              expectedRevision: item.expectedRevision,
-              expectedWorkOrderVersion: item.expectedWorkOrderVersion,
-              printIdempotencyKey: idempotencyKey,
-            },
-            actor,
-          );
-          break;
+          throw new AdminOrderWorkflowError('INVALID_INPUT', '工单无需单独下发；厂内生产请使用安排生产师傅，寄样请处理发货。');
         case 'CREATE_PRINT':
           await createNextOrderPrintRequest(
             {

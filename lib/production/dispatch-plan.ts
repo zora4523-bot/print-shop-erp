@@ -21,6 +21,7 @@ export function productionSourceKey(lane: string, ids: readonly string[]) {
   return `${lane}:${[...ids].sort().join(',')}`;
 }
 export function dispatchTargets(order: DispatchOrder, crafts: Parameters<typeof deriveProductionProgressPlan>[0]['crafts']): DispatchTarget[] {
+  if (order.purpose === 'SAMPLE_SHIPMENT') return [];
   const plan = deriveProductionOperationPlan({ ...order, orderId: order.id });
   const progress = deriveProductionProgressPlan({ items: order.items, crafts });
   if (!plan.ok || !progress.ok) throw new DispatchPlanValidationError(order, [...plan.issues, ...progress.issues]);

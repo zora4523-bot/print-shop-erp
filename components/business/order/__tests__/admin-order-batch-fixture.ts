@@ -12,6 +12,7 @@ export function batchOrder(overrides: Partial<AdminOrderWorkspaceRow> = {}): Adm
     fee: { amount: '1234.50', source: 'CONFIRMED', estimated: false },
     feeStages: { quoted: '1200.00', confirmed: '1234.50', settled: null, active: 'CONFIRMED' },
     priceComparison: null, priceComparisonError: null, confirmationPreflight: { ok: true, issues: [] },
+    canAssignProduction: true,
     capabilities: { confirm: false, reject: false, hold: true, resume: false, release: true, ship: false, settle: false, createPrint: false, markPrinted: false, reviewChange: false, completeProduction: false },
     billing: null, pendingChangeRequest: null, printPending: false, pendingPrintJobId: null, trackingNo: null,
     progress: { orderTotal: '1000', foilingProgress: '0', packingProgress: '0', foilingOverLimit: false, packingOverLimit: false, packingAhead: false, stagnant: false, stagnationDays: 0, firstClaimedAt: null },

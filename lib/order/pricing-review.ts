@@ -33,6 +33,8 @@ import {
 } from "./pricing-status";
 import { appendOrderPricingRevisionInTx } from "./pricing-revision";
 import { inspectOrderProductionReadinessInTx, prepareOrderForProductionInTx } from "./production-readiness";
+import { dispatchProductionCompletionNotification, type ProductionCompletionNotification } from '../production-completion';
+import { dispatchPreparedProduction, type PreparedProductionNotification } from '../production/preparation-notification';
 import { orderItemMessageLabel } from "./item-label";
 
 const DECIMAL_10_4_MAX = new Decimal("999999.9999");
@@ -1228,7 +1230,9 @@ export async function finalizeOrderPricing(
   logisticsPriceBookVersion: number | null;
 }> {
   assertAdmin(actor);
-  return db.$transaction(async (tx) => {
+  let preparationNotification: ProductionCompletionNotification | undefined;
+  let scheduledNotification: PreparedProductionNotification | undefined;
+  const result = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       input.orderId,
     )}))`;
@@ -1640,9 +1644,11 @@ export async function finalizeOrderPricing(
     let productionReadiness: { ready: boolean; issues: string[] } | undefined;
     if (
       order.status === OrderStatus.PENDING_FACTORY ||
-      order.status === OrderStatus.SUBMITTED
+      order.status === OrderStatus.SUBMITTED || order.status === OrderStatus.CONFIRMED
     ) {
       const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, now);
+      preparationNotification = prepared.notification;
+      scheduledNotification = prepared.scheduledNotification;
       productionReadiness = { ready: prepared.ready, issues: prepared.issues };
       if (!prepared.ready) {
         await tx.orderLog.create({ data: {
@@ -1707,4 +1713,7 @@ export async function finalizeOrderPricing(
       logisticsPriceBookVersion: logisticsPriceBook?.version ?? null,
     };
   });
+  await dispatchProductionCompletionNotification(preparationNotification);
+  await dispatchPreparedProduction(scheduledNotification);
+  return result;
 }

@@ -41,6 +41,8 @@ const { dbMock } = vi.hoisted(() => {
   return { dbMock: mock };
 });
 vi.mock('@/lib/db', () => ({ db: dbMock }));
+const { prepareMock } = vi.hoisted(() => ({ prepareMock: vi.fn() }));
+vi.mock('@/lib/order/production-readiness', () => ({ prepareOrderForProductionInTx: prepareMock }));
 const { notifyMock } = vi.hoisted(() => ({
   notifyMock: vi.fn().mockResolvedValue(undefined),
 }));
@@ -67,6 +69,7 @@ const foremanActor = {
 };
 
 beforeEach(() => {
+  prepareMock.mockReset().mockResolvedValue({ ready: true, status: 'RELEASED', issues: [] });
   dbMock.order.findUnique.mockReset().mockResolvedValue({
     status: OrderStatus.IN_PRODUCTION,
   });
@@ -263,6 +266,14 @@ describe('createOutsourceOrder', () => {
     await expect(
       createOutsourceOrder(baseInput, foremanActor),
     ).resolves.toEqual({ id: 'o1' });
+  });
+  it('keeps creating the external work order when internal readiness needs more information', async () => {
+    dbMock.order.findUnique.mockResolvedValue({ status: OrderStatus.SUBMITTED });
+    dbMock.outsourceOrder.create.mockResolvedValue({ id: 'external-pending' });
+    prepareMock.mockResolvedValueOnce({ ready: false, status: OrderStatus.SUBMITTED, issues: ['请补全收货人手机号'] });
+    await expect(createOutsourceOrder(baseInput, foremanActor)).resolves.toEqual({ id: 'external-pending' });
+    expect(prepareMock).toHaveBeenCalled();
+    expect(dbMock.order.update).not.toHaveBeenCalled();
   });
 
   it.each([OrderStatus.PACKING, OrderStatus.ON_HOLD])(

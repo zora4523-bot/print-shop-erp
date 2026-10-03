@@ -161,7 +161,7 @@ describe('AdminOrderWorkspaceList', () => {
       />,
     );
 
-    expect(html).toContain('>下发前检查</a>');
+    expect(html).toContain('>完善工单</a>');
   });
 
   it('shows rejected incomplete fees as excluded without exposing pricing actions', () => {
@@ -210,14 +210,16 @@ describe('AdminOrderWorkspaceList', () => {
     expect(html).not.toContain('>下发生产</button>');
   });
 
-  it('offers release with saved pricing and never waits for a current-price token', () => {
+  it('offers assignment with saved pricing and never waits for a current-price token', () => {
     const submitted = row();
     submitted.status = OrderStatus.SUBMITTED;
     submitted.confirmationPreflight = { ok: true, issues: [] };
     submitted.capabilities = { ...submitted.capabilities, confirm: true, hold: false, release: true };
     submitted.priceComparison = null;
+    submitted.canAssignProduction = true;
     const html = renderToStaticMarkup(<AdminOrderDecisionPanel order={submitted} />);
-    expect(html).toContain('下发生产');
+    expect(html).toContain('安排生产师傅');
+    expect(html).not.toContain('下发生产');
     expect(html).not.toContain('>确认工单</button>');
     expect(html).not.toContain('锁定金额');
   });

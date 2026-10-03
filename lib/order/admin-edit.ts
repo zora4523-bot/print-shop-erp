@@ -1,6 +1,7 @@
 import 'server-only';
 import { db } from '../db';
 import { prepareOrderForProductionInTx } from './production-readiness';
+import { dispatchPreparedProduction, type PreparedProductionNotification } from '../production/preparation-notification';
 import { OrderStatus, Role } from '../../generated/prisma/enums';
 import { updateOrderFields, OrderInvariantError } from '../order';
 import { orderCascadeLockKey } from './locks';
@@ -36,6 +37,7 @@ export async function editAdminOrder(
   if (actor.role !== Role.ADMIN)
     throw new OrderInvariantError('只有管理员可以直接保存款式修改');
   let completion: ProductionCompletionNotification | undefined;
+  let scheduled: PreparedProductionNotification | undefined;
   try {
     const result = await db.$transaction(
       async (tx) => {
@@ -82,6 +84,7 @@ export async function editAdminOrder(
           const context = {
             tx,
             requestId: input.requestId,
+            onPreparedProduction: (value: PreparedProductionNotification | undefined) => { scheduled = value ?? scheduled; },
             onCompletion: (
               value: ProductionCompletionNotification | undefined,
             ) => {
@@ -156,12 +159,15 @@ export async function editAdminOrder(
           }
         }
         if (mode === 'preview') throw new PreviewRollback(preview);
-        await prepareOrderForProductionInTx(tx, input.orderId, actor, new Date());
+        const prepared = await prepareOrderForProductionInTx(tx, input.orderId, actor, new Date());
+        completion = prepared.notification ?? completion;
+        scheduled = prepared.scheduledNotification ?? scheduled;
         return null;
       },
       { timeout: 20_000 },
     );
     await dispatchProductionCompletionNotification(completion);
+    await dispatchPreparedProduction(scheduled);
     return result;
   } catch (error) {
     if (error instanceof PreviewRollback) return error.preview;
