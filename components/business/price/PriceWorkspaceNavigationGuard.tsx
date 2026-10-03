@@ -74,7 +74,6 @@ export function PriceWorkspaceNavigationGuardProvider({
 }: {
   children: ReactNode;
 }) {
-  const router = useRouter();
   const [unsaved, setUnsaved] = useState<UnsavedTierState>(
     EMPTY_UNSAVED_STATE,
   );
@@ -110,13 +109,9 @@ export function PriceWorkspaceNavigationGuardProvider({
       );
       if (!destination) return;
       pendingLinkRef.current = navigation.source;
-      setPending({
-        href: destination,
-        leave:
-          navigation.kind === 'traverse'
-            ? navigation.resume
-            : () => router.push(destination),
-      });
+      // Continue the original navigation: a replayed link keeps its own
+      // pending feedback (sidebar useLinkStatus); history returns by key.
+      setPending({ href: destination, leave: navigation.resume });
     },
   });
 
@@ -216,6 +211,7 @@ export function PriceWorkspaceLink({
   const { unsaved } = useContext(NavigationGuardContext);
   const router = useRouter();
   const linkRef = useRef<HTMLAnchorElement | null>(null);
+  const confirmedRef = useRef(false);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   return (
@@ -235,7 +231,7 @@ export function PriceWorkspaceLink({
               event.preventDefault();
             },
           });
-          if (consumerPrevented || unsaved.tierCount === 0) return;
+          if (consumerPrevented || unsaved.tierCount === 0 || confirmedRef.current) return;
 
           const destination = guardedPriceWorkspaceDestination(
             window.location.href,
@@ -252,8 +248,20 @@ export function PriceWorkspaceLink({
         focusReturnRef={linkRef}
         cancelLabel="继续编辑"
         onConfirm={() => {
-          if (replace) router.replace(href, { scroll });
-          else router.push(href, { scroll });
+          // Replay the link itself (keeps replace / scroll and its pending
+          // state); the confirmation covers this one click only.
+          const link = linkRef.current;
+          if (!link) {
+            if (replace) router.replace(href, { scroll });
+            else router.push(href, { scroll });
+            return;
+          }
+          confirmedRef.current = true;
+          try {
+            link.click();
+          } finally {
+            confirmedRef.current = false;
+          }
         }}>
         <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
           `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,

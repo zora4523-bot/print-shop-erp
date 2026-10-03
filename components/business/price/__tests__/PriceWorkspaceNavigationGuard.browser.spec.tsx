@@ -53,7 +53,7 @@ afterEach(() => {
   else Reflect.deleteProperty(window, 'navigation');
 });
 
-it('asks before a sidebar link discards unsaved tiers, keeps focus on cancel and pushes on confirm', async () => {
+it('asks before a sidebar link discards unsaved tiers, keeps focus on cancel and replays the link on confirm', async () => {
   mount(3);
   await sidebar().click();
   await expect.element(page.getByRole('alertdialog')).toHaveTextContent('3 个未保存档位修改将丢失。');
@@ -63,8 +63,13 @@ it('asks before a sidebar link discards unsaved tiers, keeps focus on cancel and
   await expect.element(sidebar()).toHaveFocus();
   await sidebar().click();
   await page.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
-  expect(m.push).toHaveBeenCalledExactlyOnceWith('/owner/rules/customer-pricing?section=print');
-  expect(followed).not.toHaveBeenCalled();
+  // The original sidebar link performs the navigation (its pending state works), not router.push.
+  expect(followed).toHaveBeenCalledExactlyOnceWith('/owner/rules/customer-pricing?section=print');
+  expect(m.push).not.toHaveBeenCalled();
+  // That confirmation covered one navigation only: the still-dirty editor is guarded again.
+  await sidebar().click();
+  await expect.element(page.getByRole('alertdialog')).toBeVisible();
+  expect(followed).toHaveBeenCalledOnce();
 });
 
 it('cancels browser back with unsaved tiers and resumes the same history entry on confirm', async () => {
