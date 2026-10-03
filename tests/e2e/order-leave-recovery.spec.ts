@@ -101,3 +101,69 @@ test('save failure confirmation supports six viewports, both themes, touch and f
     }
   }
 });
+
+/**
+ * 全应用导航守卫（2026-10-04）：侧栏、面包屑父级与浏览器后退在真实外壳里同样经过建单离开判定。
+ * 修复前这三条路径都直接离开，未上传的设计文件与未存草稿的内容静默丢失。
+ */
+const SHELL = {
+  owner: { sidebarHref: '/orders', parent: '工单列表' },
+  sales: { sidebarHref: '/sales/bills', parent: '我的工单' },
+} as const;
+
+async function selectDesignFile(page: Page) {
+  await page.getByLabel('第 1 款 CDR 文件', { exact: true }).setInputFiles({ name: '外壳离开.cdr', mimeType: 'application/octet-stream', buffer: Buffer.from('cdr') });
+}
+
+for (const actor of ['owner', 'sales'] as const) {
+  test(`${actor}: sidebar, breadcrumb parent and browser back confirm before leaving order creation`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await login(page, { from: '/orders', username: E2E_USERS[actor].username, password: E2E_PASSWORD });
+    // Enter creation through the sidebar so browser back is a same-document traversal.
+    await page.locator('nav[aria-label="后台主导航"] a[href="/orders/new"]').click();
+    await expect(page).toHaveURL(/\/orders\/new$/);
+    const name = page.getByRole('textbox', { name: '工单名称', exact: true });
+    await expect(name).toBeEnabled();
+    await name.fill(`${actor} 外壳离开保护`);
+    // Typed text is autosaved as a local draft; an unuploaded file stays at risk until confirmed.
+    await selectDesignFile(page);
+    const dialog = page.getByRole('alertdialog');
+
+    const sidebar = page.locator(`nav[aria-label="后台主导航"] a[href="${SHELL[actor].sidebarHref}"]`);
+    await sidebar.click();
+    await expect(dialog).toContainText('1 个未上传的设计文件将丢失。');
+    await expect(page).toHaveURL(/\/orders\/new$/);
+    await dialog.getByRole('button', { name: '继续编辑', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(sidebar).toBeFocused();
+
+    const parent = page.getByRole('navigation', { name: '面包屑导航' }).getByRole('link', { name: SHELL[actor].parent, exact: true });
+    await parent.click();
+    await expect(dialog).toContainText('1 个未上传的设计文件将丢失。');
+    await expect(page).toHaveURL(/\/orders\/new$/);
+    await dialog.getByRole('button', { name: '继续编辑', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // A cancelled traversal never commits, so do not wait for the navigation to finish.
+    void page.goBack({ waitUntil: 'commit', timeout: 5_000 }).catch(() => undefined);
+    await expect(dialog).toContainText('1 个未上传的设计文件将丢失。');
+    await expect(page).toHaveURL(/\/orders\/new$/);
+    await dialog.getByRole('button', { name: '继续编辑', exact: true }).click();
+    await expect(name).toHaveValue(`${actor} 外壳离开保护`);
+    void page.goBack({ waitUntil: 'commit', timeout: 5_000 }).catch(() => undefined);
+    await dialog.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+    await expect(page).toHaveURL(/\/orders(\?.*)?$/);
+    expect(errors).toEqual([]);
+  });
+
+  test(`${actor}: an unuploaded design file is only discarded after confirming the sidebar link`, async ({ page }) => {
+    await openCreate(page, actor);
+    await selectDesignFile(page);
+    const dialog = page.getByRole('alertdialog');
+    await page.locator(`nav[aria-label="后台主导航"] a[href="${SHELL[actor].sidebarHref}"]`).click();
+    await expect(dialog).toContainText('1 个未上传的设计文件将丢失。');
+    await dialog.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${SHELL[actor].sidebarHref}(\\?.*)?$`));
+  });
+}
