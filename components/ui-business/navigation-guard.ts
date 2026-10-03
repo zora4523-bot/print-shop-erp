@@ -91,19 +91,61 @@ const registry: GuardEntry[] = [];
 let detach: (() => void) | null = null;
 /** One-shot passes for an already confirmed navigation, honoured by every guard. */
 let linkPass: HTMLAnchorElement | null = null;
-let traversePass: string | null = null;
-let unloadPasses = 0;
+/** Each resumed traversal is its own request: only it may consume or clear its pass. */
+let traversePass: { key: string } | null = null;
 
-/** Run a confirmed navigation; any beforeunload it fires in this task is not prompted again. */
-function withUnloadPass(run: () => void) {
-  unloadPasses += 1;
-  try {
-    run();
-  } finally {
-    setTimeout(() => {
-      unloadPasses -= 1;
-    }, 0);
+/**
+ * Reload-prompt pass for one confirmed document navigation. It is bound to the
+ * navigation's lifecycle, not to a timer, because WebKit dispatches beforeunload
+ * after asynchronous policy checks (later than the task that started it):
+ * - the first beforeunload event after the grant is covered for every guard
+ *   (all listeners of that one dispatch), later events are not;
+ * - it is revoked when the document evidently stays: user interaction
+ *   (pointerdown / keydown), the page becoming visible again, or a
+ *   back/forward-cache restore (pageshow persisted); pagehide ends it too;
+ * - UNLOAD_PASS_FALLBACK_MS bounds it as a safety net if none of these happen
+ *   (e.g. a download or a 204 response that keeps the page without input).
+ */
+const UNLOAD_PASS_FALLBACK_MS = 10_000;
+let unloadPass: { event: Event | null; revoke: () => void } | null = null;
+
+function revokeUnloadPass() {
+  unloadPass?.revoke();
+}
+
+function grantUnloadPass() {
+  revokeUnloadPass();
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible') revoke();
+  };
+  const onPageShow = (event: PageTransitionEvent) => {
+    if (event.persisted) revoke();
+  };
+  const timer = setTimeout(() => revoke(), UNLOAD_PASS_FALLBACK_MS);
+  const pass = { event: null as Event | null, revoke };
+  function revoke() {
+    clearTimeout(timer);
+    document.removeEventListener('pointerdown', revoke, true);
+    document.removeEventListener('keydown', revoke, true);
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('pageshow', onPageShow);
+    window.removeEventListener('pagehide', revoke);
+    if (unloadPass === pass) unloadPass = null;
   }
+  document.addEventListener('pointerdown', revoke, true);
+  document.addEventListener('keydown', revoke, true);
+  document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('pageshow', onPageShow);
+  window.addEventListener('pagehide', revoke);
+  unloadPass = pass;
+  return pass;
+}
+
+/** Whether this beforeunload belongs to the confirmed navigation (first one after the grant). */
+function unloadPassCovers(event: Event): boolean {
+  if (!unloadPass) return false;
+  if (unloadPass.event === null) unloadPass.event = event;
+  return unloadPass.event === event;
 }
 
 /** True while a confirmed link is being replayed (its own onNavigate guard should let it through). */
@@ -119,7 +161,8 @@ export function leaveDocument(
   href: string,
   assign: (href: string) => void = (target) => window.location.assign(target),
 ): void {
-  withUnloadPass(() => assign(href));
+  grantUnloadPass();
+  assign(href);
 }
 
 function decidingGuard(): GuardEntry | null {
@@ -170,7 +213,11 @@ function attachDocumentListeners(): () => void {
       resume: () => {
         linkPass = link;
         try {
-          withUnloadPass(() => link.click());
+          // Only a click that is not cancelled becomes a document navigation
+          // (Next Link cancels it and navigates on the client: no beforeunload).
+          const pass = grantUnloadPass();
+          const event = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+          if (!link.dispatchEvent(event)) pass.revoke();
         } finally {
           linkPass = null;
         }
@@ -190,7 +237,7 @@ function attachDocumentListeners(): () => void {
     ) {
       return;
     }
-    if (traversePass !== null && event.destination.key === traversePass) {
+    if (traversePass !== null && event.destination.key === traversePass.key) {
       traversePass = null;
       return;
     }
@@ -205,14 +252,17 @@ function attachDocumentListeners(): () => void {
       resume: () => {
         // The pass names this history entry only and is consumed by its
         // navigate event; any other destination stays guarded meanwhile.
-        traversePass = key;
+        const request = { key };
+        traversePass = request;
+        // Settled (success, failure or abort) without its navigate event — e.g.
+        // traverseTo() the current entry — must not leave the pass behind, and
+        // an older request must never clear a newer one.
+        const settle = () => {
+          if (traversePass === request) traversePass = null;
+        };
         const result = navigation!.traverseTo(key);
-        // A second user navigation can abort these promises; never surface an
-        // unhandled rejection, and drop the pass when the traversal fails.
         void result.committed.catch(() => undefined);
-        void result.finished.catch(() => {
-          if (traversePass === key) traversePass = null;
-        });
+        void result.finished.then(settle, settle);
       },
     });
   };
@@ -257,6 +307,7 @@ export function useNavigationGuard({
         detach = null;
         // No guard left: an unconsumed pass must not carry over to the next page.
         traversePass = null;
+        revokeUnloadPass();
       }
     };
   }, []);
@@ -271,7 +322,7 @@ export function useNavigationGuard({
     if (!listenUnload) return;
     const entry = entryRef.current;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (entry.released || unloadPasses > 0 || (unloadRef.current && !unloadRef.current())) return;
+      if (entry.released || unloadPassCovers(event) || (unloadRef.current && !unloadRef.current())) return;
       event.preventDefault();
       // Legacy signal still required by some browsers before showing the native prompt.
       event.returnValue = '';

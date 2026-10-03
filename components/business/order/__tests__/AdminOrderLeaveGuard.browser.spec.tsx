@@ -49,6 +49,12 @@ function Fixture() {
   );
 }
 
+/**
+ * Spec ordering: traverseTo() first fires `navigate` for the entry, then resolves
+ * `committed` / `finished`. The mock keeps both promises pending until the test
+ * dispatches that entry's navigate event and it is not cancelled.
+ */
+const inFlight = new Map<string, () => void>();
 function traversal(key: string, url: string, cancelable = true) {
   const event = new Event('navigate', { cancelable });
   Object.assign(event, {
@@ -56,14 +62,24 @@ function traversal(key: string, url: string, cancelable = true) {
     destination: { key, url, sameDocument: true },
   });
   navigation.dispatchEvent(event);
+  if (!event.defaultPrevented) {
+    inFlight.get(key)?.();
+    inFlight.delete(key);
+  }
   return event;
 }
 
 beforeEach(() => {
   pushed.mockReset();
+  inFlight.clear();
   originalNavigation = Object.getOwnPropertyDescriptor(window, 'navigation');
   navigation = Object.assign(new EventTarget(), {
-    traverseTo: vi.fn(() => ({ committed: Promise.resolve(), finished: Promise.resolve() })),
+    traverseTo: vi.fn((key: string) => {
+      let settle!: () => void;
+      const done = new Promise<void>((resolve) => { settle = resolve; });
+      inFlight.set(key, settle);
+      return { committed: done, finished: done };
+    }),
   });
   // Vitest mounts its browser tests in an iframe where native traversals are
   // not cancellable. Exercise the top-level Navigation API contract here.

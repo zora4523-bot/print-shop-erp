@@ -69,6 +69,8 @@ let root: Root;
 let originalNavigation: PropertyDescriptor | undefined;
 let navigation: EventTarget & { traverseTo: ReturnType<typeof vi.fn> };
 let finished: { resolve: () => void; reject: (error: unknown) => void };
+/** Every traverseTo() call, in order; per spec committed / finished settle after its navigate event. */
+let traversals: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
 
 function render(node: React.ReactNode) {
   flushSync(() => root.render(<>{node}<Links /></>));
@@ -98,12 +100,14 @@ beforeEach(() => {
   blocked.length = 0;
   guards.clear();
   followed.mockReset();
+  traversals = [];
   originalNavigation = Object.getOwnPropertyDescriptor(window, 'navigation');
   navigation = Object.assign(new EventTarget(), {
-    traverseTo: vi.fn(() => ({
-      committed: Promise.resolve(),
-      finished: new Promise<void>((resolve, reject) => { finished = { resolve, reject }; }),
-    })),
+    traverseTo: vi.fn(() => {
+      const done = new Promise<void>((resolve, reject) => { finished = { resolve, reject }; });
+      traversals.push(finished);
+      return { committed: done, finished: done };
+    }),
   });
   Object.defineProperty(window, 'navigation', { configurable: true, value: navigation });
   host = document.createElement('div');
@@ -242,6 +246,30 @@ describe('browser back / forward (Navigation API)', () => {
     expect(traversal('prev', at('/orders')).defaultPrevented).toBe(true);
   });
 
+  it('a confirmed traversal that settles without a navigate event leaves no pass behind', async () => {
+    // e.g. traverseTo() the current entry: both promises resolve, no navigate event fires.
+    render(<Guard name="A" />);
+    traversal('prev', at('/orders'));
+    blocked[0].resume();
+    finished.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A single check: a stale pass would be consumed by this very traversal.
+    expect(traversal('prev', at('/orders')).defaultPrevented).toBe(true);
+  });
+
+  it('an older traversal settling never clears the pass of a newer one for the same entry', async () => {
+    render(<Guard name="A" />);
+    traversal('prev', at('/orders'));
+    blocked[0].resume();
+    expect(traversal('prev', at('/orders')).defaultPrevented).toBe(false);
+    traversal('prev', at('/orders'));
+    blocked[1].resume();
+    traversals[0].reject(new DOMException('aborted', 'AbortError'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(traversal('prev', at('/orders')).defaultPrevented).toBe(false);
+    traversals[1].resolve();
+  });
+
   it('re-arms when the resumed traversal is aborted', async () => {
     render(<Guard name="A" />);
     traversal('prev', at('/orders'));
@@ -312,13 +340,29 @@ describe('leaving the document after a confirmation', () => {
     expect(promptedDuringLeave).toBe(false);
   });
 
-  it('the pass ends with the task that started the navigation', async () => {
+  it('covers a beforeunload that arrives after the starting task (WebKit ordering), exactly once', async () => {
     render(<><Guard name="A" /><Guard name="B" /></>);
     leaveDocument('/orders', () => undefined);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(unload()).toBe(false);
     expect(unload()).toBe(true);
     click(link('工单列表'));
     expect(blocked).toHaveLength(1);
+  });
+
+  it('a document that stays (user interaction) is guarded again', () => {
+    render(<Guard name="A" />);
+    leaveDocument('/orders', () => undefined);
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(unload()).toBe(true);
+  });
+
+  it('a page restored from the back/forward cache is guarded again', () => {
+    render(<Guard name="A" />);
+    leaveDocument('/orders', () => undefined);
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    expect(unload()).toBe(true);
   });
 });
 
