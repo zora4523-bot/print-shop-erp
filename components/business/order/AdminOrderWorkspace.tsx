@@ -39,10 +39,10 @@ const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
 const SIGNALS: Array<{ key: AdminOrderSignal; label: string }> = [
   // 看板卡 9 列时内容宽约 70px，标签超过 5 个字会在词中折行。
   { key: 'pending-quantity', label: '产量待核对' },
-  { key: 'pending-confirmation', label: '待下发检查' },
+  { key: 'pending-confirmation', label: '待完善' },
   { key: 'pending-pricing', label: '待核价' },
   { key: 'pending-change', label: '变更申请' },
-  { key: 'pending-release', label: '待下发生产' },
+  { key: 'pending-release', label: '待安排' },
   { key: 'on-hold', label: '已暂停' },
   { key: 'overdue', label: '已逾期' },
   { key: 'due-today', label: '今日待发' },
@@ -464,8 +464,8 @@ function AdminOrderDecisionDashboard({
   );
 }
 
-const DECISION_CARD_LAYOUT =
-  'relative flex h-auto min-w-24 shrink-0 flex-col items-start justify-start gap-0 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none @min-[56rem]:min-w-0';
+const DECISION_CARD_LAYOUT = cn(styles.decisionCard,
+  'relative flex h-auto shrink-0 flex-col items-start justify-start gap-0 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none');
 
 /**
  * 队列与快捷筛选在窄容器（<960px）排成一行、条内横向滚动，不再各自折成 2–3 行（审查 L-8）；

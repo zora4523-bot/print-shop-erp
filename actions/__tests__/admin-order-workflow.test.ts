@@ -217,13 +217,12 @@ describe('admin order workflow cache invalidation', () => {
   });
 });
 
-it('validates and forwards independent release without enabling print creation', async () => {
+it('rejects the retired standalone release entry without production or printing writes', async () => {
   const input = { orderId: 'order-1', expectedRevision: 4, expectedWorkOrderVersion: 2,
     printIdempotencyKey: 'release-only-order-1-v2', createPrint: false };
-  await expect(releaseFactoryOrderAction(input)).resolves.toMatchObject({ status: 'success' });
-  expect(mocks.release).toHaveBeenCalledWith(input, actor);
+  await expect(releaseFactoryOrderAction(input)).resolves.toMatchObject({ status: 'error', message: expect.stringContaining('无需单独下发') });
   await expect(releaseFactoryOrderAction({ ...input, createPrint: 'false' })).resolves.toMatchObject({ status: 'invalid' });
-  expect(mocks.release).toHaveBeenCalledTimes(1);
+  expect(mocks.release).not.toHaveBeenCalled();
 });
 
 const completeInput = { requestId: 'complete-production-request', command: 'COMPLETE_PRODUCTION', items: [{ orderId: 'order-1', expectedRevision: 4, expectedWorkOrderVersion: 2 }] };

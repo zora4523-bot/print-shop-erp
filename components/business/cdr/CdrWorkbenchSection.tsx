@@ -31,7 +31,7 @@ export async function CdrWorkbenchSection({ searchParams }: { searchParams: Prom
         <Button type="submit" variant="outline">筛选</Button><Button nativeButton={false} render={<Link href="/owner#cdr-download" />} variant="ghost">重置</Button>
       </Form>
       {!parsed.success && <ActionNotice tone="error" title="筛选条件无效，已显示默认范围" />}
-      <p className="text-xs text-muted-foreground">{filter.scope === 'pending' ? '待生产含待下发、已下发及历史排产工单，不含寄样；缺少 CDR 的工单列在待处理中。不限日期时包含往日工单。' : '全部范围含暂停、取消和已完成工单，请核对状态。'} 共 {total} 单，本页 {orders.length} 单。</p>
+      <p className="text-xs text-muted-foreground">{filter.scope === 'pending' ? '待生产含待安排、已下发及历史排产工单，不含寄样；缺少 CDR 的工单列在待处理中。不限日期时包含往日工单。' : '全部范围含暂停、取消和已完成工单，请核对状态。'} 共 {total} 单，本页 {orders.length} 单。</p>
       <CdrWorkbench orders={orders} bundles={history.map((row) => presentCdrHistory(row))} mock={isMockMode()} now={new Date().toISOString()} />
       {total > CDR_WORKBENCH_PAGE_SIZE && <AdminPagination basePath="/owner" anchor="cdr-download" page={page}
         pageCount={Math.ceil(total / CDR_WORKBENCH_PAGE_SIZE)} total={total} pageSize={CDR_WORKBENCH_PAGE_SIZE}

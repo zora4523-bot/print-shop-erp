@@ -485,7 +485,7 @@ describe('admin order workspace predicates', () => {
     }
     expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.PACKING })).toBeNull();
     expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.PACKING, hasOutsourceGap: true })).toBe('外协单缺失或数量未覆盖工单，请先补齐外协');
-    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.CONFIRMED })).toBe('下发并完成生产后才可发货');
+    expect(resolveAdminOrderShipDisabledReason({ ...base, status: OrderStatus.CONFIRMED })).toBe('完成工单所需生产或外协后才可发货');
     expect(
       resolveAdminOrderCapabilities({
         ...base,

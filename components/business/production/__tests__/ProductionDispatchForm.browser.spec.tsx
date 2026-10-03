@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { page, commands } from 'vitest/browser';
+import { page, commands, userEvent } from 'vitest/browser';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { ComponentProps } from 'react';
@@ -141,4 +141,30 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       expect(await commands.checkShellAccessibility('[data-testid="dispatch-fixture"]')).toEqual([]);
     });
   }
+}
+
+for (const [width, reduce] of [[320, false], [1280, false], [320, true], [1280, true]] as const) {
+  it(`${width}: keyboard review and recovery remain usable with reduced motion ${reduce}`, async () => {
+    await page.viewport(width, 844);
+    await commands.setReducedMotion(reduce);
+    mocked.publish.mockResolvedValue({ ok: false, message: '工单已变化，请刷新后重试' });
+    render();
+    await page.getByRole('combobox').selectOptions('worker');
+    page.getByRole('button', { name: '核对排单', exact: true }).element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(page.getByRole('button', { name: '发布排单', exact: true })).toBeVisible();
+    expect(document.activeElement?.tagName).toBe('H2');
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement?.textContent).toBe('发布排单');
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement?.textContent).toBe('返回修改');
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}{Enter}');
+    await expect.element(page.getByRole('alert')).toHaveTextContent('工单已变化');
+    page.getByRole('button', { name: '返回修改', exact: true }).element().focus();
+    await userEvent.keyboard(' ');
+    await expect.element(page.getByRole('combobox')).toHaveValue('worker');
+    expect(document.activeElement?.tagName).toBe('SELECT');
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    await commands.setReducedMotion(false);
+  });
 }

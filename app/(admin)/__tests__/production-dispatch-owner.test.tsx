@@ -12,6 +12,10 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/db', () => ({ db: {
   user: { findMany: mocks.workers },
+  orderChangeRequest: { count: vi.fn(async () => 0) },
+  productionOperation: { count: vi.fn(async () => 0) },
+  productionProgressStep: { count: vi.fn(async () => 0) },
+  productionTask: { count: vi.fn(async () => 0) },
   productionJob: { findMany: mocks.jobs },
 } }));
 vi.mock('@/lib/production/dispatch-targets', () => ({ currentDispatchTargets: mocks.targets }));
@@ -31,7 +35,7 @@ import { DispatchPlanValidationError } from '@/lib/production/dispatch-plan-erro
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.targets.mockResolvedValue({
-    order: { id: 'order', customName: '工单', revision: 2, workOrderVersion: 1 },
+    order: { status: 'CONFIRMED', pricingStatus: 'ADMIN_CONFIRMED', id: 'order', customName: '工单', revision: 2, workOrderVersion: 1 },
     targets: [{ key: 'PARTIAL:item', label: '局部烫金', quantity: '1000', operationType: 'PARTIAL' }],
   });
   mocks.jobs.mockResolvedValue([{
@@ -47,7 +51,7 @@ it('renders an actionable incomplete-order notice without a partial batch form',
     [{ code: 'NO_PACKAGING_GROUPS', message: '工单没有包装组，无法确定打包计件数' }],
   ));
   const html = renderToStaticMarkup(await ProductionDispatchPage({ searchParams: Promise.resolve({ ids: 'bad,order' }) }));
-  expect(html).toContain('工单资料不完整，暂不能安排本批生产');
+  expect(html).toContain('所选工单暂不能一起安排生产');
   expect(html).toContain('已选择 2 张工单');
   expect(html).toContain('href="/orders/bad"');
   expect(html).toContain('待完善工单');

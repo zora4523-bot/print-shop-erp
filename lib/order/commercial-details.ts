@@ -1,3 +1,7 @@
+import { ProductionOperationMaterializationError } from '../production/operation-materialization-service';
+import { prepareOrderForProductionInTx, type ProductionReadinessResult } from './production-readiness';
+import { dispatchProductionCompletionNotification } from '../production-completion';
+import { dispatchPreparedProduction } from '../production/preparation-notification';
 import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import {
@@ -182,7 +186,7 @@ async function finishCommercialMutation(
     action: string;
     remark: string;
   },
-): Promise<{ priceRevision: number; totalAmount: string }> {
+): Promise<{ priceRevision: number; totalAmount: string } & Pick<ProductionReadinessResult, 'notification' | 'scheduledNotification'>> {
   const aggregate = await tx.orderCustomerCharge.aggregate({
     where: { orderId: input.order.id },
     _sum: { amount: true },
@@ -277,10 +281,29 @@ async function finishCommercialMutation(
       remark: input.remark,
     },
   });
+  let prepared: ProductionReadinessResult | undefined;
+  try {
+    if (['PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED'].includes(input.order.status)) prepared = await prepareOrderForProductionInTx(tx, input.order.id, input.actor, input.now);
+  } catch (error) {
+    if (error instanceof ProductionOperationMaterializationError) throw new OrderCommercialDetailsError('生产记录与当前工单不一致，本次收费未保存，请核对原生产记录后重试。');
+    throw error;
+  }
+  const currentPriceRevision = prepared?.ready
+    ? (await tx.order.findUniqueOrThrow({ where: { id: input.order.id }, select: { priceRevision: true } })).priceRevision
+    : revision.priceRevision;
   return {
-    priceRevision: revision.priceRevision,
+    priceRevision: currentPriceRevision,
     totalAmount: totalAmount.toFixed(2),
+    notification: prepared?.notification, scheduledNotification: prepared?.scheduledNotification,
   };
+}
+
+
+async function commercialTransaction<T extends Pick<ProductionReadinessResult, 'notification' | 'scheduledNotification'>>(work: (tx: Prisma.TransactionClient) => Promise<T>) {
+  const { notification, scheduledNotification, ...receipt } = await db.$transaction(work);
+  await dispatchProductionCompletionNotification(notification);
+  await dispatchPreparedProduction(scheduledNotification);
+  return receipt;
 }
 
 export async function saveOrderManualCharge(
@@ -289,7 +312,7 @@ export async function saveOrderManualCharge(
   now = new Date(),
 ) {
   assertAdmin(actor);
-  return db.$transaction(async (tx) => {
+  return commercialTransaction(async (tx) => {
     const order = await lockAndReadOrder(tx, input);
     const categoryId = await requireCategory(tx, input.categoryCode);
     const isAdjustment = input.categoryCode === 'APPROVED_ADJUSTMENT';
@@ -394,7 +417,7 @@ export async function deleteOrderManualCharge(
   now = new Date(),
 ) {
   assertAdmin(actor);
-  return db.$transaction(async (tx) => {
+  return commercialTransaction(async (tx) => {
     const order = await lockAndReadOrder(tx, input);
     const existing = await tx.orderCustomerCharge.findFirst({
       where: { id: input.chargeId, orderId: order.id },
@@ -454,7 +477,7 @@ export async function saveOrderPlateDetail(
   now = new Date(),
 ) {
   assertAdmin(actor);
-  return db.$transaction(async (tx) => {
+  return commercialTransaction(async (tx) => {
     const order = await lockAndReadOrder(tx, input);
     assertPlateDetailMaintenanceAllowed(order);
     const item = await tx.orderItem.findFirst({
@@ -653,7 +676,7 @@ export async function deleteOrderPlateDetail(
   now = new Date(),
 ) {
   assertAdmin(actor);
-  return db.$transaction(async (tx) => {
+  return commercialTransaction(async (tx) => {
     const order = await lockAndReadOrder(tx, input);
     assertPlateDetailMaintenanceAllowed(order);
     const detail = await tx.orderItemPlateDetail.findFirst({

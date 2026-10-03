@@ -22,7 +22,7 @@ describe('工单待办', () => {
       expect(html).toContain(`/orders?queue=all&amp;signal=${signal}`);
     }
     expect(html).toContain('待审核变更工单');
-    expect(html).toContain('待下发生产');
+    expect(html).toContain('待安排');
     expect(html).not.toContain('待排产');
     expect(html).toContain('3 单');
   });

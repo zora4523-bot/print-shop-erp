@@ -30,23 +30,26 @@ async function state(id: string) {
     (SELECT count(*)::int FROM "OrderLog" WHERE "orderId"=$1 AND action='ORDER_READY_FOR_PRODUCTION') AS readiness
     FROM "Order" WHERE id=$1`, [id])).rows[0]);
 }
-test.describe('自动准备与显式生产下发', () => {
+test.describe('自动准备与直接安排生产', () => {
   test.beforeEach(() => { test.skip(Boolean(productionOperationE2eIsolationFailure()), '只在隔离数据库写入新测试工单'); });
-  // 2026-09-24 起内部/工厂直单删除，「保存后自动进入待下发」只存在于这两类单，已不可达；
-  // 这里保留仍然有效的部分：下发与打印独立，刷新不会重新计价。
-  test('下发与打印独立；刷新不会重计价', async ({ page }) => {
+  test('直接排单创建待打印任务；刷新不会重计价', async ({ page }) => {
     test.setTimeout(120_000);
     const id = await fixture();
     await login(page, { from: `/orders/${id}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
-    await page.getByRole('button', { name: '下发生产', exact: true }).click();
-    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
+    await expect(page.getByRole('heading', { level: 1, name: '自动接单测试', exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: '下发生产', exact: true })).toHaveCount(0);
+    await page.getByRole('link', { name: '安排生产师傅', exact: true }).first().click();
+    const worker = await withDb(async db => (await db.query('SELECT id FROM "User" WHERE username=$1', [E2E_USERS.workerHandPress.username])).rows[0]);
+    await page.getByRole('combobox', { name: '局部烫金 · 100 个' }).selectOption(worker.id);
+    await page.getByRole('button', { name: '核对排单' }).click();
+    await page.getByRole('button', { name: '发布排单', exact: true }).click();
+    await expect(page.getByRole('region', { name: '排单结果' })).toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => (await state(id)).status).toBe('RELEASED');
     const released = await state(id);
-    expect(released).toMatchObject({ operations: 2, prints: 0, readiness: 1, totalAmount: '12.30', confirmedFee: '12.30', settledFee: null });
-    await page.reload();
+    expect(released).toMatchObject({ operations: 2, prints: 1, readiness: 1, totalAmount: '12.30', confirmedFee: '12.30', settledFee: null });
+    await page.goto(`/orders/${id}`);
     expect(await state(id)).toEqual(released);
-    // 业主 2026-10-02 点打印即记已打印：单张下发不建打印任务；当前版本未打印时待办直接给「打印」，
-    // 不再给「加入待打印」。打印页关闭打印对话框后才在同一事务里建任务并记已打印（任务 + 回执两行）。
+    // 排单已创建待打印请求；实际打印后追加回执，不重复创建请求。
     await expect(page.getByRole('button', { name: '加入待打印', exact: true })).toHaveCount(0);
     await expect(page.locator(`a[href="/print/orders/${encodeURIComponent(id)}?autoprint=1"]`).first()).toBeVisible();
     expect(await state(id)).toEqual(released);
@@ -60,18 +63,24 @@ test.describe('自动准备与显式生产下发', () => {
     await expect.poll(async () => (await state(id)).prints).toBe(2);
     expect(await state(id)).toEqual({ ...released, prints: 2 });
   });
-  test('旧待确认单可直接下发，错误合计展示原因且没有写入', async ({ page }) => {
+  test('旧待确认单可直接安排，错误合计展示原因且没有写入', async ({ page }) => {
     test.setTimeout(120_000);
     const invalid = await fixture(true);
     await login(page, { from: `/orders/${invalid}`, username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
+    // Login settles on navigation commit; wait for the streamed detail before checking business feedback.
+    await expect(page.getByRole('heading', { level: 1, name: '自动接单测试', exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText('费用明细与工单合计不一致，请先核对费用', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '下发生产', exact: true })).toHaveCount(0);
     expect(await state(invalid)).toMatchObject({ status: 'SUBMITTED', operations: 0, prints: 0, readiness: 0, confirmedFee: null });
     const valid = await fixture();
     await page.goto(`/orders/${valid}`);
-    await page.getByRole('button', { name: '下发生产', exact: true }).click();
-    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
+    await page.getByRole('link', { name: '安排生产师傅', exact: true }).first().click();
+    const worker = await withDb(async db => (await db.query('SELECT id FROM "User" WHERE username=$1', [E2E_USERS.workerHandPress.username])).rows[0]);
+    await page.getByRole('combobox', { name: '局部烫金 · 100 个' }).selectOption(worker.id);
+    await page.getByRole('button', { name: '核对排单' }).click();
+    await page.getByRole('button', { name: '发布排单', exact: true }).click();
+    await expect(page.getByRole('region', { name: '排单结果' })).toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => (await state(valid)).status).toBe('RELEASED');
-    expect(await state(valid)).toMatchObject({ operations: 2, prints: 0, readiness: 1, confirmedFee: '12.30' });
+    expect(await state(valid)).toMatchObject({ operations: 2, prints: 1, readiness: 1, confirmedFee: '12.30' });
   });
 });

@@ -15,9 +15,10 @@ import { ProductionWageForm } from './ProductionWageForm';
 export async function ProductionJobPanel({ orderId }: { orderId: string }) {
   const actor = await requirePermission('production:manage');
   if (actor.role !== 'ADMIN') return null;
-  const { jobs, workers } = await getAdminProductionDetail(orderId, actor);
+  const { jobs, workers, canAssign } = await getAdminProductionDetail(orderId, actor);
+  if (!canAssign && jobs.length === 0) return null;
   return <section className="min-w-0 space-y-4 rounded-xl border bg-card p-4" aria-label="生产安排与提成">
-    <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">生产安排与提成</h2><Link className="inline-flex min-h-11 items-center underline" href={`/orders/production?ids=${encodeURIComponent(orderId)}`}>安排生产师傅</Link></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">生产安排与提成</h2>{canAssign && <Link className="inline-flex min-h-11 items-center underline" href={`/orders/production?ids=${encodeURIComponent(orderId)}`}>安排生产师傅</Link>}</div>
     {jobs.map(job => {
       const currentWages = job.wages.filter(wage => wage.workDate.getTime() === job.workDate?.getTime());
       const settledDay = !!job.workDate && job.settledWorkDates.includes(job.workDate.toISOString().slice(0, 10));

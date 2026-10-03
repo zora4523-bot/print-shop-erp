@@ -1,5 +1,6 @@
 import Decimal from 'decimal.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('server-only', () => ({}));
 import type { Prisma } from '@/generated/prisma/client';
 import { OrderStatus, OrderPricingStatus, OrderSettlementType } from '@/generated/prisma/enums';
 const { append } = vi.hoisted(() => ({ append: vi.fn() }));
@@ -23,7 +24,7 @@ function fixture() {
 function client(order = fixture()) {
   const tx = {
     $executeRaw: vi.fn(),
-    order: { findUniqueOrThrow: vi.fn().mockResolvedValue(order), update: vi.fn() },
+    order: { findUniqueOrThrow: vi.fn().mockResolvedValue(order), findMany: vi.fn().mockResolvedValue([order]), update: vi.fn() },
     orderLog: { create: vi.fn() },
     craft: { findMany: vi.fn().mockResolvedValue([]) },
   };
@@ -115,7 +116,7 @@ describe('readiness inspection and financial boundaries', () => {
     const { tx, call } = client({ ...fixture(), ...settlement });
     const result = await call();
     expect(result.ready).toBe(false);
-    expect(result.issues).toContain('已结算工单不能重新进入待下发');
+    expect(result.issues).toContain('已结算工单不能重新安排生产');
     expect(tx.order.update).not.toHaveBeenCalled();
     expect(tx.orderLog.create).not.toHaveBeenCalled();
     expect(append).not.toHaveBeenCalled();

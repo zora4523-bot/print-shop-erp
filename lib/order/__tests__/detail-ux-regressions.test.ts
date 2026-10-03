@@ -63,7 +63,7 @@ it.each([
   [OrderStatus.RELEASED, '生产完工后才可发货'],
   [OrderStatus.FOILING, '生产完工后才可发货'],
   [OrderStatus.IN_PRODUCTION, '生产完工后才可发货'],
-  [OrderStatus.CONFIRMED, '下发并完成生产后才可发货'],
+  [OrderStatus.CONFIRMED, '完成工单所需生产或外协后才可发货'],
   [OrderStatus.ON_HOLD, '工单已暂停，请先恢复生产再核对发货条件'],
   [OrderStatus.CANCELLED, '工单已取消，无法发货'],
   [OrderStatus.SETTLED, '工单已结算，无需重复发货'],

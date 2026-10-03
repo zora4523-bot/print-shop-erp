@@ -28,10 +28,11 @@ describe('admin order decision reason contract', () => {
     expect(source).not.toContain('void task().then(finish)');
   });
 
-  it('keeps only the explicit production release, using saved order versions', () => {
+  it('routes directly to assignment without a standalone release action', () => {
     expect(source).not.toContain('confirmFactoryOrderAction');
     expect(source).not.toContain('确认并锁定金额');
-    expect(source).toContain('releaseFactoryOrderAction({');
+    expect(source).not.toContain('releaseFactoryOrderAction');
+    expect(source).toContain('/orders/production?ids=');
     expect(source).toContain('expectedRevision: order.revision');
     expect(source).toContain('expectedWorkOrderVersion: order.workOrderVersion');
   });

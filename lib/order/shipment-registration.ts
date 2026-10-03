@@ -11,6 +11,7 @@ import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { dispatchNotification } from '@/lib/notification/dispatch';
 import { dispatchProductionCompletionNotification, type ProductionCompletionNotification } from '@/lib/production-completion';
 import { completePlannedProductionInTx, PlannedCompletionError } from '@/lib/production/planned-completion';
+import { prepareOrderForProductionInTx } from './production-readiness';
 
 export const SHIPMENT_IMAGE_LIMIT = 512 * 1024;
 export async function normalizeShipmentImage(bytes: Uint8Array): Promise<Uint8Array> {
@@ -49,9 +50,15 @@ export async function registerShipment(raw: ShipmentRegistrationInput, actor: { 
       throw new OrderInvariantError('工单已被修改，请刷新后重新登记');
     }
     if ([OrderStatus.CANCELLED, OrderStatus.FINISHED].includes(order.status as 'CANCELLED' | 'FINISHED')) throw new OrderInvariantError('该工单已关闭，不能登记发货');
+    const now = new Date();
     let productionNotification: ProductionCompletionNotification | undefined;
     if (input.confirm) {
       if (shipment.status === ShipmentStatus.SHIPPED) throw new OrderInvariantError('该地址已发货，请刷新查看');
+      if (order.purpose === 'SAMPLE_SHIPMENT' && ['CONFIRMED', 'PENDING_FACTORY', 'SUBMITTED'].includes(order.status)) {
+        const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, now);
+        if (!prepared.ready) throw new OrderInvariantError(prepared.issues.join('；'));
+        order = await tx.order.findUniqueOrThrow({ where: { id: input.orderId }, include: { shipments: { orderBy: { sequence: 'asc' } } } });
+      }
       // 业主 2026-10-01：单人流程填物流单号确认发货即证明已按工单数量生产完成，
       // 先代师傅按计划数量登记并计提成；任何一步失败整体回滚。
       if (order.simpleProduction && (order.status === OrderStatus.RELEASED || order.status === OrderStatus.FOILING)) {
@@ -74,7 +81,6 @@ export async function registerShipment(raw: ShipmentRegistrationInput, actor: { 
     }
     // Do not clear previously registered logistics when saving corrections after shipment.
     if (shipment.status === ShipmentStatus.SHIPPED && (!input.trackingNo || !input.carrierCode || (input.carrierCode === 'OTHER' && !input.carrierName))) throw new OrderInvariantError('已发货地址须保留完整物流资料');
-    const now = new Date();
     const updated = await tx.orderShipment.update({ where: { id: shipment.id }, data: {
       trackingNo: input.trackingNo || null, carrierCode: input.carrierCode || null,
       carrierName: input.carrierCode === 'OTHER' ? input.carrierName || null : null,

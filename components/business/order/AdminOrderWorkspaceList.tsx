@@ -432,7 +432,7 @@ function rowSummaryClassName(order: AdminOrderWorkspaceRow): string {
 function rowActionVariant(order: AdminOrderWorkspaceRow): 'default' | 'outline' {
   const actionable = order.pendingChangeRequest || order.fee.source === 'PENDING' ||
     ['PENDING_FACTORY', 'SUBMITTED'].includes(order.status) ||
-    order.capabilities.confirm || order.capabilities.release || order.capabilities.ship || order.printPending;
+    order.canAssignProduction || order.capabilities.ship || order.printPending;
   return actionable ? 'default' : 'outline';
 }
 
@@ -444,13 +444,13 @@ function rowActionLabel(order: AdminOrderWorkspaceRow): string {
   if (order.pendingChangeRequest) return '裁决变更';
   if (order.fee.source === 'PENDING') return '录价';
   if (order.printPending) return '打印';
+  if (order.capabilities.ship) return '录运单发货';
+  if (order.canAssignProduction) return '安排生产';
   if (order.status === 'PENDING_FACTORY' || order.status === 'SUBMITTED') {
-    return '下发前检查';
+    return '完善工单';
   }
   if (order.status === 'ON_HOLD') return '处理暂停';
-  if (order.capabilities.release) return '下发生产';
   if (order.capabilities.settle) return '结算';
-  if (order.capabilities.ship) return '录运单发货';
   return '详情';
 }
 

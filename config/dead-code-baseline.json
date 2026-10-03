@@ -752,7 +752,6 @@
     "[\"ts-prune\",\"lib/order/pricing-status.ts\",\"ORDER_PRICING_STATUS_LABELS\"]",
     "[\"ts-prune\",\"lib/order/print-access.ts\",\"PrintActor\"]",
     "[\"ts-prune\",\"lib/order/print-jobs.ts\",\"createOrderPrintRequest\"]",
-    "[\"ts-prune\",\"lib/order/production-readiness.ts\",\"ProductionReadinessResult\"]",
     "[\"ts-prune\",\"lib/order/receiver-address-paste.ts\",\"PastedReceiverFacts\"]",
     "[\"ts-prune\",\"lib/order/receiver-address-paste.ts\",\"ReceiverAddressDisplay\"]",
     "[\"ts-prune\",\"lib/order/receiver-info.ts\",\"ReceiverInfoParts\"]",
