@@ -24,7 +24,7 @@ verification_scope: 本分支相对 be338762 的共享导航守卫与离开保�
 | 站内链接 | 任一守卫挂载时在 document 上挂一个 capture click 监听（全局一份）。只拦同源、路径或查询串不同、普通左键的 `<a href>`；跳过修饰键、中键、`target` 非 `_self`、`download`、只差 hash、外链、已被 `preventDefault` 的事件、`data-navigation-guard-skip` 容器内的链接（守卫自己的确认层、自带确认的 `PriceWorkspaceLink`）。拦下时 `preventDefault + stopPropagation`，Next Link 与页面 onClick 都不再执行。 |
 | 后退 / 前进 | 沿用管理员改单已验证的做法：Navigation API `navigate` 事件中取消可取消的同文档 traverse，早于 App Router 处理 popstate，不插入重复历史、不改 `history.state`；`resume()` 用原条目 key `traverseTo`，被后续导航中止时自动重新布防。不支持 Navigation API 的浏览器只剩链接与刷新保护（与原实现一致）。 |
 | 刷新 / 关闭 | 每个守卫自己的 beforeunload 监听；`blockUnload` 默认等于 `when`，也可传函数在整个挂载期实时判定（销售改单「保存中仍防刷新」）。 |
-| 放行 | 确认后的放行是**一次性的、绑定到那一次导航**，所有守卫都认。① 链接：`resume()` 用一次可取消的 click 事件重放原链接，只放过这一次点击（保留 Next Link 的 replace / scroll 与 pending）；被链接自己取消（如 Next `onNavigate.preventDefault()`）后照常布防。② 后退 / 前进：每次 `resume()` 是一个独立请求，只放过它那条历史的 navigate 事件；请求结束（成功、失败、中止）而事件未到时清除，旧请求不会清掉新请求。③ 刷新 / 关闭：`leaveDocument(href)` 与未被取消的链接重放授予一次刷新放行，覆盖授予后的**第一个** beforeunload 事件（同一次派发里所有守卫都放过），之后的事件不再覆盖；页面明显留下时（pointerdown / keydown、重新可见、bfcache 恢复、pagehide）立即作废，另有 10 秒兜底上限（下载、204 等页面不离开又无交互时）。`release()` 只用于保存成功等「内容已安全」的整体解除，持续到 `when` 再次由 false 变 true。 |
+| 放行 | 确认后的放行是**一次性的、绑定到那一次导航**，所有守卫都认。① 链接：`resume()` 用一次可取消的 click 事件重放原链接，只放过这一次点击（保留 Next Link 的 replace / scroll 与 pending）；被链接自己取消（如 Next `onNavigate.preventDefault()`）后照常布防。② 后退 / 前进：每次 `resume()` 是一个独立请求，只放过它那条历史的 navigate 事件；请求结束（成功、失败、中止）而事件未到时清除，旧请求不会清掉新请求。③ 刷新 / 关闭：`leaveDocument(href)` 与链接重放授予一次刷新放行（重放的点击被取消时，靠 Next 公开钩子 `onRouterTransitionStart`——根目录 `instrumentation-client.ts` 经无依赖的 `navigation-guard-transition.ts` 转发——区分「Next Link 接管了导航」与「调用方 onNavigate 真的取消」：前者保留放行直到新 URL 在本文档提交或整页回退消费它，后者立即收回），覆盖授予后的**第一个** beforeunload 事件（同一次派发里所有守卫都放过），之后的事件不再覆盖；页面明显留下时（pointerdown / keydown、重新可见、bfcache 恢复、pagehide）立即作废，另有 10 秒兜底上限（下载、204 等页面不离开又无交互时）。`release()` 只用于保存成功等「内容已安全」的整体解除，持续到 `when` 再次由 false 变 true。 |
 | 多守卫共存 | 按挂载（effect 注册）顺序，**最后注册且 `when && shouldBlock()` 为真**的守卫独自决定：只调用它的 `onBlocked`、只弹一个确认层；它已放行则直接通过，不再询问更早的守卫；它没有可丢内容时由更早的守卫判定。beforeunload 任一守卫需要即拦。 |
 
 原语只负责判定、拦截与回调；确认层仍由各业务用 `ConfirmActionController level="L2"` 渲染，文案不变。
@@ -91,21 +91,36 @@ E2E 首版两处用例问题已在用例侧修正、未放宽断言：① 管理
 
 WebKit 覆盖：用临时 Vitest 配置（未提交）只跑 `webkit` 实例，执行 `navigation-guard`、`PendingButton.navigation`、`AdminOrderLeaveGuard`、`SalesOrderEditGuard` 四个浏览器组件测试：4 文件 / 49 用例通过。这些测试用合成事件模拟异步 beforeunload 顺序；**没有**在 WebKit 下跑真实页面的整页跳转或 E2E（项目 Playwright 配置只有 Chromium），WebKit 下真实浏览器提示的行为只由上面的时序探针间接支持。
 
+## 第四轮复审修复（Codex gpt-6-astra，1 项 P2）
+
+- 核实：已安装的 Next 16.3.6 `client/app-dir/link.js` 在正常接管导航时也会对点击 `preventDefault()`（之后才调用 onNavigate），所以「重放点击被取消」不能区分 Next 接管与调用方取消。原实现据此立即收回刷新放行；若目标页 RSC 请求失败，Next 退回 `location.assign()` 整页加载，仍挂载的守卫又拦 beforeunload，用户在已确认后再看到一次原生提示（违反 §8.3）。
+- 修复：新增根目录 `instrumentation-client.ts`（Next 公开文件约定），导出 `onRouterTransitionStart`，经无依赖的 `components/ui-business/navigation-guard-transition.ts` 转发给守卫。Next 在接管点击时同步调用这个钩子（`dispatchNavigateAction` → `startRouterTransition`），守卫据此判断：
+  - 重放期间收到钩子，算作接管，保留放行，直到新 URL 在本文档提交（同文档 push / replace 且 URL 改变）或整页回退消费第一个 beforeunload；
+  - 点击被取消且没有收到钩子，算作真实取消，立即收回。
+  - 页面明显留下时的收回规则与 10 秒兜底不变。
+- 测试：
+  - 原语新增「路由接管后，稍后到来的整页回退 beforeunload 仍被覆盖且只覆盖一次」：修复前失败 → 通过。
+  - 原语新增「客户端导航在本文档提交后放行结束」「调用方取消（无路由转场）立即恢复保护」。
+  - 原有「onNavigate.preventDefault() 后仍受保护」的用例保留并通过。
+  - E2E `order-leave-recovery.spec.ts` 新增「确认侧栏离开后目标页 RSC 返回 500，整页回退到 `/orders` 且没有第二次提示」：修复前收到一次 beforeunload 对话框 → 修复后 0 次。
+  - 慢导航 pending 两条 E2E 仍通过。
+- 范围：没有修改任何 `next.config` 选项；`instrumentation-client.ts` 只转发一个函数调用，不做别的初始化。`check:dead-code`（非门禁）对新文件没有报告，只把 `isGuardedNavigationDestination` 的 index 再导出列为未被外部使用。
+
 ## 验证结果
 
 环境：Node 24.15.0、pnpm 10.33.1、Next.js 16.3.6，Chromium（Playwright）；guard 相关浏览器组件测试另在 WebKit 执行（见第三轮复审）。E2E 使用本工作树开发服务器 `127.0.0.1:3100`。最终一轮（HEAD `966402db`）用独立可丢弃库 `erp_e2e_navguard_20261004e`（功能 E2E）与 `erp_e2e_navguard_20261004f`（九视口门禁，先跑功能 E2E、门禁用另一新库），均 `migrate deploy` + seed + `test:e2e:prepare`，用后已 DROP；更早各轮的库也已全部 DROP。未连接生产库，日常开发库只作 prepare 的隔离比对与单测库。
 
 | 检查 | 结果 |
 |---|---|
-| `pnpm check:architecture` | 通过（最终一轮 `966402db` 重跑；1198 模块，24 项存量超长函数债务，未新增） |
-| `pnpm test:backup` | 23 / 23 通过（最终一轮重跑） |
-| `pnpm lint` | 最终一轮重跑：0 error；2 条既有 warning（`app/global-error.tsx`、`OrderCreatedSuccessView.tsx` 的 `location.assign`，与 2026-09-30 记录一致）；UI 文案 0 命中、令牌 0 新增违例 |
-| `pnpm typecheck` | 通过（最终一轮重跑） |
-| 全量 `pnpm test run`（只传主仓 `.env` 的 `DATABASE_URL`；最终一轮重跑） | 758 文件通过、19 文件按条件跳过；8,466 用例通过、173 按条件跳过 |
-| 全量 `pnpm test:browser` | 最终一轮在 HEAD `966402db` 的全新分离工作树（`pnpm install --offline --frozen-lockfile` + `prisma generate`）中执行：92 文件、1,194 用例全部通过（此前 `530e2691` 91 / 1,187，`2f58b82d` 90 / 1,186，同法执行）。**更正**：首版记录称 `CdrWorkbench.browser.spec.tsx` 导入失败（`deps/next_navigation.js does not provide an export named 't'`）是既存问题，不对——协调方在干净 main 与本分支每个提交的新检出上均通过；失败只出现在本开发工作树，来自本地环境状态（清除 `node_modules/.vite/vitest` 不能消除，根因未查） |
-| 相关 E2E（chromium，最终一轮 17 个 spec，含管理员 / 销售改单相关的 order-field-repairs、foil-color-history、order-multiple-addresses、order-external-sales-association、sales-functional-review、order-create，以及 order-leave-recovery、price-workspace-leave、order-create-ui-parity、order-creation-groups、sample-orders、price-entry、price-versions-layout、blank-price-only、blank-paper-pricing、confirmed-custom-tiers、interaction-discoverability） | 81 / 81 通过（8.0 分钟）。此前各轮：79 / 79、80 / 80、81 / 81 |
-| `test:admin-ui`（全部九个配置视口，最终一轮新库，`--workers=4`） | 227 通过、16 跳过、0 失败（第二、三轮均如此）。16 个跳过是两条按设计只在单一视口运行的用例（`order creation responds to its available container…`、`mobile pricing filters stay inline…`）在其余 8 个视口各跳过一次。首轮（`22841915`）曾有 1 次失败：`admin-390x844`「critical routes pass the same gates with dark tokens」在 `/orders` 点「全部」后 5 秒内 URL 未变；当时同条件单独重跑 3 / 3 通过，之后两次完整九视口执行未再出现。按偶发记录，根因未确认 |
-| `test:worker-ui`（全部九个配置视口，最终一轮新库） | 18 / 18 通过（第二、三轮均如此） |
+| `pnpm check:architecture` | 通过（第四轮 `267c903a` 重跑；1199 模块，24 项存量超长函数债务，未新增） |
+| `pnpm test:backup` | 23 / 23 通过（第四轮重跑） |
+| `pnpm lint` | 第四轮重跑：0 error；2 条既有 warning（`app/global-error.tsx`、`OrderCreatedSuccessView.tsx` 的 `location.assign`，与 2026-09-30 记录一致）；UI 文案 0 命中、令牌 0 新增违例 |
+| `pnpm typecheck` | 通过（第四轮重跑） |
+| 全量 `pnpm test run`（只传主仓 `.env` 的 `DATABASE_URL`；第四轮重跑） | 758 文件通过、19 文件按条件跳过；8,466 用例通过、173 按条件跳过 |
+| 全量 `pnpm test:browser` | 第四轮在 HEAD `267c903a` 的全新分离工作树（`pnpm install --offline --frozen-lockfile` + `prisma generate`）中执行：92 文件、1,197 用例全部通过（此前 `966402db` 92 / 1,194， `530e2691` 91 / 1,187，`2f58b82d` 90 / 1,186，同法执行）。**更正**：首版记录称 `CdrWorkbench.browser.spec.tsx` 导入失败（`deps/next_navigation.js does not provide an export named 't'`）是既存问题，不对——协调方在干净 main 与本分支每个提交的新检出上均通过；失败只出现在本开发工作树，来自本地环境状态（清除 `node_modules/.vite/vitest` 不能消除，根因未查） |
+| 相关 E2E（chromium，17 个 spec，含管理员 / 销售改单相关的 order-field-repairs、foil-color-history、order-multiple-addresses、order-external-sales-association、sales-functional-review、order-create，以及 order-leave-recovery、price-workspace-leave、order-create-ui-parity、order-creation-groups、sample-orders、price-entry、price-versions-layout、blank-price-only、blank-paper-pricing、confirmed-custom-tiers、interaction-discoverability） | 第四轮（新库 `erp_e2e_navguard_20261004g`，含新增 RSC 500 回退用例）82 / 82 通过（8.0 分钟）。此前各轮：79 / 79、80 / 80、81 / 81、81 / 81 |
+| `test:admin-ui`（全部九个配置视口，第三轮 `966402db` 新库，`--workers=4`；第四轮未重跑） | 227 通过、16 跳过、0 失败（第二、三轮均如此）。16 个跳过是两条按设计只在单一视口运行的用例（`order creation responds to its available container…`、`mobile pricing filters stay inline…`）在其余 8 个视口各跳过一次。首轮（`22841915`）曾有 1 次失败：`admin-390x844`「critical routes pass the same gates with dark tokens」在 `/orders` 点「全部」后 5 秒内 URL 未变；当时同条件单独重跑 3 / 3 通过，之后两次完整九视口执行未再出现。按偶发记录，根因未确认 |
+| `test:worker-ui`（全部九个配置视口，第三轮新库；第四轮未重跑） | 18 / 18 通过（第二、三轮均如此） |
 
 ## Design QA（§11.4）
 
@@ -130,6 +145,7 @@ WebKit 覆盖：用临时 Vitest 配置（未提交）只跑 `webkit` 实例，�
 - 程序化 `router.push`、`next/form` 提交、`window.location` 赋值不经过原语（与改造前一致）；业务里的此类跳转须继续自行调用守卫判定（新建工单的 `navigate()` / 价格工作台筛选表单已如此）。
 - 新建工单里自带本守卫 onNavigate 的页内链接（页头返回、结果页「查看工单」、报价草稿「恢复草稿」、「打开草稿」）确认后重放时，仍按各自目标 `router.push`，不经 Next Link 自己导航。这些链接没有 `useLinkStatus` / `LinkPendingHint` 之类的 pending 界面，所以界面上看不出差别；改为由 Link 自己导航会改变 `OrderCreationLeave.browser.spec.tsx` ①② 中既有的 `router.push` 断言，按规则不改，待评审决定。
 - `PendingButton` 确认离开后有意用整页加载（`leaveDocument`），不重放原链接：软导航会排在进行中的 action 之后。外链由浏览器原生 beforeunload 确认，文案由浏览器决定。
+- 区分「Next 接管」与「调用方取消」依赖 Next 的 `onRouterTransitionStart` 钩子在点击处理中同步触发（16.3.6 已实测）；Next 升级若改变这一时序，确认后的整页回退可能再弹一次原生提示，升级时需复跑 `order-leave-recovery` 的 RSC 500 用例。
 - 刷新放行在无法跟踪时的退化：页面既未卸载、也没有交互 / 可见性 / pageshow 事件时，放行最多保留 10 秒；这期间由键盘以外方式（如浏览器菜单）触发的刷新不会再提示。反过来，若浏览器在页面交互之后才派发 beforeunload，用户会再看到一次原生提示（只多一次，不会丢内容）。
 - WebKit 只做了组件级测试与时序探针，没有真实页面 / E2E 验收；Firefox 未验证。
 - `admin-responsive` 首轮的一次偶发失败（见上表）根因未确认，若 CI 再现需在基线上对照分类。
