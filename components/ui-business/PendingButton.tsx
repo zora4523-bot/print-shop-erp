@@ -5,7 +5,7 @@ import { LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ConfirmActionController, ConfirmActionDialog } from './ConfirmActionDialog';
-import { useNavigationGuard, type BlockedNavigation } from './navigation-guard';
+import { leaveDocument, useNavigationGuard, type BlockedNavigation } from './navigation-guard';
 
 export type PendingButtonProps = Omit<
   React.ComponentProps<typeof Button>,
@@ -57,7 +57,7 @@ export function PendingButton({
   // Same-origin links, browser back/forward and reload/close while the
   // submission is in flight go through the shared navigation guard. External
   // links fall back to the browser's own beforeunload confirmation.
-  const navigationGuard = useNavigationGuard({
+  useNavigationGuard({
     when: pending && blockNavigation,
     onBlocked: (navigation) => {
       navigationSourceRef.current = navigation.source;
@@ -114,9 +114,9 @@ export function PendingButton({
             return;
           }
           // A full document load does not wait behind the in-flight action.
-          // Release first so the browser does not ask a second time.
-          navigationGuard.release();
-          window.location.assign(pendingNavigation.href);
+          // The confirmed pass covers every guard's reload prompt (e.g. other
+          // pending buttons on the same page), so the browser does not ask again.
+          leaveDocument(pendingNavigation.href);
         }}>
         <ConfirmActionDialog action="当前操作仍在提交，仍要离开" changes={[]} consequences={[
           '操作可能已经到达服务器，返回后请先核对结果。',

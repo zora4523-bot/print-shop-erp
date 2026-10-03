@@ -4,6 +4,23 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import '@/app/globals.css';
+
+// Replace only the document load at the end of leaveDocument(): the fake still
+// fires beforeunload synchronously (as Chromium does for location.assign) so the
+// test can observe whether any guard would prompt a second time.
+const leave = vi.hoisted(() => ({ prompted: [] as boolean[], hrefs: [] as string[] }));
+vi.mock('@/components/ui-business/navigation-guard', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui-business/navigation-guard')>();
+  return {
+    ...actual,
+    leaveDocument: (href: string) => actual.leaveDocument(href, (target) => {
+      leave.hrefs.push(target);
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      leave.prompted.push(event.defaultPrevented);
+    }),
+  };
+});
 import { PendingButton } from '../PendingButton';
 
 /** 提交中离开（PendingButton，迁移到共享导航守卫后）：站内链接与浏览器后退都先确认。 */
@@ -64,6 +81,29 @@ it('asks before browser back while the submission is in flight and resumes the s
   await expect.element(dialog()).toHaveTextContent('当前操作仍在提交，仍要离开');
   await dialog().getByRole('button', { name: '仍要离开', exact: true }).click();
   expect(navigation.traverseTo).toHaveBeenCalledExactlyOnceWith('previous-entry');
+});
+
+it('with several buttons in flight, confirming once leaves without a second browser prompt', async () => {
+  leave.prompted.length = 0; leave.hrefs.length = 0;
+  flushSync(() => root.render(<>
+    <nav aria-label="侧栏"><ShellLink href="/owner/products">产品</ShellLink></nav>
+    <form onSubmit={(event) => event.preventDefault()}>
+      <PendingButton pending>生成 CDR</PendingButton>
+      <PendingButton pending>撤销</PendingButton>
+      <PendingButton pending>重新生成</PendingButton>
+    </form>
+  </>));
+  await shellLink().click();
+  await expect.element(dialog()).toBeVisible();
+  expect(document.querySelectorAll('[role="alertdialog"]')).toHaveLength(1);
+  await dialog().getByRole('button', { name: '仍要离开', exact: true }).click();
+  expect(leave.hrefs).toEqual([new URL('/owner/products', location.href).href]);
+  expect(leave.prompted).toEqual([false]);
+  // Only that navigation was confirmed: a later reload is still protected.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const unload = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(unload);
+  expect(unload.defaultPrevented).toBe(true);
 });
 
 it('does nothing once the submission has settled', async () => {
