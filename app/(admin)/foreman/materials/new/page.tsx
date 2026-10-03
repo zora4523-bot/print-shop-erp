@@ -15,7 +15,7 @@ export default async function NewForemanMaterialPage() {
     <FormPage>
       <PageHeader
         title="新建物料"
-        subtitle="新物料默认启用；库存数量通过出入库单独维护。"
+        subtitle="库存数量通过出入库维护。"
 
       />
 

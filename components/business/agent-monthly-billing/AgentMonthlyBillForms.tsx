@@ -43,7 +43,7 @@ export function GenerateAgentMonthlyBillsForm({
     >
       <div className="space-y-1">
         <label htmlFor="agent-bill-period" className="text-xs text-muted-foreground">
-          结算发生月（上海时区）
+          结算发生月
         </label>
         <Input
           id="agent-bill-period"

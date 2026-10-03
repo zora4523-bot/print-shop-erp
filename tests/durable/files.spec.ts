@@ -97,7 +97,7 @@ test('月账单导出由真实worker读取请求时数据并生成可下载XLSX'
   test.setTimeout(90_000);
   const fixture = await seedSettledExternalSalesOrder({ customerRef: `e2e-durable-bill-${uniqueSuffix()}`, settledFee: '321.09', settledAt: midPreviousShanghaiMonth() });
   await login(page, { from: '/owner/agent-bills', username: E2E_USERS.owner!.username, password: E2E_PASSWORD });
-  await page.getByLabel('结算发生月（上海时区）', { exact: true }).fill(fixture.period);
+  await page.getByLabel('结算发生月', { exact: true }).fill(fixture.period);
   await page.getByRole('button', { name: '生成或更新草稿', exact: true }).click();
   await expect(page.getByText(new RegExp(`^已生成或更新 \\d+ 张 ${fixture.period} 账单$`))).toBeVisible();
   await page.goto(`/owner/agent-bills?period=${fixture.period}&agentUserId=${fixture.agentUserId}`);

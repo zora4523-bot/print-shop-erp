@@ -43,12 +43,12 @@ test('管理员编辑、发布计件工价，重复发布与并发修改不覆�
   await section.getByLabel('调价依据', { exact: true }).fill('隔离测试工价');
   await section.getByLabel('调整说明').fill('仅用于自动验收');
   await section.getByLabel('生效方式').selectOption('scheduled');
-  await section.getByLabel('生效时间（北京时间）').fill('2030-01-01T08:00');
+  await section.getByLabel('生效时间').fill('2030-01-01T08:00');
   await section.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect(section.getByRole('status')).toContainText('草稿已保存');
   await page.reload();
   await expect(section.getByLabel('局部烫金（元/下）')).toHaveValue('0.0075');
-  await expect(section.getByLabel('生效时间（北京时间）')).toHaveValue('2030-01-01T08:00');
+  await expect(section.getByLabel('生效时间')).toHaveValue('2030-01-01T08:00');
   await section.getByLabel('生效方式').selectOption('immediate');
   await section.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect(section.getByRole('status')).toContainText('草稿已保存');

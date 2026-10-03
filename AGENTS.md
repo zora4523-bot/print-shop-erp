@@ -1,5 +1,7 @@
 # 项目约束
 
+- 所有任务遵循 [协作与表达规则](./docs/协作与表达规则.md)。用户消息提及 AGENTS.md 时，每次重新读取本文件。
+
 - 涉及 Next.js 版本敏感的 API、路由或构建行为时，核对当前安装版 `node_modules/next/dist/docs/` 中的对应文档。
 - 服务端授权、资源所有权、金额精度、历史快照及数据库迁移约束见 [CONTRIBUTING.md](./CONTRIBUTING.md) 对应章节；这些业务与安全边界不因流程精简而改变。
 

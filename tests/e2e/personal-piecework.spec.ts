@@ -19,7 +19,7 @@ async function publish(page: Page, workerId: string, rate: string | null, future
   await region.getByLabel('调整说明').fill('账号个人工价验收');
   if (future) {
     await region.getByLabel('生效方式').selectOption('scheduled');
-    await region.getByLabel('生效时间（北京时间）').fill('2030-01-01T08:00');
+    await region.getByLabel('生效时间').fill('2030-01-01T08:00');
   }
   await region.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect(region.getByRole('status')).toContainText('草稿已保存');

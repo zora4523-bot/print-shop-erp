@@ -121,7 +121,7 @@ export function MaterialForm(props: Props) {
           open={Boolean(errs.code?.[0])}
         >
           <DisclosureSummary className="text-muted-foreground">
-            高级设置：自定义物料编码（通常无需填写）
+            自定义物料编码
           </DisclosureSummary>
           <div className="mt-3">
             <TextField
