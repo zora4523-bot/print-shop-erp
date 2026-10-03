@@ -29,7 +29,7 @@ applies_to: repository deployment workflow at last_verified
 | 支持的 cron 端点与时间 | [`deploy/crontab.example`](./deploy/crontab.example) |
 | cron 安全调用脚本 | [`deploy/run-cron.sh`](./deploy/run-cron.sh) |
 | 当前生产候选目录切换 | [09-21 实际发布流程](./docs/audits/2026-09-21-production-release-ef6fa012.md) |
-| 最新生产状态与发布证据 | [10-03 发布记录](./docs/audits/2026-10-03-production-release-deb6c2b2.md) |
+| 最新生产状态与发布证据 | [10-03 Analytics 发布记录](./docs/audits/2026-10-03-production-release-c5983b89.md) |
 | 09-29 颜色目录验收（历史） | [09-29 烫金颜色修复发布记录](./docs/audits/2026-09-29-foil-color-identity-fix.md#正式发布结果) |
 | 其他适配环境的更新脚本（不适用于当前生产） | [`deploy/update.sh`](./deploy/update.sh) |
 | Pigsty 扩展激活 | [`docs/pigsty-production-activation-runbook.md`](./docs/pigsty-production-activation-runbook.md) |
@@ -39,9 +39,9 @@ applies_to: repository deployment workflow at last_verified
 当前生产不是 `main` 检出，应用机 1.6 GiB 内存不能承担本机构建，不得直接运行 `deploy/update.sh`。
 2026-09-21 两条空白封迁移已 applied，脚本的 `--check-applied` 门禁会放行，不能再依赖它防止误用。
 
-2026-10-03 当前生产为 `deb6c2b2`，188 条迁移已应用，Web/LIGHT/HEAVY、ready、jobs 与部署 smoke 通过。
-本次使用候选目录切换、保留 queued PDF 和四条原有 cron；备份、副本迁移与数据摘要证据见
-[10-03 发布记录](./docs/audits/2026-10-03-production-release-deb6c2b2.md)。
+2026-10-03 当前生产为 `c5983b89`，188 条迁移已应用，Web/LIGHT/HEAVY、ready、jobs 与部署 smoke 通过。
+本次使用候选目录切换、保留 queued PDF 和四条原有 cron；备份、副本演练、分析页及导出验收证据见
+[10-03 Analytics 发布记录](./docs/audits/2026-10-03-production-release-c5983b89.md)。
 历史前置 SQL 不应重复执行；后续仍须按目标环境事实确认适用步骤。
 
 ## 不可跳过的边界
