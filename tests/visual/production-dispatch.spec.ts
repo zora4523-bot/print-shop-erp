@@ -38,9 +38,11 @@ test('single owner dispatch, quantity approval, wages and external sales state',
   await page.getByRole('button', { name: '恢复草稿' }).click();
   await expect(page.getByRole('combobox', { name: '局部烫金 · 1000 个' })).toHaveValue(fixture.workerId);
   await page.getByRole('button', { name: '核对排单' }).click();
+  await expect(page.getByRole('heading', { name: '发布排单', exact: true })).toBeFocused();
   await gates(page, info, 'dispatch-review');
   await page.getByRole('button', { name: '发布排单', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('已安排 1 张工单');
+  await expect(page.getByRole('region', { name: '排单结果', exact: true })).toBeFocused();
   await expect(page.getByRole('combobox')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '返回修改' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /草稿/ })).toHaveCount(0);
@@ -189,8 +191,8 @@ test('incomplete dispatch orders show recovery without partial publication', asy
   const name = '待完善工单-ABCDEFGHIJKLMNOPQRSTUVWXYZ-包装与工艺资料需要核对';
   await withDb(db => db.query('UPDATE "Order" SET "customName"=$2 WHERE id=$1', [incomplete.id, name]));
   await login(page, { from: `/orders/production?ids=${valid.id},${incomplete.id}` });
-  await expect(page.getByRole('status')).toContainText('工单资料不完整，暂不能安排本批生产');
-  const blocked = page.getByRole('list', { name: '待完善工单' });
+  await expect(page.getByRole('status')).toContainText('所选工单暂不能一起安排生产');
+  const blocked = page.getByRole('list', { name: '待处理工单' });
   await expect(blocked).toContainText('款式 #1：生产工艺不明确，请完善工艺资料。');
   await expect(blocked).toContainText('未填写包装组，请完善包装资料。');
   await expect(blocked).not.toContainText('canonical');

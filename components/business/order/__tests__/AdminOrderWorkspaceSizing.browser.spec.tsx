@@ -140,7 +140,8 @@ function assertDashboardSingleRow(width: number) {
   const cards = [...dashboard.querySelectorAll<HTMLElement>('a')];
   expect(cards).toHaveLength(9);
   expect(new Set(cards.map((card) => Math.round(card.getBoundingClientRect().top))).size, `${width}px 看板单行`).toBe(1);
-  if (width >= 1280) {
+  // 简化后的状态文案在 1024px 已能完整容纳九项，无需强制制造横滚。
+  if (width >= 1024) {
     expect(dashboard.scrollWidth, `${width}px 看板 9 列铺开、不滚动`).toBeLessThanOrEqual(dashboard.clientWidth);
   } else {
     expect(dashboard.scrollWidth, `${width}px 看板在条内横向滚动`).toBeGreaterThan(dashboard.clientWidth);
@@ -167,7 +168,7 @@ function contentBox(container: HTMLElement) {
   return { left: box.left + parseFloat(style.paddingLeft), right: box.right - parseFloat(style.paddingRight) };
 }
 
-for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
+for (const [width, height] of [[320, 568], [375, 667], [390, 844], [393, 852], [430, 932], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
   for (const theme of ['light', 'dark']) {
     it(`${width}×${height} ${theme}: fills the main area and keeps selection actions above the list`, async () => {
       await page.viewport(width, height);
@@ -184,7 +185,7 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
       // Current controls list eligible commands only; assert the capability
       // boundary rather than an obsolete disabled-reason wrapper.
-      await expect.element(page.getByRole('button', { name: '下发生产（20）', exact: true })).toBeEnabled();
+      await expect.element(page.getByRole('link', { name: '安排生产师傅', exact: true })).toBeEnabled();
       for (const unavailable of ['加入待打印', '批量结算']) {
         await expect.element(page.getByRole('button', { name: new RegExp(unavailable) })).not.toBeInTheDocument();
       }

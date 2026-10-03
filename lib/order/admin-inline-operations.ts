@@ -55,14 +55,13 @@ export async function getAdminOrderInlineOperations(
     hasLogisticsRows: hasLogisticsChargeRows(row.customerCharges),
   });
   const canPrice = row.settlementType !== OrderSettlementType.NO_CHARGE && (isPricingPending || row.purpose === 'PROOF');
-  // 业主 2026-10-01：先下发生产，生产后才处理物流。待下发的工单「当前待办」只给
-  // 「下发生产」；物流核对留在费用区，下发后（发货前）才进入当前待办。
+  // 尚待厂内安排时，物流核对留在费用区；寄样按实际发货能力展示物流入口。
   const heldFrom = row.workflowDecisions[0]?.fromStatus;
-  const awaitingRelease = row.status === OrderStatus.CONFIRMED || (row.status === OrderStatus.ON_HOLD && (!heldFrom || heldFrom === OrderStatus.CONFIRMED));
+  const awaitingProduction = row.purpose !== 'SAMPLE_SHIPMENT' && (row.status === OrderStatus.CONFIRMED || (row.status === OrderStatus.ON_HOLD && (!heldFrom || heldFrom === OrderStatus.CONFIRMED)));
   const pricing = canPrice && isOrderPricingReviewAllowedStatus(row.status, row.purpose)
     ? 'factory'
     : canPrice && billsLogistics && isFulfillmentPricingStatus(row.status) && row.settledAt === null && row.settledFee === null
-      && !awaitingRelease
+      && !awaitingProduction
       ? 'fulfillment' : null;
   const charges = new Map(row.customerCharges.flatMap((charge) =>
     charge.shipmentId ? [[`${charge.shipmentId}:${charge.category.code}`, charge] as const] : [],

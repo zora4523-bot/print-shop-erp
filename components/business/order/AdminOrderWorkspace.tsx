@@ -39,10 +39,10 @@ const QUEUES: Array<{ key: AdminOrderQueue; label: string }> = [
 const SIGNALS: Array<{ key: AdminOrderSignal; label: string }> = [
   // 看板卡 9 列时内容宽约 70px，标签超过 5 个字会在词中折行。
   { key: 'pending-quantity', label: '产量待核对' },
-  { key: 'pending-confirmation', label: '待下发检查' },
+  { key: 'pending-confirmation', label: '待完善' },
   { key: 'pending-pricing', label: '待核价' },
   { key: 'pending-change', label: '变更申请' },
-  { key: 'pending-release', label: '待下发生产' },
+  { key: 'pending-release', label: '待安排' },
   { key: 'on-hold', label: '已暂停' },
   { key: 'overdue', label: '已逾期' },
   { key: 'due-today', label: '今日待发' },

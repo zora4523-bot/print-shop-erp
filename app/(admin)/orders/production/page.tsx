@@ -16,8 +16,8 @@ export default async function ProductionDispatchPage({ searchParams }: { searchP
   const blocked = rows.filter(row => row.issues?.length);
   if (blocked.length) return <div className="min-w-0 space-y-5">
     <PageHeader title="安排生产师傅" subtitle={`已选择 ${rows.length} 张工单`} />
-    <ActionNotice tone="warning" title="工单资料不完整，暂不能安排本批生产" description="请完善以下工单后重试，或返回工单列表重新选择。" />
-    <ul aria-label="待完善工单" className="min-w-0 space-y-4">
+    <ActionNotice tone="warning" title="所选工单暂不能一起安排生产" description="请按以下原因处理工单，或返回工单列表重新选择。" />
+    <ul aria-label="待处理工单" className="min-w-0 space-y-4">
       {blocked.map(order => <li key={order.id} className="min-w-0 space-y-2 rounded-xl border bg-card p-4">
         <Link href={`/orders/${order.id}`} className="inline-flex min-h-11 max-w-full items-center break-all text-primary underline underline-offset-4">{order.name}</Link>
         <ul className="list-disc space-y-1 pl-5 text-sm">{order.issues!.map(issue => <li key={issue}>{issue}</li>)}</ul>

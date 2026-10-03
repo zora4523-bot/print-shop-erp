@@ -1,3 +1,4 @@
+import { ProductionOperationMaterializationError } from '../production/operation-materialization-service';
 import { workflowOrderSelect } from './factory-confirmation-facts';
 import { buildTrustedAdminItemPricingSnapshot, isTrustedAdminItemPricingSnapshot } from './admin-pricing-snapshot';
 import { appendOrderPricingRevisionInTx } from './pricing-revision';
@@ -11,7 +12,9 @@ import { orderCascadeLockKey } from './locks';
 import { isValidPackagingUnitsPerBag } from './packaging-units';
 import { isMixedPackaging, packagingBoxType, packagingModeWithStyleCount } from './packaging-mode';
 import { calculatePackagingBagCount } from './packaging-bag-count';
-import { inspectOrderProductionReadinessInTx } from './production-readiness';
+import { prepareOrderForProductionInTx, type ProductionReadinessResult } from './production-readiness';
+import { dispatchProductionCompletionNotification } from '../production-completion';
+import { dispatchPreparedProduction } from '../production/preparation-notification';
 
 export class LegacyProductionFactsError extends Error {
   constructor(message: string) { super(message); this.name = 'LegacyProductionFactsError'; }
@@ -26,7 +29,7 @@ const repairSelect = {
 
 export async function repairLegacyProductionFacts(input: RepairLegacyProductionFactsInput, actor: { id: string; role: Role }) {
   if (actor.role !== Role.ADMIN) throw new LegacyProductionFactsError('无权补录生产资料');
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(input.orderId)}))`;
     const order = await tx.order.findUnique({ where: { id: input.orderId }, select: repairSelect });
     if (!order) throw new LegacyProductionFactsError('工单不存在');
@@ -117,7 +120,17 @@ export async function repairLegacyProductionFacts(input: RepairLegacyProductionF
     });
     await tx.orderLog.create({ data: { orderId: order.id, operatorId: actor.id, action: 'LEGACY_PRODUCTION_FACTS_REPAIRED',
       changedFields: { crafts: craftChanges, packagingGroups: packagingPlans, reboundSnapshots }, remark: '管理员补录缺失的工艺与包装资料' } });
-    const { ready, issues, status } = await inspectOrderProductionReadinessInTx(tx, order.id);
-    return { orderId: order.id, revision: order.revision + 1, ready, issues, status };
+    let prepared: ProductionReadinessResult;
+    try { prepared = await prepareOrderForProductionInTx(tx, order.id, actor, now); }
+    catch (error) {
+      if (error instanceof ProductionOperationMaterializationError) throw new LegacyProductionFactsError('生产记录与当前工单不一致，本次补录未保存，请核对原生产记录后重试。');
+      throw error;
+    }
+    const saved = await tx.order.findUniqueOrThrow({ where: { id: order.id }, select: { revision: true } });
+    return { orderId: order.id, revision: saved.revision, ...prepared };
   });
+  const { notification, scheduledNotification, ...receipt } = result;
+  await dispatchProductionCompletionNotification(notification);
+  await dispatchPreparedProduction(scheduledNotification);
+  return receipt;
 }

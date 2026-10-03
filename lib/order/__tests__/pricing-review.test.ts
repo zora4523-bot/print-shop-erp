@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock('server-only', () => ({}));
 import {
   OrderBillingMode,
   OrderItemPricingRoute,
@@ -1699,7 +1700,7 @@ describe('administrator edits all applicable fees', () => {
     expect(dbMock.orderPackagingGroup.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'group-auto' }, data: expect.objectContaining({ unitPrice: '99.0000' }) }));
     expect(dbMock.orderCustomerCharge.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'shipping-auto' }, data: expect.objectContaining({ amount: '99.00' }) }));
     expect(result.totalAmount).toBe('2284.00');
-    expect(prepareProductionMock).not.toHaveBeenCalled();
+    expect(prepareProductionMock).toHaveBeenCalledWith(dbMock, 'order-1', admin, now);
     expect(appendPricingRevisionMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ incrementOrderRevision: true }));
   });
   it('leaves unchanged automatic snapshots intact', async () => {

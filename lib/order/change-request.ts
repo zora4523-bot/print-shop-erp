@@ -9,6 +9,7 @@ import { subtotalReconciles } from './subtotal-reconciliation';
 import { packagingBoxType } from './packaging-mode';
 import { isAwaitingFactoryConfirmation } from './factory-confirmation-preflight';
 import { prepareOrderForProductionInTx } from './production-readiness';
+import { dispatchPreparedProduction, type PreparedProductionNotification } from '../production/preparation-notification';
 import { OrderChangeRequestError } from './change-request-error';
 import { assertChangeRequestRespectsShippedShipments } from './change-request-shipment-guard';
 import { ORDER_MODIFIABLE_STATUSES, canChangeOrderPackaging } from './editable-fields';
@@ -520,6 +521,7 @@ export type OrderChangeTransactionContext = {
   tx: Prisma.TransactionClient;
   requestId?: string;
   onCompletion?: (notification: ProductionCompletionNotification | undefined) => void;
+  onPreparedProduction?: (notification: PreparedProductionNotification | undefined) => void;
 };
 
 function inOrderChangeTransaction<T>(
@@ -771,6 +773,7 @@ export async function withdrawOrderChangeRequest(
   if (!locator) throw new OrderChangeRequestError('变更申请不存在');
 
   let completionNotification: ProductionCompletionNotification | undefined;
+  let scheduledNotification: PreparedProductionNotification | undefined;
   const result = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       locator.orderId,
@@ -818,9 +821,10 @@ export async function withdrawOrderChangeRequest(
         remark: '申请人撤回待审核变更申请',
       },
     });
-    return recheckClosedChangeInTx(tx, withdrawn, actor.id, value => { completionNotification = value; });
+    return recheckClosedChangeInTx(tx, withdrawn, actor.id, (value, scheduled) => { completionNotification = value; scheduledNotification = scheduled; });
   });
   await dispatchProductionCompletionNotification(completionNotification);
+  await dispatchPreparedProduction(scheduledNotification);
   return result;
 }
 
@@ -5011,6 +5015,7 @@ async function reviewOrderCancellationRequest(
   locator: { orderId: string },
 ) {
   let completionNotification: ProductionCompletionNotification | undefined;
+  let scheduledNotification: PreparedProductionNotification | undefined;
   const result = await db.$transaction(async (tx) => {
     // Approved cancellation writes v2 settlement facts. The global shared
     // cutoff lock must therefore be the first statement in this transaction.
@@ -5058,7 +5063,7 @@ async function reviewOrderCancellationRequest(
           remark: denyReason,
         },
       });
-      return recheckClosedChangeInTx(tx, denied, actor.id, value => { completionNotification = value; });
+      return recheckClosedChangeInTx(tx, denied, actor.id, (value, scheduled) => { completionNotification = value; scheduledNotification = scheduled; });
     }
     const actualStatus = request.order.status;
     request.order.status = await resolveOrderChangeStageInTx(tx, request.order);
@@ -5072,7 +5077,7 @@ async function reviewOrderCancellationRequest(
           reviewRemark: versionMismatchReason,
           reviewedAt,
         },
-      }), actor.id, value => { completionNotification = value; });
+      }), actor.id, (value, scheduled) => { completionNotification = value; scheduledNotification = scheduled; });
     }
     if (!CANCELLABLE_BY_REQUEST_STATUSES.includes(request.order.status)) {
       throw new OrderChangeRequestError('当前工单状态不允许批准取消');
@@ -5213,6 +5218,7 @@ async function reviewOrderCancellationRequest(
     return reviewed;
   });
   await dispatchProductionCompletionNotification(completionNotification);
+  await dispatchPreparedProduction(scheduledNotification);
   return result;
 }
 
@@ -5775,6 +5781,7 @@ export async function reviewOrderChangeRequest(
   }
 
   let completionNotification: ProductionCompletionNotification | undefined;
+  let scheduledNotification: PreparedProductionNotification | undefined;
   const result = await inOrderChangeTransaction(context, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
       locator.orderId,
@@ -5819,7 +5826,7 @@ export async function reviewOrderChangeRequest(
           remark: denyReason,
         },
       });
-      return recheckClosedChangeInTx(tx, denied, actor.id, value => { completionNotification = value; });
+      return recheckClosedChangeInTx(tx, denied, actor.id, (value, scheduled) => { completionNotification = value; scheduledNotification = scheduled; });
     }
 
     const wasOnHold = request.order.status === OrderStatus.ON_HOLD;
@@ -5834,7 +5841,7 @@ export async function reviewOrderChangeRequest(
           reviewRemark: versionMismatchReason,
           reviewedAt,
         },
-      }), actor.id, value => { completionNotification = value; });
+      }), actor.id, (value, scheduled) => { completionNotification = value; scheduledNotification = scheduled; });
     }
     if (!CHANGEABLE_ORDER_STATUSES.includes(request.order.status)) {
       return recheckClosedChangeInTx(tx, await tx.orderChangeRequest.update({
@@ -5845,7 +5852,7 @@ export async function reviewOrderChangeRequest(
           reviewRemark: `工单状态已变为 ${request.order.status}，不再允许修改，申请已自动失效`,
           reviewedAt,
         },
-      }), actor.id, value => { completionNotification = value; });
+      }), actor.id, (value, scheduled) => { completionNotification = value; scheduledNotification = scheduled; });
     }
 
     const proposedChanges = readProposedChanges(request.proposedChanges);
@@ -5878,7 +5885,7 @@ export async function reviewOrderChangeRequest(
             '申请内容与当前工单一致，没有可应用的实际变化，已自动失效',
           reviewedAt,
         },
-      }), actor.id, value => { completionNotification = value; });
+      }), actor.id, (value, scheduled) => { completionNotification = value; scheduledNotification = scheduled; });
     }
     if (input.expectedPriceRevision === undefined) {
       throw new OrderChangeRequestError(
@@ -6061,15 +6068,17 @@ export async function reviewOrderChangeRequest(
       reviewRemark,
       tx,
     });
-    if (isAwaitingFactoryConfirmation(request.order.status)) {
-      await prepareOrderForProductionInTx(tx, request.order.id, actor, reviewedAt);
+    if (isAwaitingFactoryConfirmation(request.order.status) || request.order.status === OrderStatus.CONFIRMED) {
+      const prepared = await prepareOrderForProductionInTx(tx, request.order.id, actor, reviewedAt);
+      completionNotification = prepared.notification ?? completionNotification;
+      scheduledNotification = prepared.scheduledNotification ?? scheduledNotification;
     }
     if (isReprintChangeStatus(request.order.status) && (!wasOnHold || (request.order.simpleProduction && request.order.completedAt))) {
       const completion = await maybeCompleteProductionOrder(
         tx as unknown as ProductionCompletionTx, request.order.id, actor.id, reviewedAt,
         request.order.simpleProduction ? request.order.completedAt : undefined,
       );
-      completionNotification = completion.notification;
+      completionNotification = completion.notification ?? completionNotification;
     }
     return reviewed;
   }).catch((error: unknown) => {
@@ -6080,6 +6089,8 @@ export async function reviewOrderChangeRequest(
   });
   if (context) context.onCompletion?.(completionNotification);
   else await dispatchProductionCompletionNotification(completionNotification);
+  if (context) context.onPreparedProduction?.(scheduledNotification);
+  else await dispatchPreparedProduction(scheduledNotification);
   return result;
 }
 
@@ -6352,10 +6363,18 @@ function buildModificationItemPricing(
 
 async function recheckClosedChangeInTx<T extends { orderId: string }>(
   tx: Prisma.TransactionClient, changed: T, actorId: string,
-  notify: (value: ProductionCompletionNotification | undefined) => void,
+  notify: (value: ProductionCompletionNotification | undefined, scheduled?: PreparedProductionNotification) => void,
 ): Promise<T> {
-  const order = await tx.order.findUnique({ where: { id: changed.orderId }, select: { simpleProduction: true } });
-  if (order?.simpleProduction) {
+  const order = await tx.order.findUnique({ where: { id: changed.orderId }, select: { simpleProduction: true, status: true } });
+  if (order && ['PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED'].includes(order.status)) {
+    try {
+      const prepared = await prepareOrderForProductionInTx(tx, changed.orderId, { id: actorId }, await databaseClockNow(tx));
+      notify(prepared.notification, prepared.scheduledNotification);
+    } catch (error) {
+      if (error instanceof ProductionOperationMaterializationError) throw new OrderChangeRequestError('生产记录与当前工单不一致，本次未保存，请核对原生产记录后重试。');
+      throw error;
+    }
+  } else if (order?.simpleProduction) {
     const completion = await reconcileProductionOrderInTx(tx, changed.orderId, actorId, await databaseClockNow(tx));
     notify(completion.notification);
   }

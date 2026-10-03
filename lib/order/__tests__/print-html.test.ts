@@ -300,7 +300,7 @@ describe('buildPrintHtml', () => {
 
   it.each([
     ['RELEASED', false, '已下发'],
-    ['CONFIRMED', false, '待下发生产'],
+    ['CONFIRMED', false, '待安排'],
     ['ON_HOLD', true, '已暂停'],
   ] as const)('页眉使用真实状态 %s，审批标签只来自待处理变更', async (status, hasPendingChange, label) => {
     const html = await renderPrintHtml(fixtureOrder({ status, hasPendingChange }));

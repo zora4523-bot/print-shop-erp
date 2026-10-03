@@ -369,9 +369,11 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
   // 业主 2026-10-01：单人流程确认发货时按计划数量代师傅登记完成。
   const plannedCompletionPreview = order.simpleProduction && (order.status === OrderStatus.RELEASED || order.status === OrderStatus.FOILING)
     ? await getPlannedCompletionPreview(order.id, order.workOrderVersion) : null;
+  const sampleReady = canShipOrSettle && order.purpose === 'SAMPLE_SHIPMENT' && ['CONFIRMED', 'PENDING_FACTORY', 'SUBMITTED'].includes(order.status)
+    ? (await getOrderProductionReadiness(order.id)).ready : false;
   const shippingFacts = {
       isAdministrator: canShipOrSettle,
-      status: order.status,
+      status: sampleReady ? OrderStatus.PACKING : order.status,
       incompleteProductionCount,
       hasLiveOutsource,
       hasOutsourceGap,

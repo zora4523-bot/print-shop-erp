@@ -192,9 +192,15 @@ describe('admin order decisions require review before mutation', () => {
     expect(actions.review).not.toHaveBeenCalled();
   });
 
+  it.each([OrderStatus.PENDING_FACTORY, OrderStatus.CONFIRMED])('provides assignment navigation without an extra release command (%s)', async status => {
+    const order = baseOrder(); order.status = status; order.canAssignProduction = true;
+    renderOrder(order);
+    await expect.element(page.getByRole('link', { name: '安排生产师傅', exact: true })).toHaveAttribute('href', `/orders/production?ids=${order.id}`);
+    await expect.element(page.getByRole('button', { name: '下发生产', exact: true })).not.toBeInTheDocument();
+    expect(actions.release).not.toHaveBeenCalled();
+  });
+
   it.each([
-    { action: 'release', status: OrderStatus.PENDING_FACTORY, trigger: '下发生产', confirm: '确认下发生产' },
-    { action: 'release', status: OrderStatus.CONFIRMED, trigger: '下发生产', confirm: '确认下发生产' },
     { action: 'settle', status: OrderStatus.SHIPPED, trigger: '结算', confirm: '结算' },
   ] as const)('$action waits for impact confirmation before writing', async ({ action, status, trigger, confirm }) => {
     const order = baseOrder();
@@ -244,13 +250,14 @@ describe('admin order decisions require review before mutation', () => {
 
   it('shows pending and failed results visibly while a confirmed action is running', async () => {
     let finish!: (result: { status: 'error'; message: string }) => void;
-    actions.release.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    actions.settle.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     const order = baseOrder();
-    order.capabilities.release = true;
+    order.status = OrderStatus.SHIPPED;
+    order.capabilities.settle = true;
     renderOrder(order);
-    await page.getByRole('button', { name: '下发生产', exact: true }).click();
-    await page.getByRole('alertdialog').getByRole('button', { name: '确认下发生产', exact: true }).click();
-    expect(actions.release).toHaveBeenCalledWith(expect.objectContaining({ createPrint: false }));
+    await page.getByRole('button', { name: '结算', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '结算', exact: true }).click();
+    expect(actions.settle).toHaveBeenCalledWith(expect.objectContaining({ orderId: order.id }));
     await expect.element(page.getByText('正在处理，请稍候…', { exact: true })).toBeVisible();
     finish({ status: 'error', message: '工单版本已变化，请刷新后重试。' });
     await expect.element(page.getByRole('alert')).toHaveTextContent('工单版本已变化');

@@ -88,13 +88,13 @@ function renderWorkspace(orders: AdminOrderWorkspaceRow[] = [{
   />));
 }
 describe('admin order list reference layout', () => {
-  for (const [width, height] of [[375,667],[393,852],[768,1024],[1024,768],[1280,800],[1920,1080]]) {
+  for (const [width, height] of [[320,568],[375,667],[390,844],[393,852],[430,932],[768,1024],[1024,768],[1280,800],[1920,1080]]) {
     for (const theme of ['light', 'dark']) {
       it(`${width}×${height} ${theme}: overflow, touch targets and accessibility`, async () => {
         await page.viewport(width, height);
         document.documentElement.classList.toggle('dark', theme === 'dark');
         renderWorkspace();
-        await expect.element(page.getByRole('link', { name: '下发生产', exact: true }).first()).toBeVisible();
+        await expect.element(page.getByRole('link', { name: '安排生产', exact: true }).first()).toBeVisible();
         expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
         for (const element of host.querySelectorAll<HTMLElement>('a, button, select, input:not([aria-hidden="true"]):not([type="hidden"]), [role="checkbox"]')) {
           const rect = element.getBoundingClientRect();
@@ -122,7 +122,7 @@ describe('admin order list reference layout', () => {
       document.documentElement.classList.toggle('dark', theme === 'dark');
       renderWorkspace(referenceRows());
 
-      await expect.element(page.getByRole('link', { name: '下发前检查', exact: true }).first()).toBeVisible();
+      await expect.element(page.getByRole('link', { name: '完善工单', exact: true }).first()).toBeVisible();
       expect(matchMedia('(min-width: 921px) and (hover: hover) and (pointer: fine)').matches).toBe(true);
       const rows = [...host.querySelectorAll<HTMLElement>('li[data-order-id]')];
       expect(rows).toHaveLength(6);
@@ -170,7 +170,7 @@ describe('admin order list reference layout', () => {
   it('920px keeps full touch targets in compact rows', async () => {
     await page.viewport(920, 900);
     renderWorkspace(referenceRows());
-    await expect.element(page.getByRole('link', { name: '下发前检查', exact: true }).first()).toBeVisible();
+    await expect.element(page.getByRole('link', { name: '完善工单', exact: true }).first()).toBeVisible();
     for (const element of host.querySelectorAll<HTMLElement>('li[data-order-id] a, li[data-order-id] button, li[data-order-id] [role="checkbox"]')) {
       const rect = element.getBoundingClientRect();
       if (!rect.width || !rect.height) continue;
@@ -186,7 +186,7 @@ describe('admin order list reference layout', () => {
     renderWorkspace();
     await page.getByRole('checkbox', { name: '选择工单 春节企业定制红包 · 多款设计（GD-260902-001）', exact: true }).click();
     expect(location.hash).toBe('');
-    await expect.element(page.getByRole('link', { name: '下发生产', exact: true })).toHaveAttribute('href', '/orders/order-1');
+    await expect.element(page.getByRole('link', { name: '安排生产', exact: true })).toHaveAttribute('href', '/orders/order-1');
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
   });
   // 2026-10-01 审查 L-8：手机上首张工单前曾有约 900px（看板 3×3、队列 3 行、筛选 4 行）。
@@ -290,6 +290,7 @@ function referenceRows(): AdminOrderWorkspaceRow[] {
   const base = row();
   const pending: AdminOrderWorkspaceRow = {
     ...base,
+    canAssignProduction: false,
     id: 'reference-ready',
     orderNo: 'GD-20260828-3121',
     customName: '新春平安封 四款',
@@ -363,6 +364,7 @@ function row(): AdminOrderWorkspaceRow {
     customName: '端午定制',
     submitter: { id: 'sales-1', name: '业务员甲' },
     status: OrderStatus.CONFIRMED,
+    canAssignProduction: true,
     statusSummary: null,
     isUrgent: false,
     isStarred: true,

@@ -291,12 +291,13 @@ pnpm test --run
 预览不持久化；保存把资料修改及管理员批准的款式/交期修改纳入同一事务。`UPDATE` 款式支持已有包装组的 `pack` 每包数量，服务端按分袋组成重算袋数及费用。待核运费沿用 `pendingChargeResolutions`，携带票 ID、序号、投影数量、省份、金额与依据；重新预览与保存使用相同核定数据。纯资料或交期修改不接受重算运费。详细约束与演示稿差异见 [管理端编辑工单](./docs/admin-order-edit-design.md)。
 
 
-### 工单准备与生产下发（2026-09-08）
+### 工单准备与生产安排（2026-10-03）
 
-- 创建动作成功响应的可选 `readyForProduction` 表示是否已进入待下发，用于成功页提示；未提供时不得视为可生产。
-- `submitOrder`、人工核价及管理员保存/修改审批完成后，在原事务自动检查保存价与生产事实；完整订单返回或进入 `CONFIRMED`（待下发），不提前创建生产/打印任务。异常订单保留待处理。
-- `releaseFactoryOrderAction` 与批量 `RELEASE_AND_CREATE_PRINT` 接受满足准备校验的 `PENDING_FACTORY / SUBMITTED` 存量单。单张工单界面传 `createPrint: false`，事务仅完成准备和下发，不读取或创建打印任务；省略该可选布尔值时保留组合下发与首次打印行为，供现有批量调用使用。仍限 ADMIN，保留 revision、workOrderVersion、请求键校验；独立下发不使用打印任务作为重放凭证，过期版本按原规则拒绝，需刷新核对后再操作。领域结果 `printJobId` 在不创建打印时为 null。
-- `confirmFactoryOrderAction` 保留兼容：使用已保存费用进入待下发；`expectedQuoteToken` 仅为旧请求兼容字段，不触发最新目录报价，工单版本仍须匹配。新 UI 不再展示独立确认步骤。
+- 创建动作的可选 `readyForProduction` 保留兼容；成功页以“已提交”提示，不据此承诺生产完成。
+- `submitOrder`、人工核价及管理员保存/修改审批完成后，在原事务自动检查保存价与生产事实。厂内待安排、寄样待发货、无需派工的工单自动进入履约；异常订单保留具体问题。
+- `releaseFactoryOrderAction` 保留鉴权和输入校验，合法旧请求返回 `status: error` 并提示改用生产安排或寄样发货，不写入。批量 `RELEASE_AND_CREATE_PRINT` 保留解析兼容，每项返回 `INVALID_INPUT`，不创建工序或打印任务。
+- `publishProductionDispatchAction` 接受满足校验的 `PENDING_FACTORY / SUBMITTED` 存量单，在同一事务准备并安排师傅、创建打印任务。仍执行管理员、版本、待审批、工艺、师傅资格、历史报工和幂等校验，每批 1–20 张且最多 100 项，整批原子提交。寄样与无厂内任务不能通过排单推进。
+- `confirmFactoryOrderAction` 保留兼容：使用已保存费用自动进入对应履约流程；`expectedQuoteToken` 仅为旧请求兼容字段，不触发最新目录报价，工单版本仍须匹配。新 UI 不再展示独立确认步骤。
 - 下发不形成财务结算；后续费用沿用既有更正接口，已结算记录不能覆盖。
 
 ### 管理端工单读取的工艺标识

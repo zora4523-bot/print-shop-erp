@@ -62,10 +62,10 @@ function shippingStatusReason(status: OrderStatus): string {
       return '提交并完成生产后才可发货';
     case OrderStatus.PENDING_FACTORY:
     case OrderStatus.SUBMITTED:
-      return '工厂确认并完成生产后才可发货';
+      return '完善工单并完成履约后才可发货';
     case OrderStatus.CONFIRMED:
     case OrderStatus.SCHEDULING:
-      return '下发并完成生产后才可发货';
+      return '完成工单所需生产或外协后才可发货';
     case OrderStatus.RELEASED:
     case OrderStatus.FOILING:
     case OrderStatus.IN_PRODUCTION:

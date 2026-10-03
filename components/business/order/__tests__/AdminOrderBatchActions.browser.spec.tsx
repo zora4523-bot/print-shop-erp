@@ -60,7 +60,7 @@ function mount(orders = [batchOrder()], selectionKey = 'initial') {
 function partialResult(): AdminOrderBatchActionResult {
   return {
     status: 'partial_failure', message: 'INTERNAL_MESSAGE',
-    result: { command: 'RELEASE_AND_CREATE_PRINT', successCount: 1, skippedCount: 1, failedCount: 1, notAttemptedCount: 1,
+    result: { command: 'SETTLE', successCount: 1, skippedCount: 1, failedCount: 1, notAttemptedCount: 1,
       items: [
         { orderId: 'order-0', status: 'success', code: 'OK' },
         { orderId: 'order-1', status: 'skipped', code: 'INVALID_STATUS', message: 'PENDING_FACTORY' },
@@ -72,13 +72,13 @@ function partialResult(): AdminOrderBatchActionResult {
 
 function mixedOrders(): AdminOrderWorkspaceRow[] {
   return Array.from({ length: 5 }, (_, index) => {
-    const order = batchOrder({ id: `order-${index}`, orderNo: `GD-260907-00${index}` });
-    return index === 4 ? { ...order, capabilities: { ...order.capabilities, release: false } } : order;
+    const order = batchOrder({ id: `order-${index}`, orderNo: `GD-260907-00${index}`, status: OrderStatus.SHIPPED });
+    return { ...order, capabilities: { ...order.capabilities, release: false, settle: index !== 4 } };
   });
 }
 
 async function review() {
-  await page.getByRole('button', { name: '下发生产（4）', exact: true }).click();
+  await page.getByRole('button', { name: '批量结算（4）', exact: true }).click();
   await expect.element(page.getByRole('alertdialog')).toBeVisible();
   await settleAnimation('[data-slot="alert-dialog-content"]');
 }
@@ -90,12 +90,13 @@ async function settleAnimation(selector: string) {
 
 describe('admin order batch review', () => {
   it('shows only applicable actions as the selected orders change', async () => {
-    const order = batchOrder();
+    const order = batchOrder({ canAssignProduction: true });
     mount([order]);
     const toolbar = page.getByRole('region', { name: '工单批量操作' });
-    await expect.element(toolbar.getByRole('button', { name: '下发生产（1）', exact: true })).toBeVisible();
+    await expect.element(toolbar.getByRole('link', { name: '安排生产师傅', exact: true })).toHaveAttribute('href', '/orders/production?ids=order-1');
+    await expect.element(toolbar.getByRole('button', { name: /下发生产/ })).not.toBeInTheDocument();
     expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual([
-      '下发生产（1）', '打印所选（1）', '导出所选', '取消选择',
+      '打印所选（1）', '导出所选', '取消选择',
     ]);
 
     mount([{ ...order, status: OrderStatus.RELEASED, pendingPrintJobId: 'print-1',
@@ -103,9 +104,12 @@ describe('admin order batch review', () => {
     // 业主 2026-10-02：打印即记已打印——待打印的工单只剩「打印所选」，没有单独的确认已打印。
     expect([...host.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['打印所选（1）', '导出所选', '取消选择']);
 
-    mount([{ ...order, status: OrderStatus.SHIPPED,
+    mount([{ ...order, status: OrderStatus.SHIPPED, canAssignProduction: false,
       capabilities: { ...order.capabilities, release: false, settle: true } }]);
     await expect.element(toolbar.getByRole('button', { name: '批量结算（1）', exact: true })).toBeVisible();
+    await expect.element(toolbar.getByRole('link', { name: '安排生产师傅' })).not.toBeInTheDocument();
+    await expect.element(toolbar.getByRole('button', { name: '安排生产师傅' })).not.toBeInTheDocument();
+    await expect.element(toolbar.getByText(/请重新选择/)).not.toBeInTheDocument();
     await expect.element(toolbar.getByRole('button', { name: /下发生产|更多操作/ })).not.toBeInTheDocument();
 
     // Missing confirmed money cannot create a settlement shortcut.
@@ -152,19 +156,18 @@ describe('admin order batch review', () => {
     let resolve!: (result: AdminOrderBatchActionResult) => void;
     batchAction.mockImplementation(() => new Promise((done) => { resolve = done; }));
     mount(mixedOrders());
-    await expect.element(page.getByRole('button', { name: /批量结算/ })).not.toBeInTheDocument();
     await review();
     expect(batchAction).not.toHaveBeenCalled();
     await expect.element(page.getByText(/已选 5 张，本次可处理 4 张/)).toBeVisible();
     await expect.element(page.getByText(/GD-260907-004：本次不处理/)).toBeVisible();
     await page.getByRole('button', { name: '取消', exact: true }).click();
     expect(batchAction).not.toHaveBeenCalled();
-    await expect.poll(() => document.activeElement?.textContent).toBe('下发生产（4）');
+    await expect.poll(() => document.activeElement?.textContent).toBe('批量结算（4）');
     await review();
-    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
+    await page.getByRole('button', { name: '确认批量结算', exact: true }).click();
     await expect.element(page.getByRole('dialog', { name: '批量处理结果' }).getByText('正在逐单处理…', { exact: true })).toBeVisible();
     expect(batchAction).toHaveBeenCalledOnce();
-    expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'RELEASE_AND_CREATE_PRINT', items: mixedOrders().slice(0, 4).map((order) => ({ orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2 })) });
+    expect(batchAction.mock.calls[0][0]).toMatchObject({ command: 'SETTLE', items: mixedOrders().slice(0, 4).map((order) => ({ orderId: order.id, expectedRevision: 4, expectedWorkOrderVersion: 2 })) });
     expect(batchAction.mock.calls[0][0]).not.toHaveProperty('reason');
     resolve(partialResult());
     await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
@@ -185,13 +188,13 @@ describe('admin order batch review', () => {
     batchAction.mockResolvedValue({
       status: 'success',
       result: {
-        command: 'RELEASE_AND_CREATE_PRINT', successCount: 4, skippedCount: 0, failedCount: 0, notAttemptedCount: 0,
+        command: 'SETTLE', successCount: 4, skippedCount: 0, failedCount: 0, notAttemptedCount: 0,
         items: mixedOrders().slice(0, 4).map((order) => ({ orderId: order.id, status: 'success', code: 'OK' })),
       },
     });
     mount(mixedOrders());
     await review();
-    await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
+    await page.getByRole('button', { name: '确认批量结算', exact: true }).click();
     await expect.element(page.getByRole('heading', { name: '请处理未完成的工单', exact: true })).toBeVisible();
     await assertConsistentSummary('成功 4 张，跳过 0 张，结果未知 0 张，未执行 0 张，未纳入处理 1 张');
     expect(document.querySelectorAll('[data-slot="batch-action-result-items"] > li')).toHaveLength(5);
@@ -243,7 +246,7 @@ function assertGeometry(selector: string, width: number) {
   }
 }
 
-for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
+for (const [width, height] of [[320, 568], [375, 667], [390, 844], [393, 852], [430, 932], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]]) {
   for (const theme of ['light', 'dark']) {
     it(`${width}×${height} ${theme}: batch confirmation and results remain accessible without overflow`, async () => {
       await page.viewport(width, height);
@@ -254,7 +257,7 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
       await review();
       assertGeometry('[data-slot="alert-dialog-content"]', width);
       expect(await commands.checkShellAccessibility('[data-slot="alert-dialog-content"]')).toEqual([]);
-      await page.getByRole('button', { name: '确认下发生产', exact: true }).click();
+      await page.getByRole('button', { name: '确认批量结算', exact: true }).click();
       await expect.element(page.getByRole('heading', { name: '部分结果需要核对', exact: true })).toBeVisible();
       await settleAnimation('[data-slot="dialog-content"]');
       assertGeometry('[data-slot="dialog-content"]', width);
@@ -280,7 +283,7 @@ for (const [width, height] of [[375, 667], [393, 852], [768, 1024], [1024, 768],
 }
 
 
-it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]])(
+it.each([[320, 568], [375, 667], [390, 844], [393, 852], [430, 932], [768, 1024], [1024, 768], [1280, 800], [1920, 1080]])(
   'keeps the complete batch toolbar aligned at %i × %i through print states', async (width, height) => {
     await page.viewport(width, height);
     const originalFetch = globalThis.fetch.bind(globalThis);
@@ -304,7 +307,7 @@ it.each([[375, 667], [393, 852], [768, 1024], [1024, 768], [1280, 800], [1920, 1
             : '正在准备打印文件，完成后可打开打印或下载。')).toBeVisible();
         }
         const buttons = [...host.querySelectorAll<HTMLButtonElement>('button')];
-        const primary = buttons.filter((button) => /下发生产|打印所选|正在准备打印|等待打印服务恢复|导出所选/.test(button.textContent ?? ''));
+        const primary = buttons.filter((button) => /安排生产师傅|打印所选|正在准备打印|等待打印服务恢复|导出所选/.test(button.textContent ?? ''));
         const boxes = primary.map((button) => button.getBoundingClientRect());
         if (width >= 768) {
           expect(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top))).toBeLessThanOrEqual(1);

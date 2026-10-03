@@ -5,10 +5,10 @@ import { requirePermission } from '@/lib/auth/permissions';
 import { getOrderAttentionCounts } from '@/lib/dashboard/order-attention';
 
 const categories = [
-  { signal: 'pending-confirmation', label: '待确认工单' },
+  { signal: 'pending-confirmation', label: '待完善工单' },
   { signal: 'pending-pricing', label: '待核价工单' },
   { signal: 'pending-change', label: '待审核变更工单' },
-  { signal: 'pending-release', label: '待下发生产' },
+  { signal: 'pending-release', label: '待安排' },
 ] as const;
 
 export async function OrderAttentionSection() {

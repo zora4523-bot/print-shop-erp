@@ -1,4 +1,4 @@
-vi.mock('@/lib/order/production-readiness', () => ({ prepareOrderForProductionInTx: vi.fn().mockResolvedValue({ ready: true, status: 'CONFIRMED', issues: [] }) }));
+vi.mock('@/lib/order/production-readiness', () => ({ prepareOrderForProductionInTx: vi.fn(async () => ({ ready: true, status: 'CONFIRMED', issues: [] })) }));
 import Decimal from 'decimal.js';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';

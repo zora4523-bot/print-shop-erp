@@ -31,6 +31,8 @@ import { transitionOrder } from './status-machine';
 
 import { workflowOrderSelect, hasUnresolvedManualPricing, type WorkflowOrder } from './factory-confirmation-facts';
 import { prepareOrderForProductionInTx } from './production-readiness';
+import { readProductionRouting } from '../production/routing';
+import { dispatchPreparedProduction, type PreparedProductionNotification } from '../production/preparation-notification';
 import {
   evaluateFactoryConfirmationPreflight,
   isAwaitingFactoryConfirmation,
@@ -225,7 +227,9 @@ export async function confirmFactoryOrder(
   actor: AdminWorkflowActor,
 ): Promise<{ orderId: string; status: OrderStatus; confirmedFee: string }> {
   assertAdmin(actor);
-  return db.$transaction(async (tx) => {
+  let preparationNotification: ProductionCompletionNotification | undefined;
+  let scheduledNotification: PreparedProductionNotification | undefined;
+  const result = await db.$transaction(async (tx) => {
     await lockOrder(tx, input.orderId);
     const order = await readLockedOrder(tx, input.orderId);
     if (order.status === OrderStatus.CONFIRMED) {
@@ -234,6 +238,16 @@ export async function confirmFactoryOrder(
           'PREFLIGHT_FAILED',
           '已确认工单缺少确认费用，请人工审计',
         );
+      }
+      const routing = (await readProductionRouting(tx, [order.id])).get(order.id);
+      if (routing && routing.kind !== 'ASSIGN') {
+        assertExpectedVersion(order, input);
+        assertNoPendingChange(order);
+        const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
+        if (!prepared.ready) throw new AdminOrderWorkflowError('PREFLIGHT_FAILED', prepared.issues.join('；'));
+        preparationNotification = prepared.notification;
+        scheduledNotification = prepared.scheduledNotification;
+        return { orderId: order.id, status: prepared.status, confirmedFee: order.confirmedFee.toFixed(2) };
       }
       return {
         orderId: order.id,
@@ -244,11 +258,16 @@ export async function confirmFactoryOrder(
     assertExpectedVersion(order, input);
     assertFactoryConfirmationPreflight(order);
     const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
+    preparationNotification = prepared.notification;
+    scheduledNotification = prepared.scheduledNotification;
     if (!prepared.ready) {
       throw new AdminOrderWorkflowError('PREFLIGHT_FAILED', prepared.issues.join('；'));
     }
     return { orderId: order.id, status: prepared.status, confirmedFee: order.totalAmount.toFixed(2) };
   });
+  await dispatchProductionCompletionNotification(preparationNotification);
+  await dispatchPreparedProduction(scheduledNotification);
+  return result;
 }
 
 export async function rejectFactoryOrder(
@@ -422,6 +441,7 @@ export async function resumeFactoryOrder(
       idempotentReplay: boolean;
     };
     notification?: ProductionCompletionNotification;
+    scheduledNotification?: PreparedProductionNotification;
   } = await db.$transaction(async (tx) => {
     await lockOrder(tx, input.orderId);
     const replay = await findDecisionReplay(tx, {
@@ -475,7 +495,14 @@ export async function resumeFactoryOrder(
       },
     });
     let notification: ProductionCompletionNotification | undefined;
+    let scheduledNotification: PreparedProductionNotification | undefined;
     let finalStatus = hold.fromStatus;
+    if (hold.fromStatus === OrderStatus.CONFIRMED) {
+      const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
+      finalStatus = prepared.status;
+      notification = prepared.notification;
+      scheduledNotification = prepared.scheduledNotification;
+    }
     if (
       hold.fromStatus === OrderStatus.RELEASED ||
       hold.fromStatus === OrderStatus.FOILING ||
@@ -516,9 +543,11 @@ export async function resumeFactoryOrder(
         idempotentReplay: false,
       },
       ...(notification ? { notification } : {}),
+      ...(scheduledNotification ? { scheduledNotification } : {}),
     };
   });
   await dispatchProductionCompletionNotification(committed.notification);
+  await dispatchPreparedProduction(committed.scheduledNotification);
   return committed.result;
 }
 
@@ -608,16 +637,20 @@ export async function releaseFactoryOrderInTx(
   }
   assertExpectedVersion(order, input);
   assertNoPendingChange(order);
+  let preparationNotification: ProductionCompletionNotification | undefined;
+  let preparedScheduledNotification: PreparedProductionNotification | undefined;
   if (isAwaitingFactoryConfirmation(order.status)) {
     const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, await databaseClockNow(tx));
     if (!prepared.ready) {
       throw new AdminOrderWorkflowError('PREFLIGHT_FAILED', prepared.issues.join('；'));
     }
     order = await readLockedOrder(tx, order.id);
+    preparationNotification = prepared.notification;
+    preparedScheduledNotification = prepared.scheduledNotification;
   }
 
   let releaseResult = null;
-  if (order.status !== OrderStatus.RELEASED && !(order.purpose === 'SAMPLE_SHIPMENT' && order.status === OrderStatus.PACKING)) {
+  if (order.status !== OrderStatus.RELEASED && !(order.status === OrderStatus.PACKING && (order.purpose === 'SAMPLE_SHIPMENT' || preparationNotification))) {
     if (order.status !== OrderStatus.CONFIRMED) {
       throw new AdminOrderWorkflowError(
         'INVALID_STATUS',
@@ -690,8 +723,8 @@ export async function releaseFactoryOrderInTx(
       printJobId: print?.jobId ?? null,
       idempotentReplay: print?.idempotentReplay ?? false,
     },
-    postCommitNotification: null,
-    completionNotification: undefined,
+    postCommitNotification: preparedScheduledNotification && !preparedScheduledNotification.queued ? preparedScheduledNotification.payload : null,
+    completionNotification: preparationNotification,
   };
 }
 
