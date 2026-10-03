@@ -125,6 +125,62 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('analytics five views pass light and dark gates', async ({ page, browser }, testInfo) => {
+    const routes: AdminRoute[] = ['overview', 'orders', 'costs', 'structure', 'inventory'].map(view => ({
+      name: `analytics-${view}`, path: `/owner/analytics?view=${view}`, readyHeading: '经营概览',
+      prepareGateState: view === 'overview' ? prepareDashboardChartsState : async page => {
+        await expect(page.locator('[data-slot="analytics-report"]:visible')).toBeVisible();
+        await page.getByRole('navigation', { name: '分析明细分页' }).scrollIntoViewIfNeeded();
+        await expectViewportGate(page, testInfo);
+        await page.evaluate(() => window.scrollTo(0, 0));
+      },
+    }));
+    routes.push(...(['receipts', 'stock'] as const).map(inventoryKind => ({ name: `analytics-${inventoryKind}`, path: `/owner/analytics?view=inventory&inventoryKind=${inventoryKind}`, readyHeading: '经营概览', prepareGateState: routes[4]!.prepareGateState })));
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+    const nativeContext = await browser.newContext({ baseURL: new URL(page.url()).origin, storageState: await page.context().storageState(), javaScriptEnabled: false, viewport: testInfo.project.use.viewport, hasTouch: testInfo.project.use.hasTouch, isMobile: testInfo.project.use.isMobile });
+    try {
+      for (const theme of ['light', 'dark'] as const) {
+        const native = await nativeContext.newPage();
+        await native.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await native.goto('/owner/analytics');
+        const form = native.locator('form[action="/api/owner/analytics/export"]');
+        await expect(form).toBeVisible();
+        await native.evaluate(theme => {
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        }, theme);
+        expect(await native.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+        await attachCandidateScreenshot(native, testInfo, 'admin', `analytics-nojs-${theme}`);
+        // axe schedules JavaScript callbacks, which disabled-script documents
+        // cannot execute. Audit their rendered DOM in a script-free inspection
+        // document; keep real no-script geometry/screenshots and verify parity.
+        const html = await native.evaluate(() => {
+          const html = document.documentElement.cloneNode(true) as HTMLElement;
+          html.querySelectorAll('script, link[as="script"], link[rel="modulepreload"]').forEach(script => script.remove());
+          html.querySelectorAll('noscript').forEach(node => node.replaceWith(...node.childNodes));
+          const base = document.createElement('base'); base.href = location.origin;
+          html.querySelector('head')!.prepend(base);
+          return '<!doctype html>' + html.outerHTML;
+        });
+        const inspection = await page.context().newPage();
+        await inspection.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await inspection.route('**/__analytics_nojs_inspection', route => route.fulfill({ contentType: 'text/html', body: html }));
+        await inspection.goto(`${new URL(page.url()).origin}/__analytics_nojs_inspection`);
+        await inspection.evaluate(() => document.fonts.ready);
+        const before = await form.boundingBox();
+        const after = await inspection.locator('form[action="/api/owner/analytics/export"]').boundingBox();
+        for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(before![key] - after![key])).toBeLessThanOrEqual(1);
+        await expectViewportGate(inspection, testInfo);
+        await expectA11yGate(inspection);
+        await inspection.close();
+        await native.close();
+      }
+    } finally { await nativeContext.close(); }
+
+  });
+
   test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
     const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention'));
     expect(routes).toHaveLength(6);

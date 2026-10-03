@@ -65,7 +65,7 @@ describe('custom loading fallback slow-loading contract', () => {
     const attention = source('components/business/dashboard/OrderAttentionSection.tsx');
     expect(attention).toContain('<SectionLoading');
     const analytics = source('components/business/dashboard/OwnerAnalytics.tsx');
-    expect(analytics.match(/<SectionLoading label=/g)).toHaveLength(3);
+    expect(analytics.match(/<SectionLoading label=/g)).toHaveLength(5);
   });
 
 });

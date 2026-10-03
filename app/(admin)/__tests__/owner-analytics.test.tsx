@@ -1,117 +1,50 @@
 import { isValidElement, Suspense, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Role } from '@/generated/prisma/enums';
-
-const {
-  requirePermissionMock,
-  getProductionTrendMock,
-  getSalesRankingMock,
-  getCategoryDistributionMock,
-} = vi.hoisted(() => ({
-  requirePermissionMock: vi.fn(),
-  getProductionTrendMock: vi.fn(),
-  getSalesRankingMock: vi.fn(),
-  getCategoryDistributionMock: vi.fn(),
-}));
-
-vi.mock('@/lib/auth/permissions', () => ({
-  requirePermission: requirePermissionMock,
-}));
-vi.mock('@/lib/dashboard/owner-charts', () => ({
-  getProductionTrend: getProductionTrendMock,
-  getSalesRanking: getSalesRankingMock,
-  getCategoryDistribution: getCategoryDistributionMock,
-}));
-
-import OwnerAnalyticsPage from '@/app/(admin)/owner/analytics/page';
-import {
-  CategoryDistributionChartSection,
-  OwnerAnalytics,
-  ProductionTrendChartSection,
-  SalesRankingChartSection,
-} from '@/components/business/dashboard/OwnerAnalytics';
+const mocks = vi.hoisted(() => ({ permission: vi.fn(), sales: vi.fn(), crafts: vi.fn(), read: vi.fn(), orders: vi.fn(), trend: vi.fn() }));
+vi.mock('server-only', () => ({}));
+vi.mock('@/lib/auth/permissions', () => ({ requirePermission: mocks.permission }));
+vi.mock('@/lib/analytics/overview', () => ({ getAnalyticsOverview: async () => ({ metrics: [], ranking: [], distribution: [] }) }));
+vi.mock('@/lib/analytics/queries', () => ({ getAnalyticsSales: mocks.sales, getAnalyticsCrafts: mocks.crafts, analyticsRead: mocks.read, readOrders: mocks.orders, getAnalyticsTrend: mocks.trend, getAnalyticsFinance: vi.fn() }));
+import Page from '@/app/(admin)/owner/analytics/page';
+import { OwnerAnalytics, ProductionTrendChartSection, SalesRankingChartSection, CategoryDistributionChartSection } from '@/components/business/dashboard/OwnerAnalytics';
 import { ErrorBoundary, PageHeader } from '@/components/ui-business';
-
-function findElements(
-  node: ReactNode,
-  predicate: (element: React.ReactElement<Record<string, unknown>>) => boolean,
-): React.ReactElement<Record<string, unknown>>[] {
-  if (Array.isArray(node)) return node.flatMap((child) => findElements(child, predicate));
+import { parseAnalyticsFilters } from '@/lib/analytics/filters';
+function find(node: ReactNode, type: unknown): React.ReactElement<Record<string, unknown>>[] {
+  if (Array.isArray(node)) return node.flatMap(child => find(child, type));
   if (!isValidElement<Record<string, unknown>>(node)) return [];
-  return [
-    ...(predicate(node) ? [node] : []),
-    ...findElements(node.props.children as ReactNode, predicate),
-  ];
+  return [...(node.type === type ? [node] : []), ...find(node.props.children as ReactNode, type)];
 }
-
-beforeEach(() => {
-  vi.resetAllMocks();
-  requirePermissionMock.mockResolvedValue({ id: 'admin-1', role: Role.ADMIN });
-});
-
-describe('经营概览页面', () => {
-  it('验证权限后返回静态标题和返回入口，图表查询不阻塞页面壳', async () => {
-    const result = await OwnerAnalyticsPage();
-    expect(requirePermissionMock).toHaveBeenCalledWith('report:all');
-    const header = findElements(result, (element) => element.type === PageHeader)[0];
-    expect(header?.props.title).toBe('经营概览');
-    // 返回工作台由顶栏面包屑父级承担（ui-规范 §8.3，业主 2026-10-02「请保持一致性」）。
-    expect(header?.props.back).toBeUndefined();
-    expect(findElements(result, (element) => element.type === OwnerAnalytics)).toHaveLength(1);
-    expect(getProductionTrendMock).not.toHaveBeenCalled();
-    expect(getSalesRankingMock).not.toHaveBeenCalled();
-    expect(getCategoryDistributionMock).not.toHaveBeenCalled();
+const actor = { id: 'admin', role: Role.ADMIN };
+const filters = parseAnalyticsFilters({});
+beforeEach(() => { vi.resetAllMocks(); mocks.permission.mockResolvedValue(actor); mocks.sales.mockResolvedValue([]); mocks.crafts.mockResolvedValue([]); mocks.read.mockResolvedValue([]); });
+describe('analytics page boundaries', () => {
+  it('authenticates before data and keeps the breadcrumb return contract', async () => {
+    const result = await Page({ searchParams: Promise.resolve({}) });
+    expect(mocks.permission).toHaveBeenCalledWith('report:all');
+    expect(find(result, PageHeader)[0]?.props).toMatchObject({ title: '经营概览' });
+    expect(find(result, PageHeader)[0]?.props.back).toBeUndefined();
+    expect(find(result, OwnerAnalytics)).toHaveLength(1);
+    expect(mocks.trend).not.toHaveBeenCalled();
   });
-
-  it('未授权时拒绝整个页面，不读取经营数据', async () => {
-    const forbidden = new Error('Forbidden');
-    requirePermissionMock.mockRejectedValueOnce(forbidden);
-    await expect(OwnerAnalyticsPage()).rejects.toBe(forbidden);
-    expect(getProductionTrendMock).not.toHaveBeenCalled();
-    expect(getSalesRankingMock).not.toHaveBeenCalled();
-    expect(getCategoryDistributionMock).not.toHaveBeenCalled();
+  it('blocks all option and report reads for unauthorized users', async () => {
+    mocks.permission.mockRejectedValueOnce(new Error('Forbidden'));
+    await expect(Page({ searchParams: Promise.resolve({}) })).rejects.toThrow('Forbidden');
+    expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.crafts).not.toHaveBeenCalled(); expect(mocks.sales).not.toHaveBeenCalled();
   });
-
-  it('每张图表各有失败边界及加载占位，失败不会冒充空态', () => {
-    const boundaries = findElements(OwnerAnalytics(), (element) => element.type === ErrorBoundary);
-    expect(boundaries).toHaveLength(3);
-    const sections = [ProductionTrendChartSection, SalesRankingChartSection, CategoryDistributionChartSection];
-    for (const [index, boundary] of boundaries.entries()) {
-      expect(boundary.props.scope).toBe('section');
-      expect(boundary.props.title).toContain('暂时无法加载');
-      const suspense = findElements(boundary.props.children as ReactNode, (element) => element.type === Suspense);
-      expect(suspense).toHaveLength(1);
-      expect(suspense[0]?.props.fallback).toBeDefined();
-      expect(findElements(suspense[0]?.props.children as ReactNode, (element) => element.type === sections[index])).toHaveLength(1);
-    }
+  it('shows a recoverable validation state before querying', async () => {
+    const result = await Page({ searchParams: Promise.resolve({ from: '2026-02-30' }) });
+    expect(find(result, 'p')[0]?.props.role).toBe('alert');
+    expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.crafts).not.toHaveBeenCalled();
   });
-
-  it('保留原始图表数据与金额字符串，不在迁移层改写口径', async () => {
-    const trend = [{ day: '2026-09-07', count: 12 }];
-    const ranking = [{ userId: 'sales-1', displayName: '销售甲', role: Role.SALES, totalAmount: '1234567.89', orderCount: 4 }];
-    const categories = [{ category: 'UNCATEGORIZED', orderCount: 2 }];
-    getProductionTrendMock.mockResolvedValueOnce(trend);
-    getSalesRankingMock.mockResolvedValueOnce(ranking);
-    getCategoryDistributionMock.mockResolvedValueOnce(categories);
-
-    expect((await ProductionTrendChartSection()).props.data).toBe(trend);
-    expect((await SalesRankingChartSection()).props.data).toBe(ranking);
-    expect((await CategoryDistributionChartSection()).props.data).toBe(categories);
+  it('isolates summary and all three charts with loading/error states', () => {
+    const boundaries = find(OwnerAnalytics({ actor, filters }), ErrorBoundary);
+    expect(boundaries).toHaveLength(4);
+    for (const boundary of boundaries) { expect(boundary.props.scope).toBe('section'); expect(find(boundary.props.children as ReactNode, Suspense)[0]?.props.fallback).toBeDefined(); }
   });
-
-  it('单个图表读取失败时，其余图表仍能返回', async () => {
-    const failure = new Error('trend read failed');
-    getProductionTrendMock.mockRejectedValueOnce(failure);
-    getSalesRankingMock.mockResolvedValueOnce([]);
-    getCategoryDistributionMock.mockResolvedValueOnce([]);
-
-    const results = await Promise.allSettled([
-      ProductionTrendChartSection(),
-      SalesRankingChartSection(),
-      CategoryDistributionChartSection(),
-    ]);
-    expect(results[0]).toEqual({ status: 'rejected', reason: failure });
-    expect(results[1]?.status).toBe('fulfilled');
-    expect(results[2]?.status).toBe('fulfilled');
+  it('a trend failure does not replace the other charts with zero', async () => {
+    mocks.trend.mockRejectedValueOnce(new Error('db unavailable'));
+    const results = await Promise.allSettled([ProductionTrendChartSection({ actor, filters }), SalesRankingChartSection({ actor, filters }), CategoryDistributionChartSection({ actor, filters })]);
+    expect(results.map(result => result.status)).toEqual(['rejected', 'fulfilled', 'fulfilled']);
   });
 });

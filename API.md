@@ -7,6 +7,16 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 管理员经营分析 CSV（本地候选，2026-10-03）
+
+`GET /api/owner/analytics/export`：会话经 `requireSessionPermission('report:all')` 核对当前账号，仅管理员可导出。
+
+- `view=overview|orders|costs|structure|inventory`；默认 overview。`from/to=YYYY-MM-DD` 使用上海自然日、包含结束日期，默认本月截至今天，最多 366 天。
+- `sales` 为销售用户 ID；`customer/paper/supplier` 为全称；`craft` 为工艺枚举或字典 ID；`q` 为工单或物料关键词。采购库存不应用销售/客户/工艺/纸张条件；总览仅应用日期与销售。`inventoryKind=purchases|receipts|stock` 选择采购库存明细，默认 purchases。
+- `page` 只影响页面；CSV 导出全部匹配明细和汇总。每类源记录最多 30,000 条（成本含关联重做）；超限、日期/视图/页码非法或重复参数返回 400，提示缩小范围，不输出截断合计。未登录、账号停用或角色无权限返回 401。数据库异常不伪装成空报表。
+- 返回 UTF-8 BOM CSV，附件下载、`private, no-store`、`nosniff`；Decimal 金额两位、原单价四位，文本转义并防公式注入，未知金额标为“待核对”。当前库存和当前待收款不代表所选历史日余额。
+- 分析使用只读、RepeatableRead 事务和查询超时；不创建/修改订单、账单、工资、采购或库存记录。日期和金额口径详见[经营概览方案](docs/audits/2026-10-03-analytics-refactor-plan.md)。
+
 ## 2026-10-01 导出展示名称
 
 月账单 XLSX 的工作表为“月账单 / 工单明细 / 跨月抵扣 / 收款回执”，外部销售账号、金额及日期列的取值边界不变；工单状态使用与账单页面相同的业务名称，未知状态不回显原始枚举。计件结算 XLSX 的前两表为“计件结算 / 报工明细”，工序、条目和单位使用业务名称；规则校验码连同结算/报工编号与工价版本放在独立“核验记录”表。已生成文件不重写，下载地址、权限、金额精度和源数据版本约束不变。

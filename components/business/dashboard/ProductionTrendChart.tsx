@@ -20,10 +20,11 @@ import {
 // `data-slot="dashboard-chart-trend"` 是 E2E + 视觉回归 hook，别改。
 
 export type ProductionTrendChartProps = {
+  label?: string;
   data: ReadonlyArray<{ day: string; count: number }>;
 };
 
-export function ProductionTrendChart({ data }: ProductionTrendChartProps) {
+export function ProductionTrendChart({ data, label = '完工' }: ProductionTrendChartProps) {
   if (data.length === 0) {
     return <ChartEmpty slot="dashboard-chart-trend" />;
   }
@@ -70,7 +71,7 @@ export function ProductionTrendChart({ data }: ProductionTrendChartProps) {
                   fontSize={11}
                   fill="var(--muted-foreground)"
                 >
-                  {(p.payload?.value ?? '').slice(5)}
+                  {(p.payload?.value ?? '').length === 7 ? p.payload?.value : (p.payload?.value ?? '').slice(5)}
                 </text>
               );
             }}
@@ -90,8 +91,8 @@ export function ProductionTrendChart({ data }: ProductionTrendChartProps) {
               borderColor: 'var(--border)',
               color: 'var(--popover-foreground)',
             }}
-            labelFormatter={(label) => `${String(label ?? '')}（完工）`}
-            formatter={(value) => [`${Number(value)} 单`, '完工']}
+            labelFormatter={(day) => `${String(day ?? '')}（${label}）`}
+            formatter={(value) => [`${Number(value)} 单`, label]}
           />
           <Line
             type="monotone"

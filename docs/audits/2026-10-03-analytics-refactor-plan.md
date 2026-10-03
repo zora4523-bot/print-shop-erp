@@ -1,14 +1,14 @@
 ---
-status: proposed
+status: implemented-verified
 owner: project-maintainers
 date: 2026-10-03
 baseline: be338762a9f5456ef2bab9edbfb7e8d05366f191
 scope: /owner/analytics
 ---
 
-# analytics 经营概览重构方案（待实现）
+# analytics 经营概览重构方案
 
-用户要求：规划 analytics 页面重构，学习 `/Users/zhixing/历史订单` 的看板实现，不影响其他功能。本文是可审查的实施方案；本次仅新增此文档，没有修改页面、查询、数据库或业务流程。
+用户要求：规划 analytics 页面重构，学习 `/Users/zhixing/历史订单` 的看板实现，不影响其他功能。本文保留初始实施方案；初始规划回合只提交此文档。用户随后授权执行、测试与 Claude 对抗审查，实施及实际验收见[实施记录](2026-10-03-analytics-implementation-audit.md)。五视图实现与本地验证已完成，Claude 最终 9.3/10 PASS；下方“现状/待执行”描述保留初始规划时点，不替代实施记录。未部署。
 
 ## 1. 目标与现状证据
 
