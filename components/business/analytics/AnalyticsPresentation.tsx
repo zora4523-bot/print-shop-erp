@@ -8,7 +8,7 @@ import { formatMoney } from '@/lib/dashboard/format';
 import { analyticsUrl, type AnalyticsFilters } from '@/lib/analytics/filters';
 import type { AnalyticsCell, AnalyticsGroup, AnalyticsMetric, AnalyticsReport, AnalyticsTable } from '@/lib/analytics/types';
 
-export function cellText(cell: AnalyticsCell) {
+function cellText(cell: AnalyticsCell) {
   if (cell.value === null) return cell.format ? '待核对' : '未填写';
   if (cell.format === 'money') return formatMoney(cell.value);
   if (cell.format === 'price') return formatUnitPrice(cell.value);
@@ -17,7 +17,7 @@ export function cellText(cell: AnalyticsCell) {
 export function AnalyticsMetrics({ metrics }: { metrics: AnalyticsMetric[] }) {
   return <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(metric => <StatCard key={metric.label} label={metric.label} value={cellText(metric)} hint={metric.hint} />)}</div>;
 }
-export function AnalyticsDataTable({ table, limit }: { table: AnalyticsTable; limit?: number }) {
+function AnalyticsDataTable({ table, limit }: { table: AnalyticsTable; limit?: number }) {
   const rows = limit ? table.rows.slice(0, limit) : table.rows;
   return <section className="min-w-0 space-y-3" aria-label={table.title}>
     <h2 className="text-base font-semibold">{table.title}</h2>

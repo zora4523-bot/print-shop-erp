@@ -16,7 +16,7 @@ export function paginateTable(details: AnalyticsTable, page: number, all = false
   return { details: { ...details, rows: all ? details.rows : details.rows.slice((current - 1) * ANALYTICS_PAGE_SIZE, current * ANALYTICS_PAGE_SIZE) }, total, page: current, pages };
 }
 
-export function salesGroups(orders: AnalyticsOrder[], filters: AnalyticsFilters): AnalyticsGroup[] {
+function salesGroups(orders: AnalyticsOrder[], filters: AnalyticsFilters): AnalyticsGroup[] {
   const map = new Map<string, { name: string; total: Decimal; count: number }>();
   for (const order of orders) {
     if (new Decimal(order.processingAmount.toString()).lte(0)) continue;

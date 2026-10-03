@@ -41,7 +41,7 @@ export function orderWhere(filters: AnalyticsFilters, includeCancelled = false, 
   };
 }
 
-export const orderSelect = {
+const orderSelect = {
   id: true, orderNo: true, customName: true, customerRef: true, submittedAt: true,
   status: true, kind: true, sourceOrderId: true, billingMode: true, pricingStatus: true,
   processingAmount: true, packagingAmount: true, settledFee: true, settledAt: true,

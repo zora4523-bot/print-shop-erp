@@ -807,11 +807,8 @@ async function checkRoutes(
   }
 }
 
-// Dashboard 的三张图走 next/dynamic + IntersectionObserver 延迟挂载
-// （components/business/dashboard/DeferredDashboardCharts.tsx）。checkRoutes
-// 只 goto + 等 heading，全程不滚动，于是 375/393/768 三个视口下门禁一直在
-// 对占位骨架做断言，图表本身（含 recharts 生成的 SVG）从未被 axe 或裁切
-// 检查看过。滚到容器可见并等 surface 出现，把这块真正纳入门禁。
+// 经营概览由 OwnerAnalytics 的独立 Suspense 区块承载。滚动到三张实际图表，
+// 等待内容出现，避免把加载占位当成图表的几何与可访问性检查。
 async function prepareDashboardChartsState(page: Page): Promise<void> {
   const deferred = page.locator('[data-slot="dashboard-chart-deferred"]:visible');
   await expect(deferred).toHaveCount(3);
