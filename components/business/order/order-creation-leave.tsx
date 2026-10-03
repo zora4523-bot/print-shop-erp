@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ActionNotice, ConfirmActionController, ConfirmActionDialog, useNavigationGuard, type BlockedNavigation, type PageHeaderBack } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog, isConfirmedNavigationInProgress, useNavigationGuard, type BlockedNavigation, type PageHeaderBack } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
 
 export type LocalDraftSaveFailure = 'unserializable' | 'storage' | 'unavailable';
@@ -61,7 +61,6 @@ function planOrderCreationLeave(
 /** A blocked leave: where it goes and how to continue it once drafts are saved. */
 type LeaveTarget = { href: string; go: () => void };
 type Failure = { target: LeaveTarget | null; failed: Record<string, LocalDraftSaveFailure> };
-const pathOf = (href: string) => { const url = new URL(href, location.href); return `${url.pathname}${url.search}${url.hash}`; };
 
 /** One coordinator for batch navigation, persistence failures and browser unload. */
 export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled = true }: {
@@ -80,14 +79,14 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
   // Every same-origin link (sidebar, breadcrumb, top bar, page body), browser
   // back/forward and reload/close pass through the same batch plan. While busy
   // the navigation is held without a dialog, as the header back already did.
-  const navigationGuard = useNavigationGuard({
+  useNavigationGuard({
     when: enabled && (plan.guarded || plan.busy),
     shouldBlock: () => { const latest = currentPlan(); return latest.guarded || latest.busy; },
     onBlocked: (navigation: BlockedNavigation) => {
       if (currentPlan().busy) return;
-      openLeave(navigation.kind === 'traverse'
-        ? { href: navigation.href, go: navigation.resume }
-        : { href: navigation.href, go: () => router.push(pathOf(navigation.href)) });
+      // Continue the original navigation: a replayed link keeps its own pending
+      // feedback (sidebar useLinkStatus, drawer closing); history returns by key.
+      openLeave({ href: navigation.href, go: navigation.resume });
     },
   });
 
@@ -129,7 +128,8 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
     setTarget(next);
   }
   const guard = (href: string) => (event: { preventDefault(): void }) => {
-    if (navigationGuard.isReleased()) return;
+    // A confirmed replay of a link that carries this guard keeps its own target.
+    if (isConfirmedNavigationInProgress()) { event.preventDefault(); router.push(href); return; }
     const latest = currentPlan();
     if (latest.busy) { event.preventDefault(); return; }
     if (!latest.guarded) return;

@@ -414,8 +414,15 @@ describe('links outside the workspace and browser history', () => {
     await breadcrumb().click();
     await expect.element(dialog()).toHaveTextContent('本单 1 个未上传的设计文件将丢失。');
     await dialog().getByRole('button', { name: '放弃修改并离开' }).click();
-    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/orders');
-    expect(mocks.navigations).toEqual([]);
+    // The confirmed click is replayed on the original link, so the shell link
+    // itself navigates (its pending state / drawer closing work), not router.push.
+    expect(mocks.navigations).toEqual(['/orders']);
+    expect(mocks.push).not.toHaveBeenCalled();
+    // The pass was for that one navigation: the next shell link is guarded again.
+    await sidebar().click();
+    await expect.element(dialog()).toHaveTextContent('本单 1 个未上传的设计文件将丢失。');
+    await dialog().getByRole('button', { name: '继续编辑' }).click();
+    expect(mocks.navigations).toEqual(['/orders']);
 
     const before = { length: history.length, href: location.href };
     expect(traversal('previous-entry', '/orders').defaultPrevented).toBe(true);
