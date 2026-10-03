@@ -463,7 +463,9 @@ export function AdminOrderEditor(props: Props) {
         focusReturnRef={leaveSourceRef}
         cancelLabel="继续编辑"
         onConfirm={() => {
-          allowNavigation();
+          // Discarding is not saving: the captured navigation carries its own
+          // one-shot pass. If it is cancelled the draft stays guarded;
+          // allowNavigation() is only for a successful save.
           pendingNavigationRef.current?.();
         }}
       >

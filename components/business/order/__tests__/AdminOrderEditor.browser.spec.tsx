@@ -476,6 +476,37 @@ describe('administrator edit design', () => {
       .toHaveValue(2000);
   });
 
+  it('a discard confirmation covers one navigation: if the link cancels it, the draft stays guarded', async () => {
+    // A shell link outside the editor whose own handler cancels the replayed click,
+    // as Next Link does when its onNavigate calls preventDefault().
+    const followed = vi.fn();
+    const shell = document.createElement('a');
+    shell.href = '/orders';
+    shell.textContent = '侧栏工单列表';
+    shell.addEventListener('click', (event) => { event.preventDefault(); followed(); });
+    document.body.append(shell);
+    try {
+      mount();
+      const quantity = page.getByRole('spinbutton', { name: '数量（个）', exact: true });
+      await quantity.fill('2000');
+      await page.getByRole('link', { name: '侧栏工单列表', exact: true }).click();
+      await expect.element(page.getByRole('alertdialog')).toBeVisible();
+      expect(followed).not.toHaveBeenCalled();
+      await page.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+      expect(followed).toHaveBeenCalledOnce();
+      await expect.element(page.getByRole('alertdialog')).not.toBeInTheDocument();
+      await expect.element(quantity).toHaveValue(2000);
+      const unload = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(unload);
+      expect(unload.defaultPrevented).toBe(true);
+      await page.getByRole('link', { name: '侧栏工单列表', exact: true }).click();
+      await expect.element(page.getByRole('alertdialog')).toBeVisible();
+      expect(followed).toHaveBeenCalledOnce();
+    } finally {
+      shell.remove();
+    }
+  });
+
   it('restores every changed field in a style and returns the draft to clean', async () => {
     mount();
     await page.getByRole('textbox', { name: '第 1 款名称', exact: true }).fill('新款名称');

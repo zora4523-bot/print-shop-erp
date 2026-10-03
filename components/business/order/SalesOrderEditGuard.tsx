@@ -135,8 +135,9 @@ export function SalesOrderEditGuard({ children }: { children: ReactNode }) {
       cancelLabel="继续编辑"
       onConfirm={() => {
         const pending = notice?.navigation;
-        if (pending) dirtyForms.current.clear();
         setNotice(null);
+        // Keep the real unsaved state: resume() is a one-shot pass for this
+        // navigation, so a cancelled leave stays guarded (reload included).
         pending?.resume();
       }}>
       {notice?.navigation
