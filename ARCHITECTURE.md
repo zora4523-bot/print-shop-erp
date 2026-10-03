@@ -7,12 +7,19 @@ applies_to: repository source at last_verified
 
 # 系统架构
 
+## 2026-10-04 现行入口与领域边界
+
+最近变更与历史文档阅读规则见 [当前开发入口](docs/当前开发入口.md)。本节只更新生产入口与经营分析边界，不重签全文旧验证日期。
+
+- `lib/order/production-readiness.ts` 在已授权写事务中复核保存的报价、收货资料、待审批和工艺／包装事实；`lib/production/routing.ts` 区分厂内安排、寄样、外协、包装、直接履约和资料异常。
+- `lib/production/dispatch.ts` 在同一事务准备厂内工序、保存单负责人和打印请求；内部 release 物化仍被使用，但不再暴露独立管理员下发步骤。自动准备不产生结算，也不绕过存量报工守卫。
+- `/owner/analytics` 与 CSV 导出共用 `lib/analytics/filters.ts`、`service.ts` 及分视图报表；五个视图定义于 `views.ts`。分析只读，页面分页与全量导出采用同一筛选口径；不把现金收款、加工费、出账或当前库存混成同一日期指标。
+
 ## 2026-09-28 单负责人生产与工资边界
 
-`actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用事务内下发；`completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。
+`actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用内部工序准备与状态推进；`completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。
 
 生产人、操作人、工资受益人是不同事实。生产归属在排单时确定，协作受益人仅出现在管理员提成核定入口。新旧报工写入口互斥，统一日结/导出读取两种账本；新增事实不伪装成历史报告。管理专用异步 ProductionJobPanel 不传入销售模型，师傅工资按当前会话受益人读取。
-
 
 ## 2026-09-27 录入页恢复边界
 

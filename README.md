@@ -1,5 +1,7 @@
 # 红包印刷 ERP 系统
 
+开发前先读 [当前开发入口](docs/当前开发入口.md)：按 2026-09-24 至 10-04 提交核对，区分现行规则、发布事实与历史证据。生产最近一次已记录发布为 `f084d34e`，具体范围见 [部署入口](DEPLOYMENT.md)。
+
 内部工具，服务于佛山某红包印刷厂的生产、销售、薪资、库存全流程数字化。
 
 ---
@@ -22,7 +24,7 @@
 | **[docs/UI-DESIGN-COVERAGE.md](./docs/UI-DESIGN-COVERAGE.md)** | 85 页设计证据等级、实现覆盖与视觉验证边界 | 设计 / 开发 / 验收 |
 | **[docs/UI-REMEDIATION-BACKLOG.md](./docs/UI-REMEDIATION-BACKLOG.md)** | UI 问题严重度、成本、独立任务与完成状态 | 开发 / 验收 |
 | **[docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md](./docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)** | 提交 `41abe65` 后的 UI/UX 对抗复审、代码证据、独立子任务与 canonical 映射 | 设计 / 开发 / 验收 |
-| **SPEC-v1.2.md** | 业务规格（冻结版，权威） | 所有人 |
+| **[SPEC-v1.2.md](SPEC-v1.2.md)** | 业务规格及后续替代规则；先读开头的现行规则说明 | 所有人 |
 | **CLAUDE.md** | 开发规范与工作准则 | Claude Code / Codex |
 | **prisma/schema.prisma** | 数据库Schema | 开发 |
 | **prisma/seed.ts** | 初始化种子数据 | 开发 |
@@ -189,7 +191,9 @@ pnpm dev
 
 ---
 
-## 🚢 上线运维（P0 部署清单）
+## 🚢 上线运维（通用配置参考）
+
+> 下列环境与首次安装示例不等于当前生产操作单。现有生产使用候选目录切换，实际待迁移、四条已安装 cron 与已验证 PDF 模式以 [部署指南](docs/部署指南.md) 和最近发布记录为准；不要整套覆盖现有配置。
 
 > 可执行部署步骤的唯一入口是 `DEPLOYMENT.md`，详细 runbook 是
 > `docs/部署指南.md`。本节包含带日期的历史快照，不应替代目标环境核验。
@@ -350,41 +354,15 @@ fc-list :lang=zh | head
 
 本地/CI 若没有系统 Chromium，可运行 `npx puppeteer browsers install chrome` 安装 Puppeteer-managed Chrome。完整生产命令见 `docs/部署指南.md` §7 / §13。
 
-### 7. 日常更新与数据库迁移边界
+### 7. 更新部署与上线验收
 
-首次部署完成后，统一从项目根目录运行：
+现有生产使用候选目录切换，禁止直接照抄通用 `deploy/update.sh` 在应用机原地构建。
+可执行步骤统一看 [部署指南](docs/部署指南.md)，候选前置看
+[上线前置操作清单](docs/上线前置操作清单.md)，自动检查范围看
+[smoke 清单](docs/deployment-smoke-checklist.md)。先核对目标 SHA 与实际待迁移差异；
+已应用的删除迁移预查、历史 seed 和一次性修复不能在下一次部署照单重跑。
 
-```bash
-./deploy/update.sh
-```
-
-> 发布前必须在目标服务器确认 remote、tracking branch 和经过审核的 release SHA；
-> 不得仅凭本地分支名或本文历史快照决定发布源。
-
-脚本先在旧进程在线时完成依赖安装、生产环境预检、Prisma Client 生成和构建；随后停止 Web、LIGHT worker、HEAVY worker，执行 `prisma migrate deploy`，立即启动新版本并检查 `/api/health/ready`。进入停机窗口后的任何失败都会让三个进程保持停止，防止旧代码继续写入新数据库结构。
-
-数据库迁移开始后禁止只 `git checkout` 旧 commit 回滚应用。应修正当前版本或补新的前向 migration 后重跑脚本；只有同时恢复匹配的数据库备份时，旧代码才可恢复。Fresh DB 必须完整应用 `prisma/migrations/` 中的全部 migration，并用 `pnpm exec prisma migrate status` 核对；不要把 README 中的固定数量当门禁。当前仓库快照、最新 migration 和完整规则见 `DATABASE.md`，无效索引检查和视觉 fixture 见 `docs/部署指南.md` §14，下一批发布的迁移前置见 `docs/上线前置操作清单.md`。`20260821120100_notification_log_delivery_key_unique` 的唯一索引仍是通知重试的正确性依赖，必须验收 `indisvalid`；仓库状态不代表生产已经迁移。
-
-### 8. 上线 smoke checklist
-
-按顺序跑一遍（**本次发布批次另有前置排查与单向门，先过一遍 `docs/上线前置操作清单.md`**）：
-- [ ] `docs/上线前置操作清单.md` §二的两段只读预查每列为 0（2026-09-24 两条删除迁移遇到业务引用即中止）
-- [ ] `pnpm prisma migrate deploy`（生产 migration）
-- [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（部署指南 §14 的无效并发索引检查）
-- [ ] `pnpm prisma db seed`（仅首次部署且确认 seed 行为后执行）
-- [ ] `chromium --version`、`fc-list :lang=zh`，并按部署指南用 `/usr/bin/chromium` 真生成一份中文 PDF
-- [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
-- [ ] 管理员登录 `/owner/accounts` 改默认密码
-- [ ] 销售 / 师傅各创一个测试账号
-- [ ] 跑通 工单创建 → 工厂确认 → 下发（`CONFIRMED → RELEASED`）→ 报工 → 生产完成 → 发货一条链
-- [ ] 触发一次 `/api/cron/daily-salary` 验证 shared-secret + 入库
-- [ ] 触发一次 `/api/cron/generate-bills`（建议先用 `{"period": "<上月>"}` 显式指定），验证账单生成
-- [ ] ADMIN 账单页面发单 → 录入付款 → 状态切到 FULLY_PAID
-- [ ] 用受控测试错误确认 Sentry 收到事件；生产未配置 `SENTRY_DSN` 时此项明确不通过，禁止临时破坏真实业务 action
-- [ ] **`NOTIFICATION_MOCK_MODE=false` + 管理员在 `/owner/notifications` 建至少 1 个 channel + 逐项核对 13 条预置 rule + 按业务启用并绑定收件群 + 用&ldquo;测试&rdquo;按钮验证真发**。Webhook 通道核对 URL；智能机器人通道先轮换已暴露 Secret，成对注入两个 `WECOM_SMART_BOT_*` 变量，确认只有一个 LIGHT worker 进程，再于目标群 `@机器人` 并发送一次性绑定码。Mock-mode 还开着的话 NotificationLog 会全是 `errorMessage='MOCK'` —— 管理员会以为推送已发其实没真发。
-- [ ] 真实触发一次 `ORDER_SCHEDULED`（下发 `RELEASED`）与 `ORDER_COMPLETED`（当前 work-order generation 通过生产完成闸口），核对群消息和投递日志各只有一次。
-- [ ] 触发一次 `/api/cron/outsource-overdue` + `/api/cron/order-overdue` 验证扫描 + 推送（dev 期 mock-mode 写 status=SUCCESS+'MOCK'；prod 期真发企业微信）
-- [ ] `pm2 status` 显示 Web、LIGHT worker、HEAVY worker 三个进程都 online
-- [ ] `/api/health/ready` 返回 200，且两类 worker 心跳存在
-- [ ] `/api/health/jobs` 返回 200（有死信 / 卡死 RUNNING / worker 缺失会 503）；把它接进外部监控，否则「死信 30 分钟响应」这条 SLO 不生效
-- [ ] `pnpm check:backup` 通过，确认两个 repo 的 full + WAL
+最近已记录发布及未验收范围见 [10-04 发布记录](docs/audits/2026-10-04-production-release-f084d34e.md)。
+生产流程验收按「提交／核价自动校验 → 厂内安排师傅 → 完成生产 → 发货」；
+寄样直接发货，外协走外协工单，混合工单仍检查厂内生产与外协回货。
+测试、构建、只读页面与 PDF 探针不替代真实业务写入、群消息实收、实体打印和手机扫码。
