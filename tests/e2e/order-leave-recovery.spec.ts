@@ -167,3 +167,24 @@ for (const actor of ['owner', 'sales'] as const) {
     await expect(page).toHaveURL(new RegExp(`${SHELL[actor].sidebarHref}(\\?.*)?$`));
   });
 }
+
+test('owner: a confirmed sidebar leave keeps the sidebar link pending during a slow navigation', async ({ page }) => {
+  await openCreate(page, 'owner');
+  await selectDesignFile(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  // Hold the RSC payload of the destination so the navigation stays in flight.
+  await page.route((url) => url.pathname === '/orders' && url.searchParams.has('_rsc'), async (route) => {
+    await held;
+    await route.continue();
+  });
+  const link = page.locator('nav[aria-label="后台主导航"] a[href="/orders"]');
+  await link.click();
+  const dialog = page.getByRole('alertdialog');
+  await dialog.getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+  await expect(link.locator('[data-pending="true"]')).toBeVisible();
+  await expect(page).toHaveURL(/\/orders\/new$/);
+  release();
+  await expect(page).toHaveURL(/\/orders$/);
+  await expect(link.locator('[data-pending="true"]')).toHaveCount(0);
+});
