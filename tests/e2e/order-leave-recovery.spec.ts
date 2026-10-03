@@ -188,3 +188,17 @@ test('owner: a confirmed sidebar leave keeps the sidebar link pending during a s
   await expect(page).toHaveURL(/\/orders$/);
   await expect(link.locator('[data-pending="true"]')).toHaveCount(0);
 });
+
+test('owner: a confirmed sidebar leave whose client fetch fails falls back to a full load without a second prompt', async ({ page }) => {
+  await openCreate(page, 'owner');
+  await selectDesignFile(page);
+  const prompts: string[] = [];
+  page.on('dialog', async (dialog) => { prompts.push(dialog.type()); await dialog.accept(); });
+  // The RSC payload fails; Next then hard-navigates (location.assign) to the same URL.
+  await page.route((url) => url.pathname === '/orders' && url.searchParams.has('_rsc'), (route) => route.fulfill({ status: 500, body: 'boom' }));
+  await page.locator('nav[aria-label="后台主导航"] a[href="/orders"]').click();
+  await page.getByRole('alertdialog').getByRole('button', { name: '放弃修改并离开', exact: true }).click();
+  await expect(page).toHaveURL(/\/orders$/);
+  await expect(page.getByRole('heading', { name: '工单列表', exact: true })).toBeVisible();
+  expect(prompts).toEqual([]);
+});

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { setRouterTransitionListener } from './navigation-guard-transition';
 
 /**
  * 共享导航守卫原语（2026-10-04 全应用导航守卫，docs/ui-规范.md §8.3）。
@@ -103,6 +104,9 @@ let traversePass: { key: string } | null = null;
  * - it is revoked when the document evidently stays: user interaction
  *   (pointerdown / keydown), the page becoming visible again, or a
  *   back/forward-cache restore (pageshow persisted); pagehide ends it too;
+ * - a confirmed link the client router took over keeps it until that
+ *   navigation commits a new URL in this document (or falls back to a full
+ *   load, which the pass then covers);
  * - UNLOAD_PASS_FALLBACK_MS bounds it as a safety net if none of these happen
  *   (e.g. a download or a 204 response that keeps the page without input).
  */
@@ -212,14 +216,23 @@ function attachDocumentListeners(): () => void {
       source: link,
       resume: () => {
         linkPass = link;
+        // A cancelled click is ambiguous: Next Link cancels it when it takes the
+        // navigation over (and may later fall back to location.assign, e.g. when
+        // the RSC fetch fails), a consumer's onNavigate.preventDefault() cancels
+        // it for real. Next reports a takeover synchronously through the public
+        // onRouterTransitionStart hook (instrumentation-client.ts).
+        let tookOver = false;
+        setRouterTransitionListener(() => {
+          tookOver = true;
+        });
         try {
-          // Only a click that is not cancelled becomes a document navigation
-          // (Next Link cancels it and navigates on the client: no beforeunload).
           const pass = grantUnloadPass();
           const event = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-          if (!link.dispatchEvent(event)) pass.revoke();
+          const native = link.dispatchEvent(event);
+          if (!native && !tookOver) pass.revoke();
         } finally {
           linkPass = null;
+          setRouterTransitionListener(null);
         }
       },
     });
@@ -228,6 +241,16 @@ function attachDocumentListeners(): () => void {
   const navigation = (window as Window & { navigation?: BrowserNavigation }).navigation;
   const onNavigate = (rawEvent: Event) => {
     const event = rawEvent as BrowserNavigateEvent;
+    // A confirmed client navigation committed its new URL in this document: no
+    // unload follows, so the reload pass ends here (history-state syncs that keep
+    // the URL do not count).
+    if (
+      event.navigationType !== 'traverse' &&
+      event.destination.sameDocument &&
+      isGuardedNavigationDestination(location.href, event.destination.url)
+    ) {
+      revokeUnloadPass();
+    }
     if (
       event.defaultPrevented ||
       event.navigationType !== 'traverse' ||

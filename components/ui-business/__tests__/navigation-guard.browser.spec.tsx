@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { noteRouterTransitionStart } from '../navigation-guard-transition';
 import {
   NAVIGATION_GUARD_SKIP_ATTRIBUTE,
   leaveDocument,
@@ -362,6 +363,45 @@ describe('leaving the document after a confirmation', () => {
     render(<Guard name="A" />);
     leaveDocument('/orders', () => undefined);
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    expect(unload()).toBe(true);
+  });
+});
+
+describe('a replayed link that the client router takes over', () => {
+  // Next Link cancels the click and starts the App Router transition synchronously
+  // (instrumentation-client onRouterTransitionStart); a consumer's
+  // onNavigate.preventDefault() cancels the click without starting one.
+  function RouterLink() {
+    return <Anchor href="/orders/router" onClick={(event) => {
+      event.preventDefault();
+      noteRouterTransitionStart(new URL('/orders/router', location.href).href);
+    }}>路由链接</Anchor>;
+  }
+
+  it('keeps the reload pass for that navigation’s hard-navigation fallback (e.g. RSC 500)', async () => {
+    render(<><Guard name="A" /><Guard name="B" /><RouterLink /></>);
+    click(link('路由链接'));
+    blocked[0].resume();
+    // The fallback location.assign() fires beforeunload later, after the fetch fails.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(unload()).toBe(false);
+    expect(unload()).toBe(true);
+  });
+
+  it('ends the pass once the client navigation commits in the same document', async () => {
+    render(<><Guard name="A" /><RouterLink /></>);
+    click(link('路由链接'));
+    blocked[0].resume();
+    const commit = new Event('navigate', { cancelable: true });
+    Object.assign(commit, { navigationType: 'push', destination: { key: 'next', url: at('/orders/router'), sameDocument: true } });
+    navigation.dispatchEvent(commit);
+    expect(unload()).toBe(true);
+  });
+
+  it('a consumer cancellation (no router transition) re-arms immediately', () => {
+    render(<Guard name="A" />);
+    click(link('工单列表'));
+    blocked[0].resume();
     expect(unload()).toBe(true);
   });
 });
