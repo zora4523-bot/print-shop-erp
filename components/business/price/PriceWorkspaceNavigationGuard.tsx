@@ -14,7 +14,12 @@ import {
 import Form from 'next/form';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ConfirmActionController, ConfirmActionDialog } from '@/components/ui-business';
+import {
+  ConfirmActionController,
+  ConfirmActionDialog,
+  NAVIGATION_GUARD_SKIP_ATTRIBUTE,
+  useNavigationGuard,
+} from '@/components/ui-business';
 
 type UnsavedTierState = {
   registered: boolean;
@@ -73,7 +78,7 @@ export function PriceWorkspaceNavigationGuardProvider({
   const [unsaved, setUnsaved] = useState<UnsavedTierState>(
     EMPTY_UNSAVED_STATE,
   );
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ href: string; leave: () => void } | null>(null);
   const pendingLinkRef = useRef<HTMLAnchorElement | null>(null);
 
   const reportTierChanges = useCallback((tierCount: number) => {
@@ -91,60 +96,29 @@ export function PriceWorkspaceNavigationGuardProvider({
     setUnsaved(EMPTY_UNSAVED_STATE);
   }, []);
 
-  useEffect(() => {
-    if (unsaved.tierCount === 0) return;
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [unsaved.tierCount]);
-
-  useEffect(() => {
-    if (unsaved.tierCount === 0) return;
-
-    const onDocumentClick = (event: MouseEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
-        !(event.target instanceof Element)
-      ) {
-        return;
-      }
-
-      const anchor = event.target.closest<HTMLAnchorElement>('a[href]');
-      if (
-        !anchor ||
-        anchor.dataset.priceWorkspaceGuarded === 'true' ||
-        anchor.hasAttribute('download') ||
-        (anchor.target && anchor.target !== '_self')
-      ) {
-        return;
-      }
-
+  // The price editor is rendered inside the page while the global admin
+  // sidebar lives outside it. The shared guard captures same-origin links at
+  // document level (and browser back/forward) so moving section navigation into
+  // that sidebar does not bypass draft safety. PriceWorkspaceLink confirms by
+  // itself and is skipped through NAVIGATION_GUARD_SKIP_ATTRIBUTE.
+  useNavigationGuard({
+    when: unsaved.tierCount > 0,
+    onBlocked: (navigation) => {
       const destination = guardedPriceWorkspaceDestination(
         window.location.href,
-        anchor.href,
+        navigation.href,
       );
       if (!destination) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      pendingLinkRef.current = anchor;
-      setPendingHref(destination);
-    };
-
-    // The price editor is rendered inside the page while the global admin
-    // sidebar lives outside it. Capture same-origin links at document level so
-    // moving section navigation into that sidebar does not bypass draft safety.
-    document.addEventListener('click', onDocumentClick, true);
-    return () => document.removeEventListener('click', onDocumentClick, true);
-  }, [unsaved.tierCount]);
+      pendingLinkRef.current = navigation.source;
+      setPending({
+        href: destination,
+        leave:
+          navigation.kind === 'traverse'
+            ? navigation.resume
+            : () => router.push(destination),
+      });
+    },
+  });
 
   const value = useMemo<NavigationGuardContextValue>(
     () => ({
@@ -165,14 +139,14 @@ export function PriceWorkspaceNavigationGuardProvider({
     <NavigationGuardContext.Provider value={value}>
       {children}
       <ConfirmActionController level="L2"
-        open={pendingHref !== null}
+        open={pending !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingHref(null);
+          if (!open) setPending(null);
         }}
         focusReturnRef={pendingLinkRef}
         cancelLabel="继续编辑"
         onConfirm={() => {
-          if (pendingHref) router.push(pendingHref);
+          pending?.leave();
         }}>
         <ConfirmActionDialog action="放弃未保存修改并离开" changes={[]} consequences={[
           `${unsaved.tierCount.toLocaleString('zh-CN')} 个未保存档位修改将丢失。`,
@@ -250,7 +224,7 @@ export function PriceWorkspaceLink({
         {...props}
         ref={linkRef}
         href={href}
-        data-price-workspace-guarded="true"
+        {...{ [NAVIGATION_GUARD_SKIP_ATTRIBUTE]: '' }}
         replace={replace}
         scroll={scroll}
         onNavigate={(event) => {
