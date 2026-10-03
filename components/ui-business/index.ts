@@ -52,6 +52,17 @@ export { PendingLink } from './PendingLink';
 export { FilterClearLink } from './FilterClearLink';
 export { LinkPendingHint } from './LinkPendingHint';
 export type { PendingLinkProps } from './PendingLink';
+export {
+  NAVIGATION_GUARD_SKIP_ATTRIBUTE,
+  isGuardedNavigationDestination,
+  useNavigationGuard,
+} from './navigation-guard';
+export type {
+  BlockedNavigation,
+  BlockedNavigationKind,
+  NavigationGuard,
+  NavigationGuardOptions,
+} from './navigation-guard';
 
 export { EnvNotice } from './EnvNotice';
 export type { EnvNoticeProps } from './EnvNotice';
