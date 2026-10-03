@@ -5,6 +5,7 @@ import { LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ConfirmActionController, ConfirmActionDialog } from './ConfirmActionDialog';
+import { useNavigationGuard, type BlockedNavigation } from './navigation-guard';
 
 export type PendingButtonProps = Omit<
   React.ComponentProps<typeof Button>,
@@ -36,9 +37,8 @@ export function PendingButton({
   const noteId = useId();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const navigationSourceRef = useRef<HTMLElement | null>(null);
-  const [pendingNavigationHref, setPendingNavigationHref] = useState<
-    string | null
-  >(null);
+  const [pendingNavigation, setPendingNavigation] =
+    useState<BlockedNavigation | null>(null);
 
   useEffect(() => {
     const formElement = form
@@ -54,50 +54,16 @@ export function PendingButton({
     };
   }, [form, pending]);
 
-  useEffect(() => {
-    if (!pending || !blockNavigation) return;
-    const onLeave = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    const onInternalNavigate = (event: MouseEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey ||
-        !(event.target instanceof Element)
-      ) {
-        return;
-      }
-      const anchor = event.target.closest<HTMLAnchorElement>('a[href]');
-      if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) {
-        return;
-      }
-      const target = new URL(anchor.href, window.location.href);
-      const current = new URL(window.location.href);
-      if (
-        target.href === current.href ||
-        (target.pathname === current.pathname &&
-          target.search === current.search &&
-          target.hash)
-      ) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      navigationSourceRef.current = anchor;
-      setPendingNavigationHref(target.href);
-    };
-    window.addEventListener('beforeunload', onLeave);
-    document.addEventListener('click', onInternalNavigate, true);
-    return () => {
-      window.removeEventListener('beforeunload', onLeave);
-      document.removeEventListener('click', onInternalNavigate, true);
-    };
-  }, [pending, blockNavigation]);
+  // Same-origin links, browser back/forward and reload/close while the
+  // submission is in flight go through the shared navigation guard. External
+  // links fall back to the browser's own beforeunload confirmation.
+  const navigationGuard = useNavigationGuard({
+    when: pending && blockNavigation,
+    onBlocked: (navigation) => {
+      navigationSourceRef.current = navigation.source;
+      setPendingNavigation(navigation);
+    },
+  });
 
   const ariaDescribedBy = [describedBy, groupNote ? noteId : undefined]
     .filter(Boolean)
@@ -115,7 +81,7 @@ export function PendingButton({
         className={cn('min-h-11', className)}
         onClick={(event) => {
           // 新一轮由按钮发起的提交不继承上一轮可能残留的离开目标。
-          setPendingNavigationHref(null);
+          setPendingNavigation(null);
           onClick?.(event);
         }}
         {...buttonProps}
@@ -135,14 +101,22 @@ export function PendingButton({
         </p>
       ) : null}
       <ConfirmActionController level="L2"
-        open={pending && pendingNavigationHref !== null}
+        open={pending && pendingNavigation !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingNavigationHref(null);
+          if (!open) setPendingNavigation(null);
         }}
         focusReturnRef={navigationSourceRef}
         cancelLabel="留在当前页面"
         onConfirm={() => {
-          if (pendingNavigationHref) window.location.assign(pendingNavigationHref);
+          if (!pendingNavigation) return;
+          if (pendingNavigation.kind === 'traverse') {
+            pendingNavigation.resume();
+            return;
+          }
+          // A full document load does not wait behind the in-flight action.
+          // Release first so the browser does not ask a second time.
+          navigationGuard.release();
+          window.location.assign(pendingNavigation.href);
         }}>
         <ConfirmActionDialog action="当前操作仍在提交，仍要离开" changes={[]} consequences={[
           '操作可能已经到达服务器，返回后请先核对结果。',
