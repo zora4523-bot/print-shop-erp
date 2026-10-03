@@ -57,6 +57,7 @@ export {
   isConfirmedNavigationInProgress,
   isGuardedNavigationDestination,
   leaveDocument,
+  navigateConfirmed,
   useNavigationGuard,
 } from './navigation-guard';
 export type {

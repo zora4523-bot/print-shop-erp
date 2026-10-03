@@ -104,14 +104,16 @@ let traversePass: { key: string } | null = null;
  * - it is revoked when the document evidently stays: user interaction
  *   (pointerdown / keydown), the page becoming visible again, or a
  *   back/forward-cache restore (pageshow persisted); pagehide ends it too;
- * - a confirmed link the client router took over keeps it until that
- *   navigation commits a new URL in this document (or falls back to a full
- *   load, which the pass then covers);
- * - UNLOAD_PASS_FALLBACK_MS bounds it as a safety net if none of these happen
+ * - once the client router has taken the confirmed navigation over (link
+ *   replay or navigateConfirmed()), the pass is bound to that navigation only:
+ *   it ends when the new URL commits in this document, when its full-load
+ *   fallback (e.g. RSC failure → location.assign) consumes the first
+ *   beforeunload, or when the page evidently stays — never on a timer;
+ * - before / without a takeover, UNLOAD_PASS_FALLBACK_MS bounds it as a safety net if none of these happen
  *   (e.g. a download or a 204 response that keeps the page without input).
  */
 const UNLOAD_PASS_FALLBACK_MS = 10_000;
-let unloadPass: { event: Event | null; revoke: () => void } | null = null;
+let unloadPass: { event: Event | null; revoke: () => void; hold: () => void } | null = null;
 
 function revokeUnloadPass() {
   unloadPass?.revoke();
@@ -126,7 +128,9 @@ function grantUnloadPass() {
     if (event.persisted) revoke();
   };
   const timer = setTimeout(() => revoke(), UNLOAD_PASS_FALLBACK_MS);
-  const pass = { event: null as Event | null, revoke };
+  // Lifecycle-bound from now on: the router has taken this navigation over.
+  const hold = () => clearTimeout(timer);
+  const pass = { event: null as Event | null, revoke, hold };
   function revoke() {
     clearTimeout(timer);
     document.removeEventListener('pointerdown', revoke, true);
@@ -143,6 +147,41 @@ function grantUnloadPass() {
   window.addEventListener('pagehide', revoke);
   unloadPass = pass;
   return pass;
+}
+
+/**
+ * Run one confirmed navigation under a single-use pass. Next reports a takeover
+ * synchronously via onRouterTransitionStart (instrumentation-client.ts); then
+ * the pass follows that navigation's lifecycle instead of the safety timer.
+ * `run` returns false when the navigation was cancelled for real (a replayed
+ * click cancelled without a router takeover): the pass is revoked at once.
+ */
+function runConfirmedNavigation(run: () => boolean | void): void {
+  const pass = grantUnloadPass();
+  let tookOver = false;
+  const previous = setRouterTransitionListener(() => {
+    tookOver = true;
+  });
+  let proceeded: boolean | void;
+  try {
+    proceeded = run();
+  } finally {
+    setRouterTransitionListener(previous);
+  }
+  if (tookOver) pass.hold();
+  else if (proceeded === false) pass.revoke();
+}
+
+/**
+ * The one entry point for a programmatic navigation the user already confirmed
+ * (e.g. `navigateConfirmed(() => router.push(href))` after「放弃修改并离开」):
+ * same single-use pass and lifecycle as a replayed link, so a full-load
+ * fallback is not prompted again and nothing stays disarmed afterwards.
+ */
+export function navigateConfirmed(navigate: () => boolean | void): void {
+  // `navigate` may return false for a real cancellation (e.g. a re-dispatched
+  // click that was cancelled without a router takeover).
+  runConfirmedNavigation(navigate);
 }
 
 /** Whether this beforeunload belongs to the confirmed navigation (first one after the grant). */
@@ -165,8 +204,9 @@ export function leaveDocument(
   href: string,
   assign: (href: string) => void = (target) => window.location.assign(target),
 ): void {
-  grantUnloadPass();
-  assign(href);
+  runConfirmedNavigation(() => {
+    assign(href);
+  });
 }
 
 function decidingGuard(): GuardEntry | null {
@@ -219,20 +259,13 @@ function attachDocumentListeners(): () => void {
         // A cancelled click is ambiguous: Next Link cancels it when it takes the
         // navigation over (and may later fall back to location.assign, e.g. when
         // the RSC fetch fails), a consumer's onNavigate.preventDefault() cancels
-        // it for real. Next reports a takeover synchronously through the public
-        // onRouterTransitionStart hook (instrumentation-client.ts).
-        let tookOver = false;
-        setRouterTransitionListener(() => {
-          tookOver = true;
-        });
+        // it for real. runConfirmedNavigation() tells them apart.
         try {
-          const pass = grantUnloadPass();
-          const event = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-          const native = link.dispatchEvent(event);
-          if (!native && !tookOver) pass.revoke();
+          runConfirmedNavigation(() =>
+            link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })),
+          );
         } finally {
           linkPass = null;
-          setRouterTransitionListener(null);
         }
       },
     });

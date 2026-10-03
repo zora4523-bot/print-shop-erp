@@ -10,6 +10,9 @@ export function noteRouterTransitionStart(url: string): void {
   listener?.(url);
 }
 
-export function setRouterTransitionListener(next: TransitionListener | null): void {
+/** Install a listener for the duration of a confirmed navigation; returns the previous one to restore. */
+export function setRouterTransitionListener(next: TransitionListener | null): TransitionListener | null {
+  const previous = listener;
   listener = next;
+  return previous;
 }

@@ -6,6 +6,7 @@ import { noteRouterTransitionStart } from '../navigation-guard-transition';
 import {
   NAVIGATION_GUARD_SKIP_ATTRIBUTE,
   leaveDocument,
+  navigateConfirmed,
   useNavigationGuard,
   type BlockedNavigation,
   type NavigationGuard,
@@ -386,6 +387,47 @@ describe('a replayed link that the client router takes over', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(unload()).toBe(false);
     expect(unload()).toBe(true);
+  });
+
+  it('once the router took over, the pass outlives the safety timer (fallback after > 10 s)', async () => {
+    vi.useFakeTimers();
+    try {
+      render(<><Guard name="A" /><RouterLink /></>);
+      click(link('路由链接'));
+      blocked[0].resume();
+      vi.advanceTimersByTime(11_000);
+      expect(unload()).toBe(false);
+      expect(unload()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('confirmed programmatic navigation (navigateConfirmed) shares the same lifecycle', () => {
+    vi.useFakeTimers();
+    try {
+      render(<><Guard name="A" /><Guard name="B" /></>);
+      navigateConfirmed(() => noteRouterTransitionStart(at('/orders/elsewhere')));
+      vi.advanceTimersByTime(11_000);
+      expect(unload()).toBe(false);
+      expect(unload()).toBe(true);
+      click(link('工单列表'));
+      expect(blocked).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a confirmed programmatic navigation the router never started keeps only the safety bound', () => {
+    vi.useFakeTimers();
+    try {
+      render(<Guard name="A" />);
+      navigateConfirmed(() => undefined);
+      vi.advanceTimersByTime(11_000);
+      expect(unload()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ends the pass once the client navigation commits in the same document', async () => {
