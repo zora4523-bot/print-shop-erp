@@ -91,9 +91,12 @@ test('生产事实缺失时终价照存、缺项提示且不生成生产事实�
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
 
   // 终价落库后页面按 revalidate 重渲染：人工核价表单随 ADMIN_CONFIRMED 消失，
-  // 「下发前检查」面板列出待补录事项，页面不报错。
+  // 「待处理事项」面板列出待补录事项，页面不报错。
   await expect(pricing).toHaveCount(0);
-  await expect(page.getByText('待处理事项', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '待处理事项', exact: true })).toBeVisible();
+  await expect(page.locator('#admin-order-confirmation-preflight')).toContainText('待处理事项');
+  await expect(page.locator('#admin-order-confirmation-preflight').getByRole('listitem').first()).toBeVisible();
+  await expect(page.locator('#admin-order-confirmation-preflight').getByRole('listitem').first()).toContainText(/\S/);
   await expect(page.getByText('CANONICAL_FACTS_INCOMPLETE')).toHaveCount(0);
   await expectNoNextErrorOverlay(page);
   const after = await readPricingState(orderId);
@@ -111,7 +114,10 @@ test('生产事实缺失时终价照存、缺项提示且不生成生产事实�
 
   await page.reload();
   // 终价已保存，不再提供人工核价入口；刷新后状态不变。
-  await expect(page.getByText('待处理事项', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '待处理事项', exact: true })).toBeVisible();
+  await expect(page.locator('#admin-order-confirmation-preflight')).toContainText('待处理事项');
+  await expect(page.locator('#admin-order-confirmation-preflight').getByRole('listitem').first()).toBeVisible();
+  await expect(page.locator('#admin-order-confirmation-preflight').getByRole('listitem').first()).toContainText(/\S/);
   await expect(page.getByRole('button', { name: '录入人工核价', exact: true })).toHaveCount(0);
   expect(await readPricingState(orderId)).toEqual(after);
   await expectNoNextErrorOverlay(page);
@@ -144,7 +150,10 @@ test('管理端旧链接进入详情后终价照存、缺项提示，且不生�
   await trigger.click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
   await expect(pricing).toHaveCount(0);
-  await expect(drawer.getByText('待处理事项', { exact: true })).toBeVisible();
+  await expect(drawer.getByRole('heading', { name: '待处理事项', exact: true })).toBeVisible();
+  await expect(drawer.locator('#admin-order-confirmation-preflight')).toContainText('待处理事项');
+  await expect(drawer.locator('#admin-order-confirmation-preflight').getByRole('listitem').first()).toBeVisible();
+  await expect(drawer.locator('#admin-order-confirmation-preflight').getByRole('listitem').first()).toContainText(/\S/);
   await expect(page).toHaveURL(`/orders/${seeded.urgentOrderId}`);
   const after = await readPricingState(seeded.urgentOrderId);
   expect(after).toMatchObject({

@@ -72,3 +72,17 @@
 用户随后授权推送并合并主分支。以远程 main 建立 `codex/production-entry-merge`，仅移入本任务实现提交，未包含原分支上另一任务的部署记录；候选 `74594132` 的应用代码与上述本地验收代码一致。PR 为 #46。
 
 首轮远程 static 门禁发现 `ProductionReadinessResult` 仍留在未使用导出基线，但已由 `lib/order/legacy-production-facts.ts` 和 `lib/order/commercial-details.ts` 实际导入并使用。仅删除这一条已解决的候选记录，不修改检测器、不批量刷新清单。修正后 `pnpm check:dead-code --check` 通过（136 个 knip issue groups、541 个 ts-prune candidates、0 cycles），日志 `/tmp/erp-production-entry-dead-code-merge2.log`。完整 PR CI 以修正后的远程候选重新执行；合并不代表生产部署。
+
+### PR 全量 CI 补充回归
+
+`123b6be9` 的远程全量检查补充暴露了本地定向 E2E 未覆盖的旧定位及跨平台布局问题；本节更正前文“1024px 已能完整容纳九项”的判断。
+
+- Linux Browser Mode 在 1024px 的看板条宽 728px、内容 731px。macOS 诊断实际卡片最小宽仅 44px，全局触控规则覆盖了已有 `min-w-24`，文案缩短后是否横滚取决于系统字体。将看板自己的最小宽度移入局部 CSS Module，窄容器每卡至少 6rem；达到既有 56rem 容器断点后保留 44px 触控底线、九列铺开。恢复既有宽窄布局契约并新增 96px 卡宽断言，不隐藏溢出、不缩小触控、不改共享组件。
+- `admin-responsive` 与 `sales-functional-review` 仍查找旧“待下发生产”，同步为当前“待安排”，保留 href、aria-current、工厂处理进度与数据库状态断言。
+- `order-pricing-materialization-error` 的“待处理事项”文本同时存在于标题与反馈说明，改用唯一 heading 角色，并断言实际 preflight 包含提示、首个缺项可见且非空；原金额、版本、缺项与不物化生产事实断言保持。
+
+补充验证：3 份 Browser Mode 共 62 项通过（Sizing/Colors/ListLayout，含九视口明暗、44px、局部与页面溢出、axe、选中项可见与键盘焦点）；截图复验 Sizing 19 项通过，截图 `/tmp/erp-ci-dashboard-<width>-<theme>.png`。生产构建后按默认单 worker 执行上述失败 E2E 与九视口入口跳转，12 项通过。完整 lint 0 错误、2 条原有导航警告，typecheck 通过。日志 `/tmp/erp-ci-sizing-fix.log`、`/tmp/erp-ci-sizing-screens.log`、`/tmp/erp-ci-followup-e2e.log`、`/tmp/erp-ci-followup-lint.log`、`/tmp/erp-ci-followup-type.log`；临时日志/截图不作为永久存档。
+
+增量 Design QA（仅工单看板最小卡宽，代理自查）：1 层级沿用计数/状态/待收款，320 明、1024 暗、1280 明实图复核；2 留白/文字九视口自动几何通过且实图无中文逐字折行；3 明暗颜色不变、Colors/axe通过；4 仅局部看板类，消费者为 `/orders`，共享 strip 未改；5 筛选/选中项滚入/取消批量/详情展开由62项组件与12项真实E2E复验；6 未变更动效，复用既有 reduced-motion 规则及前批证据；7 九视口明暗、body无横溢出、窄卡96px及触控底线通过；8 真实入口跳转/生产事实缺项/销售状态通过；9 axe与列表焦点/选中可见检查通过，未改变键盘结构，200%缩放沿用前批证据；10 无新增资产或设计来源。未宣称全站或生产目标验收。
+
+新增缺项断言后，使用同一已构建应用串行复验两项核价 E2E，2/2 通过，日志 `/tmp/erp-ci-followup-pricing2.log`。截图仅在临时取证步骤生成，已移除该语句，未提交到测试或 CI。Claude 对本次增量复审从 8.5/10 提升至 **9.3/10**，确认两项问题已解决，无剩余 P0/P1/P2；远程最终 CI 通过仍为合并前置。

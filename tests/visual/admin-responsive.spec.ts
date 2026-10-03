@@ -190,11 +190,11 @@ test.describe('administrator workspace', () => {
 
   test('owner pending release link opens the matching order filter', async ({ page }) => {
     await page.goto('/owner');
-    const entry = page.getByRole('region', { name: '工单待办' }).getByRole('link', { name: /待下发生产/ });
+    const entry = page.getByRole('region', { name: '工单待办' }).getByRole('link', { name: /待安排/ });
     await expect(entry).toHaveAttribute('href', '/orders?queue=all&signal=pending-release');
     await entry.click();
     await expect(page).toHaveURL(/queue=all&signal=pending-release/, { timeout: 30_000 });
-    await expect(page.getByRole('region', { name: '工单决定看板' }).getByRole('link', { name: /待下发生产/ })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('region', { name: '工单决定看板' }).getByRole('link', { name: /待安排/ })).toHaveAttribute('aria-current', 'page');
   });
 
   test('order creation, detail and editing pass focused light and dark gates', async ({

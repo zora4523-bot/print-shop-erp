@@ -139,9 +139,11 @@ function assertDashboardSingleRow(width: number) {
   const dashboard = element('[aria-label="工单决定看板"] [data-slot="admin-order-scroll-strip"]');
   const cards = [...dashboard.querySelectorAll<HTMLElement>('a')];
   expect(cards).toHaveLength(9);
+  if (width < 1280) {
+    for (const card of cards) expect(card.getBoundingClientRect().width, '窄容器卡片至少 6rem').toBeGreaterThanOrEqual(96);
+  }
   expect(new Set(cards.map((card) => Math.round(card.getBoundingClientRect().top))).size, `${width}px 看板单行`).toBe(1);
-  // 简化后的状态文案在 1024px 已能完整容纳九项，无需强制制造横滚。
-  if (width >= 1024) {
+  if (width >= 1280) {
     expect(dashboard.scrollWidth, `${width}px 看板 9 列铺开、不滚动`).toBeLessThanOrEqual(dashboard.clientWidth);
   } else {
     expect(dashboard.scrollWidth, `${width}px 看板在条内横向滚动`).toBeGreaterThan(dashboard.clientWidth);

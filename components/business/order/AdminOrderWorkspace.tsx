@@ -464,8 +464,8 @@ function AdminOrderDecisionDashboard({
   );
 }
 
-const DECISION_CARD_LAYOUT =
-  'relative flex h-auto min-w-24 shrink-0 flex-col items-start justify-start gap-0 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none @min-[56rem]:min-w-0';
+const DECISION_CARD_LAYOUT = cn(styles.decisionCard,
+  'relative flex h-auto shrink-0 flex-col items-start justify-start gap-0 whitespace-normal rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none');
 
 /**
  * 队列与快捷筛选在窄容器（<960px）排成一行、条内横向滚动，不再各自折成 2–3 行（审查 L-8）；

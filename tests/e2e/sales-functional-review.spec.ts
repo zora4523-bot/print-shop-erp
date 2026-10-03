@@ -92,13 +92,13 @@ test('销售旧工单顺丰到付往返切换，报价三字段与不可变记�
   expect(errors).toEqual([]);
 });
 
-test('待下发生产的销售工单抽屉定位工厂处理，不提前显示完成', async ({ page }) => {
+test('待安排的销售工单抽屉定位工厂处理，不提前显示完成', async ({ page }) => {
   const id = await seed('CONFIRMED');
   const errors = trackErrors(page);
   await salesLogin(page, `/orders#wo=${id}`);
   const drawer = page.getByRole('dialog');
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByText('待下发生产', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('待安排', { exact: true })).toBeVisible();
   const progress = drawer.getByRole('list', { name: '工单进度' });
   await expect(progress.locator('[aria-current="step"]')).toHaveText('工厂处理');
   await expect(progress.getByText('完成', { exact: true })).not.toHaveAttribute('aria-current', 'step');

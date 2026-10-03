@@ -112,3 +112,47 @@
 
 ## 结论
 **最终评分维持 9.2 / 10，通过本地提交验收。** 第 4 轮提出的条件（串行全量单元测试，以及在生产构建上跑通 E2E 和九视口）都有日志证据，测试改动只是补等待，没有删除或放宽原有断言。本次没有部署，以上结论不代表生产环境验收。
+
+
+## PR CI 修正增量复审
+
+实际 Claude Code Opus 会话 `c8ea3f69-e904-4d21-b02d-e25698e68856`，只读审查，原始结果 `/tmp/erp-ci-followup-claude2.json`。第一轮 8.5 分指出缺项列表断言与临时截图语句；两项均解决后，第二轮原文如下：
+
+I've re-checked the final diff and the working tree: **both P2 issues are fixed, and nothing at P0, P1 or P2 is left. I give it 9.3/10, up from 8.5.** It can merge once the new missing-items assertions finish re-verifying and remote CI passes. Both are still conditions, not done.
+
+## P2-2 (debug screenshot line): fixed
+- The test file no longer contains `/tmp` or `screenshot`.
+- The diff for that file is identical to the first round: only the `>=96` card-width check and the 1280px split were added.
+
+## P2-1 (missing items not asserted): fixed
+- All three places (`order-pricing-materialization-error.spec.ts:96-99`, `:117-120`, `:153-156`) now check three things in order:
+  - the "待处理事项" heading is visible;
+  - `#admin-order-confirmation-preflight` contains "待处理事项";
+  - the first `listitem` is visible and has non-empty text.
+- That block only shows the "待处理事项" list when `issues.length > 0` (`AdminOrderDecisionPanel.tsx:97-118`). So these checks prove a real missing item is on screen, not just that the status is `SUBMITTED`.
+- **No duplicate id:** `AdminOrderDecisionPanel` has one production consumer (`AdminOrderDetailDecision.tsx:26`), and the readiness check renders once per panel (`:944`). The id is unique on the page, so these locators won't hit a strict-mode error.
+
+## Still holds from round one
+- The CSS module rule sits outside any cascade layer, so it beats the shared touch rule regardless of file order.
+- The container query resolves against the dashboard `<section>`, as before.
+- At 1024px the cards need about 944px against a 728px strip, so scrolling no longer depends on platform fonts.
+- No content is hidden, touch targets are not reduced, and test gates are not lowered.
+- Both "待安排" locators match exactly one link or text.
+
+## P3: acceptance doc is slightly out of date (not blocking)
+`docs/audits/2026-10-03-production-entry-acceptance.md` was added in this diff and lags the final code in two places:
+- **Line 69** still says only "改用唯一 heading 角色". It doesn't mention the three new checks on the readiness block's missing items.
+- **Line 71**:
+  - "12 项通过" was measured before the missing-items assertions were added, so it doesn't cover them.
+  - It still cites `/tmp/erp-ci-dashboard-*.png`. That's fine as a record of where the evidence came from, but it could mislead someone into thinking the screenshot step is still in the test.
+
+Once the new assertions pass, add one line with the result and log path so the doc doesn't overstate what was verified.
+
+## Merge decision
+Merge once both of these pass:
+1. the re-verification of the new missing-items assertions;
+2. the full remote CI run for PR #46.
+
+I'd also update the P3 doc lines before merging. Merging does not mean deploying to production.
+
+I didn't write any files or make any commits.
