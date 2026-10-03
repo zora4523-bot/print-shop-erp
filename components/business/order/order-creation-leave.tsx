@@ -2,9 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ActionNotice, ConfirmActionController, ConfirmActionDialog, type PageHeaderBack } from '@/components/ui-business';
+import { ActionNotice, ConfirmActionController, ConfirmActionDialog, useNavigationGuard, type BlockedNavigation, type PageHeaderBack } from '@/components/ui-business';
 import { Button } from '@/components/ui/button';
-import { useOrderFormLeaveGuard } from './use-order-form-leave-guard';
 
 export type LocalDraftSaveFailure = 'unserializable' | 'storage' | 'unavailable';
 export type OrderLeaveState = {
@@ -59,7 +58,10 @@ function planOrderCreationLeave(
   return { guarded: fileLines.length > 0 || draftKeys.length > 0, busy, losesFiles: fileLines.length > 0, fileLines, draftKeys, draftLines };
 }
 
-type Failure = { href: string | null; failed: Record<string, LocalDraftSaveFailure> };
+/** A blocked leave: where it goes and how to continue it once drafts are saved. */
+type LeaveTarget = { href: string; go: () => void };
+type Failure = { target: LeaveTarget | null; failed: Record<string, LocalDraftSaveFailure> };
+const pathOf = (href: string) => { const url = new URL(href, location.href); return `${url.pathname}${url.search}${url.hash}`; };
 
 /** One coordinator for batch navigation, persistence failures and browser unload. */
 export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled = true }: {
@@ -71,11 +73,23 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
   const [reports, setReports] = useState<Record<string, OrderLeaveState>>({});
   const reportsRef = useRef(reports);
   const persists = useRef(new Map<string, () => LocalDraftSaveFailure | null>());
-  const [target, setTarget] = useState<string | null>(null);
+  const [target, setTarget] = useState<LeaveTarget | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const sourceRef = useRef<HTMLElement | null>(null);
   const plan = planOrderCreationLeave(reports, labelFor, removedFileCount);
-  useOrderFormLeaveGuard(enabled && (plan.guarded || plan.busy));
+  // Every same-origin link (sidebar, breadcrumb, top bar, page body), browser
+  // back/forward and reload/close pass through the same batch plan. While busy
+  // the navigation is held without a dialog, as the header back already did.
+  const navigationGuard = useNavigationGuard({
+    when: enabled && (plan.guarded || plan.busy),
+    shouldBlock: () => { const latest = currentPlan(); return latest.guarded || latest.busy; },
+    onBlocked: (navigation: BlockedNavigation) => {
+      if (currentPlan().busy) return;
+      openLeave(navigation.kind === 'traverse'
+        ? { href: navigation.href, go: navigation.resume }
+        : { href: navigation.href, go: () => router.push(pathOf(navigation.href)) });
+    },
+  });
 
   const report = useCallback((key: string, state: OrderLeaveState | null) => {
     const current = reportsRef.current;
@@ -109,14 +123,18 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
     });
   }
   function dismissFailure() { setFailure(null); restoreFocus(); }
+  function openLeave(next: LeaveTarget) {
+    rememberSource();
+    setFailure(null);
+    setTarget(next);
+  }
   const guard = (href: string) => (event: { preventDefault(): void }) => {
+    if (navigationGuard.isReleased()) return;
     const latest = currentPlan();
     if (latest.busy) { event.preventDefault(); return; }
     if (!latest.guarded) return;
     event.preventDefault();
-    rememberSource();
-    setFailure(null);
-    setTarget(href);
+    openLeave({ href, go: () => router.push(href) });
   };
   const navigate = (href: string) => {
     let prevented = false;
@@ -125,7 +143,7 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
   };
 
   /** Failure blocks both leaving the page and changing/removing the active slot. */
-  function saveDrafts(orderId?: string, href: string | null = null) {
+  function saveDrafts(orderId?: string, leaveTarget: LeaveTarget | null = null) {
     const latest = currentPlan();
     if (latest.busy) return false;
     const failed: Failure['failed'] = {};
@@ -138,8 +156,8 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
       else report(key, { ...reportsRef.current[key], dirty: false });
     }
     if (Object.keys(failed).length) {
-      if (!href) rememberSource();
-      setFailure({ href, failed });
+      if (!leaveTarget) rememberSource();
+      setFailure({ target: leaveTarget, failed });
       return false;
     }
     setFailure(null);
@@ -161,15 +179,15 @@ export function useOrderCreationLeave({ labelFor, removedFileCount = 0, enabled 
     {visibleFailure ? <ActionNotice tone="error" title="本机草稿未保存，仍在本页"
       description={<>
         {failedKeys.map((key) => <p key={key}>{labelFor(key)}：{FAILURE_TEXT[visibleFailure.failed[key]]}。</p>)}
-        {visibleFailure.href ? <p>可以留在本页继续填写并保存工单；仍然离开将丢失：{losses.join('、')}。</p> : null}
+        {visibleFailure.target ? <p>可以留在本页继续填写并保存工单；仍然离开将丢失：{losses.join('、')}。</p> : null}
       </>}
       action={<div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" className="min-h-11" onClick={dismissFailure}>留在本页</Button>
-        {visibleFailure.href ? <span className="inline-flex rounded-md bg-background"><Button type="button" variant="destructive" className="min-h-11" disabled={plan.busy}
-          onClick={() => { const href = visibleFailure.href; if (!href || currentPlan().busy) return; setFailure(null); router.push(href); }}>仍然离开</Button></span> : null}
+        {visibleFailure.target ? <span className="inline-flex rounded-md bg-background"><Button type="button" variant="destructive" className="min-h-11" disabled={plan.busy}
+          onClick={() => { const leave = visibleFailure.target; if (!leave || currentPlan().busy) return; setFailure(null); leave.go(); }}>仍然离开</Button></span> : null}
       </div>} /> : null}
     <ConfirmActionController level="L2" open={target !== null} onOpenChange={(open) => { if (!open) setTarget(null); }}
-      focusReturnRef={sourceRef} disabled={plan.busy} cancelLabel="继续编辑" onConfirm={() => { if (target && saveDrafts(undefined, target)) router.push(target); }}>
+      focusReturnRef={sourceRef} disabled={plan.busy} cancelLabel="继续编辑" onConfirm={() => { if (target && saveDrafts(undefined, target)) target.go(); }}>
       <ConfirmActionDialog action={leaveAction} changes={[]}
         consequences={plan.guarded ? [...plan.fileLines, ...plan.draftLines] : ['当前没有未保存的内容。']}
         confirmText={leaveAction} danger={plan.losesFiles} />

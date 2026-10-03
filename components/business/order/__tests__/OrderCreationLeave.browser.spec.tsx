@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import '@/app/globals.css';
 import { WORKBENCH_CATALOG, WORKBENCH_CRAFTS } from '@/lib/workbench/__tests__/item-fixtures';
@@ -51,6 +51,7 @@ vi.mock('@/components/business/order/design-upload-client', async (importOrigina
   uploadOrderItemDesignFile: mocks.upload,
 }));
 
+import { PendingLink } from '@/components/ui-business';
 import { OrderCreationWorkspace } from '../OrderCreationWorkspace';
 import { OrderForm } from '../OrderForm';
 import type { OrderCreationEditor } from '../order-creation-editor';
@@ -360,4 +361,128 @@ it('normal-order fee navigation checks the batch after upload and submit complet
   expect(mocks.push).not.toHaveBeenCalled();
   await dialog().getByRole('button', { name: '放弃修改并离开', exact: true }).click();
   expect(mocks.push).toHaveBeenCalledWith('/orders/order-s#admin-fee-editor');
+});
+
+/**
+ * 全应用导航守卫（2026-10-04）：侧栏、面包屑父级等工作台外的站内链接与浏览器后退 / 前进
+ * 同样经过整批判定。外壳链接用 PendingLink（内部即 Next Link，与面包屑父级同一组件）渲染在工作台之外。
+ */
+describe('links outside the workspace and browser history', () => {
+  let originalNavigation: PropertyDescriptor | undefined;
+  let navigation: EventTarget & { traverseTo: ReturnType<typeof vi.fn> };
+  beforeEach(() => {
+    originalNavigation = Object.getOwnPropertyDescriptor(window, 'navigation');
+    navigation = Object.assign(new EventTarget(), {
+      traverseTo: vi.fn(() => ({ committed: Promise.resolve(), finished: Promise.resolve() })),
+    });
+    Object.defineProperty(window, 'navigation', { configurable: true, value: navigation });
+  });
+  afterEach(() => {
+    if (originalNavigation) Object.defineProperty(window, 'navigation', originalNavigation);
+    else Reflect.deleteProperty(window, 'navigation');
+  });
+  function mountInShell() {
+    flushSync(() => root.render(<>
+      <nav aria-label="侧栏"><PendingLink href="/foreman/schedule" pending={false}>排产看板</PendingLink></nav>
+      <nav aria-label="面包屑"><PendingLink href="/orders" pending={false}>工单列表</PendingLink></nav>
+      <OrderCreationWorkspace crafts={WORKBENCH_CRAFTS} products={WORKBENCH_CATALOG.products}
+        externalCreateOrderOptions={WORKBENCH_CATALOG} draftScope={SCOPE} />
+    </>));
+  }
+  const sidebar = () => page.getByRole('link', { name: '排产看板', exact: true });
+  const breadcrumb = () => page.getByRole('link', { name: '工单列表', exact: true });
+  function traversal(key: string, path: string) {
+    const event = new Event('navigate', { cancelable: true });
+    Object.assign(event, { navigationType: 'traverse', destination: { key, url: new URL(path, location.href).href, sameDocument: true } });
+    navigation.dispatchEvent(event);
+    return event;
+  }
+
+  it('sidebar, breadcrumb parent and browser back ask before discarding an unuploaded file', async () => {
+    mountInShell();
+    await expect.element(orderName()).toBeEnabled();
+    selectCdr('侧栏离开.cdr');
+    await expect.element(page.getByTitle('侧栏离开.cdr')).toBeVisible();
+
+    await sidebar().click();
+    await expect.element(dialog()).toHaveTextContent('本单 1 个未上传的设计文件将丢失。');
+    expect(mocks.navigations).toEqual([]);
+    await dialog().getByRole('button', { name: '继续编辑' }).click();
+    await expect.element(dialog()).not.toBeInTheDocument();
+    await expect.element(sidebar()).toHaveFocus();
+
+    await breadcrumb().click();
+    await expect.element(dialog()).toHaveTextContent('本单 1 个未上传的设计文件将丢失。');
+    await dialog().getByRole('button', { name: '放弃修改并离开' }).click();
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/orders');
+    expect(mocks.navigations).toEqual([]);
+
+    const before = { length: history.length, href: location.href };
+    expect(traversal('previous-entry', '/orders').defaultPrevented).toBe(true);
+    await expect.element(dialog()).toHaveTextContent('本单 1 个未上传的设计文件将丢失。');
+    expect({ length: history.length, href: location.href }).toEqual(before);
+    await dialog().getByRole('button', { name: '放弃修改并离开' }).click();
+    expect(navigation.traverseTo).toHaveBeenCalledExactlyOnceWith('previous-entry');
+  });
+
+  it('browser back saves unsaved text as a local draft before leaving', async () => {
+    mountInShell();
+    await expect.element(orderName()).toBeEnabled();
+    await orderName().fill('后退前保存');
+    expect(traversal('previous-entry', '/orders').defaultPrevented).toBe(true);
+    await expect.element(dialog()).toHaveTextContent('本单已填写的内容将保存为本机草稿。');
+    await dialog().getByRole('button', { name: '保存草稿并离开' }).click();
+    expect(navigation.traverseTo).toHaveBeenCalledExactlyOnceWith('previous-entry');
+    expect(Object.values({ ...localStorage }).some((value) => value.includes('后退前保存'))).toBe(true);
+  });
+
+  it('a failed draft save on browser back keeps the page and 仍然离开 resumes the traversal', async () => {
+    mountInShell();
+    await expect.element(orderName()).toBeEnabled();
+    await orderName().fill('后退保存失败');
+    failWrites(localStorage);
+    traversal('previous-entry', '/orders');
+    await dialog().getByRole('button', { name: '保存草稿并离开' }).click();
+    const notice = page.getByRole('alert').filter({ hasText: '本机草稿未保存' });
+    await expect.element(notice).toBeVisible();
+    expect(navigation.traverseTo).not.toHaveBeenCalled();
+    await notice.getByRole('button', { name: '仍然离开' }).click();
+    expect(navigation.traverseTo).toHaveBeenCalledExactlyOnceWith('previous-entry');
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it('shell links and history pass straight through when nothing would be lost', async () => {
+    mountInShell();
+    await expect.element(orderName()).toBeEnabled();
+    await sidebar().click();
+    await breadcrumb().click();
+    expect(traversal('previous-entry', '/orders').defaultPrevented).toBe(false);
+    expect(mocks.navigations).toEqual(['/foreman/schedule', '/orders']);
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
+  it('holds shell links and history without a dialog while an upload is running', async () => {
+    let finish!: (result: { ok: boolean }) => void;
+    mocks.upload.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    mountInShell();
+    await expect.element(orderName()).toBeEnabled();
+    await orderName().fill('打样工单');
+    await page.getByRole('button', { name: '打样', exact: true }).click();
+    await page.getByLabelText('收货人', { exact: true }).fill('测试收货人');
+    await page.getByLabelText('手机号', { exact: true }).fill('13800000000');
+    await page.getByLabelText('收货地址', { exact: true }).fill('浙江省杭州市测试地址');
+    await page.getByRole('button', { name: '核对费用', exact: true }).click();
+    await page.getByRole('button', { name: '保存工单', exact: true }).click();
+    await expect.poll(() => mocks.create.mock.calls.length).toBe(1);
+    await page.getByLabelText('上传设计文件', { exact: true }).upload(new File(['design'], 'design.png', { type: 'image/png' }));
+    await expect.poll(() => mocks.upload.mock.calls.length).toBe(1);
+    await sidebar().click();
+    await breadcrumb().click();
+    expect(traversal('previous-entry', '/orders').defaultPrevented).toBe(true);
+    expect(mocks.navigations).toEqual([]);
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    finish({ ok: true });
+    await expect.element(back()).not.toHaveAttribute('aria-disabled');
+  });
 });
