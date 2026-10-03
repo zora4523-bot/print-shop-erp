@@ -16,7 +16,7 @@ import type { ProductCategory } from '@/generated/prisma/enums';
 // 本月产品线分布饼图。lib 喂的是字符串（ProductCategory enum value
 // 或 'UNCATEGORIZED'），客户端再 map 成中文标签。
 
-export type CategoryDistributionChartProps = {
+type CategoryDistributionChartProps = {
   data: ReadonlyArray<{ category: string; orderCount: number }>;
 };
 

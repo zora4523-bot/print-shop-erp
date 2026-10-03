@@ -12,6 +12,7 @@ vi.mock('@/lib/production/reporter-operation-lane', () => ({ operationTypeForRep
 vi.mock('@/lib/production/progress-reporter-lane', () => ({ progressCraftIdsForReporter: mocks.crafts }));
 
 import { loadDispatchPageOrders } from '../dispatch-page';
+import { DispatchPlanValidationError } from '../dispatch-plan-error';
 
 const workers = [
   { id: 'w-hand', displayName: '手压师傅' },
@@ -26,6 +27,7 @@ function client(jobs: unknown[]) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mocks.lane.mockImplementation((worker: { id: string }) => (worker.id === 'w-hand' ? 'HAND_PRESS' : null));
   mocks.crafts.mockImplementation(async (_c: unknown, worker: { id: string }) => (worker.id === 'w-foil' ? ['craft-foil'] : []));
   mocks.targets.mockResolvedValue({
@@ -38,6 +40,23 @@ beforeEach(() => {
 });
 
 describe('loadDispatchPageOrders', () => {
+  it('returns blocked orders with safe issues and keeps other selected orders visible', async () => {
+    mocks.targets.mockRejectedValueOnce(new DispatchPlanValidationError(
+      { id: 'bad', customName: null, orderNo: 'BAD-1', revision: 2, workOrderVersion: 1 },
+      [{ code: 'UNKNOWN_CRAFT', message: '款式 #1 缺少可唯一映射的 canonical 工艺' }],
+    ));
+    const rows = await loadDispatchPageOrders(['bad', 'o1'], client([]));
+    expect(rows[0]).toEqual({ id: 'bad', name: 'BAD-1', revision: 2, version: 1, tasks: [], issues: ['款式 #1：生产工艺不明确，请完善工艺资料。'] });
+    expect(rows[1].tasks).toHaveLength(2);
+    expect(mocks.targets).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not disguise unexpected database failures as incomplete data', async () => {
+    const error = new Error('database offline');
+    mocks.targets.mockRejectedValueOnce(error);
+    await expect(loadDispatchPageOrders(['o1'], client([]))).rejects.toBe(error);
+  });
+
   it('offers workers by operation lane or progress craft, falling back to the order number', async () => {
     const [row] = await loadDispatchPageOrders(['o1'], client([]));
     expect(row).toMatchObject({ id: 'o1', name: 'GD-1', revision: 3, version: 2 });

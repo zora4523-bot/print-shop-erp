@@ -226,3 +226,16 @@ describe('calculateOrderCostBreakdown', () => {
     expect(withPostedAmount.totalCost.toFixed(2)).toBe('0.00');
   });
 });
+
+describe('completion-only wage evidence shared by analytics and billing', () => {
+  it.each(['5.00', '0.00'])('treats priced wage %s as authoritative and suppresses historical manual piecework', amount => {
+    const result = calculateOrderCostBreakdown({ items: [], productionOperations: [], productionJobs: [{ wages: [{ amount }] }], outsourceOrders: [], costEntries: [{ category: OrderCostCategory.PIECEWORK, amount: '90.00' }], reworkOrders: [] });
+    expect(result.piecework.toFixed(2)).toBe(amount);
+    expect(result.pieceworkSource).toBe('automatic');
+  });
+  it('retains historical evidence while a wage is still unpriced', () => {
+    const result = calculateOrderCostBreakdown({ items: [], productionJobs: [{ wages: [{ amount: null }] }], outsourceOrders: [], costEntries: [{ category: OrderCostCategory.PIECEWORK, amount: '90.00' }], reworkOrders: [] });
+    expect(result.piecework.toFixed(2)).toBe('90.00');
+    expect(result.pieceworkSource).toBe('legacy');
+  });
+});
