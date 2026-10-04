@@ -3,7 +3,7 @@ import path from 'node:path';
 const HISTORY_DOCUMENTS = new Set(['DECISIONS.md', 'HANDOFF.md', 'PROGRESS.md']);
 const REPOSITORY_DIRECTORIES = new Set([
   'app', 'actions', 'components', 'lib', 'scripts', 'prisma', 'deploy',
-  'tests', 'docs', 'config', 'hooks', '.github', '.agents',
+  'tests', 'docs', 'config', 'hooks', 'public', 'patches', '.github', '.agents',
 ]);
 const PNPM_COMMANDS = new Set([
   'add', 'approve-builds', 'audit', 'bin', 'build', 'cache', 'config', 'create',

@@ -118,7 +118,8 @@ describe('inline repository paths', () => {
       'app/missing.tsx', 'actions/missing.ts', 'components/missing.tsx',
       'lib/missing.ts', 'scripts/missing.mjs', 'prisma/missing.sql',
       'deploy/missing.sh', 'tests/missing.test.ts', 'docs/missing.md',
-      'config/missing.json', 'hooks/missing.ts', '.github/missing.yml',
+      'config/missing.json', 'hooks/missing.ts', 'public/missing.json',
+      'patches/missing.patch', '.github/missing.yml',
       '.agents/missing.md', 'missing.config.ts',
     ];
     expect(documentIssues(missing.map((reference) => `\`${reference}\``).join('\n'))).toEqual(
@@ -425,13 +426,13 @@ describe('repository scanner', () => {
     })));
   });
 
-  it('scans root Markdown, immediate docs and recursive agent skills only', async () => {
+  it('scans root Markdown, nested docs outside archive and audits, and agent skills only', async () => {
     const rootDir = await temporaryDirectory();
     await writeFixture(rootDir, 'package.json', JSON.stringify({ scripts: {} }));
-    const scanned = ['README.md', 'docs/guide.md', '.agents/skills/one/SKILL.md', '.agents/skills/group/two/SKILL.md'];
+    const scanned = ['README.md', 'docs/guide.md', 'docs/nested/guide.md', 'docs/nested/deep/guide.md', '.agents/skills/one/SKILL.md', '.agents/skills/group/two/SKILL.md'];
     const excluded = [
-      'CHANGELOG.md', 'docs/archive/old.md', 'docs/audits/old.md',
-      'docs/nested/guide.md', 'node_modules/package/README.md',
+      'CHANGELOG.md', 'docs/archive/old.md', 'docs/audits/nested/old.md',
+      'docs/nested/page.html', 'node_modules/package/README.md',
       '.agents/skills/one/README.md', 'scripts/README.md',
     ];
     for (const file of [...scanned, ...excluded]) {

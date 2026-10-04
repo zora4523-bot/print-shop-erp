@@ -47,11 +47,19 @@ async function repositoryFiles(rootDir) {
 
 export async function documentFiles(rootDir) {
   const files = [];
-  for (const directory of ['', 'docs']) {
-    for (const entry of await directoryEntries(path.join(rootDir, directory))) {
-      if (entry.isFile() && entry.name.endsWith('.md') && entry.name !== 'CHANGELOG.md') files.push(path.posix.join(directory, entry.name));
-    }
+  for (const entry of await directoryEntries(rootDir)) {
+    if (entry.isFile() && entry.name.endsWith('.md') && entry.name !== 'CHANGELOG.md') files.push(entry.name);
   }
+  // Nested docs are maintained too; archive/ and audits/ are frozen records.
+  const visitDocs = async (directory) => {
+    for (const entry of await directoryEntries(path.join(rootDir, directory))) {
+      const relative = path.posix.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!['docs/archive', 'docs/audits'].includes(relative) && entry.name !== 'node_modules') await visitDocs(relative);
+      } else if (entry.isFile() && entry.name.endsWith('.md')) files.push(relative);
+    }
+  };
+  await visitDocs('docs');
   const visitSkills = async (directory) => {
     for (const entry of await directoryEntries(path.join(rootDir, directory))) {
       if (entry.name === 'node_modules') continue;
