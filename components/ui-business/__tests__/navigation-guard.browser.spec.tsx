@@ -446,6 +446,59 @@ describe('a replayed link that the client router takes over', () => {
     }
   });
 
+  describe('URL-commit polling cleanup (fake timers)', () => {
+    function takeOver() {
+      render(<><Guard name="A" /><Guard name="B" /><RouterLink /></>);
+      click(link('路由链接'));
+      blocked[0].resume();
+      expect(vi.getTimerCount()).toBe(1);
+    }
+    function setVisibility(state: 'hidden' | 'visible') {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => {
+      Reflect.deleteProperty(document, 'visibilityState');
+      vi.useRealTimers();
+    });
+
+    it('stops polling while the page is hidden but keeps the pass for the pending fallback', () => {
+      takeOver();
+      setVisibility('hidden');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(unload()).toBe(false);
+    });
+
+    it('stops polling when the first beforeunload consumes the pass, still covering it for every guard', () => {
+      takeOver();
+      expect(unload()).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(unload()).toBe(true);
+    });
+
+    it('stops polling once the URL commits', () => {
+      const original = location.href;
+      try {
+        takeOver();
+        history.pushState(history.state, '', '?section=polled');
+        vi.advanceTimersByTime(100);
+        expect(vi.getTimerCount()).toBe(0);
+        expect(unload()).toBe(true);
+      } finally {
+        history.replaceState(history.state, '', original);
+      }
+    });
+
+    it('becoming visible again means the page stayed: pass revoked, nothing left running', () => {
+      takeOver();
+      setVisibility('hidden');
+      setVisibility('visible');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(unload()).toBe(true);
+    });
+  });
+
   it('ends the pass once the client navigation commits in the same document', async () => {
     render(<><Guard name="A" /><RouterLink /></>);
     click(link('路由链接'));

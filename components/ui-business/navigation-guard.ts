@@ -116,7 +116,7 @@ let traversePass: { key: string } | null = null;
 const UNLOAD_PASS_FALLBACK_MS = 10_000;
 /** How often a taken-over navigation checks whether its URL has committed. */
 const URL_COMMIT_POLL_MS = 100;
-let unloadPass: { event: Event | null; revoke: () => void; hold: () => void } | null = null;
+let unloadPass: { event: Event | null; revoke: () => void; hold: () => void; stopWatching: () => void } | null = null;
 
 function revokeUnloadPass() {
   unloadPass?.revoke();
@@ -124,8 +124,11 @@ function revokeUnloadPass() {
 
 function grantUnloadPass() {
   revokeUnloadPass();
+  // Hidden: stop polling but keep the pass (the pending navigation may still
+  // fall back to a full load). Visible again: the page stayed — revoke.
   const onVisibility = () => {
     if (document.visibilityState === 'visible') revoke();
+    else stopWatching();
   };
   const onPageShow = (event: PageTransitionEvent) => {
     if (event.persisted) revoke();
@@ -137,6 +140,11 @@ function grantUnloadPass() {
   // available in every browser): once the URL path or query changes, the
   // confirmed navigation is over and the next reload must be prompted again.
   let commitWatch: ReturnType<typeof setInterval> | undefined;
+  /** Stop URL polling without revoking the pass (it may still be in use). */
+  const stopWatching = () => {
+    clearInterval(commitWatch);
+    commitWatch = undefined;
+  };
   const hold = () => {
     clearTimeout(timer);
     const from = location.href;
@@ -144,10 +152,10 @@ function grantUnloadPass() {
       if (isGuardedNavigationDestination(from, location.href)) revoke();
     }, URL_COMMIT_POLL_MS);
   };
-  const pass = { event: null as Event | null, revoke, hold };
+  const pass = { event: null as Event | null, revoke, hold, stopWatching };
   function revoke() {
     clearTimeout(timer);
-    clearInterval(commitWatch);
+    stopWatching();
     document.removeEventListener('pointerdown', revoke, true);
     document.removeEventListener('keydown', revoke, true);
     document.removeEventListener('visibilitychange', onVisibility);
@@ -202,7 +210,12 @@ export function navigateConfirmed(navigate: () => boolean | void): void {
 /** Whether this beforeunload belongs to the confirmed navigation (first one after the grant). */
 function unloadPassCovers(event: Event): boolean {
   if (!unloadPass) return false;
-  if (unloadPass.event === null) unloadPass.event = event;
+  if (unloadPass.event === null) {
+    // First beforeunload consumes the pass: the same event stays covered for
+    // every guard's listener, but there is nothing left to poll for.
+    unloadPass.event = event;
+    unloadPass.stopWatching();
+  }
   return unloadPass.event === event;
 }
 
