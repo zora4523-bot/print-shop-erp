@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "OrderList.tsx"
+    },
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "docker-compose.yml"
+    },
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "lib/production.ts"
+    },
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "machine-piecework.ts"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-identity-review.json"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-review.json"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-task1.json"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-task6-final.json"
+    },
+    {
+      "file": "docs/LOAD-TEST-PLAN.md",
+      "type": "path",
+      "reference": "load-test-users.json"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "actions/paper-specifications.ts"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "components/business/rules/catalog/PaperSpecificationsForm.tsx"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "components/business/rules/catalog/UnassignedPaperProducts.tsx"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "lib/price/paper-specification-view.ts"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "lib/price/read-paper-specifications.ts"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "BeginTaskButton.tsx:20"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "CsPayrollPaymentForm.tsx:48"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "MarkPaidForm.tsx:25"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "OrderListFilters.tsx:265"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "OrdersTable.tsx:46"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "PendingSchedulingBoard.tsx:185"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "RecomputeHourlyForm.tsx:23"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "ReportTaskForm.tsx:187"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "SettleReadyCsButton.tsx:15"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "WorkerTaskBatchList.tsx:107-121"
+    },
+    {
+      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
+      "type": "path",
+      "reference": "lib/production.ts:1659-1663"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "AdminTableCard.tsx:77"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "CsPayrollPaymentForm.tsx:44"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "OrderListFilters.tsx:236"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "OrderListFilters.tsx:311"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "OrderListFilters.tsx:517"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "StartCsPeriodForm.tsx:33"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "app/(admin)/owner/salary/cs/[id]/page.tsx:230"
+    },
+    {
+      "file": "docs/UI现状盘点.md",
+      "type": "path",
+      "reference": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx:41-67"
+    },
+    {
+      "file": "docs/UI迁移清单.md",
+      "type": "path",
+      "reference": "CsPayrollPaymentForm.tsx:44"
+    },
+    {
+      "file": "docs/UI迁移清单.md",
+      "type": "path",
+      "reference": "OrderListFilterFields.tsx:13"
+    },
+    {
+      "file": "docs/UI迁移清单.md",
+      "type": "path",
+      "reference": "OrderListFilters.test.tsx:366"
+    },
+    {
+      "file": "docs/UI迁移清单.md",
+      "type": "path",
+      "reference": "OrderListFilters.tsx:517"
+    },
+    {
+      "file": "docs/UI迁移清单.md",
+      "type": "path",
+      "reference": "OrderPaperSwatchPicker.tsx:105"
+    },
+    {
+      "file": "docs/UI迁移清单.md",
+      "type": "path",
+      "reference": "components/business/salary/CsPayrollPaymentForm.tsx"
+    },
+    {
+      "file": "docs/codex-ui-brief.md",
+      "type": "path",
+      "reference": "tests/e2e/helpers/no-overflow.ts"
+    },
+    {
+      "file": "docs/ui-规范.md",
+      "type": "path",
+      "reference": "CsPayrollPaymentForm.tsx:323"
+    },
+    {
+      "file": "docs/ui-规范.md",
+      "type": "path",
+      "reference": "MarkHourlyPaidForm.tsx:73"
+    },
+    {
+      "file": "docs/ui-规范.md",
+      "type": "path",
+      "reference": "OrderPaperSwatchPicker.tsx"
+    },
+    {
+      "file": "docs/ui-规范.md",
+      "type": "path",
+      "reference": "StartCsPeriodForm.tsx:33"
+    },
+    {
+      "file": "docs/工单新建与编辑-字段对照表.md",
+      "type": "link",
+      "reference": "../components/business/order/InternalOrderEditWorkspace.tsx"
+    },
+    {
+      "file": "docs/工单编辑-字段对照表.md",
+      "type": "path",
+      "reference": "SalesOrderEditWorkspace.tsx"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "PascalCase.tsx"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "decimal.js"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "external-sales-quote.ts"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "kebab-case.ts"
+    }
+  ]
+}

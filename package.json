@@ -33,6 +33,7 @@
     "check:backup": "node scripts/check-backup-readiness.mjs",
     "check:architecture": "tsx scripts/check-architecture.ts --check",
     "check:dead-code": "node scripts/dead-code-scan.mjs",
+    "check:docs": "node scripts/check-doc-drift.mjs --check",
     "audit:review-data": "tsx scripts/audit-review-data-integrity.ts",
     "agent:next": "node scripts/agent-next-task.mjs",
     "db:migrate": "prisma migrate dev",

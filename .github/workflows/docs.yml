@@ -1,0 +1,48 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+      - "docs/**"
+      - ".agents/**"
+      - "package.json"
+      - "scripts/check-doc-drift.mjs"
+      - "scripts/lib/doc-drift.mjs"
+      - "config/doc-drift-baseline.json"
+      - ".github/workflows/docs.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.md"
+      - "docs/**"
+      - ".agents/**"
+      - "package.json"
+      - "scripts/check-doc-drift.mjs"
+      - "scripts/lib/doc-drift.mjs"
+      - "config/doc-drift-baseline.json"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check documentation drift
+        run: node scripts/check-doc-drift.mjs --check

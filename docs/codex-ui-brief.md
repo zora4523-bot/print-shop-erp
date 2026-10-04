@@ -1,6 +1,6 @@
 # Codex UI 优化任务 Brief（历史归档）
 
-> **状态：已被取代。** 本文件记录 2026-07-19 的初始范围与当时仓库现状，不再是当前权威任务书，其中“无主题入口”“只有一个 Desktop Chrome project”等描述已经过期。当前规范以 [`../UI-SYSTEM.md`](../UI-SYSTEM.md)、[`UI-DESIGN-COVERAGE.md`](./UI-DESIGN-COVERAGE.md)、[`UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md) 和 [`UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md) 为准。
+> **状态：已被取代。** 本文件记录 2026-07-19 的初始范围与当时仓库现状，不再是当前权威任务书，其中“无主题入口”“只有一个 Desktop Chrome project”等描述已经过期。当前规范以 [`../UI-SYSTEM.md`](../UI-SYSTEM.md)、[`docs/UI-DESIGN-COVERAGE.md`](./UI-DESIGN-COVERAGE.md)、[`docs/UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md) 和 [`docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md) 为准。
 
 > 本文件曾用于交给 Codex（或任何 AI/人）执行 **UI / 交互 / 跨设备高可用** 优化时的
 > **初始任务书 + 硬护栏 + 验收定义**。目标：生产在手机 / 平板 / 桌面全设备
@@ -45,7 +45,7 @@
    `app/` 和 `components/business/` 里**禁止** `bg-amber-50` / `text-emerald-600` /
    `border-red-500` 这类 Tailwind 调色板字面量，也禁止 `bg-[#...]` 硬编码颜色。
    例外仅 `components/ui/`（shadcn 原子件）。**违反 → `pnpm lint` 直接红。**
-   新配色需求 → 在 `globals.css` 新增语义 token（`:root` 和 `.dark` **两处都要加**），
+   新配色需求 → 在 `app/globals.css` 新增语义 token（`:root` 和 `.dark` **两处都要加**），
    业务代码只引用 token。
 3. **CJK 字体回退栈**、`tabular-nums` 数字对齐、`lang="zh-CN"`。
 4. **打印视图视觉基线**（`tests/visual/order-print.spec.ts-snapshots/*.png`）是资产：
@@ -134,7 +134,7 @@
 固定/贴边容器加 `env(safe-area-inset-*)` 内边距，修 iPhone 刘海/底部横条遮挡。
 
 ### D. 图表分类配色（"着色"缺陷）
-`globals.css` 的 `--chart-1..5` **当前全是灰阶**（`oklch(... 0 0)`，chroma=0）——
+`app/globals.css` 的 `--chart-1..5` **当前全是灰阶**（`oklch(... 0 0)`，chroma=0）——
 销售排行等分类图表各系列**肉眼无法区分**。改为一套**色觉友好**的分类 OKLCH
 调色板：相邻色相间隔 ≥40°、明度错开（不要只靠色相区分）、在 light/dark 两主题
 都可分辨、**通过色盲模拟**（红绿色盲对品牌红尤其敏感）。图表消费方
@@ -227,7 +227,7 @@
 
 1. **师傅手机端** `app/(worker)/`（最需要、面积小、独立）
 2. **表格 / 列表组件**（`AdminDataTable` 等，一次性受益 ~28 处）
-3. **`globals.css` 图表色 + token 补充**（§3-D）
+3. **`app/globals.css` 图表色 + token 补充**（§3-D）
 4. **各 admin 页面组**（owner / foreman / sales，逐组）
 5. **状态边界**（loading/error/not-found，§3-E）
 6. **暗色模式**（§3-H，最后，单独一批，需业主拍板）
@@ -238,7 +238,7 @@
 # 让 Codex 改（写模式，限定范围，一批一组）
 codex exec -m gpt-5.4 --sandbox workspace-write \
   "按 docs/codex-ui-brief.md 修复 app/(worker) 师傅端的响应式与裁切。
-   只动展示层；改完自己跑 pnpm typecheck/lint/test/build 和多设备视口闸，
+   只动展示层；改完自己跑 pnpm typecheck / pnpm lint / pnpm test / pnpm build 和多设备视口闸，
    贴溢出探测器与 axe 结果，不许只说已适配。"
 
 # 每批改完，只读 review 复核

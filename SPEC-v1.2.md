@@ -778,7 +778,7 @@ def calc_daily_salary(worker, date):
 
 - `CLAUDE.md`：开发规范、技术栈、目录结构
 - `prisma/schema.prisma`：完整数据库Schema
-- `seed-data.ts`：初始化种子数据
+- `prisma/seed.ts`：初始化种子数据
 - `CHANGELOG.md`：版本变更历史
 
 ---
@@ -916,7 +916,7 @@ const pdf = await page.pdf({ format: 'A4', printBackground: true });
 
 #### G.1 使用Pigsty托管PostgreSQL
 
-本项目使用 **Pigsty** 部署和管理 PostgreSQL。Pigsty对应用层透明（标准PG协议），`schema.prisma`无需任何改动。
+本项目使用 **Pigsty** 部署和管理 PostgreSQL。Pigsty对应用层透明（标准PG协议），`prisma/schema.prisma`无需任何改动。
 
 `app_ops.sensitive_column_policy` 按字符串登记脱敏策略，删列 / 删表不会级联清理。删除列或表的迁移
 必须同时（或以前向迁移）清理对应策略，否则 `app_ops.security_extension_readiness` 报

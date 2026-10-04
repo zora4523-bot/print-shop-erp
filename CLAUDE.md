@@ -180,7 +180,7 @@ import type { Prisma } from '../../generated/prisma/client';
 
 **100% 覆盖是有门禁的硬指标**，范围限定在「算错就是发错钱 / 绕过状态流转」的纯函数
 （业主 2026-08-19 拍板；阈值配在 `vitest.config.ts` 的 `coverage.thresholds`，
-`pnpm vitest run --coverage` 不达标即 exit 1）：
+`pnpm exec vitest run --coverage` 不达标即 exit 1）：
 
 - `lib/salary/piecework-pricing.ts`：工序计件工价
 - `lib/order/admin-create-price.ts`：管理员建单定价
@@ -273,7 +273,7 @@ export async function createOrder(data: OrderInput) {
 **权限定义集中在 `lib/auth/permissions.ts`**，所有权限常量、角色-权限映射、资源所有权判断都在这个文件里。修改权限规则只改一处。
 
 **新增权限时的流程**：
-1. 在 `permissions.ts` 的权限字典里新增 key（如 `'order:shipment:update'`）
+1. 在 `lib/auth/permissions-dict.ts` 的权限字典里新增 key（如 `'order:shipment:update'`）
 2. 在角色-权限映射表里声明哪些角色有此权限
 3. 在 Server Action 里用 `requirePermission('order:shipment:update')`
 4. 如涉及资源所有权（如"只能改自己的工单"），调用 `requireOwnership(resource, user)`
@@ -658,13 +658,14 @@ pnpm dev                     # 开发服务器（:3000）
 pnpm build                   # 生产构建
 pnpm typecheck               # next typegen + tsc --noEmit
 pnpm lint                    # eslint（flat config，全仓库）
+pnpm check:docs              # 文档路径、链接与 pnpm 命令漂移门禁
 
 pnpm test run                # 单测跑一遍就退出 ← agent 必须用这个
 pnpm test                    # 交互式 watch，会挂住不返回，agent 不要用
 pnpm test run lib/salary     # 只跑某个目录
 pnpm test run lib/salary/__tests__/machine-piecework.test.ts   # 只跑单个文件
 pnpm test run -t "double color"                                # 按用例名过滤
-pnpm vitest run --coverage   # 覆盖率（只统计 lib/**，见 vitest.config.ts）
+pnpm exec vitest run --coverage   # 覆盖率（只统计 lib/**，见 vitest.config.ts）
 
 pnpm test:e2e                        # Playwright（tests/e2e + tests/visual）
 pnpm test:e2e -- tests/e2e/order-create.spec.ts   # 单个 spec
@@ -695,6 +696,8 @@ pnpm agent:next              # 从 docs/AGENT-BACKLOG.md 取下一个任务并�
 pnpm worker:light            # 本地手动跑 LIGHT 队列 worker
 pnpm worker:heavy            # 本地手动跑 HEAVY 队列 worker（CDR/PDF/XLSX）
 ```
+
+纯文档改动由独立的 [Docs 工作流](./.github/workflows/docs.yml) 检查文档漂移；使用 Node.js 24 直接运行脚本，无需安装依赖。Quality 工作流继续保留 `pnpm check:docs`。
 
 **E2E 前置（2026-09-14 更新，旧说法「复用 :3000 并共用开发库」已作废）**：Playwright **绝不**复用
 `:3000` 的开发服务器，也**绝不**碰 `DATABASE_URL` 指向的开发库。它自己在 `127.0.0.1:3100`（开发配置）
@@ -775,7 +778,7 @@ export async function createProductAction(
   两个 collect 家族**不可互换**：给嵌套表单用 shallow 会丢掉行级定位。
 - Zod schema 统一从 `lib/auth/schemas.ts` import；实现按域拆在 `lib/auth/schemas/`
   （account / catalog / party / inventory / order-create / order-edit / production / outsource /
-  salary / finance / notification，跨域字段 helper 在 `shared.ts`）。新增 schema 放进对应域文件，
+  salary / finance / notification，跨域字段 helper 在 `lib/auth/schemas/shared.ts`）。新增 schema 放进对应域文件，
   入口文件只做 re-export；`lib/order/__tests__/edit-field-inventory.test.ts` 会遍历整个目录。
 - 列表页分页/排序/筛选用 `lib/admin/table.ts` 的解析器，不要各页自己 parse searchParams。
 - 成功后 `redirect()` 的 action **必须**用 `lib/admin/receipt.ts` 的 `appendReceipt` 带回执，目标页

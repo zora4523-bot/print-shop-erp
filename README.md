@@ -369,9 +369,9 @@ fc-list :lang=zh | head
 
 按顺序跑一遍（**本次发布批次另有前置排查与单向门，先过一遍 `docs/上线前置操作清单.md`**）：
 - [ ] `docs/上线前置操作清单.md` §二的两段只读预查每列为 0（2026-09-24 两条删除迁移遇到业务引用即中止）
-- [ ] `pnpm prisma migrate deploy`（生产 migration）
+- [ ] `pnpm exec prisma migrate deploy`（生产 migration）
 - [ ] `NotificationLog_deliveryKey_channelId_key` 的 `indisvalid` 为 `t`（部署指南 §14 的无效并发索引检查）
-- [ ] `pnpm prisma db seed`（仅首次部署且确认 seed 行为后执行）
+- [ ] `pnpm exec prisma db seed`（仅首次部署且确认 seed 行为后执行）
 - [ ] `chromium --version`、`fc-list :lang=zh`，并按部署指南用 `/usr/bin/chromium` 真生成一份中文 PDF
 - [ ] `CI=true NODE_ENV=production NOTIFICATION_MOCK_MODE=false BACKGROUND_JOBS_MODE=durable PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium DEPLOY_SMOKE_BASE_URL=https://bag.sshapi.cn pnpm deploy:smoke --skip-build --require-base-url`
 - [ ] 管理员登录 `/owner/accounts` 改默认密码
