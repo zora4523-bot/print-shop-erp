@@ -94,7 +94,15 @@ export async function runDocDrift({ rootDir = PROJECT_ROOT, check = false, write
   if (check && writeBaseline) throw new Error('Use either --check or --write-baseline, not both.');
   const issues = await collectDocDrift({ rootDir });
   const baselinePath = path.join(rootDir, 'config/doc-drift-baseline.json');
-  if (writeBaseline) await writeJsonAtomically(baselinePath, createDocDriftBaseline(issues));
+  if (writeBaseline) {
+    let previousBaseline;
+    try {
+      previousBaseline = JSON.parse(await readFile(baselinePath, 'utf8'));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    await writeJsonAtomically(baselinePath, createDocDriftBaseline(issues, previousBaseline));
+  }
   if (check) {
     const baseline = JSON.parse(await readFile(baselinePath, 'utf8'));
     const { added, resolved } = compareDocDriftBaseline(issues, baseline);

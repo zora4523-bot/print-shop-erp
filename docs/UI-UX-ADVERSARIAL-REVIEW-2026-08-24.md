@@ -69,16 +69,16 @@ applies_to: current worktree and docs/ux-redesign
 | 1 | ADV-S1-02 | C2 | 已确认缺确认层；理由契约待定 | 工单变更批准/拒绝迁移到 L3 | `OrderChangeReviewForm.tsx:219,241` 备注可选且按钮直接执行；现有流程已记录 reviewer/time/reviewRemark 并写 OrderLog | 显示字段/计价/生产影响并处理并发审核；保留既有日志；是否把 reviewRemark 改为必填须由 owner 确认，UI 不自行创契约 |
 | 2 | ADV-S1-03 | C2 | 已确认恢复缺口 | CDR 失败与导出超时补可恢复回执 | `cdr/page.tsx:139` 未显示已有 `lastErrorCode`；`OrderExportControls.tsx:68,241` 120 秒后停止轮询但仍永久“生成中” | 安全错误类别、回执 ID、重试/同条件重生、手动刷新与后台任务入口；覆盖 pending/failed/expired/slow |
 | 3 | ADV-S1-04 | C2 | 已确认缺确认层；理由契约待定 | 盘点过账补 L3 影响预检 | `components/business/material/InventoryCountClient.tsx:421` 最终过账仍直接执行；现有实现已有差异预览、actor/time/remark、逐行 delta 与 MaterialTransaction | 确认层复用现有差异与 remark，保留并发/部分成功和库存流水；是否把 remark 改为必填须由 owner 确认 |
-| 4 | ADV-S1-10A | C2 | 已确认高风险操作缺口 | 批量排产补 L2 影响确认 | `PendingSchedulingBoard.tsx:143,237` 选中后直接调用既有批量 Action | 确认层列工单、任务、师傅兼容性和交期；继续使用现有逐项结果契约 |
+| 4 | ADV-S1-10A | C2 | 已确认高风险操作缺口 | 批量排产补 L2 影响确认 | 当时的排产板选中后直接调用批量 Action；该旧排产板与运行时已于 `674cf8fc` 退役，本项保留历史确认层要求，不作为现行排产实现证据 | 确认层列工单、任务、师傅兼容性和交期；继续使用现有逐项结果契约 |
 | 5 | ADV-S1-10B | C2 | 已确认高风险操作缺口 | 发货补 L2 影响确认 | `components/business/order/ShipOrderForm.tsx:321` 直接执行；发货会定稿外部销售快递/耗材收费、重算应收总额、更新 Shipment/Order 为非终态 `SHIPPED` 并发通知，不扣库存 | 准确显示工单、数量、物流、收费定稿和应收变化；不得伪称扣库存或进入终态；幂等、pending 和错误恢复完整 |
-| 6 | ADV-S1-10C | C2 | 风险等级待业务确认 | 单项开工/报工补适当确认与结果反馈 | `BeginTaskButton.tsx:20`、`ReportTaskForm.tsx:187` 直接执行 | 先确认 L1/L2；保留快速作业效率、超报校验与计薪反馈，不把批量语义套到单项操作 |
-| 7 | ADV-S1-10D | C2 | 依赖契约决策 | 师傅批量完工补确认 | `WorkerTaskBatchList.tsx:136,190` 直接执行 | 先完成 `ADV-S1-11`；确认层准确表达最终选定的原子或逐项语义，不先承诺部分成功 |
-| 8 | ADV-S1-11 | C2 | 契约待定 | 决定批量完工是原子回滚还是逐项部分成功 | 设计的“不回滚”示例未明确覆盖 `reportTasks`；`lib/production.ts:1659-1663` 当前明确整批原子 | owner 形成 ADR；仅在决策改变时同步 schema、Action 结果与 `BatchActionResult`；契约未定前不改语义 |
+| 6 | ADV-S1-10C | C2 | 风险等级待业务确认 | 单项开工/报工补适当确认与结果反馈 | 当时的旧开工/报工按钮直接执行；该任务运行时及组件已于 `674cf8fc` 退役。现行报工入口见 `components/business/production/OperationReportForm.tsx`，不能沿用旧缺陷结论 | 先确认 L1/L2；保留快速作业效率、超报校验与计薪反馈，不把批量语义套到单项操作 |
+| 7 | ADV-S1-10D | C2 | 依赖契约决策 | 师傅批量完工补确认 | 当时的旧师傅批量任务列表直接执行；该组件已于 `674cf8fc` 随旧任务运行时退役，以下是当时的批量契约要求 | 先完成 `ADV-S1-11`；确认层准确表达最终选定的原子或逐项语义，不先承诺部分成功 |
+| 8 | ADV-S1-11 | C2 | 契约待定 | 决定批量完工是原子回滚还是逐项部分成功 | 设计的“不回滚”示例当时未明确覆盖 `reportTasks`；其旧生产模块已于 `674cf8fc` 退役。当时整批原子的证据仅用于历史契约讨论，不能作为现行 `lib/production/operation-reporting.ts` 的批量语义依据 | owner 形成 ADR；仅在决策改变时同步 schema、Action 结果与 `BatchActionResult`；契约未定前不改语义 |
 | 9 | ADV-S1-05 | C3 | 已确认安全 UX 缺口；审计载体待定 | 账号停用、角色、机器和工艺能力变更统一 L3 | `account/ToggleActiveButton.tsx:27` 直接提交；`AccountForm.tsx:272,361,523` 普通保存；实机已复现直接停用 | 真实引用/会话/任务影响、二次确认、服务端校验和焦点恢复；是否新增理由或统一审计载体先做 ADR |
 | 10 | ADV-S1-06 | C3 | 已确认并发缺口 | 工单编辑增加乐观锁和冲突三选 | 编辑页/Action 不传 revision：`orders/[id]/edit/page.tsx:50`、`actions/order.ts:291`；服务层最终按 id 更新：`lib/order.ts:1671,1740` | CAS/revision；同时展示我的版本与最新版本；“用我的/用最新/取消”均不静默丢输入；并发 E2E |
 | 11 | ADV-S1-07 | C3 | 已确认恢复缺口 | 定价草稿与阶梯冲突接入真实差异三选 | `components/business/price/ExternalSalesPriceBookDraftForms.tsx:247`、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:432` 只有刷新；生产 UI 未消费 `ConflictResolutionPanel` | Action 返回最新快照/版本；保留本地草稿；差异可读；三个动作再次做 CAS |
 | 12 | ADV-S1-08 | C3 | 已确认高风险操作缺口 | 账单发单、登记付款、外协付款统一 L2 | `components/business/bill/IssueBillButton.tsx:15`、`components/business/bill/RecordPaymentForm.tsx:39`、`components/business/outsource/OutsourcePaymentForm.tsx:55` 直接提交；设计规范将发单/付款列为 L2 | 确认层显示周期、对象、金额、剩余应收及不可回退影响；幂等、pending、结果反馈完整 |
-| 13 | ADV-S1-09 | C3 | 已确认高风险操作缺口；理由契约待定 | 薪资发放/撤销、结算、时薪重算统一 L3 | `CsPayrollPaymentForm.tsx:48`、`MarkPaidForm.tsx:25`、`RecomputeHourlyForm.tsx:23`、`SettleReadyCsButton.tsx:15` 直接执行 | 复用日薪重算的两阶段模式；显示人数/金额/周期影响并保留幂等/并发；理由或新审计字段只在既有契约或 ADR 下接入 |
+| 13 | ADV-S1-09 | C3 | 已确认高风险操作缺口；理由契约待定 | 薪资发放/撤销、结算、时薪重算统一 L3 | 当时的客服工资/周期结算、日薪发放、时薪重算直接执行；对应旧组件分别随 `3bb2e21a`、`0c8e75a8`、`d3aa552d` 退役。此处保留历史影响确认要求，现行计件结算入口见 `components/business/salary/PieceworkSettlementActions.tsx` | 复用日薪重算的两阶段模式；显示人数/金额/周期影响并保留幂等/并发；理由或新审计字段只在既有契约或 ADR 下接入 |
 | 14 | ADV-S1-12 | C3 | 已确认网络恢复缺口 | Server Action 传输失败保留输入并可安全重试 | 当前没有 `Failed to fetch` / offline E2E；根错误测试只是字符串契约；此前真实出现 `fetchServerAction` 失败 | 确定性断网 fixture；区分网络/字段/业务错误；保留输入；幂等重试；恢复后不重复写入 |
 | 15 | ADV-S1-13 | C3 | 已确认隔离缺口 | 对复杂页拆分数据源、Suspense 与 ErrorBoundary | 工单列表 `app/(admin)/orders/_components/OrdersListContent.tsx:34`、仓库 `warehouses/page.tsx:68`、Dashboard `owner/page.tsx:74` 将独立源绑在 `Promise.all` | 附属源失败不替换核心操作；分别覆盖列表/筛选/导出、库存/调拨/历史、KPI/待办/图表的单源失败 |
 | 16 | ADV-S1-14 | C3 | 缺确认层；理由/审计契约待定 | 通知模板与群绑定变更迁移 L3 | `RuleForm.tsx:49,200` 普通保存；当前 Action 不接理由 | 先展示影响规则/群/接收人和并发恢复；是否要求理由、用何种审计载体由 owner/数据 ADR 决定 |
@@ -93,14 +93,14 @@ applies_to: current worktree and docs/ux-redesign
 | 20 | ADV-S2-01 | C1 | 已确认布局缺陷 | disabled/pending 保持 44px 几何 | `components/ui/button.tsx:23` 基础为 32px，`app/globals.css:330` 的 44px 兜底排除 disabled；登录实测 active 44px → disabled 32px。修复后增加 pending 前后 rect 断言 |
 | 21 | ADV-S2-02 | C1 | 已确认对比缺陷 | 修复成功小字和焦点 token | `components/business/cdr/RegenerateBundleForm.tsx:70` 的 `text-xs text-success` 约 3.39:1；浅色 ring 对比也偏弱。改用可读 foreground，并加入焦点外观测试 |
 | 22 | ADV-S2-03 | C1 | 已确认语义缺陷 | 静态前置阻断不再使用 assertive alert | `components/business/bom/BomForm.tsx:148`、`components/business/purchase/PurchaseOrderForm.tsx:81` 等初始缺主数据提示抢播报；改为 `DisabledReason` / note/status，真实提交失败保留 alert |
-| 23 | ADV-S2-04 | C1 | 已确认状态缺口 | 工单筛选零结果使用 `no-result` | `OrdersTable.tsx:46` 总是 `no-data`；有筛选时需说明无结果并提供“清除全部筛选” |
+| 23 | ADV-S2-04 | C1 | 已确认状态缺口 | 工单筛选零结果使用 `no-result` | 旧工单表当时总是 `no-data`，已于 `5fd22ee1` 删除；现行列表见 `components/business/order/AdminOrderWorkspaceList.tsx`、`components/business/order/SalesOrdersList.tsx`。有筛选时需说明无结果并提供“清除全部筛选” |
 | 24 | ADV-S2-05 | C1 | 已确认根状态缺口 | 增加根 `app/not-found.tsx` | 当前只有 admin/worker 404；认证、打印和未知根路径会落入 Next 默认页。新增不泄露对象存在性的统一返回路径与测试 |
 | 25 | ADV-S2-06 | C2 | 已确认表单 a11y 缺口 | 错误摘要聚焦、去重播报并关联字段 | `components/ui-business/FormErrorSummary.tsx:18` 只有 `tabIndex=-1`；`components/ui-business/FormMessage.tsx:52` 每字段又 assertive；采购/BOM/薪资旧表单缺 `aria-describedby` 或字段身份。统一“单一摘要播报 + 首错定位”并测 activeElement |
 | 26 | ADV-S2-07 | C2 | 风险已确认 | Portal 自带 reduced-motion 与 safe-area | Sheet/Dropdown/Tooltip 挂到 body，绕过壳级 reduced-motion；全屏 Sheet 未完整处理 notch safe area。原语级修复并做 CSS env/设备验证 |
-| 27 | ADV-S2-08 | C2 | 风险已确认 | 统一 sticky header offset 和 fixed bar 占位 | `PendingSchedulingBoard.tsx:185` 使用 `top-0`，时间线/版本页写死 offset；工单批量条无 spacer。滚动后断言不与 header/末行重叠，并处理 safe-inline |
+| 27 | ADV-S2-08 | C2 | 风险已确认 | 统一 sticky header offset 和 fixed bar 占位 | 旧排产板当时使用 `top-0`，已于 `674cf8fc` 退役；时间线/版本页写死 offset、工单批量条无 spacer 是其余历史发现。滚动后断言不与 header/末行重叠，并处理 safe-inline |
 | 28 | ADV-S2-09 | C2 | 已确认状态漂移 | 扩充共享 status registry | 采购、CDR、发货、导出仍有本地映射；外协存在“已发出/已回货”与“已发送/已收货”漂移；worker 详情仍用中性 Badge。统一 label/tone/dot 并扩消费者门禁 |
 | 29 | ADV-S2-10 | C2 | 已确认 loading 不一致 | 统一慢加载契约 | `ContentSkeleton` 有 8 秒提示，但 worker、Dashboard、仓库等手写骨架没有。保留领域形状，复用慢加载包装器并用时间推进测试 |
-| 30 | ADV-S2-11 | C2 | 已确认移动交互不一致 | 375/393 宽度工单筛选改为底部抽屉 | `OrderListFilters.tsx:265` 所有视口均用内联 `<details>`；按设计实现 ≤80vh 抽屉、常驻 chips、焦点 trap/return 与 Escape |
+| 30 | ADV-S2-11 | C2 | 已确认移动交互不一致 | 375/393 宽度工单筛选改为底部抽屉 | 旧筛选器当时在所有视口使用内联 `<details>`，已于 `5fd22ee1` 删除；现行消费者为 `components/business/order/AdminOrderWorkspace.tsx` 与 `components/business/order/SalesOrderListFilters.tsx`，不据旧实现断言当前仍有该缺陷。设计要求为 ≤80vh 抽屉、常驻 chips、焦点 trap/return 与 Escape |
 | 31 | ADV-S2-12 | C2 | 设计契约任务 | 工单批量条接入已有排产能力 | 当前条只有复制/取消；批量排产 Action/schema 已存在，真正缺口是所选工单到师傅兼容选择/排产页的 UI 交接。导出/打印等动作仍须分别确认契约 |
 | 32 | ADV-S2-14C | C2 | 依赖服务端安全契约 | 展示考勤对薪资月份的影响并接入撤销 UI | 依赖 `ADV-S1-15`；只展示服务端返回的月份/已发阻断与下一步，不能靠客户端推断；服务端契约未完成前不得独立上线 |
 | 33 | ADV-S2-15A | C2 | IA 决策任务 | 确认并调整侧栏分类 | 当前通知/设置等归“运维”；设计建议设置归“设置”、CDR 归业务、Pigsty 与业务异常分离。先由 owner 签核 taxonomy，再迁移导航和回归权限可见性 |
@@ -108,7 +108,7 @@ applies_to: current worktree and docs/ux-redesign
 | 35 | ADV-S2-20 | C2 测量；满足阈值后另立 C3 | 架构候选，尚非已确认缺陷 | 量化账单生成、薪资重算/结算的长任务风险 | 同步 await 本身不能证明超时。先记录数据规模、p50/p95/p99、平台超时和失败恢复；达到阈值后再立后台回执任务，未达到则完善 pending/结果反馈 |
 | 36 | ADV-S2-21 | C2 决策；实施另估 | 已决策限制，非现有 Bug | 决定 DRAFT 是否需要直接款式编辑 | `lib/order/editable-fields.ts:11` 明确只编辑顶层字段；若 owner 立项，依赖 `ADV-S1-06`，复用新建工单编辑器并保持核价/revision/日志 |
 | 37 | ADV-S2-22 | C2 决策；实施另估 | 业务契约待定 | 决定款式 REMOVE 的修改申请契约 | SUBMITTED 已通过 `components/business/order/OrderChangeRequestForm.tsx:149-171` 支持 ADD/UPDATE 并走审批版本流；不得改成直接编辑。REMOVE 需先定义生产、计价和历史影响 |
-| 38 | ADV-S2-23 | C2 | 契约核对任务 | 在既有“进行中 N 分组”内核对师傅任务卡 | 设计明确不是唯一单卡，`WorkerTaskBatchList.tsx:107-121` 当前分组方向正确；仅核对是否缺交期、合法主动作和触控反馈，不推翻分组信息架构 |
+| 38 | ADV-S2-23 | C2 | 契约核对任务 | 在既有“进行中 N 分组”内核对师傅任务卡 | 设计当时明确不是唯一单卡，旧师傅任务列表的分组方向符合该设计；该组件已于 `674cf8fc` 退役，不作为现行任务页的结构依据。原检查范围为交期、合法主动作和触控反馈，不推翻已确认的信息架构 |
 | 39 | ADV-S2-14B | C3 | 业务契约待定 | 设计考勤批量填 | 当前只能单员工逐日录入；先确认批量覆盖范围、冲突、审计和部分成功契约，再实现交互 |
 | 40 | ADV-S2-15B | C3 | 产品范围待定 | 定义全局搜索与未决提醒 | Header 当前是重复快捷链接；搜索对象、权限过滤、索引、异常来源和未决数口径须单独立项，不能与导航改名绑在一个任务 |
 | 41 | ADV-S2-16 | C3 | 验收证据缺口 | 建立 route × design × state 可追踪清单和核心像素基线 | 74 个 admin 页面仅 28 个进入当前 responsive/axe 路由门禁，另 46 个未进入；admin/worker 截图只是忽略目录里的 candidate。先固定 fixture/字体/浏览器，再由 owner 签核 393/1280 light/dark expected |
@@ -120,7 +120,7 @@ applies_to: current worktree and docs/ux-redesign
 
 | 顺序 | ID | 成本 | 独立任务 | 完成标准 |
 |---:|---|---|---|---|
-| 45 | ADV-S3-01 | C1 | 修正文档状态漂移（本审查提交已完成） | 旧 `docs/codex-ui-brief.md` 已标记 historical/superseded；所有已知现行引用已改指 `UI-SYSTEM.md`、coverage、backlog 和本报告 |
+| 45 | ADV-S3-01 | C1 | 修正文档状态漂移（本审查提交已完成） | 旧 `docs/archive/codex-ui-brief.md` 已标记 historical/superseded；所有已知现行引用已改指 `UI-SYSTEM.md`、coverage、backlog 和本报告 |
 | 46 | ADV-S3-02 | C1 | 补三个详情页安全 metadata | 日薪详情、师傅工单详情、师傅工资详情使用不泄露权限信息的动态标题，并覆盖不存在时回落 |
 | 47 | ADV-S3-03 | C2 | 扩展静态 UI 防回退门禁 | AST 扫描本地状态映射、手写“暂无”、危险直接提交、无原因 disabled、重复 live region；先报告与例外清单，再升级为失败门禁 |
 | 48 | ADV-S3-04 | C2 | 设计证据自包含与签核治理 | 为原设计包建立文件清单/哈希/来源，不让仓库文档只依赖 Downloads 绝对路径；记录画板、证据等级、fixture、签核人和日期 |

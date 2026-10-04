@@ -1,6 +1,6 @@
 # Codex UI 优化任务 Brief（历史归档）
 
-> **状态：已被取代。** 本文件记录 2026-07-19 的初始范围与当时仓库现状，不再是当前权威任务书，其中“无主题入口”“只有一个 Desktop Chrome project”等描述已经过期。当前规范以 [`../UI-SYSTEM.md`](../UI-SYSTEM.md)、[`docs/UI-DESIGN-COVERAGE.md`](./UI-DESIGN-COVERAGE.md)、[`docs/UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md) 和 [`docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md) 为准。
+> **状态：已被取代。** 本文件记录 2026-07-19 的初始范围与当时仓库现状，不再是当前权威任务书，其中“无主题入口”“只有一个 Desktop Chrome project”等描述已经过期。当前规范以 [`UI-SYSTEM.md`](../../UI-SYSTEM.md)、[`docs/UI-DESIGN-COVERAGE.md`](../UI-DESIGN-COVERAGE.md)、[`docs/UI-REMEDIATION-BACKLOG.md`](../UI-REMEDIATION-BACKLOG.md) 和 [`docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](../UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md) 为准。
 
 > 本文件曾用于交给 Codex（或任何 AI/人）执行 **UI / 交互 / 跨设备高可用** 优化时的
 > **初始任务书 + 硬护栏 + 验收定义**。目标：生产在手机 / 平板 / 桌面全设备
@@ -237,7 +237,7 @@
 ```bash
 # 让 Codex 改（写模式，限定范围，一批一组）
 codex exec -m gpt-5.4 --sandbox workspace-write \
-  "按 docs/codex-ui-brief.md 修复 app/(worker) 师傅端的响应式与裁切。
+  "按 docs/archive/codex-ui-brief.md 修复 app/(worker) 师傅端的响应式与裁切。
    只动展示层；改完自己跑 pnpm typecheck / pnpm lint / pnpm test / pnpm build 和多设备视口闸，
    贴溢出探测器与 axe 结果，不许只说已适配。"
 

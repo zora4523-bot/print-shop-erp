@@ -39,15 +39,15 @@ inventory: UI现状盘点.md
 - 唯一口径：`lib/dashboard/format.ts` `formatMoney`（`¥ 1,234.56`）/ `formatMoneyPlain`；4 位单价 `formatUnitPrice`。
 - 步骤：
   1. `lib/order/sales-list-presentation.ts:98 formatMoney` 改名 `formatSalesAmountPlain` 并委托 `formatMoneyPlain`；调用点（`components/business/order/SalesOrdersList.tsx`、`components/business/order/SalesOrderDetailView.tsx`）改为 `formatMoney`。
-  2. 删除 14 个私有函数：`components/business/order/AdminOrderDecisionPanel.tsx:946`、`components/business/order/AdminOrderWorkspace.tsx:489`、`components/business/order/AdminOrderWorkspaceList.tsx:428`、`components/business/order/SubmitOrderButton.tsx:8`、`components/business/order/AdminOrderEditor.tsx:132`、`components/business/order/OrderSavedConfiguration.tsx:21`、`OrderChangeReviewForm.tsx:107,111`、`components/business/order/OrderForm.tsx:627`、`components/business/order/ExternalSalesOrderFormRail.tsx:61`、`CsPayrollPaymentForm.tsx:44`、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:354`、`app/(admin)/foreman/materials/page.tsx:36`；图表轴 `SalesRankingChart.tsx:141,151` 保留但改为包 `formatMoneyPlain`。
-  3. 88 处内联 `toFixed` / `Intl.NumberFormat` / 带小数位 `toLocaleString` 逐处替换（清单 = `scripts/ui-tokens/baseline.json` 中 `rule: "money"` 的 51 文件；最重：`owner/salary/cs/[id]/page.tsx` 13、`components/business/order/AdminOrderWorkspace.tsx` 10、`components/business/order/OrderForm.tsx` 8、`foreman/outsource/[id]/page.tsx` 7、`components/business/order/OrderChangeReviewForm.tsx` 7）。
+  2. 删除 14 个私有函数：`components/business/order/AdminOrderDecisionPanel.tsx:946`、`components/business/order/AdminOrderWorkspace.tsx:489`、`components/business/order/AdminOrderWorkspaceList.tsx:428`、`components/business/order/SubmitOrderButton.tsx:8`、`components/business/order/AdminOrderEditor.tsx:132`、`components/business/order/OrderSavedConfiguration.tsx:21`、`OrderChangeReviewForm.tsx:107,111`、`components/business/order/OrderForm.tsx:627`、`components/business/order/ExternalSalesOrderFormRail.tsx:61`、原 `CsPayrollPaymentForm`（客服工资已退役，`3bb2e21a`）、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:354`、`app/(admin)/foreman/materials/page.tsx:36`；图表轴 `SalesRankingChart.tsx:141,151` 保留但改为包 `formatMoneyPlain`。
+  3. 88 处内联 `toFixed` / `Intl.NumberFormat` / 带小数位 `toLocaleString` 逐处替换（清单 = `scripts/ui-tokens/baseline.json` 中 `rule: "money"` 的 51 文件；最重：原客服工资明细页 13 处（已退役，`3bb2e21a`）、`components/business/order/AdminOrderWorkspace.tsx` 10、`components/business/order/OrderForm.tsx` 8、`foreman/outsource/[id]/page.tsx` 7、`components/business/order/OrderChangeReviewForm.tsx` 7）。
   4. 差额显示（`deltaMoney`、带符号金额）统一进 `lib/dashboard/format.ts` 新增 `formatMoneyDelta`。
 - 验收：`scripts/ui-tokens/baseline.json` 中 `money` 条目清零；全仓 `¥` 后统一一个空格（`grep -rn "¥{" app components` 为 0）；`lib/dashboard/__tests__` 覆盖 delta、null、负数；`SalesOrdersList` / `OrdersTable` 快照测试更新说明写进 commit。
 - 代价：约 52 文件。可按域分批：订单（`components/business/order/**`）→ 薪资 / 账单（`app/(admin)/owner/salary/**`、`sales/bills/**`）→ 其余。
 - 完成记录：`lib/dashboard/format.ts` 新增 `formatMoneyDelta`；`lib/order/sales-list-presentation.ts` 同名异义 `formatMoney` 删除；14 个页面级 money 函数删除；88 处内联格式化与约 45 处 `¥ ${服务端字符串}` 直拼全部改走共享 formatter（含 `agent-bills/page.tsx:81`、`bills/archive/[id]/page.tsx:92` 两处原本渲染成 `¥ ¥ 1.00` 的双前缀缺陷）；`OrderCostEntry.unitPrice`（Decimal 12,4）改 `formatUnitPrice`。门禁 `money` 规则收紧为金额形态并新增拦 `¥ ${…}` 直拼；`scripts/ui-tokens/baseline.json` 的 `money` 待迁移条目清零，非金额命中（文件大小、百分比、数量、图表刻度）与下列遗留登记为 `permanent`（带理由）。约 20 个测试文件断言随 `¥ 1,234.56` 口径更新，无删除。
 - **遗留处置（2026-09-09 定案）**：
   1. 阶梯价与费率：新增 `lib/format/unit-price.ts formatRate`（2–4 位小数去尾零），`ExternalSalesPriceTierGroupEditor` 标签与差额、`visual-fixture` 两文件、计件 / 时薪 / 规则费率 4 处全部改走；对应 permanent 豁免删除；`components/business/price/__tests__/ExternalSalesPriceTierGroupEditor.test.tsx` 11 处断言更新。
-  2. `components/business/order/ShipOrderForm.tsx:23` 用户输入运费回显、`CsPayrollPaymentForm.tsx:71,73` 非数字兜底：保留原样回显，permanent。
+  2. `components/business/order/ShipOrderForm.tsx:23` 用户输入运费回显：保留原样回显，permanent。原 `CsPayrollPaymentForm` 的非数字兜底已随客服工资退役（`3bb2e21a`），不再适用此豁免。
 
 ## P1
 
@@ -88,7 +88,7 @@ inventory: UI现状盘点.md
 
 ### P1-2 裸表补横滚容器（§5.1、§8） — ✅ 2026-09-09 完成
 
-- 文件：`app/(admin)/foreman/materials/page.tsx:96`、`app/(admin)/owner/pigsty/page.tsx`（6 张表）、`app/(admin)/owner/salary/daily/page.tsx`、`owner/salary/hourly/page.tsx`、`owner/salary/piecework/page.tsx`、`owner/salary/cs/page.tsx`、`app/(admin)/owner/background-jobs/page.tsx`、`app/(admin)/owner/notifications/page.tsx`（4 张表）。
+- 文件：`app/(admin)/foreman/materials/page.tsx:96`、`app/(admin)/owner/pigsty/page.tsx`（6 张表）、`app/(admin)/owner/salary/daily/page.tsx`、`owner/salary/hourly/page.tsx`、`owner/salary/piecework/page.tsx`、原客服工资列表页（已退役，`3bb2e21a`）、`app/(admin)/owner/background-jobs/page.tsx`、`app/(admin)/owner/notifications/page.tsx`（4 张表）。
 - 验收：`admin-responsive` 在 375×667 与 393×852 无 `root-horizontal-overflow` / `viewport-x`；表格容器可键盘聚焦。
 - 代价：8 文件。
 - 完成记录：盘点时这 8 页其实已有手写 `role="region" tabIndex={0} overflow-x-auto` 包裹（无横向溢出风险），缺的是共享语义与滚动提示；17 个包裹全部替换为 `TableScrollArea`（自带 scroll cue，`piecework/page.tsx` 两张表补上了原本缺失的焦点圈）。剩余同形手写包裹 15 处登记为 P2-11。
@@ -102,11 +102,11 @@ inventory: UI现状盘点.md
 
 ### P1-5 圆角与间距任意值归并（§2.3、§2.4） — ✅ 2026-09-09 完成
 
-- 圆角：`rounded-[14px]` → `rounded-xl`（`ExternalSalesOrderFormRail.tsx:168,257,368,369`、`components/business/order/order-form-b/ExternalSalesOrderFormB.tsx:1057`、`components/business/rules/pricing/CustomerPricingSectionViews.tsx` 11 处）；`rounded-[9px]` / `[10px]` → `rounded-lg`（`ExternalSalesOrderFormB.tsx:1000,1019,1028,1039`、`OrderPaperSwatchPicker.tsx:105`）；裸 `rounded` 25 处 → `rounded-md`；CSS Module px 圆角 → `var(--radius-*)`（`components/business/order/AdminOrderDetailView.module.css`、`components/business/order/AdminOrderWorkspace.module.css`、`components/business/order/AdminOrderEditor.module.css:26`）。
-- 间距：safe-area 表达式 19 处 → `.admin-safe-*` / `.worker-safe-*`（`SalesOrdersList.tsx:543,568,715`、`OrderListFilters.tsx:517`、`components/business/order/OrderListBatchSelection.tsx:242`、`components/business/order/AdminOrderEditor.tsx:1116` 等）；`[1.125rem]` 8 处 → `4`（`OrderForm.tsx:3498,3604` 等）；`p-[18px]` → `p-4`；`py-[11px]` → `py-3`。
+- 圆角：`rounded-[14px]` → `rounded-xl`（`ExternalSalesOrderFormRail.tsx:168,257,368,369`、`components/business/order/order-form-b/ExternalSalesOrderFormB.tsx:1057`、`components/business/rules/pricing/CustomerPricingSectionViews.tsx` 11 处）；`rounded-[9px]` / `[10px]` → `rounded-lg`（`ExternalSalesOrderFormB.tsx:1000,1019,1028,1039`、原 `OrderPaperSwatchPicker`（已改为纸张胶囊，色卡退役，`3e1a3151`））；裸 `rounded` 25 处 → `rounded-md`；CSS Module px 圆角 → `var(--radius-*)`（`components/business/order/AdminOrderDetailView.module.css`、`components/business/order/AdminOrderWorkspace.module.css`、`components/business/order/AdminOrderEditor.module.css:26`）。
+- 间距：safe-area 表达式 19 处 → `.admin-safe-*` / `.worker-safe-*`（`SalesOrdersList.tsx:543,568,715`、原 `OrderListFilters`（旧筛选界面已退役，`5fd22ee1`）、`components/business/order/OrderListBatchSelection.tsx:242`、`components/business/order/AdminOrderEditor.tsx:1116` 等）；`[1.125rem]` 8 处 → `4`（`OrderForm.tsx:3498,3604` 等）；`p-[18px]` → `p-4`；`py-[11px]` → `py-3`。
 - 验收：`grep -rnE "rounded-\[|rounded\b[^-]|(p|m|gap|space)[xytblr]?-\[" app components` 只剩 `components/ui/`；六视口几何门禁通过。
 - 代价：约 14 文件。
-- 完成记录：19 文件。`rounded-[14px]` 16 → `xl`；`[9px]`/`[10px]` 5 → `lg`；裸 `rounded` 20 → `md`；`[1.125rem]` 6 → `4`、`gap-[1.375rem]` → `6`、`p-[18px]` 4 → `4`、`py-[11px]` 2 → `3`；safe-area 表达式 17 处 → `.admin-safe-inline` / `.admin-safe-bottom`；CSS Module 圆角 14/12/10/6/4px → `var(--radius-xl|lg|sm)`。保留：`SalesOrdersList.tsx:543,772` Sheet 头部 `pt-[max(1rem,env(top))] pr-[max(4rem,…)]`（为关闭按钮预留，无同义共享类，登记附录 A-7）；CSS Module 里 `99px` 胶囊、`50%` 圆、`3px` 进度条圆角（无对应 token）。两个源码契约测试断言随类名更新（`OrderListFilters.test.tsx:366`、`components/business/price/__tests__/ExternalSalesPriceTierGroupEditor.test.tsx:401`）。
+- 完成记录：19 文件。`rounded-[14px]` 16 → `xl`；`[9px]`/`[10px]` 5 → `lg`；裸 `rounded` 20 → `md`；`[1.125rem]` 6 → `4`、`gap-[1.375rem]` → `6`、`p-[18px]` 4 → `4`、`py-[11px]` 2 → `3`；safe-area 表达式 17 处 → `.admin-safe-inline` / `.admin-safe-bottom`；CSS Module 圆角 14/12/10/6/4px → `var(--radius-xl|lg|sm)`。保留：`SalesOrdersList.tsx:543,772` Sheet 头部 `pt-[max(1rem,env(top))] pr-[max(4rem,…)]`（为关闭按钮预留，无同义共享类，登记附录 A-7）；CSS Module 里 `99px` 胶囊、`50%` 圆、`3px` 进度条圆角（无对应 token）。两个源码契约测试断言随类名更新（原 `OrderListFilters` 测试（随旧筛选界面退役，`5fd22ee1`）、`components/business/price/__tests__/ExternalSalesPriceTierGroupEditor.test.tsx:401`）。
 
 ### P1-6 任意字号归并（§2.2） — ✅ 2026-09-09 完成（业主目视确认）
 
@@ -142,7 +142,7 @@ inventory: UI现状盘点.md
 
 ### P2-8 空态措辞与工厂（§5.5） — ✅ 2026-09-09 完成
 
-- 文件：`components/ui-business/empty-state-copy.ts`（删「还没有X」工厂，或改为「暂无X」并接入 `EmptyState` 默认值）、`components/business/admin/AdminDataTable.tsx:77`；内联 `暂无X。`（带句号）10 处（`foreman/outsource/page.tsx:35`、`owner/salary/cs/[id]/page.tsx:126,241`、`orders/[id]/page.tsx:1848`、`components/business/production/TaskDisputePanel.tsx:86`、`components/business/production/TaskDisputeAdminPanel.tsx:48`、`components/business/bill/BillCostEntryList.tsx:38` 等）去句号或换 `EmptyState`；三张图表 `暂无数据` 抽公共。「暂无法预测 / 计算」5 处移交文案任务。
+- 文件：`components/ui-business/empty-state-copy.ts`（删「还没有X」工厂，或改为「暂无X」并接入 `EmptyState` 默认值）、`components/business/admin/AdminDataTable.tsx:77`；内联 `暂无X。`（带句号）10 处（`foreman/outsource/page.tsx:35`、原客服工资明细页（已退役，`3bb2e21a`）、`orders/[id]/page.tsx:1848`、`components/business/production/TaskDisputePanel.tsx:86`、`components/business/production/TaskDisputeAdminPanel.tsx:48`、`components/business/bill/BillCostEntryList.tsx:38` 等）去句号或换 `EmptyState`；三张图表 `暂无数据` 抽公共。「暂无法预测 / 计算」5 处移交文案任务。
 - 验收：`grep -rn "还没有\|暂无.*。" app components` 为 0。
 - 代价：约 15 文件。
 - 完成记录：`components/ui-business/empty-state-copy.ts` 工厂改为「暂无X」/「没有匹配的X」（`EmptyState` 的 no-data / no-result 默认标题随之统一，5 个测试文件断言更新）；8 处纯空态短句去句号（外协单、包装组、工资发放流水、补录成本、异议记录 ×2、暂无修改、已停用记录）。带后续引导的整句（「暂无后台任务。通知……会落在这里。」等 10 处）是空态说明而非标题，保留。「暂无法预测 / 计算」5 处仍移交文案任务。
@@ -163,9 +163,9 @@ inventory: UI现状盘点.md
 
 ### P2-6 一线表单字段错误接 FormMessage / FormErrorSummary（§5.4、§5.10）
 
-- 文件（12 文件 / 50 处）：`components/business/order/order-form-b/ExternalSalesOrderFormB.tsx`（15，含多款定位）、`components/business/notification/ChannelForm.tsx`（9）、`components/business/auth/LoginForm.tsx`（8，零 JS 硬约束，只改错误渲染不改 form 形状）、`components/business/salary/CsPayrollPaymentForm.tsx`（5）、`components/business/notification/RuleForm.tsx`（3）、`components/business/auth/ChangePasswordForm.tsx`（3，同 LoginForm 约束）、`components/business/production/TaskDisputeAdminPanel.tsx`（2）及其余 5 文件。
+- 文件（原盘点 12 文件 / 50 处，其中客服工资 1 文件 / 5 处已退役）：`components/business/order/order-form-b/ExternalSalesOrderFormB.tsx`（15，含多款定位）、`components/business/notification/ChannelForm.tsx`（9）、`components/business/auth/LoginForm.tsx`（8，零 JS 硬约束，只改错误渲染不改 form 形状）、`components/business/notification/RuleForm.tsx`（3）、`components/business/auth/ChangePasswordForm.tsx`（3，同 LoginForm 约束）、`components/business/production/TaskDisputeAdminPanel.tsx`（2）及其余 5 文件。
 - 验收：每个错误经 `aria-describedby` 连到控件；`FormErrorSummary` 提交失败后获焦；`tests/e2e/no-js.spec.ts` 仍绿；`components/business/order/__tests__/EditOrderForm.aria.test.tsx` 式 SSR 断言补到 `ExternalSalesOrderFormB`。
-- 代价：12 文件。
+- 代价：原估 12 文件；已排除随客服工资退役的 `CsPayrollPaymentForm`（`3bb2e21a`）。
 
 ### P2-1 状态药丸归并（§6） — ✅ 2026-09-09 完成
 
@@ -184,7 +184,7 @@ inventory: UI现状盘点.md
 
 ### P2-3 PendingButton 覆盖（§5.7）
 
-- 文件（33）：`AttendanceRecordDialog`、`AdminOrderDecisionPanel`、`OrderChangeWithdrawButton`、`OrderPricingReviewForm`、`FulfillmentPricingReviewForm`、`ReworkOrderForm`、`OrderChangeRequestForm`、`SubmitOrderButton`、`SfCollectToggleForm`、`AdminOrderDetailDecision`、`EditOrderForm`、`OrderCommercialDetailsManager`、`CraftForm`、`BomForm`、`IssueBillButton`、`GenerateBillsForm`、`OrderCostEntryForm`、`AgentMonthlyBillExportControls`、`AgentMonthlyBillForms`、`LoginForm`、`ChangePasswordForm`、`DeleteChannelButton`、`UnknownNotificationActions`、`SalaryRuleSettingsForm`、`PieceworkSettlementActions`、`StartCsPeriodForm`、`BackgroundJobActionButton`、`ProductCategoryForm`、`ExternalSalesPriceBookDraftForms`、`OutsourceAmountForm`、`TaskDisputePanel`、`OperationReportForm`、`PurchaseOrderForm`、`SettingsForm`（均在 `components/business/`）。`LoginForm` / `ChangePasswordForm` 保持零 JS 形状。
+- 文件（33）：`AttendanceRecordDialog`、`AdminOrderDecisionPanel`、`OrderChangeWithdrawButton`、`OrderPricingReviewForm`、`FulfillmentPricingReviewForm`、`ReworkOrderForm`、`OrderChangeRequestForm`、`SubmitOrderButton`、`SfCollectToggleForm`、`AdminOrderDetailDecision`、`EditOrderForm`、`OrderCommercialDetailsManager`、`CraftForm`、`BomForm`、`IssueBillButton`、`GenerateBillsForm`、`OrderCostEntryForm`、`AgentMonthlyBillExportControls`、`AgentMonthlyBillForms`、`LoginForm`、`ChangePasswordForm`、`DeleteChannelButton`、`UnknownNotificationActions`、`SalaryRuleSettingsForm`、`PieceworkSettlementActions`、原 `StartCsPeriodForm`（客服工资已退役，`3bb2e21a`，不再迁移）、`BackgroundJobActionButton`、`ProductCategoryForm`、`ExternalSalesPriceBookDraftForms`、`OutsourceAmountForm`、`TaskDisputePanel`、`OperationReportForm`、`PurchaseOrderForm`、`SettingsForm`（均在 `components/business/`）。`LoginForm` / `ChangePasswordForm` 保持零 JS 形状。
 - 验收：`grep -rn "disabled={pending}" components/business` 只剩非按钮控件；提交中 `aria-busy` 与导航拦截行为由 `PendingButton` 测试覆盖。
 - 代价：33 文件，按域分批。
 
@@ -192,7 +192,7 @@ inventory: UI现状盘点.md
 
 > **状态（2026-09-29）：已完成。** 73 处 `<select`、全部原生 `<textarea` 与 14 处可见原生 `<input` 已迁到 `NativeSelect` / `Textarea` / `Input`（同一规格 `components/ui/field-styles.ts`），eslint 在业务范围禁止三者复发。记录见 [`audits/2026-09-29-ui-remediation-plan.md`](audits/2026-09-29-ui-remediation-plan.md)。以下为当初的任务描述，保留作追溯。
 
-- 新增 `components/ui/native-select.tsx`（原生 `<select>` 包装：`Input` 同款高度 `h-9` / 触控 `min-h-11`、`rounded-md`、`border-input`、`focus-visible:ring-3 ring-ring/50`、`aria-invalid` 样式、`data-slot="native-select"`）；删除 8 份 `selectClass`（`OrderListFilterFields.tsx:13`、`components/business/bom/BomForm.tsx:42`、`components/business/product-category/ProductCategoryForm.tsx:48`、`components/business/purchase/PurchaseReceiptForm.tsx:53`、`components/business/order/OrderForm.tsx:4158`、`components/business/order/SfCollectToggleForm.tsx:264`、`components/business/price/ExternalSalesPriceBookDraftForms.tsx:57`、`components/business/price/RulePriceWorkbench.tsx:123`）；替换 68 处 `<select`（39 文件，页面层：`owner/salary/{hourly,daily,piecework}`、`owner/agent-bills`、`sales/bills`、`owner/parties`、`foreman/attendance`）。同批把 17 处原生 `<textarea` 换 `Textarea`，30 处可见原生 `<input` 换 `Input`。
+- 新增 `components/ui/native-select.tsx`（原生 `<select>` 包装：`Input` 同款高度 `h-9` / 触控 `min-h-11`、`rounded-md`、`border-input`、`focus-visible:ring-3 ring-ring/50`、`aria-invalid` 样式、`data-slot="native-select"`）；删除 8 份 `selectClass`（原 `OrderListFilterFields`（旧筛选界面已退役，`5fd22ee1`）、`components/business/bom/BomForm.tsx:42`、`components/business/product-category/ProductCategoryForm.tsx:48`、`components/business/purchase/PurchaseReceiptForm.tsx:53`、`components/business/order/OrderForm.tsx:4158`、`components/business/order/SfCollectToggleForm.tsx:264`、`components/business/price/ExternalSalesPriceBookDraftForms.tsx:57`、`components/business/price/RulePriceWorkbench.tsx:123`）；替换 68 处 `<select`（39 文件，页面层：`owner/salary/{hourly,daily,piecework}`、`owner/agent-bills`、`sales/bills`、`owner/parties`、`foreman/attendance`）。同批把 17 处原生 `<textarea` 换 `Textarea`，30 处可见原生 `<input` 换 `Input`。
 - 验收：`grep -rn "<select\b\|<textarea\b" app components/business` 为 0；eslint 加 `no-restricted-syntax` 拦原生 select/textarea（与现有 checkbox 规则同形）；六视口触控门禁通过。
 - 代价：39 + 15 + 19 文件，分三批。
 

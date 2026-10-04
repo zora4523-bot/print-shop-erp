@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -339,13 +339,44 @@ describe('doc-drift baseline', () => {
     });
   });
 
+  it('preserves reasons when normalizing entries and refreshing matching issues', () => {
+    const reason = 'Naming example, not a repository file';
+    const baseline = createDocDriftBaseline([{ ...first, reason }, second, { ...first, line: 100 }]);
+    expect(baseline.entries[0]).toEqual({ file: first.file, type: first.type, reference: first.reference, reason });
+    expect(createDocDriftBaseline([second, { ...first, line: 200 }], baseline)).toEqual(baseline);
+    expect(compareDocDriftBaseline([first, second], baseline)).toEqual({ added: [], resolved: [] });
+    expect(compareDocDriftBaseline([], baseline).resolved).toEqual(baseline.entries);
+  });
+
+  it('drops resolved reasons and never transfers them across file, type or reference changes', () => {
+    const baseline = createDocDriftBaseline([{ ...first, reason: 'Historical reference' }]);
+    const replacements = [
+      { ...first, file: 'docs/guide.md' },
+      { ...first, type: 'link' },
+      { ...first, reference: 'lib/new.ts' },
+    ];
+    expect(createDocDriftBaseline(replacements, baseline)).toEqual(createDocDriftBaseline(replacements));
+    expect(createDocDriftBaseline([], baseline)).toEqual({ schemaVersion: 1, entries: [] });
+  });
+
+  it.each([null, 123, false, [], {}, undefined])('rejects an explicitly non-string reason: %j', (reason) => {
+    const baseline = {
+      schemaVersion: 1,
+      entries: [{ file: first.file, type: first.type, reference: first.reference, reason }],
+    };
+    expect(() => compareDocDriftBaseline([first], baseline)).toThrow('Invalid doc-drift baseline');
+    expect(() => createDocDriftBaseline([first], baseline)).toThrow('Invalid doc-drift baseline');
+  });
+
   it('rejects malformed and duplicate baseline entries', () => {
     const entry = { file: first.file, type: first.type, reference: first.reference };
     for (const baseline of [
       null, {}, { schemaVersion: 2, entries: [] },
       { schemaVersion: 1, entries: [1] },
       { schemaVersion: 1, entries: [{ ...entry, type: 'unknown' }] },
+      { schemaVersion: 1, entries: [{ ...entry, unexpected: 'field' }] },
       { schemaVersion: 1, entries: [entry, entry] },
+      { schemaVersion: 1, entries: [{ ...entry, reason: 'One' }, { ...entry, reason: 'Two' }] },
     ]) {
       expect(() => compareDocDriftBaseline([first], baseline)).toThrow('Invalid doc-drift baseline');
     }
@@ -449,5 +480,53 @@ describe('repository scanner', () => {
 
     await runDocDrift({ rootDir, writeBaseline: true });
     await expect(runDocDrift({ rootDir, check: true })).resolves.toEqual([]);
+  });
+
+  it('round-trips CLI write-baseline reasons while dropping resolved entries and adding unannotated issues', async () => {
+    const rootDir = await temporaryDirectory();
+    await writeFixture(rootDir, 'package.json', '{}');
+    await writeFixture(rootDir, 'README.md', '`Example.tsx` `lib/old.ts`');
+    await mkdir(path.join(rootDir, 'scripts'));
+    for (const file of ['check-doc-drift.mjs', 'dead-code-scan.mjs', 'lib']) {
+      await symlink(path.resolve(import.meta.dirname, '..', file), path.join(rootDir, 'scripts', file));
+    }
+    // Preserve only the entrypoint symlink so PROJECT_ROOT is the fixture, while
+    // imported helpers still resolve normally without copying repository code.
+    const runCli = (flag: string) => execFileSync(process.execPath, [
+      '--preserve-symlinks-main', path.join(rootDir, 'scripts/check-doc-drift.mjs'), flag,
+    ], { cwd: rootDir, encoding: 'utf8' });
+    const baselinePath = path.join(rootDir, 'config/doc-drift-baseline.json');
+    expect(runCli('--write-baseline')).toContain('(baseline written)');
+    const baseline = JSON.parse(await readFile(baselinePath, 'utf8'));
+    for (const entry of baseline.entries) entry.reason = `Retained: ${entry.reference}`;
+    await writeFile(baselinePath, JSON.stringify(baseline));
+
+    expect(runCli('--write-baseline')).toContain('(baseline written)');
+    expect(JSON.parse(await readFile(baselinePath, 'utf8'))).toEqual(baseline);
+    expect(runCli('--check')).toContain('2 unique entries (baseline matches)');
+
+    await writeFixture(rootDir, 'README.md', '\n\n`Example.tsx` `lib/new.ts`');
+    expect(runCli('--write-baseline')).toContain('(baseline written)');
+    expect(JSON.parse(await readFile(baselinePath, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      entries: [
+        { file: 'README.md', type: 'path', reference: 'Example.tsx', reason: 'Retained: Example.tsx' },
+        { file: 'README.md', type: 'path', reference: 'lib/new.ts' },
+      ],
+    });
+    expect(runCli('--check')).toContain('2 unique entries (baseline matches)');
+  });
+
+  it('refuses to overwrite a baseline with an invalid reason', async () => {
+    const rootDir = await temporaryDirectory();
+    await writeFixture(rootDir, 'package.json', '{}');
+    await writeFixture(rootDir, 'README.md', '`Example.tsx`');
+    const baselineText = JSON.stringify({
+      schemaVersion: 1,
+      entries: [{ file: 'README.md', type: 'path', reference: 'Example.tsx', reason: 42 }],
+    });
+    await writeFixture(rootDir, 'config/doc-drift-baseline.json', baselineText);
+    await expect(runDocDrift({ rootDir, writeBaseline: true })).rejects.toThrow('Invalid doc-drift baseline');
+    expect(await readFile(path.join(rootDir, 'config/doc-drift-baseline.json'), 'utf8')).toBe(baselineText);
   });
 });

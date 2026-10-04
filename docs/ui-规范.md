@@ -591,7 +591,7 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ### A-2 金额格式化（§4.1）
 
-P0-1 已完成，`scripts/ui-tokens/baseline.json` 的 `money` 待迁移条目为 0；费率与阶梯价已于 2026-09-09 改走 `formatRate`。剩余 `permanent` 登记（各带理由）：用户输入回显（`components/business/order/ShipOrderForm.tsx:23`、`CsPayrollPaymentForm.tsx:71,73`）、图表刻度（`components/business/dashboard/SalesRankingChart.tsx`）、Decimal→字符串序列化传子组件校验、非金额（文件大小、百分比、数量）。
+P0-1 已完成，`scripts/ui-tokens/baseline.json` 的 `money` 待迁移条目为 0；费率与阶梯价已于 2026-09-09 改走 `formatRate`。剩余 `permanent` 登记（各带理由）：用户输入回显（`components/business/order/ShipOrderForm.tsx:23`；原 `CsPayrollPaymentForm` 已随客服工资退役，`3bb2e21a`，不再适用）、图表刻度（`components/business/dashboard/SalesRankingChart.tsx`）、Decimal→字符串序列化传子组件校验、非金额（文件大小、百分比、数量）。
 
 ### A-3 抽屉内表单（§5.8）
 
@@ -601,11 +601,11 @@ P0-1 已完成，`scripts/ui-tokens/baseline.json` 的 `money` 待迁移条目�
 
 ### A-4 高风险操作停留 L2（§5.3）
 
-`MarkHourlyPaidForm.tsx:73`、`CsPayrollPaymentForm.tsx:323`、`PieceworkSettlementActions.tsx:54,95,140`、`components/business/bill/IssueBillButton.tsx:42`、`components/business/order/AdminOrderBatchActions.tsx:173` → **定案保持 L2**（DECISIONS 2026-09-09）。
+`PieceworkSettlementActions.tsx:54,95,140`、`components/business/bill/IssueBillButton.tsx:42`、`components/business/order/AdminOrderBatchActions.tsx:173` → **定案保持 L2**（DECISIONS 2026-09-09）。原 `MarkHourlyPaidForm` 与 `CsPayrollPaymentForm` 已分别随时薪月结写入链路（`d3aa552d`）、客服工资（`3bb2e21a`）退役，不再作为现行站点。
 
 ### A-5 表单提交写法（§5.2）
 
-箭头包裹 7 处（`components/business/bill/GenerateBillsForm.tsx:22`、`components/business/bill/IssueBillButton.tsx:37`、`components/business/order/OrderCancellationRequestForm.tsx:59`、`components/business/order/SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、`StartCsPeriodForm.tsx:33`）与 `useActionState` 闭包 7 处（`components/business/order/FinishOrderButton.tsx:19`、`components/business/order/ShipOrderForm.tsx:109`、`components/business/bill/IssueBillButton.tsx:29`、`craft/ToggleActiveButton.tsx:22`、`product/ToggleActiveButton.tsx:23`、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:537`、`account/ToggleActiveButton.tsx:21`） → **接受的现状**（DECISIONS 2026-08-17），不迁移。
+箭头包裹原 7 处（`components/business/bill/GenerateBillsForm.tsx:22`、`components/business/bill/IssueBillButton.tsx:37`、`components/business/order/OrderCancellationRequestForm.tsx:59`、`components/business/order/SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、原 `StartCsPeriodForm`，已随客服工资退役，`3bb2e21a`）与 `useActionState` 闭包 7 处（`components/business/order/FinishOrderButton.tsx:19`、`components/business/order/ShipOrderForm.tsx:109`、`components/business/bill/IssueBillButton.tsx:29`、`craft/ToggleActiveButton.tsx:22`、`product/ToggleActiveButton.tsx:23`、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:537`、`account/ToggleActiveButton.tsx:21`） → **接受的现状**（DECISIONS 2026-08-17），不迁移。
 
 ### A-6 deep import（§3.1）
 
@@ -626,7 +626,7 @@ P0-1 已完成，`scripts/ui-tokens/baseline.json` 的 `money` 待迁移条目�
 | 原生 `<select` + `selectClass` | 已清零（2026-09-29）+ eslint 门禁（业务范围禁 JSX `<select>` / `<textarea>`） | **P2-2** ✅ |
 | 裸 `disabled={pending}` 按钮 | 55 处 / 35 文件 | **P2-3** |
 | 手写分页 | `components/business/price/RulePriceWorkbench.tsx:905`（翻页链接须走 `PriceWorkspaceLink` 导航拦截，共享分页不支持） | 豁免 |
-| 一线表单字段错误未接 `FormMessage` | 12 文件 / 50 处 | **P2-6** |
+| 一线表单字段错误未接 `FormMessage` | 原盘点 12 文件 / 50 处，其中客服工资 1 文件 / 5 处已退役（`3bb2e21a`） | **P2-6** |
 | 空态引导整句（带句号） | 约 10 处（`background-jobs/page.tsx:90`、`BomForm.tsx:159,160,270`、`components/business/setting/SettingsForm.tsx:297` 等） | 允许（§5.5） |
 | 手写卡面 284 处 / 112 文件、手写通知块 27 文件、裸 `role=status/alert` | — | **收编**，不迁移（§3.2、§5.4） |
 

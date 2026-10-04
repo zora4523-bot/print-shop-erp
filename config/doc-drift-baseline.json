@@ -4,252 +4,122 @@
     {
       "file": "CLAUDE.md",
       "type": "path",
-      "reference": "OrderList.tsx"
+      "reference": "OrderList.tsx",
+      "reason": "组件文件 PascalCase 命名示例，不要求仓库存在同名组件。"
     },
     {
       "file": "CLAUDE.md",
       "type": "path",
-      "reference": "docker-compose.yml"
+      "reference": "docker-compose.yml",
+      "reason": "文中明确说明仓库没有该文件，当前部署走 deploy/ecosystem.config.cjs；引用用于描述不存在的事实。"
     },
     {
       "file": "CLAUDE.md",
       "type": "path",
-      "reference": "lib/production.ts"
+      "reference": "lib/production.ts",
+      "reason": "文中明确说明旧模块已于 674cf8fc 删除，并指出现行 ProductionOperation 运行时；引用用于记录退役边界。"
     },
     {
       "file": "CLAUDE.md",
       "type": "path",
-      "reference": "machine-piecework.ts"
+      "reference": "machine-piecework.ts",
+      "reason": "代码文件 kebab-case 命名示例，不是当前实现路径。"
     },
     {
       "file": "DEVELOPMENT.md",
       "type": "path",
-      "reference": "claude-identity-review.json"
+      "reference": "claude-identity-review.json",
+      "reason": "历史验证记录中的本机临时审查调用结果，属于日志产物而非仓库源文件；文中已说明调用返回 429、审查未完成。"
     },
     {
       "file": "DEVELOPMENT.md",
       "type": "path",
-      "reference": "claude-review.json"
+      "reference": "claude-review.json",
+      "reason": "历史数据回放验证中的本机临时审查调用结果，属于日志产物而非仓库源文件；文中已说明调用返回 429、审查未完成。"
     },
     {
       "file": "DEVELOPMENT.md",
       "type": "path",
-      "reference": "claude-task1.json"
+      "reference": "claude-task1.json",
+      "reason": "历史账单验收中的本机临时审查调用结果，属于日志产物而非仓库源文件。"
     },
     {
       "file": "DEVELOPMENT.md",
       "type": "path",
-      "reference": "claude-task6-final.json"
+      "reference": "claude-task6-final.json",
+      "reason": "历史账单验收中的本机临时审查调用结果，属于日志产物而非仓库源文件；保留最终审查受 429 阻断的记录。"
     },
     {
       "file": "docs/LOAD-TEST-PLAN.md",
       "type": "path",
-      "reference": "load-test-users.json"
+      "reference": "load-test-users.json",
+      "reason": "压测 seed 运行时生成、正式压测读取的凭据文件；文档明确要求 chmod 600 并禁止放入仓库。"
     },
     {
       "file": "docs/PLAN-空白封按单价管理.md",
       "type": "path",
-      "reference": "actions/paper-specifications.ts"
+      "reference": "actions/paper-specifications.ts",
+      "reason": "清理清单明确标注启用 Action 已移除；有意保留旧组合启用协议的退役记录。"
     },
     {
       "file": "docs/PLAN-空白封按单价管理.md",
       "type": "path",
-      "reference": "components/business/rules/catalog/PaperSpecificationsForm.tsx"
+      "reference": "components/business/rules/catalog/PaperSpecificationsForm.tsx",
+      "reason": "清理清单明确标注纸张规格表单已移除；有意保留旧组合维护入口的退役记录。"
     },
     {
       "file": "docs/PLAN-空白封按单价管理.md",
       "type": "path",
-      "reference": "components/business/rules/catalog/UnassignedPaperProducts.tsx"
+      "reference": "components/business/rules/catalog/UnassignedPaperProducts.tsx",
+      "reason": "清理清单明确标注未归属产品提示已移除；有意保留旧组合维护入口的退役记录。"
     },
     {
       "file": "docs/PLAN-空白封按单价管理.md",
       "type": "path",
-      "reference": "lib/price/paper-specification-view.ts"
+      "reference": "lib/price/paper-specification-view.ts",
+      "reason": "清理清单明确标注旧状态视图已移除；有意保留旧组合状态协议的退役记录。"
     },
     {
       "file": "docs/PLAN-空白封按单价管理.md",
       "type": "path",
-      "reference": "lib/price/read-paper-specifications.ts"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "BeginTaskButton.tsx:20"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "CsPayrollPaymentForm.tsx:48"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "MarkPaidForm.tsx:25"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "OrderListFilters.tsx:265"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "OrdersTable.tsx:46"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "PendingSchedulingBoard.tsx:185"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "RecomputeHourlyForm.tsx:23"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "ReportTaskForm.tsx:187"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "SettleReadyCsButton.tsx:15"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "WorkerTaskBatchList.tsx:107-121"
-    },
-    {
-      "file": "docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md",
-      "type": "path",
-      "reference": "lib/production.ts:1659-1663"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "AdminTableCard.tsx:77"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "CsPayrollPaymentForm.tsx:44"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "OrderListFilters.tsx:236"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "OrderListFilters.tsx:311"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "OrderListFilters.tsx:517"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "StartCsPeriodForm.tsx:33"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "app/(admin)/owner/salary/cs/[id]/page.tsx:230"
-    },
-    {
-      "file": "docs/UI现状盘点.md",
-      "type": "path",
-      "reference": "components/business/order/order-form-b/OrderPaperSwatchPicker.tsx:41-67"
-    },
-    {
-      "file": "docs/UI迁移清单.md",
-      "type": "path",
-      "reference": "CsPayrollPaymentForm.tsx:44"
-    },
-    {
-      "file": "docs/UI迁移清单.md",
-      "type": "path",
-      "reference": "OrderListFilterFields.tsx:13"
-    },
-    {
-      "file": "docs/UI迁移清单.md",
-      "type": "path",
-      "reference": "OrderListFilters.test.tsx:366"
-    },
-    {
-      "file": "docs/UI迁移清单.md",
-      "type": "path",
-      "reference": "OrderListFilters.tsx:517"
-    },
-    {
-      "file": "docs/UI迁移清单.md",
-      "type": "path",
-      "reference": "OrderPaperSwatchPicker.tsx:105"
-    },
-    {
-      "file": "docs/UI迁移清单.md",
-      "type": "path",
-      "reference": "components/business/salary/CsPayrollPaymentForm.tsx"
-    },
-    {
-      "file": "docs/codex-ui-brief.md",
-      "type": "path",
-      "reference": "tests/e2e/helpers/no-overflow.ts"
+      "reference": "lib/price/read-paper-specifications.ts",
+      "reason": "清理清单明确标注旧读取模块已移除；有意保留旧组合读取协议的退役记录。"
     },
     {
       "file": "docs/ui-规范.md",
       "type": "path",
-      "reference": "CsPayrollPaymentForm.tsx:323"
-    },
-    {
-      "file": "docs/ui-规范.md",
-      "type": "path",
-      "reference": "MarkHourlyPaidForm.tsx:73"
-    },
-    {
-      "file": "docs/ui-规范.md",
-      "type": "path",
-      "reference": "OrderPaperSwatchPicker.tsx"
-    },
-    {
-      "file": "docs/ui-规范.md",
-      "type": "path",
-      "reference": "StartCsPeriodForm.tsx:33"
-    },
-    {
-      "file": "docs/工单新建与编辑-字段对照表.md",
-      "type": "link",
-      "reference": "../components/business/order/InternalOrderEditWorkspace.tsx"
+      "reference": "OrderPaperSwatchPicker.tsx",
+      "reason": "明确记录纸张色卡组件已于 2026-09-23 删除、改用胶囊按钮及移除旧豁免；这是有意保留的退役事实，不是当前文件定位。"
     },
     {
       "file": "docs/工单编辑-字段对照表.md",
       "type": "path",
-      "reference": "SalesOrderEditWorkspace.tsx"
+      "reference": "SalesOrderEditWorkspace.tsx",
+      "reason": "F75 实现记录明确描述此组件已被替代并删除；517efcde 的删除与替代实现可核实。"
     },
     {
       "file": "docs/编码规范.md",
       "type": "path",
-      "reference": "PascalCase.tsx"
+      "reference": "PascalCase.tsx",
+      "reason": "React 组件文件命名模式示例，不是仓库文件引用。"
     },
     {
       "file": "docs/编码规范.md",
       "type": "path",
-      "reference": "decimal.js"
+      "reference": "decimal.js",
+      "reason": "package.json 声明的第三方 Decimal 计算依赖包名，不是仓库内 JavaScript 文件路径。"
     },
     {
       "file": "docs/编码规范.md",
       "type": "path",
-      "reference": "external-sales-quote.ts"
+      "reference": "external-sales-quote.ts",
+      "reason": "命名约定表中的领域文件示例，不要求仓库存在同名文件。"
     },
     {
       "file": "docs/编码规范.md",
       "type": "path",
-      "reference": "kebab-case.ts"
+      "reference": "kebab-case.ts",
+      "reason": "领域文件命名模式示例，不是仓库文件引用。"
     }
   ]
 }

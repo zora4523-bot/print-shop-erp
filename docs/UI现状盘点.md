@@ -47,7 +47,7 @@ evidence:
 | `ring` | 121 | `ring-ring` 41、`ring-ring/50` 41、`border-ring` 34 | `app/(admin)/foreman/cdr/page.tsx:172` |
 | `warning` | 112 | `bg-warning/10` 44、`border-warning/40` 32、`/50` 12 | `app/(admin)/orders/[id]/page.tsx:841` |
 | `primary` | 91 | `text-primary` 46、`bg-primary` 15 | `app/(admin)/foreman/materials/page.tsx:192` |
-| `warning-foreground` / `success-foreground` | 57 / 40 | `text-*-foreground` | `app/(admin)/owner/salary/cs/[id]/page.tsx:230` |
+| `warning-foreground` / `success-foreground` | 57 / 40 | `text-*-foreground` | 原客服工资明细页（已随客服工资退役，`3bb2e21a`） |
 | `success` | 33 | `bg-success/10` 12、`border-success/40` 10 | `components/business/agent-monthly-billing/AgentMonthlyBillForms.tsx:17` |
 | `info` / `info-foreground` | 12 / 3 | `text-info` 3、`bg-info/10` 3 | `components/business/price/ExternalSalesPriceBookVersionPanel.tsx:265` |
 | `info-neutral` / `-foreground` | 1 / 1 | 仅 `components/ui-business/EnvNotice.tsx:15` | |
@@ -73,7 +73,7 @@ evidence:
 
 | 位置 | 次数 | 性质 |
 |---|---:|---|
-| `components/business/order/order-form-b/OrderPaperSwatchPicker.tsx:41-67` | 31 | 纸张实物色卡数据 |
+| 原 `OrderPaperSwatchPicker`（已改为纸张胶囊，色卡退役，`3e1a3151`） | 31 | 纸张实物色卡数据 |
 | `components/business/order/order-form-b/OrderFoilSwatchPicker.tsx:48-75` | 28 | 烫金/烫银实物色卡数据 |
 | `components/business/order/AdminOrderWorkspace.module.css:4-26` | 20 | 页面局部主题覆盖（§1.1） |
 | `components/business/order/AutoPrint.tsx:210` | 2 | 打印视图内联 `#fff` / `#a8121a` |
@@ -113,7 +113,7 @@ CSS Module 另有 `font-size` 41 处（`components/business/order/AdminOrderDeta
 | 7 / 9 / 10 / 12 / 14 | | 23 合计 | 0.5% |
 | 任意值 | | 33 | 0.7% |
 
-四档（1/2/3/4）占 84%。任意间距 33 处：safe-area `env()` 表达式 19（`SalesOrdersList.tsx:543,568,715`、`OrderListFilters.tsx:517`、`components/business/order/AdminOrderEditor.tsx:1116`，globals.css L212-306 已有 `.admin-safe-*` / `.worker-safe-*` 同义类）、`[1.125rem]` 8（`OrderForm.tsx:3498,3604`）、`p-[18px]` 4（`ExternalSalesOrderFormRail.tsx:168,257,368,369`）、`py-[11px]` 2。另有 `min/max-w-[Npx]` 表格宽 62 处、`min-[Npx]:` 自定义断点 40 处（960px 14、560px 13、360px 8）。
+四档（1/2/3/4）占 84%。任意间距 33 处：safe-area `env()` 表达式 19（`SalesOrdersList.tsx:543,568,715`、原 `OrderListFilters`（旧筛选界面已退役，`5fd22ee1`）、`components/business/order/AdminOrderEditor.tsx:1116`，globals.css L212-306 已有 `.admin-safe-*` / `.worker-safe-*` 同义类）、`[1.125rem]` 8（`OrderForm.tsx:3498,3604`）、`p-[18px]` 4（`ExternalSalesOrderFormRail.tsx:168,257,368,369`）、`py-[11px]` 2。另有 `min/max-w-[Npx]` 表格宽 62 处、`min-[Npx]:` 自定义断点 40 处（960px 14、560px 13、360px 8）。
 
 ### 1.5 圆角
 
@@ -191,11 +191,11 @@ deep import 违规 3 处：`components/business/order/AdminOrderDecisionPanel.ts
 | select | `NativeSelect`（2026-09-29 起） | 原生 `<select` 与本地 `selectClass` 已清零，eslint 禁止复发（2026-09-29 盘点前为 68 处 / 39 文件、8 份常量） | 统一 `components/ui/field-styles.ts`：rounded-md、px-3、ring-3、aria-invalid、只读态 |
 | textarea / input | `Textarea` 15 处 / 5 文件；`Input` 174 处 / 57 文件 | 原生 `<textarea` 17 处 / 15 文件；可见原生 `<input` 30 处 / 19 文件（`components/business/order/ShipOrderFields.tsx` 5） | |
 | 复制反馈 | 无 | `navigator.clipboard` 4 处，4 种反馈：`components/business/order/OrderListBatchSelection.tsx:218`、`components/business/order/SalesOrdersList.tsx:154`（sr-only live region）、`components/business/order/AdminOrderDetailView.tsx:122`（ActionNotice）、`components/business/notification/SmartBotBindingPanel.tsx:54`（`<p role="status">` 无 aria-live） | |
-| 金额格式化 | `lib/dashboard/format.ts:18 formatMoney` → `¥ 1,234.56`（25 文件）；`lib/format/unit-price.ts:4`（3 文件） | 同名异义 `lib/order/sales-list-presentation.ts:98 formatMoney` → `1,234.56`（2 文件）；UI 私有 money 函数 **14 个**（`components/business/order/AdminOrderDecisionPanel.tsx:946` = `components/business/order/AdminOrderWorkspace.tsx:489` = `components/business/order/AdminOrderWorkspaceList.tsx:428`；`components/business/order/OrderForm.tsx:627` = `components/business/order/ExternalSalesOrderFormRail.tsx:61`；`components/business/order/SubmitOrderButton.tsx:8`、`components/business/order/AdminOrderEditor.tsx:132`、`components/business/order/OrderChangeReviewForm.tsx:107`、`CsPayrollPaymentForm.tsx:44`、`foreman/materials/page.tsx:36`…）；UI 层 `.toFixed(` 68 处 / 28 文件（`owner/salary/cs/[id]/page.tsx` 13）；`Intl.NumberFormat` 9 处 | 输出并存 `¥ 1,234.56` / `¥1,234.56` / `1234.56` / `¥${raw}`；含 `¥` 的行 139 / 52 文件，空格有无不一 |
+| 金额格式化 | `lib/dashboard/format.ts:18 formatMoney` → `¥ 1,234.56`（25 文件）；`lib/format/unit-price.ts:4`（3 文件） | 同名异义 `lib/order/sales-list-presentation.ts:98 formatMoney` → `1,234.56`（2 文件）；UI 私有 money 函数 **14 个**（`components/business/order/AdminOrderDecisionPanel.tsx:946` = `components/business/order/AdminOrderWorkspace.tsx:489` = `components/business/order/AdminOrderWorkspaceList.tsx:428`；`components/business/order/OrderForm.tsx:627` = `components/business/order/ExternalSalesOrderFormRail.tsx:61`；`components/business/order/SubmitOrderButton.tsx:8`、`components/business/order/AdminOrderEditor.tsx:132`、`components/business/order/OrderChangeReviewForm.tsx:107`、原 `CsPayrollPaymentForm`（客服工资已退役，`3bb2e21a`）、`foreman/materials/page.tsx:36`…）；UI 层 `.toFixed(` 68 处 / 28 文件（原客服工资明细页 13 处（已退役，`3bb2e21a`））；`Intl.NumberFormat` 9 处 | 输出并存 `¥ 1,234.56` / `¥1,234.56` / `1234.56` / `¥${raw}`；含 `¥` 的行 139 / 52 文件，空格有无不一 |
 | 日期格式化 | `lib/format/dates.ts` 四函数：`formatDateTimeShanghai` 101 次、`formatDateShanghai` 62、`formatDateInputShanghai` **3（1 文件）** | `toISOString().slice(0,10)` 14 处 / 9 文件（UTC 切片，非上海：`components/business/account/AccountForm.tsx:330-342`、`orders/[id]/page.tsx:706,1262,1756`、`orders/[id]/edit/page.tsx:189,364,404`、`foreman/attendance/page.tsx:86`…）；逐字重写 3 处（`components/business/rules/salary/EmployeePayRulesPage.tsx:9`、`components/business/price/ExternalSalesPriceBookVersionPanel.tsx:65`、`components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:511`） | 跨日边界时区不一致 |
 | 空态 | `EmptyState` 26 文件 / `TableEmptyState` 14 文件 | 内联「暂无…」文本节点 24 处 + 字符串字面量 47 处 / 43 文件；`EmptyRow` 本地封装 2 个（`warehouses/page.tsx:352`、`components/business/material/InventoryCountClient.tsx:412`） | 见 §3.5 |
 | 错误态 | `ErrorState` 5 文件、`ErrorBoundary` 10 文件、5 个 admin `error.tsx` → `components/business/admin/AdminRouteError.tsx:15` | `app/(worker)/worker/error.tsx:13`、`owner/pigsty/page.tsx:78 ErrorPanel` 手写；手写 destructive 块 4 处 | 无 retry 契约 |
-| 通知块 | `ActionNotice` 99 处 / 49 文件 | 手写 `border-warning/N bg-warning/10` 块 27 文件（`components/business/order/SubmitOrderButton.tsx:44`、`OrderListFilters.tsx:311`） | role=status/alert 不统一 |
+| 通知块 | `ActionNotice` 99 处 / 49 文件 | 手写 `border-warning/N bg-warning/10` 块 27 文件（`components/business/order/SubmitOrderButton.tsx:44`、原 `OrderListFilters`（旧筛选界面已退役，`5fd22ee1`）） | role=status/alert 不统一 |
 | 加载 | `ContentSkeleton` 6 文件；5 个 admin `loading.tsx` → `AdminRouteLoading` | 手写 `animate-pulse` 11 处 / 7 文件；同构私有 Loading 5 个（`foreman/cdr/page.tsx:269`、`components/business/dashboard/DashboardSectionLoading.tsx:3`、`components/business/dashboard/OwnerAnalytics.tsx:79`、`worker/loading.tsx:8`、`components/business/rules/pricing/CustomerPricingLoading.tsx:3`） | 仅高度不同 |
 
 ---
@@ -226,7 +226,7 @@ deep import 违规 3 处：`components/business/order/AdminOrderDecisionPanel.ts
 |---|---:|
 | `action={formAction}` 直连（含 4 个 `action={string}` 搜索） | 71 |
 | ↳ 其中 `useActionState` 传入客户端闭包（渐进增强归零） | 7（`components/business/order/FinishOrderButton.tsx:19`、`components/business/order/ShipOrderForm.tsx:109`、`components/business/bill/IssueBillButton.tsx:29`、`craft/ToggleActiveButton.tsx:22`、`product/ToggleActiveButton.tsx:23`、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:537`、`account/ToggleActiveButton.tsx:21`） |
-| `action={(fd) => …}` 箭头包裹 | 7（`components/business/bill/GenerateBillsForm.tsx:22`、`components/business/bill/IssueBillButton.tsx:37`、`components/business/order/OrderCancellationRequestForm.tsx:59`、`components/business/order/SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、`StartCsPeriodForm.tsx:33`） |
+| `action={(fd) => …}` 箭头包裹 | 7（`components/business/bill/GenerateBillsForm.tsx:22`、`components/business/bill/IssueBillButton.tsx:37`、`components/business/order/OrderCancellationRequestForm.tsx:59`、`components/business/order/SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、原 `StartCsPeriodForm`（客服工资已退役，`3bb2e21a`）） |
 | `onSubmit` 无 action | 2（`components/business/order/FulfillmentPricingReviewForm.tsx:165`、`components/business/material/InventoryCountClient.tsx:318`） |
 | `action` + `onSubmit={handleSubmit}` 混合 | 12（真 react-hook-form 仅 `components/business/order/OrderForm.tsx:3303`） |
 | GET 导航 | 13 |
@@ -257,13 +257,13 @@ Hook：`useActionState` 92 / `useTransition` 34 / `useFormState` 0 / `useFormSta
 
 | 族 | 例 |
 |---|---|
-| 「暂无X。」 | `foreman/outsource/page.tsx:35`、`owner/salary/cs/[id]/page.tsx:241`、`orders/[id]/page.tsx:1848` |
+| 「暂无X。」 | `foreman/outsource/page.tsx:35`、原客服工资明细页（已退役，`3bb2e21a`）、`orders/[id]/page.tsx:1848` |
 | 「暂无X」 | `owner/warehouses/page.tsx:159,195,213,242,264`、三张图表 `components/business/dashboard/SalesRankingChart.tsx:53` / `components/business/dashboard/CategoryDistributionChart.tsx:54` / `components/business/dashboard/ProductionTrendChart.tsx:117` |
 | 「没有匹配…记录」 | `foreman/materials/page.tsx:203`、`components/business/rules/catalog/ProductCatalogPages.tsx:200` |
 | 「还没有X」（`components/ui-business/empty-state-copy.ts:7` 官方工厂） | 业务 0 调用 |
-| 「暂无」误用于非空态 | `CsPeriodForecast.tsx:47,53`「暂无法预测」、`components/business/order/OrderChangeReviewForm.tsx:309`「暂无法计算」 |
+| 「暂无」误用于非空态 | 原 `CsPeriodForecast`「暂无法预测」（客服工资已退役，`3bb2e21a`）、`components/business/order/OrderChangeReviewForm.tsx:309`「暂无法计算」 |
 
-`AdminTableCard.tsx:77` 默认「暂无数据」与 `components/ui-business/empty-state-copy.ts` 「还没有X」两套官方措辞并存。
+`components/business/admin/AdminDataTable.tsx` 的 `AdminTableCard` 默认「暂无数据」与 `components/ui-business/empty-state-copy.ts` 「还没有X」两套官方措辞并存。
 
 ### 3.6 错误态
 
@@ -276,7 +276,7 @@ Hook：`useActionState` 92 / `useTransition` 34 / `useFormState` 0 / `useFormSta
 
 ### 3.8 抽屉
 
-5 个业务 `<Sheet>`，2 个承载写操作：`components/business/order/AdminOrderEditor.tsx:1029-1131`（`:1096-1101` 保存按钮 → `saveAdminOrderEditAction`）、`components/business/order/OrderExportControls.tsx:105-238`（`:160,167` 内嵌 `<form action={formAction}>` 触发导出）。其余 3 个只读（`OrderListFilters.tsx:236`、`SalesOrdersList.tsx:539,768`）。
+5 个业务 `<Sheet>`，2 个承载写操作：`components/business/order/AdminOrderEditor.tsx:1029-1131`（`:1096-1101` 保存按钮 → `saveAdminOrderEditAction`）、`components/business/order/OrderExportControls.tsx:105-238`（`:160,167` 内嵌 `<form action={formAction}>` 触发导出）。其余 3 个只读（原 `OrderListFilters`（旧筛选抽屉已退役，`5fd22ee1`）、`SalesOrdersList.tsx:539,768`）。
 
 ---
 

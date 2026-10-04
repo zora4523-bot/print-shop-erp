@@ -194,21 +194,35 @@ function entryId({ file, type, reference }) {
   return JSON.stringify([file, type, reference]);
 }
 
-export function createDocDriftBaseline(issues) {
-  const entries = new Map(issues.map(({ file, type, reference }) => {
+function validateDocDriftBaseline(baseline) {
+  if (baseline?.schemaVersion !== 1 || !Array.isArray(baseline.entries) || baseline.entries.some((entry) =>
+    !entry || typeof entry.file !== 'string' || !entry.file || !ISSUE_TYPES.has(entry.type) || typeof entry.reference !== 'string' || !entry.reference ||
+    (Object.hasOwn(entry, 'reason') && typeof entry.reason !== 'string') ||
+    Object.keys(entry).some((key) => !['file', 'type', 'reference', 'reason'].includes(key))) ||
+    new Set(baseline.entries.map(entryId)).size !== baseline.entries.length) {
+    throw new Error('Invalid doc-drift baseline');
+  }
+}
+
+export function createDocDriftBaseline(issues, previousBaseline) {
+  if (previousBaseline !== undefined) validateDocDriftBaseline(previousBaseline);
+  const previous = new Map((previousBaseline?.entries ?? []).map((entry) => [entryId(entry), entry]));
+  const entries = new Map();
+  for (const { file, type, reference, reason } of issues) {
     const entry = { file, type, reference };
-    return [entryId(entry), entry];
-  }));
+    const id = entryId(entry);
+    const retainedReason = previous.get(id)?.reason ?? reason ?? entries.get(id)?.reason;
+    if (retainedReason !== undefined) {
+      if (typeof retainedReason !== 'string') throw new Error('Invalid doc-drift baseline');
+      entry.reason = retainedReason;
+    }
+    entries.set(id, entry);
+  }
   return { schemaVersion: 1, entries: [...entries].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, entry]) => entry) };
 }
 
 export function compareDocDriftBaseline(issues, baseline) {
-  if (baseline?.schemaVersion !== 1 || !Array.isArray(baseline.entries) || baseline.entries.some((entry) =>
-    !entry || typeof entry.file !== 'string' || !entry.file || !ISSUE_TYPES.has(entry.type) || typeof entry.reference !== 'string' || !entry.reference ||
-    Object.keys(entry).some((key) => !['file', 'type', 'reference'].includes(key))) ||
-    new Set(baseline.entries.map(entryId)).size !== baseline.entries.length) {
-    throw new Error('Invalid doc-drift baseline');
-  }
+  validateDocDriftBaseline(baseline);
   const currentEntries = createDocDriftBaseline(issues).entries;
   const previousEntries = createDocDriftBaseline(baseline.entries).entries;
   const current = new Set(currentEntries.map(entryId));

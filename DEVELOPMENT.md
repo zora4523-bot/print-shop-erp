@@ -134,6 +134,8 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 完整 lint 不能用 `pnpm exec eslint .` 代替；后者不执行 UI 文案与令牌检查。单独运行 `vitest` 不会执行 `.browser.spec.tsx`。全量单测通过也不能替代浏览器或覆盖率门禁。若资源争用导致超时，可记录原因后用 `pnpm exec vitest run --coverage --maxWorkers=2` 复测；不得降低阈值或把未解释的失败记作通过。
 
+文档漂移基线 `config/doc-drift-baseline.json` 的条目支持可选字符串 `reason`，说明有意保留或待确认的引用；核实后运行 `node scripts/check-doc-drift.mjs --write-baseline`，会保留同一 `file` / `type` / `reference` 的已有理由并删除已解决条目。更新基线不能代替修复失效引用。
+
 ### 死代码候选审查
 
 `config/dead-code-baseline.json` 登记现存待核实候选，不代表其中代码可以删除。
