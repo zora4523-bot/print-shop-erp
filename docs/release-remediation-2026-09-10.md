@@ -89,7 +89,7 @@ verification_scope: local remediation acceptance and final candidate validation;
 验证结果（2026-09-10，开始 SHA + 本次 3 份文档补丁）：
 
 - `pnpm exec vitest run tests/regression/playwright-database-isolation.test.ts scripts/__tests__/deploy-smoke.test.ts`：2 文件、6 项通过，0 失败、0 跳过。配置测试模拟环境变量，smoke 使用本机 HTTP fixture 与 dry-run，未连接数据库。
-- 从 `deploy-smoke.mjs` 实际 Chromium 参数表达式验证未设置、空字符串、`false`、`0`、`1`、`true` 共 6 种 CI 值，结果与文档一致；未启动浏览器。
+- 从 `scripts/deploy-smoke.mjs` 实际 Chromium 参数表达式验证未设置、空字符串、`false`、`0`、`1`、`true` 共 6 种 CI 值，结果与文档一致；未启动浏览器。
 - 33 个本地链接/章节锚点按“HEAD + 仅本任务文件”检查通过；`git diff --check` 通过。上述测试及其配置/脚本依赖与开始 HEAD 一致，不依赖其他任务的未提交业务改动。
 - 原 4 份 Grok 公开答复保持原样；独立子代理完成 3 份文档 diff 复核。
 

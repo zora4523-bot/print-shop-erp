@@ -16,7 +16,7 @@ gates:
 
 本文件是项目 UI 的**唯一来源**。后续任何 UI 任务只引用条款号（如「§2.1」「§7 第 3 律」），不复述规则。
 
-收录铁律：§2–10 的实现条款要么代码已符合，要么在 [`UI迁移清单.md`](UI迁移清单.md) 有编号对应项。已知违例逐条登记在附录 A。§11 是后续 UI 任务的执行与验收要求，不代表存量页面已经通过；当前检查能力与缺口见 [质量标准审查记录](audits/2026-10-01-ui-quality-standard-review.md)。
+收录铁律：§2–10 的实现条款要么代码已符合，要么在 [`docs/UI迁移清单.md`](UI迁移清单.md) 有编号对应项。已知违例逐条登记在附录 A。§11 是后续 UI 任务的执行与验收要求，不代表存量页面已经通过；当前检查能力与缺口见 [质量标准审查记录](audits/2026-10-01-ui-quality-standard-review.md)。
 
 裁决依据见 [`audits/2026-09-08-UI对照裁决表.md`](audits/2026-09-08-UI对照裁决表.md)（2026-09-08 业主确认，待拍板项按默认取值生效）。
 
@@ -87,7 +87,7 @@ gates:
 
 标准档位：`1`（4px）、`2`（8px）、`3`（12px）、`4`（16px）、`6`（24px）；`0.5`、`1.5`、`5`、`8` 允许但不作默认。
 
-- 不写任意间距 `-[Npx]` / `-[Nrem]`；safe-area 用 `.admin-safe-*` / `.worker-safe-*`（`globals.css`）。P1-5 已于 2026-09-09 清除；唯一保留的表达式是 Sheet 头部为关闭按钮预留的 `pt/pr-[max(…env())]`（附录 A-7）。
+- 不写任意间距 `-[Npx]` / `-[Nrem]`；safe-area 用 `.admin-safe-*` / `.worker-safe-*`（`app/globals.css`）。P1-5 已于 2026-09-09 清除；唯一保留的表达式是 Sheet 头部为关闭按钮预留的 `pt/pr-[max(…env())]`（附录 A-7）。
 - `min-w-[Npx]` / `max-w-[Npx]` 表格与容器宽度、`min-[Npx]:` 容器断点是布局参数，允许，不算漂移。
 
 ### 2.4 圆角
@@ -132,7 +132,7 @@ gates:
 
 | 场景 | 组件 |
 |---|---|
-| 动作 | `Button`（原生 `<button>` 只允许在 `global-error.tsx`） |
+| 动作 | `Button`（原生 `<button>` 只允许在 `app/global-error.tsx`） |
 | 表单 | `Input`、`Textarea`、`Label`、`Checkbox`、`NativeSelect`（同一套规格见 `components/ui/field-styles.ts`；业务代码禁止原生 `<select>` / `<textarea>` / 可见 `<input>`，eslint 拦截） |
 | 容器 | `Card` 家族；手写卡面允许的唯一字面串是 `rounded-xl border bg-card p-4 shadow-sm`，新代码用 `Card` |
 | 提示 | `Alert` 家族 |
@@ -218,7 +218,7 @@ gates:
 | B 报表 / 账单 / 薪资裸表 | 列固定、含合计行 | 裸 `<table>` 必须包 `TableScrollArea`（P1-2 / P2-11 已于 2026-09-09 全部完成）；分页用 `AdminPagination`（同页多表用 `pageParam`；P2-5 已完成，唯一豁免见 A-8） |
 | C 卡片列表 | 师傅端、工单工作台、销售列表 | `<ul>` 行卡；桌面可扩展为 Table + 卡片双形态 |
 
-- 查询参数解析用 `lib/admin/table.ts`（订单列表用 `lib/order/list-query`）。
+- 查询参数解析用 `lib/admin/table.ts`（订单列表用 `lib/order/list-query.ts`）。
 - 筛选：GET `<form>`，`action` 可省或指向本路由，两种写法等价。
 - 页面 body 不横向溢出；表格内部滚动不等于页面溢出（§8）。
 
@@ -340,7 +340,7 @@ gates:
 以下行号取自安装规范时的 d742fd0，用于追溯原文，修复后不据此恢复旧文案：
 
 - `components/ui-business/ConfirmActionDialog.tsx:118`：“请确认影响范围”；`:127`：“执行后会发生”。
-- `app/(admin)/owner/agent-bills/page.tsx:75`：“仅按 settledAt 上海日历月归集…”；`:102`：“重复执行会幂等同步 DRAFT”。
+- `app/(billing)/owner/agent-bills/page.tsx:75`：“仅按 settledAt 上海日历月归集…”；`:102`：“重复执行会幂等同步 DRAFT”。
 - `components/business/order/OrderPricingReviewForm.tsx:485`：“仅核对工单已保存的报价快照；自动报价只读，仅补录待人工核价项。”
 - `components/business/order/AdminOrderDecisionPanel.tsx:837`：“款式与费用由服务端按最新规则自动合并和重算。”
 - `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:963`：“缺少设计稿规定的 5万档…本区暂时只读”。该处还涉及编辑条件，须另行核对业务规则。
@@ -391,11 +391,11 @@ gates:
 
 ### 8.1 控件对齐与勾选（2026-09-29）
 
-- 管理端与师傅端外壳内，`globals.css` 给所有可交互控件兜底 `min-height: 44px`；源码里的 `h-*` 不等于渲染高度。禁止用 `min-h-0!`、`!min-h-*` 绕过兜底。Dialog / AlertDialog / Sheet 内容挂在 body 上，原子件自带 `touch-viewport`，业务不再手补。
+- 管理端与师傅端外壳内，`app/globals.css` 给所有可交互控件兜底 `min-height: 44px`；源码里的 `h-*` 不等于渲染高度。禁止用 `min-h-0!`、`!min-h-*` 绕过兜底。Dialog / AlertDialog / Sheet 内容挂在 body 上，原子件自带 `touch-viewport`，业务不再手补。
 - 表单原子件（Input、Textarea、NativeSelect）同一规格：`rounded-md`、同一内距、同一焦点圈、同一 `aria-invalid` 错误态、同一只读态。只读用原子件的 `read-only` 样式，不在调用处手写底色。
 - 输入框内图标一律 `top-1/2 -translate-y-1/2` 垂直居中。
 - 网格或筛选栏里，按钮与带标签的字段底边对齐（`items-end` / `self-end`）。
-- 勾选框 + 文字：`gap-1`；单行 `items-center`，多行说明 `items-start` 且勾选框与首行居中；与同列字段左对齐时抵消触控盒 12px 透明边（写法见 `OrderForm.tsx` 急单字段）。表头全选框与行勾选框同列同尺寸。
+- 勾选框 + 文字：`gap-1`；单行 `items-center`，多行说明 `items-start` 且勾选框与首行居中；与同列字段左对齐时抵消触控盒 12px 透明边（写法见 `components/business/order/OrderForm.tsx` 急单字段）。表头全选框与行勾选框同列同尺寸。
 - 必填标记只用一个组件；一张表单内只标必填或只标选填，不混用。
 
 ### 8.2 选中态、按钮顺序与动词（2026-09-29，业主确认）
@@ -447,14 +447,14 @@ gates:
 | 门禁 | 位置 | 规则 | 分级 |
 |---|---|---|---|
 | Tailwind 调色板字面量、任意色类、`alert`/`confirm`、原生 checkbox | `eslint.config.mjs` `no-restricted-syntax` | 范围 `app/**`、`components/business/**`、`components/ui-business/**` | 全部 error（现状 0 命中） |
-| 裸颜色（hex / rgb / hsl / oklch）——含 `.css` 与对象字面量 | `scripts/ui-tokens/check.mjs` 规则 `color`（§2.1） | 范围同上，排除 `globals.css`、`components/ui/` | 登记在 `baseline.json` 的存量 warn；未登记 error；登记项代码消失即 stale error |
+| 裸颜色（hex / rgb / hsl / oklch）——含 `.css` 与对象字面量 | `scripts/ui-tokens/check.mjs` 规则 `color`（§2.1） | 范围同上，排除 `app/globals.css`、`components/ui/` | 登记在 `scripts/ui-tokens/baseline.json` 的存量 warn；未登记 error；登记项代码消失即 stale error |
 | 内联金额格式化、私有 money 函数 | 同上，规则 `money`（§4.1） | `.toFixed(`、`Intl.NumberFormat(`、带小数位/币种选项的 `toLocaleString(`、`function/const formatMoney|money|formatCurrency…` | 同上 |
 | ui-business deep import | 同上，规则 `deep`（§3.1） | | 同上 |
-| 文案禁词 | `scripts/ui-copy/check.mjs` + `policy.json`（§7） | 语法树追踪的可见文案 | 全仓 error，逐条豁免 |
+| 文案禁词 | `scripts/ui-copy/check.mjs` + `scripts/ui-copy/policy.json`（§7） | 语法树追踪的可见文案 | 全仓 error，逐条豁免 |
 | 响应式 / 触控 / axe | `tests/visual/ui-gates.ts` | 6 视口 × 明暗；`≤768` 触控 <44 失败；axe wcag2a/2aa/21a/21aa | error |
 | 打印像素 | `tests/visual/order-print.spec.ts` | 8 张基线 | error，更新须写进 commit message |
 
-- `baseline.json` 是存量豁免清单（对应附录 A-1 / A-2 / A-6），按「规则 + 文件 + 原文」匹配，不按行号。迁移完成一处必须同时删除对应条目，否则 stale error。重新生成：`pnpm lint:ui:baseline`（只在迁移批次合并时由迁移任务运行，不在功能 PR 里运行）。
+- `scripts/ui-tokens/baseline.json` 是存量豁免清单（对应附录 A-1 / A-2 / A-6），按「规则 + 文件 + 原文」匹配，不按行号。迁移完成一处必须同时删除对应条目，否则 stale error。重新生成：`pnpm lint:ui:baseline`（只在迁移批次合并时由迁移任务运行，不在功能 PR 里运行）。
 - PR 模板 checklist：文案对照 §7、颜色字号对照 §2。
 
 ## 11. UI / UX Quality Standard
@@ -579,7 +579,7 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ## 附录 A · 现状豁免清单
 
-格式：位置 → 违反条款 → 迁移项。lint 可检测的（A-1、A-2、A-6）逐条在 `scripts/ui-tokens/baseline.json`（127 条 / 132 处，2026-09-08）；本表列类别与代表位置，其余按 `file:line` 见 [`UI现状盘点.md`](UI现状盘点.md)。
+格式：位置 → 违反条款 → 迁移项。lint 可检测的（A-1、A-2、A-6）逐条在 `scripts/ui-tokens/baseline.json`（127 条 / 132 处，2026-09-08）；本表列类别与代表位置，其余按 `file:line` 见 [`docs/UI现状盘点.md`](UI现状盘点.md)。
 
 ### A-1 裸颜色（§2.1）
 
@@ -591,7 +591,7 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ### A-2 金额格式化（§4.1）
 
-P0-1 已完成，`baseline.json` 的 `money` 待迁移条目为 0；费率与阶梯价已于 2026-09-09 改走 `formatRate`。剩余 `permanent` 登记（各带理由）：用户输入回显（`ShipOrderForm.tsx:23`、`CsPayrollPaymentForm.tsx:71,73`）、图表刻度（`SalesRankingChart.tsx`）、Decimal→字符串序列化传子组件校验、非金额（文件大小、百分比、数量）。
+P0-1 已完成，`scripts/ui-tokens/baseline.json` 的 `money` 待迁移条目为 0；费率与阶梯价已于 2026-09-09 改走 `formatRate`。剩余 `permanent` 登记（各带理由）：用户输入回显（`components/business/order/ShipOrderForm.tsx:23`；原 `CsPayrollPaymentForm` 已随客服工资退役，`3bb2e21a`，不再适用）、图表刻度（`components/business/dashboard/SalesRankingChart.tsx`）、Decimal→字符串序列化传子组件校验、非金额（文件大小、百分比、数量）。
 
 ### A-3 抽屉内表单（§5.8）
 
@@ -601,11 +601,11 @@ P0-1 已完成，`baseline.json` 的 `money` 待迁移条目为 0；费率与阶
 
 ### A-4 高风险操作停留 L2（§5.3）
 
-`MarkHourlyPaidForm.tsx:73`、`CsPayrollPaymentForm.tsx:323`、`PieceworkSettlementActions.tsx:54,95,140`、`IssueBillButton.tsx:42`、`AdminOrderBatchActions.tsx:173` → **定案保持 L2**（DECISIONS 2026-09-09）。
+`PieceworkSettlementActions.tsx:54,95,140`、`components/business/bill/IssueBillButton.tsx:42`、`components/business/order/AdminOrderBatchActions.tsx:173` → **定案保持 L2**（DECISIONS 2026-09-09）。原 `MarkHourlyPaidForm` 与 `CsPayrollPaymentForm` 已分别随时薪月结写入链路（`d3aa552d`）、客服工资（`3bb2e21a`）退役，不再作为现行站点。
 
 ### A-5 表单提交写法（§5.2）
 
-箭头包裹 7 处（`GenerateBillsForm.tsx:22`、`IssueBillButton.tsx:37`、`OrderCancellationRequestForm.tsx:59`、`SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、`StartCsPeriodForm.tsx:33`）与 `useActionState` 闭包 7 处（`FinishOrderButton.tsx:19`、`ShipOrderForm.tsx:109`、`IssueBillButton.tsx:29`、`craft/ToggleActiveButton.tsx:22`、`product/ToggleActiveButton.tsx:23`、`ExternalSalesPriceTierGroupEditor.tsx:537`、`account/ToggleActiveButton.tsx:21`） → **接受的现状**（DECISIONS 2026-08-17），不迁移。
+箭头包裹原 7 处（`components/business/bill/GenerateBillsForm.tsx:22`、`components/business/bill/IssueBillButton.tsx:37`、`components/business/order/OrderCancellationRequestForm.tsx:59`、`components/business/order/SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、原 `StartCsPeriodForm`，已随客服工资退役，`3bb2e21a`）与 `useActionState` 闭包 7 处（`components/business/order/FinishOrderButton.tsx:19`、`components/business/order/ShipOrderForm.tsx:109`、`components/business/bill/IssueBillButton.tsx:29`、`craft/ToggleActiveButton.tsx:22`、`product/ToggleActiveButton.tsx:23`、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:537`、`account/ToggleActiveButton.tsx:21`） → **接受的现状**（DECISIONS 2026-08-17），不迁移。
 
 ### A-6 deep import（§3.1）
 
@@ -616,7 +616,7 @@ P0-1 已完成，`baseline.json` 的 `money` 待迁移条目为 0；费率与阶
 | 类别 | 处数 | 迁移项 |
 |---|---|---|
 | Sheet 头部 safe-area 表达式 | `components/business/order/SalesOrdersList.tsx:543,772`（`pt-[max(1rem,env(top))] pr-[max(4rem,calc(3rem+env(right)))]`，为关闭按钮预留） | 布局参数，豁免 |
-| CSS Module 非 token 圆角 | `AdminOrderDetailView.module.css:23,90,112`（`50%` / `99px` 胶囊）、`AdminOrderWorkspace.module.css` 桌面紧凑勾选框指示器 3px 圆角（2026-09-29 复核：原登记的「:67 进度条」已不存在） | 无对应 token，豁免 |
+| CSS Module 非 token 圆角 | `AdminOrderDetailView.module.css:23,90,112`（`50%` / `99px` 胶囊）、`components/business/order/AdminOrderWorkspace.module.css` 桌面紧凑勾选框指示器 3px 圆角（2026-09-29 复核：原登记的「:67 进度条」已不存在） | 无对应 token，豁免 |
 
 ### A-8 组件重复（§3、§6，lint 不检测）
 
@@ -626,8 +626,8 @@ P0-1 已完成，`baseline.json` 的 `money` 待迁移条目为 0；费率与阶
 | 原生 `<select` + `selectClass` | 已清零（2026-09-29）+ eslint 门禁（业务范围禁 JSX `<select>` / `<textarea>`） | **P2-2** ✅ |
 | 裸 `disabled={pending}` 按钮 | 55 处 / 35 文件 | **P2-3** |
 | 手写分页 | `components/business/price/RulePriceWorkbench.tsx:905`（翻页链接须走 `PriceWorkspaceLink` 导航拦截，共享分页不支持） | 豁免 |
-| 一线表单字段错误未接 `FormMessage` | 12 文件 / 50 处 | **P2-6** |
-| 空态引导整句（带句号） | 约 10 处（`background-jobs/page.tsx:90`、`BomForm.tsx:159,160,270`、`SettingsForm.tsx:297` 等） | 允许（§5.5） |
+| 一线表单字段错误未接 `FormMessage` | 原盘点 12 文件 / 50 处，其中客服工资 1 文件 / 5 处已退役（`3bb2e21a`） | **P2-6** |
+| 空态引导整句（带句号） | 约 10 处（`background-jobs/page.tsx:90`、`BomForm.tsx:159,160,270`、`components/business/setting/SettingsForm.tsx:297` 等） | 允许（§5.5） |
 | 手写卡面 284 处 / 112 文件、手写通知块 27 文件、裸 `role=status/alert` | — | **收编**，不迁移（§3.2、§5.4） |
 
 ### A-9 作废工单警示页的强化样式（§2.2–2.5，有意例外）

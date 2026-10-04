@@ -52,7 +52,7 @@ pnpm dev
 ### 补齐工作台演示工单
 
 已有 `e2e-dash-<16位runId>-sub-1/sub-2/sub-3-urgent` 空工单可使用
-[`complete-dashboard-order-fixtures.ts`](./scripts/complete-dashboard-order-fixtures.ts) 原位补齐。
+[`scripts/complete-dashboard-order-fixtures.ts`](./scripts/complete-dashboard-order-fixtures.ts) 原位补齐。
 它只接受本机非生产数据库和停用的工作台测试销售账号，保留编号、归属、状态和已有基本资料；
 有业务明细、金额、快照或账本引用的记录会跳过。默认运行完整计价事务后回滚：
 
@@ -103,6 +103,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | 架构门禁 | `pnpm check:architecture` |
 | 死代码候选盘点（生成 `.review/dead.json`） | `pnpm check:dead-code` |
 | 死代码候选增量门禁（与 CI 一致） | `pnpm check:dead-code --check` |
+| 文档路径、链接与 pnpm 命令漂移门禁 | `pnpm check:docs` |
 | 目标 Vitest | `pnpm test --run <path>` |
 | 全量 Vitest | `pnpm test --run` |
 | 全量单测与覆盖率 | `pnpm exec vitest run --coverage` |
@@ -133,6 +134,8 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 完整 lint 不能用 `pnpm exec eslint .` 代替；后者不执行 UI 文案与令牌检查。单独运行 `vitest` 不会执行 `.browser.spec.tsx`。全量单测通过也不能替代浏览器或覆盖率门禁。若资源争用导致超时，可记录原因后用 `pnpm exec vitest run --coverage --maxWorkers=2` 复测；不得降低阈值或把未解释的失败记作通过。
 
+文档漂移基线 `config/doc-drift-baseline.json` 的条目支持可选字符串 `reason`，说明有意保留或待确认的引用；核实后运行 `node scripts/check-doc-drift.mjs --write-baseline`，会保留同一 `file` / `type` / `reference` 的已有理由并删除已解决条目。更新基线不能代替修复失效引用。
+
 ### 死代码候选审查
 
 `config/dead-code-baseline.json` 登记现存待核实候选，不代表其中代码可以删除。
@@ -149,7 +152,7 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 
 ## 当前 CI 与发布验证缺口
 
-[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 备份脚本 / 完整 lint / typecheck、死代码候选增量门禁，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部九视口及九视口 dev fixtures（2026-10-02 补齐 320/390/430px）；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
+[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 文档漂移 / 备份脚本 / 完整 lint / typecheck、死代码候选增量门禁，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部九视口及九视口 dev fixtures（2026-10-02 补齐 320/390/430px）；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发 Quality，由独立的 [Docs 工作流](./.github/workflows/docs.yml) 使用 Node.js 24 直接运行 `node scripts/check-doc-drift.mjs --check`，无需安装依赖。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
 
 2026-09-29 补齐 `unit` 的隔离前置：fresh 链验证后的 `erp_e2e_ci` 单独 seed，并通过现有 `test:e2e:prepare` 发布仅用于测试的工价和目录 fixture；Vitest 进程显式使用 `DATABASE_URL="$E2E_DATABASE_URL"`，与确认的 E2E 库一致。仓库维护、表单创建幂等、工价取消、排单完工四组 PostgreSQL 套件必须实际执行；合并时核对 JSON 报告，不把前置不足导致的 skip 计作通过。覆盖率门槛保持不变。
 
@@ -168,7 +171,7 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 - `E2E_DATABASE_URL` 与匹配库名的 `E2E_DATABASE_CONFIRM_DATABASE` 必填。库名须含独立 `test` / `e2e` / `ci` 分段且不含 `prod` / `production` / `live`；数据库名称必须与日常 `DATABASE_URL` 不同，即使主机不同也拒绝同名，避免 DNS 别名绕过隔离。主机百分号解码、大小写与末尾点规范化后比较，localhost、127.0.0.1、::1 视为同一主机。原目标标记只在已激活的 Playwright 子进程重载中保留；普通启动重新读取当前 URL。不要设置内部标记或 URL query 来替换主机/库名。`--list` 只收集，不连接；实际执行在 webServer/globalSetup 双重预检。
 - 全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行，不能用 fixture 名称唯一代替隔离。CI unit 使用 `erp_e2e_unit`；生成 `.review/unit-tests.json` 后执行 `node scripts/check-blank-migration-tests.mjs`，强制空白封价格与 BOM 迁移套件实际通过，缺失、失败或跳过均失败。
 - 先 migrate/seed 隔离库，再执行 `test:e2e:prepare`。测试进程同时提供 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`（或明确 E2E_ADMIN 覆盖）；只设置数据库不能完成登录前置。
-- `test:e2e:prepare` 先在已确认的隔离库执行 `prepare-e2e-catalog.ts`，复用 `retire-unused-paper-imports` 的完整库存、外键、历史快照、标准纸张唯一性检查及审计，再发布测试工价。空库迁移仍会恢复旧导入记录，因此不能省略此步骤或放宽工单纸张身份校验；记录已使用或改变时直接失败。此入口拒绝日常/生产库，不代替正式环境按运维流程演练和确认修复，也不修改旧迁移。
+- `test:e2e:prepare` 先在已确认的隔离库执行 `scripts/prepare-e2e-catalog.ts`，复用 `retire-unused-paper-imports` 的完整库存、外键、历史快照、标准纸张唯一性检查及审计，再发布测试工价。空库迁移仍会恢复旧导入记录，因此不能省略此步骤或放宽工单纸张身份校验；记录已使用或改变时直接失败。此入口拒绝日常/生产库，不代替正式环境按运维流程演练和确认修复，也不修改旧迁移。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
 - 报工会产生不可删除的历史记录，必须使用隔离库及已发布、已经生效且覆盖所需操作类型的测试工价。仓库 `config/piecework-price-books/v1.json` 是待填写模板，seed 不代表已经发布工价；测试工价须明确标注非生产并通过正式发布服务建立。执行 `pnpm test:e2e:prepare` 通过正式服务发布并等待生效，工价清楚标记 E2E ONLY，重复准备幂等。发布配置缺少这些前置直接失败，不能以 skip 验收。重复运行时保留既有报工，按已有累计量断言；合格量与工单件数进度分别填写。打印基线所用提交人名称也须与固定 fixture 一致。
 - 同一工作树内，先完成全量单测，再启动 E2E 开发服务器；避免路由/配置回归测试的临时文件被 Next 文件监听器读入。发生测试期间路由缓存异常时，停止该隔离服务器并重建它的 `.next`，不要清理日常工作区或重置数据库。

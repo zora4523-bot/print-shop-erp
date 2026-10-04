@@ -177,8 +177,8 @@ Run the normal application migration workflow only after the cluster restart
 and extension creation are complete:
 
 ```bash
-pnpm prisma migrate deploy
-pnpm prisma validate
+pnpm exec prisma migrate deploy
+pnpm exec prisma validate
 ```
 
 If `20260628005000_inventory_ivm_summary` already ran before `pg_ivm` was
@@ -458,8 +458,8 @@ A09 cutover rollback plan.
 - Application checks pass:
 
 ```bash
-pnpm prisma validate
+pnpm exec prisma validate
 pnpm typecheck
-pnpm eslint .
-pnpm vitest run --reporter=dot --testTimeout=10000
+pnpm exec eslint .
+pnpm exec vitest run --reporter=dot --testTimeout=10000
 ```

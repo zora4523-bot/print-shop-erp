@@ -7,7 +7,7 @@ applies_to: repository source at last_verified
 
 # UI、状态反馈与工程文档整改任务
 
-本文把 2026-08-24 的设计稿对齐审查、状态组件审查和工程文档审查整理成可独立实现、独立验证的任务。它是执行顺序与验收边界，不替代业务规格、`DECISIONS.md` 或部署 runbook。提交 `41abe65` 之后的对抗复审、代码证据和细分任务见 [`UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)。
+本文把 2026-08-24 的设计稿对齐审查、状态组件审查和工程文档审查整理成可独立实现、独立验证的任务。它是执行顺序与验收边界，不替代业务规格、`DECISIONS.md` 或部署 runbook。提交 `41abe65` 之后的对抗复审、代码证据和细分任务见 [`docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)。
 
 ## 分级方法
 
@@ -31,7 +31,7 @@ applies_to: repository source at last_verified
 
 | 顺序 | ID | 严重度 | 成本 | 独立任务 | 依赖 | 验收标准 | 状态 |
 |---:|---|---|---|---|---|---|---|
-| 1 | UI-F01 | S1 | C1 | 根路由错误恢复 | 无 | 新增根 `error.tsx`、`global-error.tsx`；认证、账号、打印等非 admin/worker 路由发生意外错误时可重试；不泄露服务端错误详情 | 已完成 |
+| 1 | UI-F01 | S1 | C1 | 根路由错误恢复 | 无 | 新增根 `app/error.tsx`、`app/global-error.tsx`；认证、账号、打印等非 admin/worker 路由发生意外错误时可重试；不泄露服务端错误详情 | 已完成 |
 | 2 | UI-F02 | S1 | C1 | CDR 过期结果“按同条件重新生成” | 现有 `LongTaskReceipt` | 过期记录有明确操作；保留原条件；重复点击受 pending/幂等保护 | 已完成 |
 | 3 | DOC-01 | S1 | C2 | 建立九类工程文档与 UI 单一事实源 | 无 | 九个标准入口可发现；README 不再指导重建项目；部署、迁移、seed、cron 口径引用权威来源 | 已完成 |
 | 4 | UI-F03 | S1 | C2 | 统一操作反馈与确认层 | UI-P01、UI-S01 | 新增 `ConfirmActionDialog`；替换全部 `alert/confirm`；L2 显示影响范围；L3 在业务已有 reason/remark 契约时必填并恢复焦点，禁止由 UI 自创字段 | 已完成（现有业务/审计契约可执行范围）；需新增 reason/audit 字段的动作继续等待 ADR |
