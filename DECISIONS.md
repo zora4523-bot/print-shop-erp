@@ -1720,3 +1720,17 @@ PDF 产物改为 1 小时重复读取，可选持久共享卷或私有 OSS；授
 - **兼容边界**：旧单张和批量下发请求保留安全拒绝，内部工序物化与返工调用保留；不修改 schema 或已应用迁移。混合选择不静默丢弃寄样等不适用工单。
 - **重新提交**：驳回后重新提交同样执行自动校验与用途分流；无需厂内生产及包装的工单通过既有完工闸口后直接待发货，并保留完工通知。
 - **相关文档**：`SPEC-v1.2.md` §3.2、`API.md` 工单准备与生产安排、`docs/管理后台使用手册.md` §5.2、`docs/audits/2026-10-03-production-entry-plan.md`。实施与实际验收证据另记，不以本条代表已部署。
+
+## 2026-10-04：文档漂移门禁与文档和代码同步规则（PR #47）
+
+- **决策**：PR #47 已合并至 `main`（`fe197b0c`）。`AGENTS.md` 新增「文档与代码同步」：开始时以代码与 Prisma schema 为事实源（业务规则以 SPEC 为准），完成时同步受影响文档，删除功能时同步清理或标注对应描述。新增 `pnpm check:docs`，接入 Quality static，并由独立 Docs 工作流覆盖纯文档改动。
+- **理由**：文档中的失效路径、命令和实现描述会误导后续开发；在任务开始与结束时核对事实，并以自动门禁拦截新增漂移，避免修复后再次累积。
+- **影响**：修正 30 份文档的失效引用并归档 codex-ui-brief；基线 20 条均有 reason、有意保留，修复后须收紧。门禁核对引用目标与 pnpm 命令名是否存在，不验证锚点、行号或数字；历史状态文档只查 Markdown 相对链接，不能替代人工事实核查或业务验收。
+- **相关文档**：[AGENTS.md「文档与代码同步」](AGENTS.md#文档与代码同步)、[CONTRIBUTING.md「测试要求」](CONTRIBUTING.md#测试要求)、[DEVELOPMENT.md「当前 CI 与发布验证缺口」](DEVELOPMENT.md#当前-ci-与发布验证缺口)、[归档说明](docs/archive/README.md)。
+
+## 2026-10-04：提交前验证统一以 CONTRIBUTING.md 风险相称表为准
+
+- **决策**：按监督者裁决，沿用 2026-09-07 `8ef37e24` 的风险相称口径，以 `CONTRIBUTING.md`「测试要求」为提交前验证的单一正源；`CLAUDE.md` §6.3 / §10 引用该表，不再要求每个 commit 固定追加 lint、typecheck 与全量单测。
+- **理由**：较新的 AGENTS、CONTRIBUTING 与 erp-task-commit 技能三处口径一致；CLAUDE 初始版本残留的逐次全量要求与之冲突，重复维护多套规则会持续漂移。
+- **影响**：按完整变更批次选择最小但充分的验证；状态机、薪资、定价、库存、账单、权限、迁移等高风险改动不得只跑目标测试，表内适用的全量 Vitest、相关 E2E、越权失败、fresh DB 完整迁移链及覆盖率等要求不变。§6.3 补充 push 前本地预跑 CI static 的 `Static quality gates` 步骤建议；`pnpm test --run` 与 `pnpm test run` 经本地 CLI 核实等效，CONTRIBUTING 表与 CLAUDE §14 统一为后者。
+- **相关文档**：[CONTRIBUTING.md「测试要求」](CONTRIBUTING.md#测试要求)、[CLAUDE.md](CLAUDE.md) §6.3 / §10 / §14、[AGENTS.md](AGENTS.md)、[erp-task-commit](.agents/skills/erp-task-commit/SKILL.md)、[DEVELOPMENT.md「当前 CI 与发布验证缺口」](DEVELOPMENT.md#当前-ci-与发布验证缺口)。
