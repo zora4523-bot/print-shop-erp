@@ -88,6 +88,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
       {
         name: 'chromium',
         testIgnore: [
+          '**/admin-shell-navigation.spec.ts',
           '**/worker-responsive.spec.ts',
           '**/admin-responsive.spec.ts',
           '**/production-dispatch.spec.ts',
@@ -119,7 +120,7 @@ export function createE2eConfig(mode: 'development' | 'release') {
       })),
       ...adminViewportProjects.map(({ name, width, height }) => ({
         name,
-        testMatch: ['**/admin-responsive.spec.ts', '**/production-dispatch.spec.ts'],
+        testMatch: ['**/admin-responsive.spec.ts', '**/production-dispatch.spec.ts', '**/admin-shell-navigation.spec.ts'],
         use: {
           ...devices['Desktop Chrome'],
           viewport: { width, height },

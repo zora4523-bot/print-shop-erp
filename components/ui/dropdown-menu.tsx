@@ -30,12 +30,13 @@ function DropdownMenuContent({
   alignOffset = 0,
   side = "bottom",
   sideOffset = 4,
+  sticky,
   className,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<
     MenuPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "sticky"
   >) {
   return (
     <MenuPrimitive.Portal>
@@ -45,6 +46,7 @@ function DropdownMenuContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        sticky={sticky}
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"

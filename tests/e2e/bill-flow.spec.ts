@@ -55,7 +55,7 @@ async function readBill(agentUserId: string, period: string) {
 
 async function generateDraft(page: Page, period: string, scriptsPending = false): Promise<void> {
   const form = page.locator('form').filter({ has: page.locator('#agent-bill-period') });
-  await page.getByLabel('结算发生月（上海时区）', { exact: true }).fill(period);
+  await page.getByLabel('结算发生月', { exact: true }).fill(period);
   await page.getByRole('button', { name: '生成或更新草稿', exact: true }).click({ noWaitAfter: scriptsPending });
   await expect(form.getByText(new RegExp(`^已生成或更新 \\d+ 张 ${period} 账单$`, 'u'))).toBeVisible();
   await expect(form).toHaveAttribute('aria-busy', 'false');

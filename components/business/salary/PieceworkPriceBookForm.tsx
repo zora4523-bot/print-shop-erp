@@ -107,7 +107,7 @@ function DraftEditor({ draft, previous, action, pending, fieldErrors, fields, pe
         {!personal && <label className="space-y-1 text-sm" htmlFor="piecework-source"><span>调价依据</span><Input id="piecework-source" name="sourceName" maxLength={500} defaultValue={draft.sourceName} /></label>}
         <label className="space-y-1 text-sm" htmlFor="piecework-note"><span>调整说明（发布时至少两字）</span><Input id="piecework-note" name="publishNote" maxLength={500} defaultValue={draft.publishNote} /></label>
         <label className="space-y-1 text-sm" htmlFor="piecework-mode"><span>生效方式</span><NativeSelect id="piecework-mode" value={scheduled ? 'scheduled' : 'immediate'} onChange={(e) => setScheduled(e.target.value === 'scheduled')}><option value="immediate">立即生效</option><option value="scheduled">指定时间</option></NativeSelect></label>
-        {scheduled && <label className="space-y-1 text-sm" htmlFor="piecework-effective"><span>生效时间（北京时间）</span><Input id="piecework-effective" type="datetime-local" required value={effective} onChange={(e) => setEffective(e.target.value)} /></label>}
+        {scheduled && <label className="space-y-1 text-sm" htmlFor="piecework-effective"><span>生效时间</span><Input id="piecework-effective" type="datetime-local" required value={effective} onChange={(e) => setEffective(e.target.value)} /></label>}
       </fieldset>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" name="intent" value="save" disabled={pending || (scheduled && !validTime)}>{pending ? '正在处理…' : '保存草稿'}</Button>

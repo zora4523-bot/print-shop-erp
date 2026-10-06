@@ -43,7 +43,7 @@ export function GenerateAgentMonthlyBillsForm({
     >
       <div className="space-y-1">
         <label htmlFor="agent-bill-period" className="text-xs text-muted-foreground">
-          结算发生月（上海时区）
+          结算发生月
         </label>
         <Input
           id="agent-bill-period"
@@ -68,9 +68,7 @@ export function ConfirmAgentMonthlyBillForm({
   submitAction: BillFormAction;
   initialIdempotencyKey: string;
 }) {
-  // Receive the bound reference from the Server Component. Binding during
-  // client-component SSR recreates its pending argument promise on every
-  // useActionState postback retry, so native validation never finishes.
+  // 接收 Server Component 已绑定的 action，保持 useActionState 原生回传时参数 Promise 稳定。
   const [state, action, pending] = useActionState<
     AgentMonthlyBillActionResult | null,
     FormData
@@ -148,7 +146,7 @@ export function CreateAgentMonthlyBillCreditForm({
     AgentMonthlyBillActionResult | null,
     FormData
   >(submitAction, null);
-  // 业主 2026-10-01：多收了录抵扣（冲减应收），少收了录补收（追加应收）。
+  // 多收款通过抵扣冲减应收，少收款通过补收追加应收。
   const [direction, setDirection] = useState<'CREDIT' | 'SURCHARGE'>(initialDirection);
   const kind = direction === 'SURCHARGE' ? '补收' : '抵扣';
   return (

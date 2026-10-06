@@ -29,7 +29,7 @@ async function publish(page: Page, workerId: string | null, at: string | null, r
   }
   await r.getByLabel('调整说明').fill('取消计划自动回归');
   await r.getByLabel('生效方式').selectOption(at ? 'scheduled' : 'immediate');
-  if (at) await r.getByLabel('生效时间（北京时间）').fill(at);
+  if (at) await r.getByLabel('生效时间').fill(at);
   await r.getByRole('button', { name: '保存草稿', exact: true }).click();
   await expect(r.getByRole('status')).toContainText('草稿已保存');
   await r.getByRole('button', { name: '核对并发布', exact: true }).click();

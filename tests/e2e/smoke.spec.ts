@@ -337,7 +337,7 @@ test.describe('automation smoke', () => {
     await page.goto('/owner/parties/new');
     await expect(page.getByRole('heading', { name: '新建客户/供应商' })).toBeVisible();
     await expect(
-      page.getByText('高级设置：自定义客户/供应商编码（通常无需填写）'),
+      page.getByText('自定义客户/供应商编码', { exact: true }),
     ).toBeVisible();
     await expectNoNextErrorOverlay(page);
 
@@ -345,7 +345,7 @@ test.describe('automation smoke', () => {
       '/owner/parties/new?type=SUPPLIER&returnTo=%2Fowner%2Fpurchases%2Fnew',
     );
     await page
-      .getByText('高级设置：自定义客户/供应商编码（通常无需填写）')
+      .getByText('自定义客户/供应商编码', { exact: true })
       .click();
     await page
       .getByLabel('自定义编码（选填）')
@@ -509,7 +509,7 @@ test.describe('automation smoke', () => {
     await page.goto('/owner/materials/new');
     await expect(page.getByRole('heading', { name: '新建物料' })).toBeVisible();
     await expect(
-      page.getByText('高级设置：自定义物料编码（通常无需填写）'),
+      page.getByText('自定义物料编码', { exact: true }),
     ).toBeVisible();
     await expectNoNextErrorOverlay(page);
   });

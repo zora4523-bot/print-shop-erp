@@ -86,12 +86,6 @@
       "reason": "清理清单明确标注旧读取模块已移除；有意保留旧组合读取协议的退役记录。"
     },
     {
-      "file": "docs/ui-规范.md",
-      "type": "path",
-      "reference": "OrderPaperSwatchPicker.tsx",
-      "reason": "明确记录纸张色卡组件已于 2026-09-23 删除、改用胶囊按钮及移除旧豁免；这是有意保留的退役事实，不是当前文件定位。"
-    },
-    {
       "file": "docs/工单编辑-字段对照表.md",
       "type": "path",
       "reference": "SalesOrderEditWorkspace.tsx",

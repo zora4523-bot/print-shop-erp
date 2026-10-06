@@ -402,7 +402,8 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     menuSection: 'operations',
     status: 'implemented',
     menuOrder: 160,
-    menuRoles: [Role.ADMIN],
+    // 工作台的 CDR 下载区保留「按日期汇总」入口，侧栏不再重复展示。
+    menuRoles: [],
     requiredPermission: 'design:bundle:create',
   },
   {

@@ -116,6 +116,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | CDR 独立库、真实 ZIP 与下载门禁 | `pnpm test:release:cdr` |
 | 开发专用价格视觉 fixture | `pnpm test:release:dev-fixtures` |
 | 浏览器组件（独立 Vitest 配置） | `pnpm test:browser` |
+| 真实页面导航、角色菜单与键盘操作 | `pnpm exec playwright test tests/e2e/admin-shell-navigation.spec.ts --config=playwright.release.config.ts --project=admin-375x667 --project=admin-1280x800` |
 | Playwright 全套（先满足隔离前置；现行配置启动 `next dev`） | `pnpm test:e2e` |
 | 业务 E2E 与无 JS 路径 | `pnpm exec playwright test tests/e2e --project=chromium --project=no-js` |
 | 打印像素与分页门禁 | `pnpm exec playwright test tests/visual/order-print.spec.ts --project=chromium` |
@@ -160,13 +161,17 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 
 2026-09-29 补齐 `unit` 的隔离前置：fresh 链验证后的 `erp_e2e_ci` 单独 seed，并通过现有 `test:e2e:prepare` 发布仅用于测试的工价和目录 fixture；Vitest 进程显式使用 `DATABASE_URL="$E2E_DATABASE_URL"`，与确认的 E2E 库一致。仓库维护、表单创建幂等、工价取消、排单完工四组 PostgreSQL 套件必须实际执行；合并时核对 JSON 报告，不把前置不足导致的 skip 计作通过。覆盖率门槛保持不变。
 
-现有打印像素基线仅有 Darwin 版，独立的 [Print (Darwin) 工作流](./.github/workflows/print-darwin.yml) 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`；macOS 按 10 倍计费，因此只在打印相关路径变动或手动 `workflow_dispatch` 时运行。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。每个作业每次都上传 `.review/`（审计与各套件 JSON，用于分析耗时），覆盖率、报告、截图和 trace 只在失败时上传；均启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。CI 下 Playwright trace 为 `on-first-retry`。
+现有打印像素基线仅有 Darwin 版，独立的 [Print (Darwin) 工作流](./.github/workflows/print-darwin.yml) 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`；macOS 按 10 倍计费，因此只在打印相关路径变动或手动 `workflow_dispatch` 时运行。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。每个作业每次都上传 `.review/`（审计与各套件 JSON，用于分析耗时），覆盖率、报告、截图和 trace 只在失败时上传；均启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。通用 Playwright 配置在 CI 中使用 `trace: on-first-retry`，各专用配置按其验证要求设置。
 
 2026-09-11 PR #16 前两轮远端执行分别暴露了导入文案扫描、全仓按钮 AST 扫描的 5 秒超时。这两项集成扫描使用独立的 20 秒执行上限，扫描范围及全部语义断言保持。该轮 Darwin 曾有 13 项字体截图差异（历史结果；后续 PR #46 打印门禁已通过，见 [10-04 发布记录](docs/audits/2026-10-04-production-release-f084d34e.md)）：CI PDF 出现额外 Helvetica 回退，对齐系统语言偏好未消除差异，该尝试已撤回。截图基线与比较阈值未改，CI 专用基线须先取得业务确认，修正结果以最新 PR checks 为准。
 
 下述为此前本地整改时的仓库配置与保护查询记录：当时尚未推送或运行远端 CI。2026-09-11 只读查询显示 main 的 `protected=false`；保护与规则集接口返回 403，提示当前私有仓库套餐限制，因此 required checks 尚未强制执行。工作流语法通过不能替代远端通过与分支保护验收。真实通知、生产 worker、生产存量与部署 smoke 仍须按 REL-07 独立留证。认证配置的 `skipProxyUrlNormalize` 用于保留 Next 16.3 预取标头；修改时必须重跑登出晚响应竞态与公共/受保护路径回归。该轮本地实测与未通过项见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
 
 发布验证必须记录冻结候选 SHA、命令、运行模式、数据库隔离方式、通过/失败/跳过数量、跳过原因与证据。所需验证层级及放行标准只在 [贡献指南](./CONTRIBUTING.md#测试要求) 维护；本次历史实测在 [2026-09-10 审查](./docs/audits/2026-09-10-release-readiness.md)，不能沿用为后续候选的通过记录。
+
+导航 E2E 与既有管理端响应式规格共用 `admin-*` projects、隔离数据库和生产构建：PR 执行 375×667 / 1280×800，main 随九视口作业执行完整矩阵。桌面分组与快捷键专项只在 1280×800 执行，其余视口保留明暗布局、账号菜单、父级导航、触控和 axe 检查。开发环境标签等稳定组件覆盖保留在 `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx`；失败截图和 trace 沿用通用配置。
+
+文案扫描测试在 `test-results/ui-copy/` 创建及清理临时源码夹具；常规、release 与 durable TypeScript 配置均排除此生成目录，避免并行验证时把测试夹具当作应用源码。
 
 ## 测试环境约束
 

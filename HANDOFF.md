@@ -2,13 +2,15 @@
 
 ## 当前交接（2026-10-06）
 
-最新任务：死代码清理与开发文档同步已推送至 [PR #50](https://github.com/zora4523-bot/print-shop-erp/pull/50)，合入最新 main 并保留双方文档规则。18 个模板组件的删除依据见 [死代码清理记录](docs/audits/2026-10-04-dead-code-cleanup.md)。首轮 CI 发现既有间接依赖漏洞，已修复并通过本地审计、类型及脱敏测试，详见 [依赖修复记录](docs/audits/2026-10-06-pr50-dependency-security.md)。合并状态与完整 CI 以 PR 最新 checks 为准；本次未部署生产。
+本分支当前任务：PR #52 对抗审查修复，已同步 main `793bf6fa`，恢复 CDR 配置容错与既有导航组件测试，将真实导航接入 admin 视口矩阵，统一测试分层规则。验证与剩余边界见 [修复记录](docs/audits/2026-10-06-pr52-review-fixes.md)。本轮仅本地修改与验证，未 push、未合并 PR、未部署；下方 PR #50 段落保留先前交接内容。
+
+上一已记录任务：死代码清理与开发文档同步已推送至 [PR #50](https://github.com/zora4523-bot/print-shop-erp/pull/50)，合入最新 main 并保留双方文档规则。18 个模板组件的删除依据见 [死代码清理记录](docs/audits/2026-10-04-dead-code-cleanup.md)。首轮 CI 发现既有间接依赖漏洞，已修复并通过本地审计、类型及脱敏测试，详见 [依赖修复记录](docs/audits/2026-10-06-pr50-dependency-security.md)。合并状态与完整 CI 以 PR 最新 checks 为准；本次未部署生产。
 
 先读 [当前开发入口](docs/当前开发入口.md)，再按任务范围查领域契约与源代码。
 最近已记录生产发布为 `f084d34e`（PR #46），188 条迁移；10-04 00:58:22 上海时间恢复服务。
 生产入口简化、Analytics 重构与此前 CDR／打印／账单更新已包含在该版本。
 证据、CI 范围及尚未执行的真实业务验收见 [发布记录](docs/audits/2026-10-04-production-release-f084d34e.md)。
-本次仅同步开发文档，不重跑生产验收或变更生产。核对记录见 [文档同步审计](docs/audits/2026-10-04-development-doc-sync.md)。
+2026-10-04 的历史任务仅同步开发文档，未重跑生产验收或变更生产。核对记录见 [文档同步审计](docs/audits/2026-10-04-development-doc-sync.md)。
 
 ## 历史交接记录
 

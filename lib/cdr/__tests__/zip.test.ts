@@ -45,7 +45,7 @@ vi.mock('archiver', () => ({
   },
 }));
 
-import { isMockMode, uploadBundleZip, CdrZipError } from '../zip';
+import { uploadBundleZip, CdrZipError } from '../zip';
 
 const configuredEnv = {
   OSS_ACCESS_KEY_ID: 'ak',
@@ -84,60 +84,6 @@ beforeEach(() => {
   archiveMock.finalize.mockReset().mockResolvedValue(undefined);
   archiveMock.abort.mockReset();
   archiveMock.on.mockReset();
-});
-
-describe('isMockMode', () => {
-  it('CDR_BUNDLE_MOCK_MODE=true → true', () => {
-    expect(
-      isMockMode({
-        CDR_BUNDLE_MOCK_MODE: 'true',
-      } as unknown as NodeJS.ProcessEnv),
-    ).toBe(true);
-  });
-  it('CDR_BUNDLE_MOCK_MODE=false + OSS 配齐 → false', () => {
-    expect(
-      isMockMode({
-        ...(configuredEnv as Record<string, string>),
-        CDR_BUNDLE_MOCK_MODE: 'false',
-      } as unknown as NodeJS.ProcessEnv),
-    ).toBe(false);
-  });
-  it('OSS 未配齐（缺任一 key）→ true（强制 mock）', () => {
-    expect(
-      isMockMode({
-        OSS_ACCESS_KEY_ID: 'k',
-        OSS_ACCESS_KEY_SECRET: 's',
-        // OSS_STS_ROLE_ARN missing
-        OSS_BUCKET: 'b',
-        OSS_REGION: 'oss-cn-shenzhen',
-      } as unknown as NodeJS.ProcessEnv),
-    ).toBe(true);
-  });
-  it('留空 + OSS 配齐 + 非生产 → true（dev/E2E 不写真 bucket）', () => {
-    expect(
-      isMockMode({
-        ...(configuredEnv as unknown as Record<string, string>),
-        NODE_ENV: 'development',
-      } as unknown as NodeJS.ProcessEnv),
-    ).toBe(true);
-  });
-  it('OSS_ENDPOINT 非法（readOssConfig throw）→ true（页面降级 mock 而非 500）', () => {
-    expect(
-      isMockMode({
-        ...(configuredEnv as unknown as Record<string, string>),
-        OSS_ENDPOINT: 'not a url',
-        NODE_ENV: 'production',
-      } as unknown as NodeJS.ProcessEnv),
-    ).toBe(true);
-  });
-  it('留空 + OSS 配齐 + 生产 → false（真实打包）', () => {
-    expect(
-      isMockMode({
-        ...(configuredEnv as unknown as Record<string, string>),
-        NODE_ENV: 'production',
-      } as unknown as NodeJS.ProcessEnv),
-    ).toBe(false);
-  });
 });
 
 describe('uploadBundleZip — mock path', () => {

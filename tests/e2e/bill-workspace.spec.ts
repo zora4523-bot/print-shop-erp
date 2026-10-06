@@ -24,7 +24,7 @@ test('月账单两端关联、跨月抵扣、历史依据与响应式浏览', as
   await login(page, { username: E2E_USERS.owner.username, password: E2E_PASSWORD, from: '/owner/agent-bills' });
   async function generate(period: string) {
     await page.goto(`/owner/agent-bills?period=${period}&agentUserId=${source.agentUserId}`);
-    await page.getByLabel('结算发生月（上海时区）', { exact: true }).fill(period);
+    await page.getByLabel('结算发生月', { exact: true }).fill(period);
     await page.getByRole('button', { name: '生成或更新草稿', exact: true }).click();
     await expect(page.getByText(new RegExp(`^已生成或更新 \\d+ 张 ${period} 账单$`))).toBeVisible();
     const bill = await withDb(async (db) => (await db.query<{ id: string }>('SELECT id FROM "AgentMonthlyBill" WHERE "agentUserId"=$1 AND period=$2', [source.agentUserId, period])).rows[0]);

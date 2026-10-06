@@ -11,5 +11,5 @@
     ".next-release/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "generated", ".next", ".next-durable"]
+  "exclude": ["node_modules", "generated", "test-results", ".next", ".next-durable"]
 }

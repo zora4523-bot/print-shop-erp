@@ -56,9 +56,7 @@ const DEFAULT_EXPIRE_HOURS = SETTING_DEFINITIONS.cdr_link_expire_hours.fallback.
 export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.CDR_BUNDLE_MOCK_MODE === 'true') return true;
   if (env.CDR_BUNDLE_MOCK_MODE === 'false') return false;
-  // OSS 未配齐 → 强制 mock；不能真打包。malformed OSS_ENDPOINT 会让
-  // readOssConfig throw——视同未配齐，页面（/foreman/cdr 渲染时调本
-  // 函数）降级到 mock 告警条而不是 500。
+  // 缺少或错误的配置沿用页面降级提示；显式模式仍由调用方决定。
   let cfg: ReturnType<typeof readOssConfig>;
   try {
     cfg = readOssConfig(env);
@@ -94,7 +92,7 @@ function deriveObjectKey(fileUrl: string, cfg: OssConfig): string {
   return key;
 }
 
-/** Use the same object-key rules as the actual packer, without touching storage. */
+/** 校验设计文件地址，使用打包器的 object key 规则。 */
 export function isBundleSourceAddressValid(fileUrl: string, env: NodeJS.ProcessEnv = process.env): boolean {
   try {
     const url = new URL(fileUrl);
@@ -105,7 +103,7 @@ export function isBundleSourceAddressValid(fileUrl: string, env: NodeJS.ProcessE
   } catch { return false; }
 }
 
-// Keep directory components compact; filenames use a separate, larger limit.
+// 目录和文件名分别限制长度。
 export function safeArchiveFolder(value: string, maxBytes = 50): string {
   let cleaned = stripUnsafeFileNameChars(value.replace(/[/\\<>:"|?*]/g, '_'))
     .replace(/^[. ]+|[. ]+$/g, '');

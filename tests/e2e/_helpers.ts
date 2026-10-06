@@ -2403,9 +2403,8 @@ export async function logout(page: Page): Promise<void> {
   const userMenuTrigger = page.locator('button[aria-label^="用户菜单"]');
   if (await userMenuTrigger.isVisible().catch(() => false)) {
     await userMenuTrigger.click();
-    // dropdown 内的 logout 是平铺 form>button（非 DropdownMenuItem，避
-    // 免 form/menuitem 嵌套冲突）。data-slot 锁定 + auto-wait 等 portal
-    // 内容真正渲染。
+    // DropdownMenuItem 以 form 内的原生 submit 按钮承载退出操作；
+    // data-slot 定位菜单项，并等待 portal 内容真正渲染。
     await page.locator('[data-slot="user-menu-logout"]').click();
   } else {
     // worker 端 H5 layout 没接 admin shell，仍是 inline button。

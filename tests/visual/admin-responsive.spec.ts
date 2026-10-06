@@ -757,9 +757,13 @@ async function checkRoutes(
   });
   await page.addInitScript((requestedTheme) => {
     localStorage.setItem('erp-theme', requestedTheme);
-    document.documentElement.classList.toggle('dark', requestedTheme === 'dark');
-    document.documentElement.dataset.theme = requestedTheme;
-    document.documentElement.style.colorScheme = requestedTheme;
+    // 初始化脚本可能先于根元素执行；应用初始化仍会读取已保存主题。
+    const root = document.documentElement;
+    if (root) {
+      root.classList.toggle('dark', requestedTheme === 'dark');
+      root.dataset.theme = requestedTheme;
+      root.style.colorScheme = requestedTheme;
+    }
   }, theme);
   for (const route of routes) {
     await test.step(route.name, async () => {

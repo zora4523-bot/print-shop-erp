@@ -58,7 +58,7 @@ describe('getAdminMenuItems', () => {
       '规则',
       '系统管理',
     ]);
-    expect(items).toHaveLength(37);
+    expect(items).toHaveLength(36);
     expect(items.map((i) => i.label)).toEqual([
       '管理工作台',
       '经营概览',
@@ -96,7 +96,6 @@ describe('getAdminMenuItems', () => {
       '推送配置',
       '后台任务',
       'Pigsty 运维',
-      'CDR 汇总',
     ]);
     // P1 #1 Slice A：/owner/page.tsx 已落地，Dashboard href 不再是 `#`
     // placeholder。锁住，防止未来回退时 sidebar 又指 404 路由。
@@ -276,10 +275,9 @@ describe('getAdminMenuItems', () => {
       (i) => i.label === '工时录入',
     );
     expect(attendance?.requiredPermission).toBe('attendance:manage');
-    const cdr = flatten(getAdminMenuItems({ role: Role.ADMIN })).find(
-      (i) => i.label === 'CDR 汇总',
-    );
-    expect(cdr?.href).toBe('/foreman/cdr');
+    expect(labels).not.toContain('CDR 汇总');
+    const cdr = ADMIN_MODULES.find((module) => module.id === 'foreman.cdr');
+    expect(cdr?.routeBase).toBe('/foreman/cdr');
     expect(cdr?.requiredPermission).toBe('design:bundle:create');
     const hrefs = flatten(getAdminMenuItems({ role: Role.ADMIN })).map((i) => i.href);
     expect(new Set(hrefs).size).toBe(hrefs.length);
@@ -437,7 +435,7 @@ describe('全局侧栏与模块目录', () => {
     const global = getAdminSidebarGroups(full);
     const rules = full.flatMap((group) => group.items).find((item) => item.href === '/owner/rules');
     expect(rules?.children).toHaveLength(11);
-    expect(flatten(global)).toHaveLength(26);
+    expect(flatten(global)).toHaveLength(25);
     expect(flatten(global).every((item) => !item.children?.length)).toBe(true);
     expect(getActiveAdminMenuHref('/owner/rules/customer-pricing', flatten(global), new URLSearchParams('section=machine'))).toBe('/owner/rules');
     expect(getActiveAdminMenuHref('/owner/rules/customer-pricing', rules!.children!, new URLSearchParams('section=machine'))).toBe('/owner/rules/customer-pricing?section=machine');

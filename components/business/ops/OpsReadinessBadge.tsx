@@ -1,9 +1,7 @@
 import { StatusBadge } from '@/components/ui-business';
 import { opsReadinessDefinition } from '@/lib/ui/status-registry';
 
-// 运维就绪徽章。就绪态不是持久化枚举，而是由 (ready, blockers) 派生的
-// 三态展示值，映射集中在 lib/ui/status-registry.ts 的
-// opsReadinessDefinition，避免各运维页各写一份 tone 判断。
+// 运维就绪状态由 ready 与 blockers 派生，统一通过 opsReadinessDefinition 映射展示。
 export function OpsReadinessBadge({
   ready,
   blockers,
