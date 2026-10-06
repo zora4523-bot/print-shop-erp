@@ -15,6 +15,19 @@ beforeEach(() => {
   findManyMock.mockReset().mockResolvedValue([]);
 });
 
+it('零报工出勤日薪也导出提成、补足和应发', async () => {
+  const date = new Date('2026-10-06');
+  findManyMock.mockResolvedValue([{ id: 'attendance-only', workDate: date, status: 'PAID', reportAmount: '0.00', adjustmentAmount: '100.00', payableAmount: '100.00',
+    lockedAt: date, paidAt: date, reporter: { displayName: '出勤师傅', username: 'attendance-worker' }, productionWages: [], items: [] }]);
+  const rows = await loadPieceworkSettlementExportData({ from: '2026-10-06', to: '2026-10-06' });
+  const summary = readZipEntries(await buildPieceworkSettlementWorkbook(rows)).get('xl/worksheets/sheet1.xml')!;
+  expect(summary).toContain('日薪补足 / 历史调整');
+  expect(summary).toContain('attendance-only');
+  expect(summary).toMatch(/<c r="F2"[^>]*><v>0<\/v><\/c>/);
+  expect(summary).toMatch(/<c r="G2"[^>]*><v>100<\/v><\/c>/);
+  expect(summary).toMatch(/<c r="H2"[^>]*><v>100<\/v><\/c>/);
+});
+
 describe('new piecework settlement export', () => {
   it('queries only the new settlement ledger in the requested date range', async () => {
     await loadPieceworkSettlementExportData({

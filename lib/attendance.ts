@@ -9,6 +9,7 @@ import { db } from './db';
 import { parseStrictYmd } from './auth/schemas';
 import { employmentCoversDate } from './salary/employment';
 import { salaryIdentityLockKey } from './salary/hourly-lock';
+import { DAILY_MINIMUM } from './salary/daily-minimum';
 
 // 正式员工考勤：管理员按天记录实际上班/请假天数（支持半天）以及正常、
 // 加班工时。WORK_HOURS 规则仅用于录入 UI 的“全勤”快捷值，不在后端派生考勤。
@@ -104,6 +105,14 @@ async function assertMonthNotArchived(
   }
 }
 
+// The caller holds salaryIdentityLockKey, also held by daily settlement.
+// Check even when no attendance exists: adding it later would change eligibility.
+async function assertDayNotSettled(tx: Prisma.TransactionClient, workerId: string, date: string) {
+  if (date < DAILY_MINIMUM.effectiveFrom) return;
+  const settled = await tx.pieceworkSettlement.findUnique({ where: { reporterId_workDate: { reporterId: workerId, workDate: parseStrictYmd(date)! } }, select: { id: true } });
+  if (settled) throw new AttendanceError('该日工资已锁定，不能新增、修改或删除考勤；请核对历史工资');
+}
+
 // Idempotent upsert: re-recording the same (workerId, date) overwrites
 // the previous row. 管理员可能早上快速录"全勤"再下午细调，这里必须
 // 宽松（注意事项 2 — 幂等）。
@@ -187,6 +196,7 @@ export async function recordAttendance(
     }
 
     await assertMonthNotArchived(tx, workerId, month, '修改');
+    await assertDayNotSettled(tx, workerId, date);
 
     const existing = await tx.attendance.findUnique({
       where: { workerId_date: { workerId, date: dateCol } },
@@ -283,6 +293,7 @@ export async function removeAttendance(
     )}))`;
 
     await assertMonthNotArchived(tx, workerId, month, '删除');
+    await assertDayNotSettled(tx, workerId, date);
 
     const existing = await tx.attendance.findUnique({
       where: { workerId_date: { workerId, date: dateCol } },

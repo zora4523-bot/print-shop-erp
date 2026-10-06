@@ -388,7 +388,9 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     const input = { jobId: job.id, requestKey: randomUUID(), reason: '改版实际生产提成', allocations: [{ workerId: worker.id, amount: '7', expectedRevision: pending.revision }, { workerId: collaborator.id, amount: '5', expectedRevision: -1 }] };
     await allocateProductionWages(input, admin); await allocateProductionWages(input, admin);
     const receipt = await lockPieceworkSettlement({ reporterId: collaborator.id, workDate: todayShanghai(), actor: admin, now: nextDay });
-    expect(receipt.payableAmount).toBe('5.00'); expect(receipt.reportCount).toBe(1);
+    // 业主 2026-10-06：按师傅每日保底，原提成不可被改写。
+    expect(receipt.reportAmount).toBe('5.00');
+    expect(receipt.payableAmount).toBe(todayShanghai() >= '2026-10-06' ? '100.00' : '5.00'); expect(receipt.reportCount).toBe(1);
     await expect(allocateProductionWages({ ...input, requestKey: randomUUID(), allocations: input.allocations.map(row => ({ ...row, expectedRevision: row.workerId === worker.id ? 1 : 0 })) }, admin)).rejects.toThrow('已结算');
   });
   it('reverses only an unsettled erroneous registration and permits a fresh registration without duplicating wages', async () => {
@@ -407,6 +409,27 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     await expect(db.productionWageEntry.updateMany({ where: { wage: { jobId: f.job.id } }, data: { reason: 'rewrite' } })).rejects.toThrow();
     await expect(db.productionWage.updateMany({ where: { jobId: f.job.id }, data: { amount: '1' } })).rejects.toThrow();
     await expect(db.productionJob.update({ where: { id: f.job.id }, data: { workerId: collaborator.id } })).rejects.toThrow();
+  });
+  it('已发 100 元日薪后，多次补登记只增加超出保底的提成', async () => {
+    const owner = await newWorker();
+    const day = todayShanghai();
+    const date = new Date(`${day}T00:00:00Z`);
+    await db.attendance.create({ data: { workerId: owner.id, date, workUnits: 1, roleSnapshot: 'WORKER', workerTypeSnapshot: 'MACHINE', identitySnapshotVerified: true, createdById: admin.id } });
+    const locked = await lockPieceworkSettlement({ reporterId: owner.id, workDate: day, actor: admin, now: new Date(Date.now() + 86400000) });
+    expect(locked.payableAmount).toBe('100.00');
+    for (const expected of ['100.00', '200.00']) {
+      const f = await fixture();
+      f.request.orders[0].assignments = Object.fromEntries(Object.keys(f.request.orders[0].assignments).map(key => [key, owner.id]));
+      await publishProductionDispatch(f.request, admin);
+      const job = await db.productionJob.findFirstOrThrow({ where: { orderId: f.order.id, operationId: { not: null } } });
+      const input = { ...completion(job), mode: 'BACKFILL' as const, workDate: day, reason: '日薪结算后补登记', confirmedSettledDay: true };
+      await registerProductionCompletion(input, admin);
+      await registerProductionCompletion(input, admin);
+      const review = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: job.id } });
+      expect(review.evidence).toMatchObject({ lateCommissionAmount: '200.00', expectedAmount: expected, frozenPayable: '100.00' });
+      expect(await db.productionWage.count({ where: { jobId: job.id } })).toBe(0);
+    }
+    expect((await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: locked.id } })).payableAmount.toFixed(2)).toBe('100.00');
   });
   it('allows a reasoned quantity correction before completion and preserves the original request', async () => {
     const f = await assigned(); await registerProductionCompletion({ ...completion(f.job, '990'), reason: '实际数量待核对' }, worker);

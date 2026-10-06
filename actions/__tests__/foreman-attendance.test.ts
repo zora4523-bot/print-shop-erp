@@ -183,6 +183,7 @@ describe('recordAttendanceAction', () => {
     });
     expect(revalidatePathMock).toHaveBeenCalledWith('/foreman/attendance');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary');
+    expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/piecework');
     expect(revalidatePathMock).toHaveBeenCalledWith('/owner/salary/hourly');
     expect(revalidatePathMock).toHaveBeenCalledWith('/worker/salary');
   });

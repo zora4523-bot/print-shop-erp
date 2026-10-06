@@ -1,4 +1,5 @@
 import { PageHeader } from '@/components/ui-business';
+import { settlementAdjustmentLabel } from '@/lib/salary/daily-minimum';
 import { SettledProductionWages } from '@/components/business/salary/ProductionWageRecords';
 import { formatRate } from '@/lib/format/unit-price';
 import { reportWageLines } from '@/lib/salary/report-display';
@@ -305,7 +306,7 @@ function OperationSettlementDetail({
 
       <section className="grid min-w-0 grid-cols-1 gap-3 text-sm min-[360px]:grid-cols-2">
         <Money label="报工金额" value={settlement.reportAmount} />
-        <Money label="调整" value={settlement.adjustmentAmount} />
+        <Money label={settlementAdjustmentLabel(settlement.snapshot)} value={settlement.adjustmentAmount} />
         <Money label="应发工资" value={settlement.payableAmount} strong />
         <Metric label="报工明细" value={`${settlement.items.length + settlement.productionWages.length} 条`} />
       </section>

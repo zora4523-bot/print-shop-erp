@@ -10,6 +10,7 @@ const { dbMock, databaseClockNowMock, databaseNowMock } = vi.hoisted(() => ({
   databaseClockNowMock: vi.fn(),
   databaseNowMock: vi.fn(),
   dbMock: {
+    attendance: { findMany: vi.fn() },
     pieceworkSettlement: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
@@ -62,6 +63,7 @@ function report(
   return {
     id,
     amount: new Decimal(amount),
+    reportedCompletedQty: new Decimal(amount.startsWith('-') ? -100 : 100),
     priceBook: { rules: [] },
     entryType: amount.startsWith('-') ? 'REVERSAL' : 'REPORT',
     reportedAt: new Date('2026-08-27T04:00:00.000Z'),
@@ -87,6 +89,7 @@ function settlementRow(
 }
 
 beforeEach(() => {
+  dbMock.attendance.findMany.mockReset().mockResolvedValue([]);
   for (const delegate of [
     dbMock.pieceworkSettlement,
     dbMock.productionReport,
@@ -265,6 +268,36 @@ it('allows an explicit admin actor to read a settlement', async () => {
 });
 
 describe('lockPieceworkSettlement', () => {
+  it.each([['0', '100.00'], ['99.99', '100.00'], ['100', '100.00'], ['100.01', '100.01']])('同日提成 %s 只补到日薪', async (amount, expected) => {
+    dbMock.productionReport.findMany.mockResolvedValue([report('one', amount, 'PARTIAL')]);
+    await lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-10-06', actor: ACTOR, now: new Date('2026-10-07T04:00:00Z') });
+    expect(dbMock.pieceworkSettlement.create.mock.calls[0][0].data).toMatchObject({ payableAmount: expected,
+      snapshot: { dailyMinimum: { version: 1, amount: '100.00', applies: true, eligibility: 'PRODUCTION' } } });
+  });
+  it('多单与完工提成合并后只计算一次保底', async () => {
+    dbMock.productionReport.findMany.mockResolvedValue([report('one', '60', 'PARTIAL'), report('two', '30', 'FULL')]);
+    dbMock.productionWage.findMany.mockResolvedValue([{ id: 'wage', amount: new Decimal(20), jobId: 'job', job: { orderId: 'three', label: '包装' }, entries: [] }]);
+    await lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-10-06', actor: ACTOR, now: new Date('2026-10-07T04:00:00Z') });
+    expect(dbMock.pieceworkSettlement.create.mock.calls[0][0].data).toMatchObject({ reportAmount: '110.00', adjustmentAmount: '0.00', payableAmount: '110.00' });
+  });
+  it('仅有半天出勤也结算 100 元并冻结原考勤依据', async () => {
+    dbMock.productionReport.findMany.mockResolvedValue([]);
+    dbMock.attendance.findMany.mockResolvedValue([{ id: 'att', workerId: 'worker-1', workUnits: new Decimal('0.5'), roleSnapshot: 'WORKER', workerTypeSnapshot: 'MACHINE' }]);
+    await lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-10-06', actor: ACTOR, now: new Date('2026-10-07T04:00:00Z') });
+    expect(dbMock.pieceworkSettlement.create.mock.calls[0][0].data).toMatchObject({ reportAmount: '0.00', adjustmentAmount: '100.00', payableAmount: '100.00',
+      snapshot: { dailyMinimum: { eligibility: 'ATTENDANCE', attendance: [{ id: 'att', workUnits: '0.5', role: 'WORKER', workerType: 'MACHINE' }] } } });
+  });
+  it('生效后无出勤无生产不能领取日薪', async () => {
+    dbMock.productionReport.findMany.mockResolvedValue([]);
+    await expect(lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-10-06', actor: ACTOR, now: new Date('2026-10-07T04:00:00Z') })).rejects.toMatchObject({ code: 'NO_REPORTS' });
+  });
+  it('只有冲正或撤销的记录不触发日薪补足', async () => {
+    dbMock.productionReport.findMany.mockResolvedValue([{ ...report('original', '5', 'PARTIAL'), operation: { id: 'same', orderId: 'order', operationType: 'PARTIAL' } },
+      { ...report('reversal', '-5', 'PARTIAL'), operation: { id: 'same', orderId: 'order', operationType: 'PARTIAL' } }]);
+    dbMock.productionWage.findMany.mockResolvedValue([{ id: 'wage', amount: new Decimal(0), jobId: 'job', job: { orderId: 'other', label: '误登记', workDate: null, completedQty: null }, entries: [] }]);
+    await lockPieceworkSettlement({ reporterId: 'worker-1', workDate: '2026-10-06', actor: ACTOR, now: new Date('2026-10-07T04:00:00Z') });
+    expect(dbMock.pieceworkSettlement.create.mock.calls[0][0].data).toMatchObject({ reportAmount: '0.00', adjustmentAmount: '0.00', payableAmount: '0.00', snapshot: { dailyMinimum: { applies: false } } });
+  });
   it('locks only ProductionReport rows for one closed Shanghai day', async () => {
     const receipt = await lockPieceworkSettlement({
       reporterId: 'worker-1',

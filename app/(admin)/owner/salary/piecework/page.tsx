@@ -124,7 +124,7 @@ export default async function PieceworkSettlementPage({
           tone="warning"
         />
         <StatCard
-          label="待锁定报工人"
+          label="待结算师傅"
           value={`${data.candidates.length} 人`}
           icon={Calculator}
           tone={data.candidates.length > 0 ? 'warning' : 'neutral'}
@@ -138,6 +138,7 @@ export default async function PieceworkSettlementPage({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-semibold">待锁定报工</h2>
+              <p className="text-sm text-muted-foreground">含出勤日薪。当天提成与日薪保底合并结算。</p>
             </div>
             <LockPieceworkSettlementDayForm
               workDate={workDate}
@@ -159,7 +160,7 @@ export default async function PieceworkSettlementPage({
                     <th className="px-4 py-2 text-left">工序</th>
                     <th className="px-4 py-2 text-center">报工 / 工单</th>
                     <th className="px-4 py-2 text-right">待锁定金额</th>
-                    <th className="px-4 py-2" />
+                    <th className="relative px-4 py-2"><span className="sr-only">操作</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -183,7 +184,8 @@ export default async function PieceworkSettlementPage({
                         {row.reportCount} / {row.orderCount}
                       </td>
                       <td className="px-4 py-3 text-right font-sans tabular-nums font-medium">
-                        <span className="whitespace-nowrap">{row.reportCount ? formatMoney(row.reportAmount) : row.obligations.every(item => item.status === 'WAGES_DUE') ? '待补发' : '待核定'}</span>
+                        <span className="whitespace-nowrap">{row.reportCount || row.applies ? formatMoney(row.payableAmount) : row.obligations.every(item => item.status === 'WAGES_DUE') ? '待补发' : '待核定'}</span>
+                        {row.applies && <p className="text-xs text-muted-foreground">提成 {formatMoney(row.reportAmount)} · 日薪补足 {formatMoney(row.adjustmentAmount)}</p>}
                         {row.pendingPricing > 0 && <p className="text-sm text-warning-foreground">待补录提成 {row.pendingPricing} 笔</p>}
                         {row.obligations.map(item => <p key={item.id}><Link href={`/orders/${item.orderId}#production-job-${item.id}`} className="inline-flex min-h-11 items-center text-sm underline">{item.status === 'WAGES_DUE' ? '工资待补发' : item.status === 'REQUESTED' ? '数量待核定' : '历史生产待核对'} · {item.orderName} · v{item.version}</Link></p>)}
                       </td>
@@ -193,7 +195,7 @@ export default async function PieceworkSettlementPage({
                           reporterName={row.reporterName}
                           workDate={workDate}
                           reportCount={row.reportCount}
-                          amount={row.reportAmount}
+                          amount={row.payableAmount}
                           returnTo={returnTo}
                         />}
                       </td>
@@ -225,7 +227,7 @@ export default async function PieceworkSettlementPage({
                   <th className="px-4 py-2 text-right">应发</th>
                   <th className="px-4 py-2 text-center">状态</th>
                   <th className="px-4 py-2 text-left">时间</th>
-                  <th className="px-4 py-2" />
+                  <th className="relative px-4 py-2"><span className="sr-only">操作</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y">

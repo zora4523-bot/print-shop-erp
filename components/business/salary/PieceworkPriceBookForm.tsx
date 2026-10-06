@@ -1,5 +1,6 @@
 'use client';
 import { DEFAULT_FOIL_WAGES, FOIL_WAGE_THRESHOLD } from '@/lib/salary/foil-wage';
+import { DAILY_MINIMUM } from '@/lib/salary/daily-minimum';
 
 import Link from 'next/link';
 import { CancelPieceworkPlan } from './CancelPieceworkPlan';
@@ -71,6 +72,11 @@ export function PieceworkPriceBookForm({ books, now, personal, cancellationEnabl
         </Disclosure>
       </div>}
       {(!personal || personal.lane === 'PACKING') && <p>包装按实际完成袋数或盒数 × 对应工价计算，不区分大小单。</p>}
+      <div className="space-y-1">
+        <p className="font-medium text-foreground">师傅日薪保底：100 元</p>
+        <p>从 {DAILY_MINIMUM.effectiveFrom} 起，按上海工作日合计同一师傅当天全部提成：不超过 100 元只发 100 元，超过则只发提成，不另加日薪。</p>
+        <p>当天有生产登记或已确认的出勤即可计薪；有出勤但提成为 0 元、半天出勤也发 100 元。无出勤且无生产记录不计薪。统一与个人工价均适用，历史已锁定工资不重算。</p>
+      </div>
     </div>
     {state && !cancelled && <div role={state.status === 'error' ? 'alert' : undefined}><FormMessage fieldId="piecework-result" tone={state.status}>{state.message}</FormMessage></div>}
     {cancelled && <FormMessage fieldId="piecework-cancellation-result" tone="success">{cancelled.message}</FormMessage>}
