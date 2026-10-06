@@ -1,3 +1,20 @@
+# 会话交接
+
+## 当前交接（2026-10-06）
+
+最新任务：死代码清理与开发文档同步已推送至 [PR #50](https://github.com/zora4523-bot/print-shop-erp/pull/50)，合入最新 main 并保留双方文档规则。18 个模板组件的删除依据见 [死代码清理记录](docs/audits/2026-10-04-dead-code-cleanup.md)。首轮 CI 发现既有间接依赖漏洞，已修复并通过本地审计、类型及脱敏测试，详见 [依赖修复记录](docs/audits/2026-10-06-pr50-dependency-security.md)。合并状态与完整 CI 以 PR 最新 checks 为准；本次未部署生产。
+
+先读 [当前开发入口](docs/当前开发入口.md)，再按任务范围查领域契约与源代码。
+最近已记录生产发布为 `f084d34e`（PR #46），188 条迁移；10-04 00:58:22 上海时间恢复服务。
+生产入口简化、Analytics 重构与此前 CDR／打印／账单更新已包含在该版本。
+证据、CI 范围及尚未执行的真实业务验收见 [发布记录](docs/audits/2026-10-04-production-release-f084d34e.md)。
+本次仅同步开发文档，不重跑生产验收或变更生产。核对记录见 [文档同步审计](docs/audits/2026-10-04-development-doc-sync.md)。
+
+## 历史交接记录
+
+下文所有旧生产 SHA、迁移数、未推送／未部署、待验证和下一步均是对应日期的历史快照；
+不自动构成当前待办，也不能直接照抄旧发布目录与一次性操作。当前发布方式只看 [部署入口](DEPLOYMENT.md)。
+
 2026-10-02（集成导航测试契约）：第二轮完整CI发现销售视图已完成、管理工作台面包屑、基础资料及生产与采购折叠分组的旧定位。测试按现行文案和真实展开操作更新，保留导航、输入恢复、可访问性与亮暗主题断言。Darwin打印回归通过；所有失败均待最新提交CI复验，不把被取消分片记为通过。
 
 2026-10-02（CDR CI 状态契约）：真实 ZIP 测试发现旧用例在撤销后仍断言文件更新，而 b40bba50 已规定仅有效未撤销包作为比较基准。保持该业务规则，移到撤销前验证更新标记，撤销后新增尚未打包断言；分享404、真实下载与过期404仍保留。第二轮CI静态、单测、组件、兼容性和导出durable步骤通过。
@@ -8,23 +25,19 @@
 
 2026-10-02（集成主线）：PR #41 创建时 main 已更新至 `0d0d3020`，已合并最新主线以解除冲突。保留双方新增回归测试，批量打印沿用主线的取得文件后记录流程，保留 CDR 分支的超时与权限恢复。适配结算更正的可空快照和免收项目过滤，并补充两条回归。类型检查、lint、91 项组件浏览器测试及25项定向单测通过；远端 CI 以 PR Checks 为准。
 
-# 会话交接
-
-## 当前生产状态（2026-09-27 更新）
+## 2026-09-27 生产状态快照
 
 生产已运行 `b658328c`（PR #27 合并提交），166 条迁移；2026-09-27 13:23（上海时间）完成切换，停机约 66 秒，上线后检查通过。本批含删除客服 / 清废厨师、GPT-6 修复、设计款名称、打印抬头与停用客户字段；6 条迁移在正式库副本演练后执行，数据只有通知规则按预期变化（15 → 13，逾期模板改为外部销售）。crontab 按业主选择只删除已下线的 `cs-settle`、`cs-period-ending`、`hourly-payroll`，现行 4 行保留，示例里生产从未安装的 `pending-factory-backlog`、`production-alerts`、`order-export-cleanup` 仍不安装；cron 包装脚本已换为现行版本；nginx 访问日志已遮蔽 CDR token。Web/LIGHT/HEAVY 同一 SHA 在线，OSS 双仓库备份通过，企业微信 `CONNECTED`。正式库仍只有 1 个管理员 + 3 个销售账号，工单 / 账单 / 报工 / CDR 包为空，历史数据清理 dry-run 为 0。详见 [09-27 发布记录](docs/audits/2026-09-27-production-release-b658328c.md)；此前 [09-21](docs/audits/2026-09-21-production-release-ef6fa012.md)、[09-19](docs/audits/2026-09-19-production-release-09f1a1ca.md)、[09-17](docs/audits/2026-09-17-production-application-release.md) 发布保留为历史证据。
 
-发布方式（当前生产沿用，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包（容器至少 6 GB、`NODE_OPTIONS=--max-old-space-size=4096`、`CIRCLE_NODE_TOTAL=2`；4 GB 会在类型检查阶段无具体错误地失败；打包排除 `.next/cache` 用 `--exclude='.next/cache'`，不要带 `./` 前缀）→ 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。本批迁移不是空白封价格迁移，用发布目录里的 `migrate.cjs`（直接 `prisma migrate deploy`，带锁 / 语句超时、输出过滤连接串），不要复用 09-21 的 `deploy-blank-price-migrations.ts`（它遇到其他待执行迁移会拒绝）。步骤与脚本以 09-27 发布记录及应用机 `/root/erp-release-20260927/` 为准。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。
+当时发布方式（历史操作记录，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包（容器至少 6 GB、`NODE_OPTIONS=--max-old-space-size=4096`、`CIRCLE_NODE_TOTAL=2`；4 GB 会在类型检查阶段无具体错误地失败；打包排除 `.next/cache` 用 `--exclude='.next/cache'`，不要带 `./` 前缀）→ 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。本批迁移不是空白封价格迁移，用发布目录里的 `migrate.cjs`（直接 `prisma migrate deploy`，带锁 / 语句超时、输出过滤连接串），不要复用 09-21 的 `deploy-blank-price-migrations.ts`（它遇到其他待执行迁移会拒绝）。步骤与脚本以 09-27 发布记录及应用机 `/root/erp-release-20260927/` 为准。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。
 
 未验收（不得写成已验收）：登录后的各角色页面逐页检查、真实写入、实体手机扫码、企业微信真实消息实收；Sentry 未配置。
 
-> **每次新对话开始前，先读这份文件。** 它记录了上次会话停在哪、下次该接着做什么。
->
-> 本文件每次 session 结束前**整体重写**（除"历史"小节是追加式时间线）。
+> 历史交接格式保留供追溯；开始新任务先读本文件页首与当前开发入口，不按下文旧“当前任务”恢复工作。
 
 ---
 
-## 当前任务
+## 历史任务（原会话状态）
 
 2026-10-04（文档漂移门禁交接与规范冲突修正）：
 

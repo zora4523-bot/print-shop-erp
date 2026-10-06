@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> 2026-10-04 开发事实入口：[当前开发入口](docs/当前开发入口.md)。业务规格按后续已确认替代规则阅读；旧审查分数、测试数量和“未部署”均只适用于原记录日期与 SHA，不能用作新任务的状态或验收结论。
+
 > 本文档是 Claude Code / Codex 开发此项目时的**强制规范**。每次开始新任务前必读。
 
 所有用户可见 UI 任务遵循 [`docs/ui-规范.md` §11 UI / UX Quality Standard](./docs/ui-规范.md#11-ui--ux-quality-standard) 的设计原则、十项 Design QA、验收条件与停止条件。保持已确认功能、产品结构、业务流程与 Design System；实际检查与修复复验留证后再判定完成，不能把未执行的检查写成通过。
@@ -28,10 +30,10 @@ UI：Tailwind CSS + shadcn/ui
 表单：React Hook Form + Zod
 状态：Server Components 优先，必要时用 useState
 测试：
-  - 单元测试：Vitest（node 环境，`vitest.config.ts`；2026-09-24 实测 703 个测试文件 / 7549 项，
-    7505 通过、44 跳过；其中 34 个 `*.postgres.test.ts` 需要 `DATABASE_URL`，缺失时整文件跳过）
-  - 组件交互契约：Vitest Browser Mode（`vitest.browser.config.ts`，`*.browser.spec.tsx`，52 个文件 / 825 项，
-    `pnpm test:browser`；CI 有独立步骤，**尚未**纳入 §6.3 的 commit 前门禁，是否纳入待业主拍板）
+  - 单元测试：Vitest（node 环境，`vitest.config.ts`）；数据库套件须满足各自隔离与 fixture 前置，
+    缺前置的跳过不算通过，实际数量按本次报告记录，不沿用旧统计。
+  - 组件交互契约：Vitest Browser Mode（`vitest.browser.config.ts`，`*.browser.spec.tsx`，
+    `pnpm test:browser`）；所需验证按 CONTRIBUTING.md「测试要求」，CI 有独立作业。
   - 渲染/交互断言：Playwright（`tests/e2e`）+ 截图与响应式门禁（`tests/visual`）
 后台任务：PostgreSQL 任务账本（`BackgroundJob`）+ PM2 light/heavy worker
 可观测性：OpenTelemetry（instrumentation.ts） + Sentry（错误监控）
@@ -458,7 +460,7 @@ await dispatchNotification('ORDER_SUBMITTED', { orderId, orderNo, submitterName 
   `workflow_dispatch` 跑一次。
 
 - **组件交互契约用 Vitest Browser Mode**：需要真实事件循环、焦点、键盘与 axe 的组件级断言
-  （Sheet/Dialog 确认流、Checkbox 键盘 wrapper、六视口 overflow）写成 `*.browser.spec.tsx`，
+  （Sheet/Dialog 确认流、Checkbox 键盘 wrapper、响应式 overflow）写成 `*.browser.spec.tsx`，
   放在组件旁的 `__tests__/`。运行产物 `__tests__/__screenshots__/` 已 gitignore，不是基线。
 
 新增 UI 时先把逻辑抽纯函数；交互契约进 Browser Mode，真实页面级门禁进 Playwright。

@@ -13,7 +13,7 @@ applies_to: repository source at last_verified
 
 ## 开始前
 
-1. 阅读 [`AGENTS.md`](./AGENTS.md)、业务规格
+1. 先读 [当前开发入口](docs/当前开发入口.md) 确认现行与历史边界，再阅读 [`AGENTS.md`](./AGENTS.md)、业务规格
    [`SPEC-v1.2.md`](./SPEC-v1.2.md) 和与改动相关的
    [`DECISIONS.md`](./DECISIONS.md) 条目。
 2. 检查 `git status --short`。工作区可能已有他人改动；只修改任务范围内文件，不重置、不覆盖无关内容。
