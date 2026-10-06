@@ -37,7 +37,7 @@
 
 刻意**没有**归档的带日期文件及原因：`docs/release-remediation-2026-09-10.md`（被 `docs/audits/evidence/*.json` 引用）、
 `docs/LOAD-TEST-RESULTS-2026-08-25.md`（`LOAD-TEST-PLAN.md` 的配套实测）、`docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`
-与 `docs/codex-ui-brief.md`（被 `ux-redesign/*.dc.html` 交互稿和在用的 UI 覆盖文档引用）、`docs/*-20260913.md`
+与 `docs/archive/codex-ui-brief.md`（当时因交互稿和 UI 覆盖文档引用而暂留；brief 于下述第三批归档）、`docs/*-20260913.md`
 （前一日的实施说明，仍被 `API.md` / `DATABASE.md` / `DEVELOPMENT.md` / `加工费计费规则.md` 作为现行说明引用）。
 
 ## 2026-09-25 第二批归档清单
@@ -58,3 +58,17 @@
   `docs/audits/2026-09-08-UI对照裁决表.md` 也以相对链接引用。
 - 上一批已说明的 `docs/release-remediation-2026-09-10.md`、`docs/LOAD-TEST-RESULTS-2026-08-25.md`、
   `docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`、`docs/*-20260913.md`（5 份）继续留在原地，同样加了提示行。
+
+
+## 2026-10-04 第三批归档清单
+
+- 原 `docs/codex-ui-brief.md` → [codex-ui-brief.md](./codex-ui-brief.md)：文首已明确“已被取代”，
+  现行引用只把它作为历史背景或文档漂移修复证据，没有独立有效待办；当前规则由 UI-SYSTEM、覆盖表和 backlog 承担。
+  已同步对抗审查、`docs/ux-redesign/README.md`、全站线框批次 1–3 的来源说明、归档定价表单优化执行稿及 brief 内部文档链接与调用示例。
+- 本次依任务约束未修改 HANDOFF / PROGRESS / DECISIONS。HANDOFF 中只有不带路径的 brief 名称，无需形成失效相对链接；没有因本次移动新增无法修复的链接。
+
+本次复核后继续留在原地：
+
+- `docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`：仍是 UI 覆盖表、整改 backlog 与交互稿的证据化子任务依据；backlog 仍有未完成项。
+- `docs/UI现状盘点.md`、`docs/UI迁移清单.md`：仍被 UI 规范的 front matter、正文及附录作为现行违例与迁移依据，且仍有有效待办。
+- `docs/PLAN-空白封按单价管理.md`：§6 仍被 HANDOFF / PROGRESS / DECISIONS 用作已确认的历史停售核算规则；§8 的五个旧路径明确记载“已移除”，按有意保留的历史删除清单处理。

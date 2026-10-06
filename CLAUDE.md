@@ -182,7 +182,7 @@ import type { Prisma } from '../../generated/prisma/client';
 
 **100% 覆盖是有门禁的硬指标**，范围限定在「算错就是发错钱 / 绕过状态流转」的纯函数
 （业主 2026-08-19 拍板；阈值配在 `vitest.config.ts` 的 `coverage.thresholds`，
-`pnpm vitest run --coverage` 不达标即 exit 1）：
+`pnpm exec vitest run --coverage` 不达标即 exit 1）：
 
 - `lib/salary/piecework-pricing.ts`：工序计件工价
 - `lib/order/admin-create-price.ts`：管理员建单定价
@@ -272,13 +272,13 @@ export async function createOrder(data: OrderInput) {
 }
 ```
 
-**权限定义集中在 `lib/auth/permissions.ts`**，所有权限常量、角色-权限映射、资源所有权判断都在这个文件里。修改权限规则只改一处。
+**权限字典与角色-权限映射集中在 `lib/auth/permissions-dict.ts` 的 `PERMISSIONS` 中**（纯数据、零副作用）；该模块还导出 `Permission` 类型与 `hasPermission` 纯谓词。`lib/auth/permissions.ts` 提供 `requirePermission`、`requireSessionPermission`、`requireOwnership` 等检查函数，并 re-export `PERMISSIONS` 与 `Permission`。新增权限 key 或调整角色映射只改字典，资源所有权通过检查函数校验（见 §15.2）。
 
 **新增权限时的流程**：
-1. 在 `permissions.ts` 的权限字典里新增 key（如 `'order:shipment:update'`）
-2. 在角色-权限映射表里声明哪些角色有此权限
-3. 在 Server Action 里用 `requirePermission('order:shipment:update')`
-4. 如涉及资源所有权（如"只能改自己的工单"），调用 `requireOwnership(resource, user)`
+1. 在 `lib/auth/permissions-dict.ts` 的 `PERMISSIONS` 字典里新增 key（如 `'order:shipment:update'`）
+2. 在同一字典该 key 对应的角色数组中声明哪些角色有此权限
+3. 在 Server Action 中从 `lib/auth/permissions.ts` 导入 `requirePermission`，第一行调用 `requirePermission('order:shipment:update')`
+4. 如涉及资源所有权（如"只能改自己的工单"），从 `lib/auth/permissions.ts` 导入并调用 `requireOwnership(resource, user, ownerField)`；允许全局权限访问时，显式传入第四个参数 `globalPermission`
 
 **禁止**：在 `components/` 或 `app/` 的 JSX 中做权限判断来显示/隐藏按钮。正确做法是在 Server Component 里预先判断权限、传给 Client Component 一个 boolean 属性。
 
@@ -372,7 +372,9 @@ types: `feat`、`fix`、`refactor`、`test`、`docs`、`chore`
 ### 6.3 提交规则
 
 - 每完成一个小任务就commit，禁止大块commit
-- 每次commit前运行 `pnpm lint`、`pnpm typecheck`、`pnpm test run`（**注意 `run`**，见 §14）
+- 每次 commit 前按 [CONTRIBUTING.md「测试要求」](./CONTRIBUTING.md#测试要求) 的改动类型表，对完整变更批次选择最小但充分的验证，不为每个 commit 固定追加全量测试（单次 Vitest 命令写法见 §14）
+- **高风险改动（状态机、薪资、定价、库存、账单、权限、迁移）不能只跑目标测试**；必须完整执行该表适用的全量 Vitest、相关 E2E、越权失败用例、fresh DB 完整迁移链等要求，覆盖率及业务/安全门禁不得降低
+- push 前建议本地先过 [CI static 作业](./.github/workflows/quality.yml) 的 `Static quality gates` 步骤同一组命令：`pnpm check:architecture`、`pnpm check:docs`、`pnpm test:backup`、`pnpm lint`、`pnpm typecheck`；其余 CI 检查见 [DEVELOPMENT.md「当前 CI 与发布验证缺口」](./DEVELOPMENT.md#当前-ci-与发布验证缺口)
 - 不允许commit `console.log`（除日志工具内）
 
 ---
@@ -567,10 +569,8 @@ describe('calcMachinePiecework', () => {
 
 提交前，逐项检查：
 
-- [ ] 代码通过 `pnpm lint`
-- [ ] 代码通过 `pnpm typecheck`
-- [ ] 代码通过 `pnpm test run`
-- [ ] 涉及薪资/状态机的改动有对应测试
+- [ ] 已按 [CONTRIBUTING.md「测试要求」](./CONTRIBUTING.md#测试要求) 的改动类型表完成本批次适用验证，并如实记录结果与未验证范围
+- [ ] 高风险改动（状态机、薪资、定价、库存、账单、权限、迁移）已满足该表对应的全量 Vitest 等要求，未仅用目标测试替代，未降低覆盖率及业务/安全门禁
 - [ ] 没有`console.log`泄漏
 - [ ] 没有硬编码的业务常量（应从SalaryRule/Setting读取）
 - [ ] Server Action有权限检查
@@ -660,13 +660,14 @@ pnpm dev                     # 开发服务器（:3000）
 pnpm build                   # 生产构建
 pnpm typecheck               # next typegen + tsc --noEmit
 pnpm lint                    # eslint（flat config，全仓库）
+pnpm check:docs              # 文档路径、链接与 pnpm 命令漂移门禁
 
 pnpm test run                # 单测跑一遍就退出 ← agent 必须用这个
 pnpm test                    # 交互式 watch，会挂住不返回，agent 不要用
 pnpm test run lib/salary     # 只跑某个目录
 pnpm test run lib/salary/__tests__/machine-piecework.test.ts   # 只跑单个文件
 pnpm test run -t "double color"                                # 按用例名过滤
-pnpm vitest run --coverage   # 覆盖率（只统计 lib/**，见 vitest.config.ts）
+pnpm exec vitest run --coverage   # 覆盖率（只统计 lib/**，见 vitest.config.ts）
 
 pnpm test:e2e                        # Playwright（tests/e2e + tests/visual）
 pnpm test:e2e -- tests/e2e/order-create.spec.ts   # 单个 spec
@@ -697,6 +698,8 @@ pnpm agent:next              # 从 docs/AGENT-BACKLOG.md 取下一个任务并�
 pnpm worker:light            # 本地手动跑 LIGHT 队列 worker
 pnpm worker:heavy            # 本地手动跑 HEAVY 队列 worker（CDR/PDF/XLSX）
 ```
+
+纯文档改动由独立的 [Docs 工作流](./.github/workflows/docs.yml) 检查文档漂移；使用 Node.js 24 直接运行脚本，无需安装依赖。Quality 工作流继续保留 `pnpm check:docs`。
 
 **E2E 前置（2026-09-14 更新，旧说法「复用 :3000 并共用开发库」已作废）**：Playwright **绝不**复用
 `:3000` 的开发服务器，也**绝不**碰 `DATABASE_URL` 指向的开发库。它自己在 `127.0.0.1:3100`（开发配置）
@@ -743,8 +746,8 @@ only。SPEC 里的「老板 / 主管」是业务称谓，不是角色枚举。
    Route Handler 用 `auth(handler)` 包装后走 `requireSessionPermission(perm, request.auth)`
    —— 在裸 route handler 里调零参 `auth()` 会丢 Next 的 request 上下文。
 
-权限字典拆成两个文件：`lib/auth/permissions-dict.ts`（**纯数据、零副作用**，测试/导航可安全 import）
-与 `lib/auth/permissions.ts`（检查函数 + re-export）。新增权限改前者。
+权限字典与角色-权限映射位于 `lib/auth/permissions-dict.ts`（**纯数据与 `hasPermission` 纯谓词、零副作用**，测试/导航可安全 import）；
+`lib/auth/permissions.ts` 提供权限与资源所有权检查函数，并 re-export `PERMISSIONS` 与 `Permission`。新增权限改前者，检查入口仍用后者（见 §4.6）。
 
 ### 15.3 Server Action 的固定形状
 
@@ -777,7 +780,7 @@ export async function createProductAction(
   两个 collect 家族**不可互换**：给嵌套表单用 shallow 会丢掉行级定位。
 - Zod schema 统一从 `lib/auth/schemas.ts` import；实现按域拆在 `lib/auth/schemas/`
   （account / catalog / party / inventory / order-create / order-edit / production / outsource /
-  salary / finance / notification，跨域字段 helper 在 `shared.ts`）。新增 schema 放进对应域文件，
+  salary / finance / notification，跨域字段 helper 在 `lib/auth/schemas/shared.ts`）。新增 schema 放进对应域文件，
   入口文件只做 re-export；`lib/order/__tests__/edit-field-inventory.test.ts` 会遍历整个目录。
 - 列表页分页/排序/筛选用 `lib/admin/table.ts` 的解析器，不要各页自己 parse searchParams。
 - 成功后 `redirect()` 的 action **必须**用 `lib/admin/receipt.ts` 的 `appendReceipt` 带回执，目标页
@@ -859,10 +862,11 @@ const [state, formAction, pending] = useActionState(action.bind(null, id), null)
 
 ---
 
-**本文档版本**：1.5（2026-09-25 按 HEAD 复核：§2 测试数量、§3 目录计数与 `db` 直连清单、§8.2 计数、
+**本文档版本**：1.6（2026-10-04：修正 §4.6 权限定义位置与新增权限流程，同步 §15.2；§6.3 / §10 提交前验证统一引用 CONTRIBUTING.md「测试要求」，保留高风险门禁）。
+1.5（2026-09-25 按 HEAD 复核：§2 测试数量、§3 目录计数与 `db` 直连清单、§8.2 计数、
 §15.4 已删除任务 / 通知不可重试、§15.8 表单计数）。1.4（2026-09-24 按业主删除客服 / 内部与工厂直单结算 / 清废与厨师的决定同步：
 §3 目录注释与 cron 数、§4.3 覆盖清单与边界 case、§5.3 术语表、§8.3 E2E 关键路径、§15.1 角色、
 §15.4 cron 数量、§15.5 去掉 fallback-to-0 例外。1.3 为 2026-09-14 结构体检；
 未动 §4.5 / §15.7 等待业主落笔的条款，见 HANDOFF「CLAUDE.md 待业主落笔」）
-**最后更新**：2026-09-25
+**最后更新**：2026-10-04
 **维护者**：业主 + Claude Code / Codex

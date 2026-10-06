@@ -39,6 +39,14 @@
 
 ## 历史任务（原会话状态）
 
+2026-10-04（文档漂移门禁交接与规范冲突修正）：
+
+- PR #47 已合并到 `main`（合并提交 `fe197b0c`）：`AGENTS.md` 新增「文档与代码同步」；新增 `pnpm check:docs`（`scripts/check-doc-drift.mjs`、`scripts/lib/doc-drift.mjs`、`config/doc-drift-baseline.json`），接入 `quality.yml` 的 static 作业，并新增 `.github/workflows/docs.yml` 覆盖纯文档改动。当前基线 20 条，均带 reason，属有意保留。
+- PR #47 修正 30 份文档的失效引用，将 `docs/codex-ui-brief.md` 归档至 [docs/archive/codex-ui-brief.md](docs/archive/codex-ui-brief.md)；修复 `components/business/cdr/__tests__/CdrWorkbench.browser.spec.tsx` 对真实日期的依赖（fixture 于 2026-10-04 到期后在所有分支失败）。
+- 本分支 `codex/spec-conflicts-handoff` 基于 `fe197b0c`：核对源码后修正 `CLAUDE.md` §4.6 的权限定义位置与新增权限流程，同步 §15.2；按监督者裁决，将 §6.3 / §10 的提交前验证统一指向 `CONTRIBUTING.md`「测试要求」，高风险改动的全量 Vitest 等适用要求不变。两种单次 Vitest 写法经本地 CLI 核实等效，CONTRIBUTING 表与 CLAUDE §14 统一为 `pnpm test run`；追加两条决策记录。本分支只改文档，经 PR 回 `main`，合并前以该 PR 的 CI 结果为准。
+- 本地验证（`fe197b0c` + 本分支四份文档增量）：`pnpm check:docs` 通过（20 occurrences / 20 unique entries，基线匹配）；`git diff --check` 通过；`pnpm lint` 退出 0（0 错误，`app/global-error.tsx` 与 `OrderCreatedSuccessView.tsx` 各 1 条既有导航警告；UI 文案 0 处未豁免命中、UI 令牌 0 处新增违例）。本次未运行应用测试或连接数据库。
+- 已确认（2026-10-05 查看）：PR #47 合并后 `main`（`fe197b0c`）的 Quality 运行 37205283593 中 `static` 与 `viewports-main`（九视口全量）均成功；PR #48 已合并（`b5e02d43`），纯文档改动只触发 Docs 工作流并通过，该提交没有新的九视口运行。
+
 2026-10-02（UI 与 CDR 集成）：按用户要求合并 UI 分支 `ce6e0f76` 与 CDR 分支 `e32ff42a`，保留双方历史；仅手工合并 DECISIONS/HANDOFF 文档冲突。集成分支 `codex/ui-cdr-integration`，将创建 PR 并以 GitHub CI 记录最终远端验证结果。186 条迁移已在一次性空库验证；预览/生产数据库未迁移。此前 OSS 秒数取整遗留由 CDR 分支的现有修复一并纳入。
 
 2026-10-02（全站同类排版补查）：承接 `ad8c5296`，初始工作区干净。全站入口清点与多角色实页检查发现外协、后台任务、推送、运维、库存及金额表存在同类压缩/拆行问题；修复共享徽章/表头与各金额列，业务字段、流程和计算不变。新增真实组件与几何门禁回归，逐页范围、数据隔离、首次失败与最终验收见 [补查记录](docs/audits/2026-10-02-table-readability-qa.md)。3106 原预览服务保留；只创建本地提交，不推送或部署。
@@ -383,6 +391,13 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 ---
 
 ## 下一步具体指令（给下次 AI）
+
+**2026-10-04 新增：**
+
+- 新增或修改文档后运行 `pnpm check:docs`；修复了基线条目时同步收紧 `config/doc-drift-baseline.json`，不要把新失效引用直接吸收到基线。
+- [UI 现状盘点](docs/UI现状盘点.md)、[UI 迁移清单](docs/UI迁移清单.md)、[UI 对抗审查](docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)、[空白封 PLAN](docs/PLAN-空白封按单价管理.md) 四份文档仍在原地，待各自待办完成后再归档。
+- `tests/e2e/admin-fees.spec.ts` 与 `tests/e2e/order-create.spec.ts` 使用固定交期，页面随真实时间显示逾期提示；当前断言不受影响，但仍属于潜在日期依赖，后续修改这些测试时处理。
+- 文档漂移检查核对引用目标与 pnpm 命令名是否存在，不验证锚点、行号和文档中的数字；`HANDOFF.md` / `DECISIONS.md` / `PROGRESS.md` 等历史记录只查 Markdown 相对链接，仍需人工核对语义与事实。
 
 **2026-09-23 新增：**
 
@@ -751,3 +766,5 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-30：寄样品快递费默认按收件省份中通首重、提交即自动确认，超重由管理员在履约费用中更正（`b07e1f5c`）。
 - 2026-10-01：整理本地分支开 PR #35–#37，Codex gpt-6-astra 对抗审查均达 9 分以上；#36、#37 已合入 main，#35 随本条合并。寄样首重默认标记改为三态规则，覆盖全部写入口。
 - 2026-10-02：结算后金额更正两段（工单结算更正 / 账单补收）与发货确认文案，Codex 4 轮 9.1 分，分支 `claude/settled-correction` 未推送。
+- 2026-10-04：记录 PR #47（`fe197b0c`）已合并的文档同步规则、文档漂移门禁、30 份文档引用修复、执行稿归档与 CDR 日期依赖修复；本分支修正 CLAUDE.md §4.6 / §15.2 与 §6.3 / §10 的规范冲突，统一 test 命令并追加两条决策；保留九视口作业未确认及后续文档/日期依赖待办。
+- 2026-10-05：确认 `main`（`fe197b0c`）九视口全量作业通过；PR #48（`b5e02d43`）已合并，移除对应的未验证项与待办。

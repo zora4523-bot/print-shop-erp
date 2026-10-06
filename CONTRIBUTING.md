@@ -86,9 +86,9 @@ applies_to: repository source at last_verified
 
 | 改动 | 至少验证 |
 |---|---|
-| Markdown 文档 | 本地链接与路径存在、`git diff --check` |
+| Markdown 文档 | `pnpm check:docs`、本地链接与路径存在、`git diff --check` |
 | UI 原子件/状态组件 | 目标单测、`pnpm lint`、`pnpm typecheck`、相关视觉门禁 |
-| 普通领域逻辑 | 目标 Vitest、`pnpm test --run`、类型与 lint |
+| 普通领域逻辑 | 目标 Vitest、`pnpm test run`、类型与 lint |
 | 状态机、薪资、定价、库存、账单 | 目标边界测试、全量 Vitest、相关 E2E；覆盖率门禁不得降低 |
 | Server Action / 权限 | action 测试、越权失败用例、相关 E2E |
 | Route Handler | 状态码/响应体/认证测试，并更新 API 文档 |
