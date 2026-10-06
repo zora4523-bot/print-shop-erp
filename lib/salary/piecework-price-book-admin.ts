@@ -271,7 +271,7 @@ export function validatePieceworkManifestForPublication(
     }
     seen.add(`${rule.operationType}:${rule.unit}`);
     if (rule.smallOrderAmount !== undefined || rule.setupAmount !== undefined) {
-      if (rule.operationType === 'PACKING' || rule.smallOrderAmount === undefined || rule.setupAmount === undefined || normalizeRate(rule.smallOrderAmount) === null || normalizeRate(rule.setupAmount) === null) issues.push('烫金小单工资与装版费须同时填写有效金额');
+      if (rule.operationType === 'PACKING' || rule.smallOrderAmount === undefined || rule.setupAmount === undefined || normalizeRate(rule.smallOrderAmount) === null || normalizeRate(rule.setupAmount) === null) issues.push('烫金两个数量区间的工资与装版费须同时填写有效金额');
     }
     if (PIECEWORK_UNIT_BY_OPERATION[rule.operationType] !== rule.unit && !(rule.operationType === 'PACKING' && rule.unit === 'PER_BOX')) {
       issues.push(`${rule.operationType} 必须使用 ${PIECEWORK_UNIT_BY_OPERATION[rule.operationType]}`);
@@ -535,7 +535,7 @@ export async function publishPieceworkPriceBook(
       }
       for (const column of ['smallOrderAmount', 'setupAmount'] as const) {
         const stored = current[column];
-        if (stored != null && new Decimal(stored).toFixed(4) !== expected[column]) throw new PieceworkPriceBookAdminError('草稿小单工资或装版费不同，请重新核对');
+        if (stored != null && new Decimal(stored).toFixed(4) !== expected[column]) throw new PieceworkPriceBookAdminError('草稿中的分档工资或装版费不同，请重新核对');
       }
       if (current.smallOrderAmount == null && expected.smallOrderAmount !== undefined && expected.setupAmount !== undefined) {
         await tx.pieceworkPriceRule.updateMany({

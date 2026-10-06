@@ -116,8 +116,8 @@ for (const viewport of [{ width: 320, height: 568 }, { width: 375, height: 667 }
       const section = page.locator('section', { has: page.getByRole('heading', { name: '计件工价', exact: true }) });
       await expect(section).toBeVisible();
       await expect(section).toContainText('同一生产任务的实际完成件数');
-      await expect(section).toContainText('小单：1–1000 个（含 1000 个）');
-      await expect(section).toContainText('大单：1001 个及以上');
+      await expect(section).toContainText('1–1000 个（含 1000 个）');
+      await expect(section).toContainText('1001 个及以上');
       const batchSummary = section.locator('summary').filter({ hasText: '分批报工的数量规则' });
       await batchSummary.focus();
       await batchSummary.press('Enter');

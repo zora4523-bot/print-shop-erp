@@ -22,8 +22,8 @@ afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
 it('统一工价说明数量来源、包含边界、个人工价优先及包装单位', async () => {
   flushSync(() => root.render(<PieceworkPriceBookForm books={[]} now="2026-10-06T00:00:00.000Z" />));
   expect(host.textContent).toContain('同一生产任务的实际完成件数');
-  expect(host.textContent).toContain('小单：1–1000 个（含 1000 个）');
-  expect(host.textContent).toContain('大单：1001 个及以上');
+  expect(host.textContent).toContain('1–1000 个（含 1000 个）');
+  expect(host.textContent).toContain('1001 个及以上');
   expect(host.textContent).toContain('按账号中生效的个人工价计算');
   expect(host.textContent).toContain('包装按实际完成袋数或盒数');
   const summary = page.getByText('分批报工的数量规则', { exact: false });
@@ -32,14 +32,14 @@ it('统一工价说明数量来源、包含边界、个人工价优先及包装�
   await summary.click();
   await expect.element(page.getByText('使用扫码分批报工的工单', { exact: false })).not.toBeVisible();
 });
-it('包装师傅个人工价仅说明包装计费，不展示烫金大小单', () => {
+it('包装师傅个人工价仅说明包装计费，不展示烫金分档', () => {
   flushSync(() => root.render(<PieceworkPriceBookForm books={[]} now="2026-10-06T00:00:00.000Z" personal={{ workerId: 'packer', lane: 'PACKING', canEdit: true, unifiedBooks: [] }} />));
   expect(host.textContent).toContain('适用于本账号的生产计件工资');
   expect(host.textContent).toContain('包装按实际完成袋数或盒数');
   expect(host.textContent).not.toContain('烫金数量与工资');
   expect(host.textContent).not.toContain('分批报工');
 });
-it('烫金师傅个人工价说明大小单，省略无关包装工价', () => {
+it('烫金师傅个人工价说明数量区间，省略无关包装工价', () => {
   flushSync(() => root.render(<PieceworkPriceBookForm books={[]} now="2026-10-06T00:00:00.000Z" personal={{ workerId: 'machine', lane: 'PARTIAL', canEdit: true, unifiedBooks: [] }} />));
   expect(host.textContent).toContain('烫金数量与工资');
   expect(host.textContent).not.toContain('包装按实际完成');

@@ -6,6 +6,6 @@ import { PieceworkPriceBookAdminError } from './piecework-price-book-admin';
 export function foilFeeData(input: Pick<PieceworkDraftInput, 'partialSmall' | 'partialSetup' | 'fullSmall' | 'fullSetup'>, operationType: string) {
   const small = operationType === 'PARTIAL' ? input.partialSmall : operationType === 'FULL' ? input.fullSmall : undefined;
   const setup = operationType === 'PARTIAL' ? input.partialSetup : operationType === 'FULL' ? input.fullSetup : undefined;
-  if (Boolean(small) !== Boolean(setup)) throw new PieceworkPriceBookAdminError('请同时填写小单工资和大单装版费');
+  if (Boolean(small) !== Boolean(setup)) throw new PieceworkPriceBookAdminError('请同时填写两个数量区间的工资和装版费');
   return { smallOrderAmount: small ? new Prisma.Decimal(small) : null, setupAmount: setup ? new Prisma.Decimal(setup) : null };
 }
