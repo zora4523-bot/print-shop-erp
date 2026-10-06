@@ -9,7 +9,9 @@ verification_scope: local remediation acceptance and final candidate validation;
 
 # 发布整改开发任务（2026-09-10）
 
-依据：[发布审查](audits/2026-09-10-release-readiness.md)。本清单维护整改任务的现行状态；历史审查结果保持不变，修复和验收关联[本轮执行记录](audits/2026-09-11-remediation-validation.md)。**九项任务已通过本地验收，但远端 CI、生产前置和独立打印改版尚未验收，当前仍不放行上线。**
+> 2026-10-04 阅读边界：本台账保留原阶段与验收记录。领取任务前先查 [当前开发入口](当前开发入口.md)、对应修复提交及后续发布证据；旧 OPEN／未部署不自动代表当前仍阻塞，已关闭条目也不能替代新候选验收。
+
+依据：[发布审查](audits/2026-09-10-release-readiness.md)。本清单保留该批整改任务的状态；历史审查结果保持不变，修复和验收关联[本轮执行记录](audits/2026-09-11-remediation-validation.md)。**当时结论（2026-09-11）：九项任务已通过本地验收，但远端 CI、生产前置和独立打印改版尚未验收，当时不放行上线。后续发布事实见当前开发入口，不沿用为当前阻塞结论。**
 
 ## 执行规则
 
@@ -89,7 +91,7 @@ verification_scope: local remediation acceptance and final candidate validation;
 验证结果（2026-09-10，开始 SHA + 本次 3 份文档补丁）：
 
 - `pnpm exec vitest run tests/regression/playwright-database-isolation.test.ts scripts/__tests__/deploy-smoke.test.ts`：2 文件、6 项通过，0 失败、0 跳过。配置测试模拟环境变量，smoke 使用本机 HTTP fixture 与 dry-run，未连接数据库。
-- 从 `deploy-smoke.mjs` 实际 Chromium 参数表达式验证未设置、空字符串、`false`、`0`、`1`、`true` 共 6 种 CI 值，结果与文档一致；未启动浏览器。
+- 从 `scripts/deploy-smoke.mjs` 实际 Chromium 参数表达式验证未设置、空字符串、`false`、`0`、`1`、`true` 共 6 种 CI 值，结果与文档一致；未启动浏览器。
 - 33 个本地链接/章节锚点按“HEAD + 仅本任务文件”检查通过；`git diff --check` 通过。上述测试及其配置/脚本依赖与开始 HEAD 一致，不依赖其他任务的未提交业务改动。
 - 原 4 份 Grok 公开答复保持原样；独立子代理完成 3 份文档 diff 复核。
 

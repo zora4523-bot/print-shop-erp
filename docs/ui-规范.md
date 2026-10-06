@@ -16,7 +16,7 @@ gates:
 
 本文件规定项目 UI 的设计与验收要求。任务执行同时遵循[协作与表达规则](协作与表达规则.md)。引用规则时使用条款号（如「§2.1」「§7 第 3 律」）。
 
-收录铁律：§2–10 的实现条款要么代码已符合，要么在 [`UI迁移清单.md`](UI迁移清单.md) 有编号对应项。已知违例逐条登记在附录 A。§11 是后续 UI 任务的执行与验收要求，不代表存量页面已经通过；当前检查能力与缺口见 [质量标准审查记录](audits/2026-10-01-ui-quality-standard-review.md)。
+收录铁律：§2–10 的实现条款要么代码已符合，要么在 [`docs/UI迁移清单.md`](UI迁移清单.md) 有编号对应项。已知违例逐条登记在附录 A。§11 是后续 UI 任务的执行与验收要求，不代表存量页面已经通过；当前检查能力与缺口见 [质量标准审查记录](audits/2026-10-01-ui-quality-standard-review.md)。
 
 裁决依据见 [`audits/2026-09-08-UI对照裁决表.md`](audits/2026-09-08-UI对照裁决表.md)，按业主确认的规则执行。
 
@@ -87,7 +87,7 @@ gates:
 
 标准档位：`1`（4px）、`2`（8px）、`3`（12px）、`4`（16px）、`6`（24px）；`0.5`、`1.5`、`5`、`8` 允许但不作默认。
 
-- 不写任意间距 `-[Npx]` / `-[Nrem]`；safe-area 用 `.admin-safe-*` / `.worker-safe-*`（`globals.css`）。Sheet 头部允许通过 `pt/pr-[max(…env())]` 为关闭按钮预留空间（附录 A-7）。
+- 不写任意间距 `-[Npx]` / `-[Nrem]`；safe-area 用 `.admin-safe-*` / `.worker-safe-*`（`app/globals.css`）。P1-5 已于 2026-09-09 清除；唯一保留的表达式是 Sheet 头部为关闭按钮预留的 `pt/pr-[max(…env())]`（附录 A-7）。
 - `min-w-[Npx]` / `max-w-[Npx]` 表格与容器宽度、`min-[Npx]:` 容器断点是布局参数，允许，不算漂移。
 
 ### 2.4 圆角
@@ -132,7 +132,7 @@ gates:
 
 | 场景 | 组件 |
 |---|---|
-| 动作 | `Button`（原生 `<button>` 只允许在 `global-error.tsx`） |
+| 动作 | `Button`（原生 `<button>` 只允许在 `app/global-error.tsx`） |
 | 表单 | `Input`、`Textarea`、`Label`、`Checkbox`、`NativeSelect`（同一套规格见 `components/ui/field-styles.ts`；业务代码禁止原生 `<select>` / `<textarea>` / 可见 `<input>`，eslint 拦截） |
 | 容器 | `Card` 家族；手写卡面允许的唯一字面串是 `rounded-xl border bg-card p-4 shadow-sm`，新代码用 `Card` |
 | 提示 | `Alert` 家族 |
@@ -218,7 +218,7 @@ gates:
 | B 报表 / 账单 / 薪资裸表 | 列固定、含合计行 | 裸 `<table>` 必须包 `TableScrollArea`；分页用 `AdminPagination`（同页多表用 `pageParam`；例外见 A-8） |
 | C 卡片列表 | 师傅端、工单工作台、销售列表 | `<ul>` 行卡；桌面可扩展为 Table + 卡片双形态 |
 
-- 查询参数解析用 `lib/admin/table.ts`（订单列表用 `lib/order/list-query`）。
+- 查询参数解析用 `lib/admin/table.ts`（订单列表用 `lib/order/list-query.ts`）。
 - 筛选：GET `<form>`，`action` 可省或指向本路由，两种写法等价。
 - 页面 body 不横向溢出；表格内部滚动不等于页面溢出（§8）。
 
@@ -325,7 +325,7 @@ gates:
 - 款式/设计资料标题仅用于识别与折叠导航，保留款式、数量、工艺数量；不塞入生产进度、后台记录是否生成等附加说明。
 - 每条新增提示必须能回答：谁需要看、帮助其做哪个决定或操作、是否在别处已说明。无法回答时不增加常驻文字。
 - 可选明细没有记录时不渲染空字段，不将“记录未生成”当作业务异常；完整列表的空态只保留一处。禁止用占位文案填满信息网格。
-- 实际生产记录仍可核对；缺失数据确实阻止下发、发货、核价时，在对应操作旁保留具体原因及恢复入口，不因精简而隐藏阻塞。
+- 实际生产记录仍可核对；缺失数据确实阻止安排、发货、核价时，在对应操作旁保留具体原因及恢复入口，不因精简而隐藏阻塞。
 - 评审顺序：确定信息归属 → 检查实际数据条件 → 检查重复 → 补充定向文案门禁和有/无记录测试。检查禁止用替换成“暂无”“无”等同义占位绕过。
 
 **常驻说明收敛（2026-10-01）**
@@ -338,7 +338,17 @@ gates:
 - 页面标题、状态、字段与按钮各自表达必要信息。销售账单以“我的货款账单”和金额标签表达付款方向。
 - 保留会改变用户判断的范围与状态：整单金额与筛选明细、全部账期与当前筛选、金额未定稿、历史档案不计入当前账单。可选收款字段、包装与制版明细无值时省略；完整列表仍有一处空态。
 - 实际归属变更、计薪差额和不可撤销后果只在本次动作的复核层出现。禁止精简提交等待、失败恢复、禁用原因、文件未保存和离开保护提示；无复核层且带副作用的动作必须通过动作名明确表达。
-- 价格编辑器保留参数、单位和适用数量范围。试算结果来自实际输入。导出使用业务名称；核验编号与规则校验码保留在明确标识的对账/核验工作表。
+- 价格编辑器保留参数、单位和适用数量范围，不展示写死的试算例子。导出使用业务名称；核验编号与规则校验码保留在明确标识的对账/核验工作表，不作为普通页面说明。
+
+**禁用模式（反例入册）**：本次审计的共享弹窗固定叠加语、账单页 settledAt/幂等外显、核价页"快照只读服务端"导语……（附文件:行号）
+
+以下行号取自安装规范时的 d742fd0，用于追溯原文，修复后不据此恢复旧文案：
+
+- `components/ui-business/ConfirmActionDialog.tsx:118`：“请确认影响范围”；`:127`：“执行后会发生”。
+- `app/(billing)/owner/agent-bills/page.tsx:75`：“仅按 settledAt 上海日历月归集…”；`:102`：“重复执行会幂等同步 DRAFT”。
+- `components/business/order/OrderPricingReviewForm.tsx:485`：“仅核对工单已保存的报价快照；自动报价只读，仅补录待人工核价项。”
+- `components/business/order/AdminOrderDecisionPanel.tsx:837`：“款式与费用由服务端按最新规则自动合并和重算。”
+- `components/business/rules/pricing/CustomerPricingDedicatedSection.tsx:963`：“缺少设计稿规定的 5万档…本区暂时只读”。该处还涉及编辑条件，须另行核对业务规则。
 
 计价分区页头只保留名称、计价单位和操作入口。空白封的“0 元与无报价”解释、彩印的取档机制及固定缺价示例不作为常驻说明；单元格保留实际价格和转人工状态，真实校验失败仍显示原因和恢复入口。单色烫金套餐以“含制版费”标识收费内容，不展示内部计价术语。
 
@@ -386,11 +396,11 @@ gates:
 
 ### 8.1 控件对齐与勾选（2026-09-29）
 
-- 管理端与师傅端外壳内，`globals.css` 为所有可交互控件提供 `min-height: 44px`，验证时读取渲染高度。禁止用 `min-h-0!`、`!min-h-*` 绕过最小高度。Dialog / AlertDialog / Sheet 内容挂载到 body，原子件自带 `touch-viewport`。
+- 管理端与师傅端外壳内，`app/globals.css` 给所有可交互控件兜底 `min-height: 44px`；源码里的 `h-*` 不等于渲染高度。禁止用 `min-h-0!`、`!min-h-*` 绕过兜底。Dialog / AlertDialog / Sheet 内容挂在 body 上，原子件自带 `touch-viewport`，业务不再手补。
 - 表单原子件（Input、Textarea、NativeSelect）同一规格：`rounded-md`、同一内距、同一焦点圈、同一 `aria-invalid` 错误态、同一只读态。只读用原子件的 `read-only` 样式，不在调用处手写底色。
 - 输入框内图标一律 `top-1/2 -translate-y-1/2` 垂直居中。
 - 网格或筛选栏里，按钮与带标签的字段底边对齐（`items-end` / `self-end`）。
-- 勾选框 + 文字：`gap-1`；单行 `items-center`，多行说明 `items-start` 且勾选框与首行居中；与同列字段左对齐时抵消触控盒 12px 透明边（写法见 `OrderForm.tsx` 急单字段）。表头全选框与行勾选框同列同尺寸。
+- 勾选框 + 文字：`gap-1`；单行 `items-center`，多行说明 `items-start` 且勾选框与首行居中；与同列字段左对齐时抵消触控盒 12px 透明边（写法见 `components/business/order/OrderForm.tsx` 急单字段）。表头全选框与行勾选框同列同尺寸。
 - 必填标记只用一个组件；一张表单内只标必填或只标选填，不混用。
 
 ### 8.2 选中态、按钮顺序与动词（2026-09-29，业主确认）
@@ -442,14 +452,14 @@ gates:
 | 门禁 | 位置 | 规则 | 分级 |
 |---|---|---|---|
 | Tailwind 调色板字面量、任意色类、`alert`/`confirm`、原生 checkbox | `eslint.config.mjs` `no-restricted-syntax` | 范围 `app/**`、`components/business/**`、`components/ui-business/**` | 全部 error（现状 0 命中） |
-| 裸颜色（hex / rgb / hsl / oklch）——含 `.css` 与对象字面量 | `scripts/ui-tokens/check.mjs` 规则 `color`（§2.1） | 范围同上，排除 `globals.css`、`components/ui/` | 登记在 `baseline.json` 的存量 warn；未登记 error；登记项代码消失即 stale error |
+| 裸颜色（hex / rgb / hsl / oklch）——含 `.css` 与对象字面量 | `scripts/ui-tokens/check.mjs` 规则 `color`（§2.1） | 范围同上，排除 `app/globals.css`、`components/ui/` | 登记在 `scripts/ui-tokens/baseline.json` 的存量 warn；未登记 error；登记项代码消失即 stale error |
 | 内联金额格式化、私有 money 函数 | 同上，规则 `money`（§4.1） | `.toFixed(`、`Intl.NumberFormat(`、带小数位/币种选项的 `toLocaleString(`、`function/const formatMoney|money|formatCurrency…` | 同上 |
 | ui-business deep import | 同上，规则 `deep`（§3.1） | | 同上 |
-| 文案禁词 | `scripts/ui-copy/check.mjs` + `policy.json`（§7） | 语法树追踪的可见文案 | 全仓 error，逐条豁免 |
+| 文案禁词 | `scripts/ui-copy/check.mjs` + `scripts/ui-copy/policy.json`（§7） | 语法树追踪的可见文案 | 全仓 error，逐条豁免 |
 | 响应式 / 触控 / axe | `tests/visual/ui-gates.ts` | 9 视口 × 明暗；`≤768` 触控 <44 失败；axe wcag2a/2aa/21a/21aa | error |
 | 打印像素 | `tests/visual/order-print.spec.ts` | 8 张基线 | error，更新须写进 commit message |
 
-- `baseline.json` 是存量豁免清单（对应附录 A-1 / A-2 / A-6），按「规则 + 文件 + 原文」匹配，不按行号。迁移完成一处必须同时删除对应条目，否则 stale error。重新生成：`pnpm lint:ui:baseline`（只在迁移批次合并时由迁移任务运行，不在功能 PR 里运行）。
+- `scripts/ui-tokens/baseline.json` 是存量豁免清单（对应附录 A-1 / A-2 / A-6），按「规则 + 文件 + 原文」匹配，不按行号。迁移完成一处必须同时删除对应条目，否则 stale error。重新生成：`pnpm lint:ui:baseline`（只在迁移批次合并时由迁移任务运行，不在功能 PR 里运行）。
 - PR 模板 checklist：文案对照 §7、颜色字号对照 §2。
 
 ## 11. UI / UX Quality Standard
@@ -471,7 +481,7 @@ gates:
 ### 11.2 执行流程
 
 1. **确定边界**：读取现行规格、相关 DECISIONS、本文与 `UI-SYSTEM.md`；记录开始 SHA、已有改动、本次文件/页面/角色、设计证据等级及 §11.1 功能不变量。优先修复已证实问题，不借审查做无关清理。
-2. **准备检查**：列本次状态/视口矩阵，确认浏览器、依赖与测试数据可用。写入型验证遵守 `CONTRIBUTING.md` / `DEVELOPMENT.md` 的隔离库约束，使用专用测试库与真实服务。视觉功能遵守用户授权范围；无法执行的检查记录为未执行。
+2. **准备检查**：列本次状态/视口矩阵，确认浏览器、依赖与测试数据可用。写入型验证遵守 `CONTRIBUTING.md` / `DEVELOPMENT.md` 的隔离库约束，使用真实框架和专用测试库；通知、存储等外部服务沿用对应测试入口的隔离模式，记录 mock 范围，不向真实收件人发送测试通知。视觉功能遵守用户授权范围；无法执行的检查记录为未执行，必需检查未执行时按 §11.5–11.6 标记待验收或阻断。
 3. **实现后完整检查**：按 §11.4 的十项顺序逐项检查浏览器页面、触发交互并运行适用门禁。每项记录通过、失败、阻断或不适用；不适用须有具体理由，不能用它替代无法执行。
 4. **修复与复验**：记录可复现的问题、严重度、触发条件与证据；修复范围内缺陷，再在原条件复验。影响共享 token/组件时复核消费者和明暗主题；最后对完整变更批次重新完成十项 QA。未受修复影响的有效证据可复用，不机械重复全量测试。
 5. **交付**：依据 `CONTRIBUTING.md` 运行与风险相称的测试；用 §11.7 记录命令、结果、限制与验收判断，按 §11.5–11.6 决定完成或停止。自动本地提交沿用项目任务提交规则，不授权 push 或发布。
@@ -552,7 +562,7 @@ JS 交互须覆盖整页首次加载和慢加载：HTML 可见不等于交互就
 任务 / 日期 / 开始 SHA / 候选 SHA 或工作区增量：
 本次页面、角色、组件消费者 / 设计证据等级与参考：
 功能前后对照：入口、字段、默认值、校验、操作、结果、恢复、业务不变量
-运行模式 / 浏览器 / 测试数据隔离 / 真实服务：
+运行模式 / 浏览器 / 测试数据隔离 / 真实服务及 mock 范围：
 实际视口 × 主题 × 状态（含弹层、键盘、Reduced Motion、缩放）：
 QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者与证据
 问题 ID / P级别 / 触发条件 / 修改 / 同条件复验 / 剩余事项与负责人：
@@ -574,7 +584,7 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ## 附录 A · 现状豁免清单
 
-格式：位置 → 违反条款 → 迁移项。lint 可检测的（A-1、A-2、A-6）逐条在 `scripts/ui-tokens/baseline.json`（127 条 / 132 处，2026-09-08）；本表列类别与代表位置，其余按 `file:line` 见 [`UI现状盘点.md`](UI现状盘点.md)。
+格式：位置 → 违反条款 → 迁移项。lint 可检测的（A-1、A-2、A-6）逐条在 `scripts/ui-tokens/baseline.json`（127 条 / 132 处，2026-09-08）；本表列类别与代表位置，其余按 `file:line` 见 [`docs/UI现状盘点.md`](UI现状盘点.md)。
 
 ### A-1 裸颜色（§2.1）
 
@@ -584,7 +594,7 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ### A-2 金额格式化（§4.1）
 
-费率与阶梯价使用 `formatRate`。`permanent` 登记分别说明理由：用户输入回显（`ShipOrderForm.tsx:23`、`CsPayrollPaymentForm.tsx:71,73`）、图表刻度（`SalesRankingChart.tsx`）、Decimal→字符串序列化传子组件校验、非金额（文件大小、百分比、数量）。
+P0-1 已完成，`scripts/ui-tokens/baseline.json` 的 `money` 待迁移条目为 0；费率与阶梯价已于 2026-09-09 改走 `formatRate`。剩余 `permanent` 登记（各带理由）：用户输入回显（`components/business/order/ShipOrderForm.tsx:23`；原 `CsPayrollPaymentForm` 已随客服工资退役，`3bb2e21a`，不再适用）、图表刻度（`components/business/dashboard/SalesRankingChart.tsx`）、Decimal→字符串序列化传子组件校验、非金额（文件大小、百分比、数量）。
 
 ### A-3 抽屉内表单（§5.8）
 
@@ -594,11 +604,11 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ### A-4 高风险操作停留 L2（§5.3）
 
-`MarkHourlyPaidForm.tsx:73`、`CsPayrollPaymentForm.tsx:323`、`PieceworkSettlementActions.tsx:54,95,140`、`IssueBillButton.tsx:42`、`AdminOrderBatchActions.tsx:173` → **定案保持 L2**（DECISIONS 2026-09-09）。
+`PieceworkSettlementActions.tsx:54,95,140`、`components/business/bill/IssueBillButton.tsx:42`、`components/business/order/AdminOrderBatchActions.tsx:173` → **定案保持 L2**（DECISIONS 2026-09-09）。原 `MarkHourlyPaidForm` 与 `CsPayrollPaymentForm` 已分别随时薪月结写入链路（`d3aa552d`）、客服工资（`3bb2e21a`）退役，不再作为现行站点。
 
 ### A-5 表单提交写法（§5.2）
 
-箭头包裹 7 处（`GenerateBillsForm.tsx:22`、`IssueBillButton.tsx:37`、`OrderCancellationRequestForm.tsx:59`、`SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、`StartCsPeriodForm.tsx:33`）与 `useActionState` 闭包 7 处（`FinishOrderButton.tsx:19`、`ShipOrderForm.tsx:109`、`IssueBillButton.tsx:29`、`craft/ToggleActiveButton.tsx:22`、`product/ToggleActiveButton.tsx:23`、`ExternalSalesPriceTierGroupEditor.tsx:537`、`account/ToggleActiveButton.tsx:21`） → **接受的现状**（DECISIONS 2026-08-17），不迁移。
+箭头包裹原 7 处（`components/business/bill/GenerateBillsForm.tsx:22`、`components/business/bill/IssueBillButton.tsx:37`、`components/business/order/OrderCancellationRequestForm.tsx:59`、`components/business/order/SfCollectToggleForm.tsx:61`、`OutsourceActions.tsx:81,135`、原 `StartCsPeriodForm`，已随客服工资退役，`3bb2e21a`）与 `useActionState` 闭包 7 处（`components/business/order/FinishOrderButton.tsx:19`、`components/business/order/ShipOrderForm.tsx:109`、`components/business/bill/IssueBillButton.tsx:29`、`craft/ToggleActiveButton.tsx:22`、`product/ToggleActiveButton.tsx:23`、`components/business/price/ExternalSalesPriceTierGroupEditor.tsx:537`、`account/ToggleActiveButton.tsx:21`） → **接受的现状**（DECISIONS 2026-08-17），不迁移。
 
 ### A-6 deep import（§3.1）
 
@@ -609,7 +619,7 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 | 类别 | 处数 | 迁移项 |
 |---|---|---|
 | Sheet 头部 safe-area 表达式 | `components/business/order/SalesOrdersList.tsx:543,772`（`pt-[max(1rem,env(top))] pr-[max(4rem,calc(3rem+env(right)))]`，为关闭按钮预留） | 布局参数，豁免 |
-| CSS Module 非 token 圆角 | `AdminOrderDetailView.module.css:23,90,112`（`50%` / `99px` 胶囊）、`AdminOrderWorkspace.module.css` 桌面紧凑勾选框指示器 3px 圆角 | 无对应 token，豁免 |
+| CSS Module 非 token 圆角 | `AdminOrderDetailView.module.css:23,90,112`（`50%` / `99px` 胶囊）、`components/business/order/AdminOrderWorkspace.module.css` 桌面紧凑勾选框指示器 3px 圆角（2026-09-29 复核：原登记的「:67 进度条」已不存在） | 无对应 token，豁免 |
 
 ### A-8 组件重复（§3、§6，lint 不检测）
 
@@ -619,9 +629,9 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 | 表单原子件 | eslint 门禁要求业务范围使用共享组件 | §3.2 |
 | 裸 `disabled={pending}` 按钮 | 55 处 / 35 文件 | **P2-3** |
 | 手写分页 | `components/business/price/RulePriceWorkbench.tsx:905`（翻页链接须走 `PriceWorkspaceLink` 导航拦截，共享分页不支持） | 豁免 |
-| 一线表单字段错误未接 `FormMessage` | 12 文件 / 50 处 | **P2-6** |
-| 空态引导整句（带句号） | 约 10 处（`background-jobs/page.tsx:90`、`BomForm.tsx:159,160,270`、`SettingsForm.tsx:297` 等） | 允许（§5.5） |
-| 手写卡面 284 处 / 112 文件、手写通知块 27 文件、裸 `role=status/alert` | — | 允许保留现有实现（§3.2、§5.4） |
+| 一线表单字段错误未接 `FormMessage` | 原盘点 12 文件 / 50 处，其中客服工资 1 文件 / 5 处已退役（`3bb2e21a`） | **P2-6** |
+| 空态引导整句（带句号） | 约 10 处（`background-jobs/page.tsx:90`、`BomForm.tsx:159,160,270`、`components/business/setting/SettingsForm.tsx:297` 等） | 允许（§5.5） |
+| 手写卡面 284 处 / 112 文件、手写通知块 27 文件、裸 `role=status/alert` | — | **收编**，不迁移（§3.2、§5.4） |
 
 ### A-9 作废工单警示页的强化样式（§2.2–2.5，有意例外）
 
@@ -647,6 +657,8 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ### 管理员工单详情布局（2026-09-12）
 
+2026-10-03 业主决定：取消独立“下发生产”与额外接单确认。厂内工单的主动作是“安排生产师傅”；寄样直接发货，外协使用外协工单；资料及金额校验随实际业务操作执行，失败给具体修复原因。状态“待下发检查 / 待下发生产”分别改为“待完善 / 待安排”。此条取代本节及早期条目中“当前待办只给下发生产”的要求。批量不隐藏跳过不适用工单，无法安排时给出原因；历史工资和权限边界不变。
+
 详情页按“识别工单 → 处理待办 → 核对款式 → 费用 → 配送 → 生产 → 历史记录”组织。桌面内容最大宽度 1760px，沿用后台壳横向留白；主栏自适应、操作栏 320px。960px 及以下改为单栏，待办置于内容前，不使用遮挡表单的浮层。
 
 页头明确业务员、交期和总数量，工厂对接人使用业务员信息。页内导航只定位，保留全部模块；管理栏目默认展开并支持手动收起，低频维护区遵循本节的展开条件。每款完整设计文件与工艺资料在本款卡片内按需展开，收费维护紧随费用，工厂成本独立分区，配送集中展示完整收件与物流；生产概况与业务资料归入生产，售后重做单独定位，历史变更和日志置后。不得为重排重复挂载同一个表单，不改变价格、权限、版本校验、提交参数及历史记录。
@@ -657,13 +669,13 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 工单信息及各折叠摘要明确显示展开/收起状态；管理栏目默认展开，低频维护区遵循本节的展开条件，包装与逐款资料按需展开。当前合计和当前阶段使用相同金额事实，估算收费标“估”；人工核对、结算与收款分别按各自业务状态展示。发货阻塞只展示首要原因并提供真实恢复入口，终态沿用其操作限制；最后一票确认说明自动结算与停止编辑，收费单说明生成应收但未收款。保留深层链接，按需编辑器等待挂载后聚焦，普通折叠保留未提交内容。
 
-费用区合计统一使用「当前金额」，估价标“估”。先下发生产、生产后处理物流：仍可下发时「当前待办」只给「下发生产」，物流核对下发后才进入当前待办，维护区同一动作只保留一个入口。低频表单（物流费用确认、添加整单费用 / 制版明细 / 成本明细、发起重做工单、尚不能发货的地址登记）默认收起并保持挂载，摘要用 `DisclosureIndicator`。同一区块只使用一个业务标题；页内导航与区块标题同名。依据见 DECISIONS 2026-10-01。
+费用区合计统一使用「当前金额」，估价标“估”。当前待办按实际履约分流：厂内工单安排生产师傅，寄样直接发货，外协通过外协工单处理；资料校验随提交、核价、修改及实际履约执行（2026-10-03 决定）。物流核对按实际发货条件显示，维护区同一动作只保留一个入口。低频表单（物流费用确认、添加整单费用 / 制版明细 / 成本明细、发起重做工单、尚不能发货的地址登记）默认收起并保持挂载，摘要用 `DisclosureIndicator`。同一区块只使用一个业务标题；页内导航与区块标题同名。依据见 DECISIONS 2026-10-01。
 
 「计价与收费维护」「工厂成本」两块低频维护区首次打开时默认收起，有待处理事项时展开：价格待管理员确认、有金额待定的收费行、历史材料单价待核价；工厂成本没有待处理事项，首次打开时收起。展开状态只在首次打开时决定，之后跟随手动展开 / 收起与页内链接；深层链接展开祖先并聚焦，保存后刷新保留正在查看的分区。其余管理栏目默认展开。
 
 点击「打印」时记录已打印状态。当前版本未打印时，待办提供「打印」并直接打开打印页；「加入待打印」用于已打印过、需要补打的工单；改单补打时，在待办下方提醒打印后收回旧版纸单。记录失败保持打印页打开，说明原因并提供「重试记录」。打印页打开后，纸面生产指令（生产师傅、款式、包装、收货等）被修改时，说明本次未记录并要求重新打印；生产进度变化不影响记录。批量打印先取得文件，再整批记录，记录成功后交付文件；任一步失败停留在当前页面并提供「重试打开 / 重试下载」。记录结果未知时仍交付文件，同时提供「重试记录」。浏览器拦截新标签页时下载文件；打开 / 下载 PDF 使用按钮。依据见 DECISIONS 2026-10-02。
 
-发货状态受限时，按实际阶段说明提交、下发、恢复或完工条件；暂停时要求先恢复再核对，不推断暂停前的生产进度。终态只说明不可再次发货，首要原因判定顺序不变。生产阻塞的“查看生产进度”定位到含工序、步骤状态的生产概况；无计件步骤不依赖计件工序存在，逐款保留完成数；只有历史派工时也保留任务状态。缺地址且已不可编辑的历史完工单只说明限制与核对历史收货资料，不提供虚假的“处理”按钮，也不放开终态编辑权限。
+发货状态受限时，按实际阶段说明提交、安排、恢复或完工条件；暂停时要求先恢复再核对，不推断暂停前的生产进度。终态只说明不可再次发货，首要原因判定顺序不变。生产阻塞的“查看生产进度”定位到含工序、步骤状态的生产概况；无计件步骤不依赖计件工序存在，逐款保留完成数；只有历史派工时也保留任务状态。缺地址且已不可编辑的历史完工单只说明限制与核对历史收货资料，不提供虚假的“处理”按钮，也不放开终态编辑权限。
 
 ### 工单动态（2026-09-12）
 
@@ -673,7 +685,7 @@ QA 1–10：逐项通过 / 失败 / 阻断 / 不适用（原因）；审查者�
 
 ### 工单详情操作集中（2026-09-12）
 
-详情页的编辑、物流更正、外协、发货等入口集中到右侧操作栏；打印、下载 PDF、网页预览紧邻版本与打印记录。当前待办突出主要动作，暂停等异常操作降低视觉优先级；移动端操作栏置于正文前。保留原权限和禁用原因，同一动作只提供一个入口。单张工单“下发生产”激活生产，“打印”独立执行；批量“下发+打印”执行组合动作。详情仅展示业务所需的费用与制版信息；底层历史字段、计价快照和数据库保持完整。
+详情页的编辑、物流更正、外协、发货等入口集中到右侧操作栏；打印、下载 PDF、网页预览紧邻版本与打印记录。当前待办突出主要动作，暂停等异常操作降低视觉优先级；移动端操作栏置于正文前。保留原权限和禁用原因，同一动作只提供一个入口。厂内工单通过“安排生产师傅”完成准备与任务安排，打印使用独立入口；寄样与外协按各自履约条件处理。详情仅展示业务所需的费用与制版信息；底层历史字段、计价快照和数据库保持完整。
 
 ### 多地址添加（2026-09-12）
 

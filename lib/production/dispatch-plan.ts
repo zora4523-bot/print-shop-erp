@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import type { Prisma } from '@/generated/prisma/client';
 import { deriveProductionOperationPlan } from './operation-materializer';
 import { deriveProductionProgressPlan } from './progress-materializer';
+import { DispatchPlanValidationError } from './dispatch-plan-error';
 
 const dispatchOrderInclude = {
   items: { orderBy: { sequence: 'asc' as const }, include: { designs: true } },
@@ -20,9 +21,10 @@ export function productionSourceKey(lane: string, ids: readonly string[]) {
   return `${lane}:${[...ids].sort().join(',')}`;
 }
 export function dispatchTargets(order: DispatchOrder, crafts: Parameters<typeof deriveProductionProgressPlan>[0]['crafts']): DispatchTarget[] {
+  if (order.purpose === 'SAMPLE_SHIPMENT') return [];
   const plan = deriveProductionOperationPlan({ ...order, orderId: order.id });
   const progress = deriveProductionProgressPlan({ items: order.items, crafts });
-  if (!plan.ok || !progress.ok) throw new Error([...plan.issues, ...progress.issues].map(issue => issue.message).join('；'));
+  if (!plan.ok || !progress.ok) throw new DispatchPlanValidationError(order, [...plan.issues, ...progress.issues]);
   const target = (lane: string, itemIds: string[], quantity: string, label: string, operationType: DispatchTarget['operationType'], craftId: string | null): DispatchTarget => {
     const items = order.items.filter(item => itemIds.includes(item.id)).map(item => ({
       id: item.id, name: item.name, quantity: item.quantity,

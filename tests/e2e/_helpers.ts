@@ -953,7 +953,6 @@ export async function seedDashboardSnapshot(opts: {
   // midnight. Seed relative to Shanghai's YYYY-MM-DD,
   // not relative to an instant, so the result is stable around UTC/Shanghai
   // day boundaries.
-  const dayMs = 24 * 60 * 60 * 1000;
   // Outsource expectedDate is written through parseStrictYmd as the calendar
   // day's UTC midnight. Seeding from Shanghai's 16:00Z boundary would serialize
   // to the previous UTC date and display one extra overdue day.
@@ -1218,9 +1217,9 @@ export async function seedDashboardSnapshot(opts: {
         await db.query(
           `
           INSERT INTO "Product" (
-            id, category, name, "isActive", "createdAt", "updatedAt"
+            id, category, "categoryNodeId", name, "isActive", "createdAt", "updatedAt"
           ) VALUES (
-            $1, $2::"ProductCategory", $3, TRUE, NOW(), NOW()
+            $1, $2::"ProductCategory", (SELECT id FROM "ProductCategoryNode" WHERE "legacyCategory" = $2::"ProductCategory" AND "isActive" = TRUE ORDER BY path LIMIT 1), $3, TRUE, NOW(), NOW()
           )
           `,
           [id, spec.category, spec.name],
@@ -1232,7 +1231,6 @@ export async function seedDashboardSnapshot(opts: {
       //   - ownerUserId (ADMIN, muted):      ¥1,500   (only when provided)
       // Each order goes through the current month at varying days so
       // submittedAt is a believable spread.
-      const monthlyMidUtc = new Date(Date.UTC(yyyy!, mm! - 1, 15, 4, 0));
       const rankingSpecs: Array<{
         submitterId: string;
         submitterRole: string;
@@ -1281,19 +1279,19 @@ export async function seedDashboardSnapshot(opts: {
         const orderId = `${fixturePrefix}-rank-${rankIdx}`;
         const orderNo = `E2E-RANK-${fixtureRunId}-${rankIdx}`;
         const submittedAt = new Date(
-          monthlyMidUtc.getTime() + spec.daysOffset * dayMs,
+          Date.UTC(yyyy!, mm! - 1, Math.max(1, dd! + spec.daysOffset), 4, 0),
         );
         await db.query(
           `
           INSERT INTO "Order" (
             id, "orderNo", "submitterId", "submitterRole", "settlementType", "createdById",
-            status, "isUrgent", "totalAmount",
+            status, "isUrgent", "totalAmount", "processingAmount",
             "submittedAt", "createdAt", "updatedAt"
           ) VALUES (
             $1, $2, $3, $4::"Role",
             'EXTERNAL_SALES'::"OrderSettlementType",
             $3,
-            'SUBMITTED'::"OrderStatus", FALSE, $5,
+            'SUBMITTED'::"OrderStatus", FALSE, $5, $5,
             $6, $6, $6
           )
           `,
@@ -2405,9 +2403,8 @@ export async function logout(page: Page): Promise<void> {
   const userMenuTrigger = page.locator('button[aria-label^="用户菜单"]');
   if (await userMenuTrigger.isVisible().catch(() => false)) {
     await userMenuTrigger.click();
-    // dropdown 内的 logout 是平铺 form>button（非 DropdownMenuItem，避
-    // 免 form/menuitem 嵌套冲突）。data-slot 锁定 + auto-wait 等 portal
-    // 内容真正渲染。
+    // DropdownMenuItem 以 form 内的原生 submit 按钮承载退出操作；
+    // data-slot 定位菜单项，并等待 portal 内容真正渲染。
     await page.locator('[data-slot="user-menu-logout"]').click();
   } else {
     // worker 端 H5 layout 没接 admin shell，仍是 inline button。

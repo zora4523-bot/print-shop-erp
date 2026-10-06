@@ -1,4 +1,5 @@
 import { orderShippingAvailability } from './shipping-availability';
+import { readProductionRouting, type ProductionRouting } from '../production/routing';
 import { inspectOrderProductionReadinessInTx } from './production-readiness';
 import 'server-only';
 import { adminOrderCraftTags, type AdminOrderCraftTag } from './admin-list-presentation';
@@ -75,6 +76,8 @@ export type AdminOrderWorkspaceCounts = {
 };
 
 export type AdminOrderWorkspaceRow = {
+  productionRouting?: ProductionRouting;
+  canAssignProduction?: boolean;
   purpose?: import("./purpose").OrderPurposeValue;
   inlineOperations?: import('./admin-inline-types').AdminOrderInlineOperationsData | null;
   id: string;
@@ -325,7 +328,10 @@ const adminOrderSelect = {
   pricingStatus: true,
   trackingNo: true,
   submitter: { select: { id: true, displayName: true } },
-  _count: { select: { shipments: true } },
+  _count: { select: { shipments: true,
+    productionOperations: { where: { OR: [{ reports: { some: {} } }, { workOrderProgress: { some: {} } }, { carriedCompletedQty: { gt: 0 } }, { carriedWorkOrderProgressQty: { gt: 0 } }] } },
+    productionProgressSteps: { where: { OR: [{ reports: { some: {} } }, { carriedCompletedQty: { gt: 0 } }] } },
+  } },
   stars: { select: { userId: true } },
   items: {
     orderBy: { sequence: 'asc' },
@@ -341,7 +347,7 @@ const adminOrderSelect = {
       craft: true,
       crafts: true,
       quoteDisposition: true,
-      tasks: { select: { status: true } },
+      tasks: { select: { status: true, completedQty: true, pieceworkAmount: true } },
       designs: {
         where: { fileType: DesignFileType.IMAGE },
         orderBy: [{ uploadedAt: 'desc' }, { id: 'desc' }],
@@ -629,7 +635,9 @@ export async function loadAdminOrderWorkspace(
           tx,
         ),
       ]);
+      const productionRouting = await readProductionRouting(tx, rows.map(row => row.id));
       return {
+        productionRouting,
         rows,
         counts,
         total,
@@ -654,14 +662,14 @@ export async function loadAdminOrderWorkspace(
 
   return {
     rows: snapshot.rows.map((row) =>
-      mapAdminOrderRow(
+      withProductionRouting(mapAdminOrderRow(
         row,
         actor.id,
         snapshot.craftNames,
         snapshot.progressByOrder.get(row.id),
         now,
         stagnationDays,
-      ),
+      ), snapshot.productionRouting.get(row.id)),
     ),
     total: snapshot.total,
     page: snapshot.window.page,
@@ -706,10 +714,11 @@ export async function getAdminOrderByOrderNo(
           [row.id],
           tx,
         );
-        const readiness = isAwaitingFactoryConfirmation(row.status)
+        const readiness = isAwaitingFactoryConfirmation(row.status) || row.status === OrderStatus.CONFIRMED
           ? await inspectOrderProductionReadinessInTx(tx, row.id)
           : null;
-        return { row, craftNames, progressByOrder, readiness };
+        const routing = (await readProductionRouting(tx, [row.id])).get(row.id);
+        return { row, craftNames, progressByOrder, readiness, routing };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
@@ -717,12 +726,22 @@ export async function getAdminOrderByOrderNo(
   if (!snapshot) return null;
   const mapped = mapAdminOrderRow(snapshot.row, actor.id, snapshot.craftNames,
     snapshot.progressByOrder.get(snapshot.row.id), now, stagnationDays);
-  if (!snapshot.readiness) return mapped;
-  return {
+  if (!snapshot.readiness) return withProductionRouting(mapped, snapshot.routing);
+  return withProductionRouting({
     ...mapped,
     confirmationPreflight: { ok: snapshot.readiness.ready, issues: snapshot.readiness.issues },
     capabilities: { ...mapped.capabilities, release: snapshot.readiness.ready, confirm: snapshot.readiness.ready },
-  };
+  }, snapshot.routing);
+}
+
+function withProductionRouting(row: AdminOrderWorkspaceRow, routing?: ProductionRouting): AdminOrderWorkspaceRow {
+  const canAssignProduction = row.canAssignProduction && routing?.kind === 'ASSIGN' && !row.pendingChangeRequest
+    && (row.capabilities.release || ['RELEASED', 'FOILING', 'PACKING'].includes(row.status));
+  const sampleReady = routing?.kind === 'SAMPLE' && row.capabilities.release && !row.shipDisabledReason;
+  return { ...row, productionRouting: routing, canAssignProduction,
+    ...(routing?.kind === 'BLOCKED' ? { confirmationPreflight: { ok: false, issues: routing.issues } } : {}),
+    shipDisabledReason: sampleReady ? null : row.shipDisabledReason,
+    capabilities: { ...row.capabilities, release: false, ship: sampleReady || row.capabilities.ship } };
 }
 
 function emptyFilters(): AdminOrderWorkspaceQuery['list']['filters'] {
@@ -839,7 +858,7 @@ function mapAdminOrderRow(
     totalAmount: row.totalAmount,
     pendingChangeRequestCount: row.changeRequests.length,
     manualPricingPending: manualPricing,
-  });
+  }, { allowConfirmed: true });
   const currentProductionOperations = row.productionOperations.filter(
     (operation) => operation.workOrderVersion === row.workOrderVersion && (!row.simpleProduction || operation.operationType !== 'PACKING'),
   );
@@ -901,7 +920,15 @@ function mapAdminOrderRow(
     printFacts,
     ...(row.simpleProduction ? { plannedCompletion: plannedCompletionFacts(row) } : {}),
   };
+  const samplePending = row.purpose === 'SAMPLE_SHIPMENT' && ['CONFIRMED', 'PENDING_FACTORY', 'SUBMITTED'].includes(row.status);
+  const sampleShipReason = samplePending ? resolveAdminOrderShipDisabledReason({ ...capabilityFacts, status: OrderStatus.PACKING }) : null;
+  const currentJobs = (row.productionJobs ?? []).filter(job => job.workOrderVersion === row.workOrderVersion);
+  const hasLegacyReports = !row.simpleProduction && ((row._count.productionOperations ?? 0) > 0 || (row._count.productionProgressSteps ?? 0) > 0 || row.items.some(item => item.tasks.some(task => task.status === 'COMPLETED' || task.status === 'IN_PROGRESS' || task.completedQty > 0 || Number(task.pieceworkAmount) > 0)));
+  const canAssignProduction = !hasLegacyReports && (row.status !== 'CONFIRMED' || ['AUTO_CONFIRMED', 'ADMIN_CONFIRMED'].includes(row.pricingStatus)) && (['PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED'].includes(row.status)
+    || currentJobs.some(job => job.status === 'PENDING')
+    || (!currentJobs.length && hasIncompleteProduction));
   return {
+    canAssignProduction,
     simpleProduction: row.simpleProduction,
     productionOwners: [...new Set((row.productionJobs ?? []).filter(job => job.workOrderVersion === row.workOrderVersion).map(job => job.workerName))],
     productionReviews: (row.productionJobs ?? []).filter(job => job.status === 'REQUESTED' || (job.factReview && ['OPEN', 'CONFLICT'].includes(job.factReview.status)))
@@ -935,7 +962,7 @@ function mapAdminOrderRow(
     promisedDaysLeft: ACTIVE_PROMISE_STATUSES.includes(
       row.status as (typeof ACTIVE_PROMISE_STATUSES)[number],
     ) || row.status === OrderStatus.REJECTED ? daysLeft : null,
-    shipDisabledReason: row.status === OrderStatus.PACKING || row.status === OrderStatus.COMPLETED
+    shipDisabledReason: samplePending ? sampleShipReason : row.status === OrderStatus.PACKING || row.status === OrderStatus.COMPLETED
       || (row.simpleProduction && (row.status === OrderStatus.RELEASED || row.status === OrderStatus.FOILING))
       ? resolveAdminOrderShipDisabledReason(capabilityFacts)
       : null,

@@ -1,5 +1,7 @@
 # Agent Backlog
 
+> 2026-10-04 阅读边界：本台账保留原阶段与验收记录。领取任务前先查 [当前开发入口](当前开发入口.md)、对应修复提交及后续发布证据；旧 OPEN／未部署不自动代表当前仍阻塞，已关闭条目也不能替代新候选验收。
+
 This file is the automation queue for Codex routines. A routine should pick the
 first task whose status is `agent-ready`, create a branch, implement only that
 task, run the listed verification commands, and open a draft PR.

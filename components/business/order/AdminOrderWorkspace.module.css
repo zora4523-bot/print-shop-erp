@@ -83,3 +83,15 @@
     grid-template-columns: 20px 34px minmax(210px, 1.35fr) minmax(150px, 1fr) 96px 130px 120px 100px;
   }
 }
+
+/* Keep the documented narrow-strip width above the shell's 44px touch minimum.
+   A utility alone loses to that later rule and makes scrolling font-dependent. */
+.decisionCard {
+  min-width: 6rem;
+}
+
+@container (min-width: 56rem) {
+  .decisionCard {
+    min-width: 2.75rem;
+  }
+}

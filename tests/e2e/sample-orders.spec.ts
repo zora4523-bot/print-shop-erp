@@ -12,6 +12,8 @@ import {
 const password = 'e2e-test-password-1234';
 async function login(page: Page, username: string, path = '/workbench') {
   await loginWithIsolatedClient(page, { username, password, from: path });
+  // Auth navigation resolves on commit; detail content streams afterwards.
+  if (/^\/orders\/(?!new$)[a-z0-9]+$/.test(path)) await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 30_000 });
 }
 async function database() {
   const explicit = process.env.SAMPLE_TEST_DATABASE_URL;
@@ -92,7 +94,7 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
     }
     await page.getByRole('button', { name: '核对费用', exact: true }).click();
     const save = page.getByRole('button', { name: '保存工单', exact: true });
-    await expect(save).toBeEnabled();
+    await expect(save).toBeEnabled({ timeout: 30_000 });
     await save.click();
     await page
       .getByRole('button', { name: '查看已保存工单', exact: true })
@@ -126,6 +128,7 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
                 orderId,
               ])
             ).rows[0].status,
+          { timeout: 30_000 },
         )
         .not.toBe('DRAFT');
       await expect(page.getByLabel('整单总价（元）')).toHaveCount(0);
@@ -136,12 +139,18 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
       const adminPage = await context.newPage();
       adminPage.on('pageerror', (error) => errors.push(error.message));
       await login(adminPage, 'e2e-sample-admin', `/orders/${orderId}`);
+      if (purpose === '寄样品') {
+        expect((await db.query('SELECT status FROM "Order" WHERE id=$1', [orderId])).rows[0].status).toBe('PACKING');
+        expect((await db.query('SELECT id FROM "ProductionOperation" WHERE "orderId"=$1', [orderId])).rowCount).toBe(0);
+        await expect(adminPage.getByRole('link', { name: '安排生产师傅', exact: true })).toHaveCount(0);
+        await expect(adminPage.getByRole('button', { name: '下发生产', exact: true })).toHaveCount(0);
+      }
       await expect(
         adminPage
           .locator('[data-slot="badge"]')
           .filter({ hasText: purpose })
           .first(),
-      ).toBeVisible();
+      ).toBeVisible({ timeout: 30_000 });
       if (purpose === '打样') {
         const amount = adminPage.getByLabel('整单总价（元）');
         await adminPage
@@ -173,6 +182,8 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
       await adminPage.getByRole('button', { name: '编辑全部收费', exact: true }).click();
       const fees = adminPage.locator('#admin-fee-editor');
       await expect(fees.getByLabel('收费金额（元）').first()).toBeVisible();
+      const originalLastFee = await fees.getByLabel('收费金额（元）').last().inputValue();
+      const originalConfirmedFee = (await db.query('SELECT "confirmedFee"::text AS fee FROM "Order" WHERE id=$1', [orderId])).rows[0].fee;
       await fees.getByLabel('收费金额（元）').last().fill(purpose === '打样' ? '99.00' : '3.00');
       await fees.getByLabel('定价依据').fill('管理员调整样品收费');
       await fees.getByRole('button', { name: '保存收费', exact: true }).click();
@@ -181,13 +192,42 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
       // Asia/Shanghai 会话 NOW() 写入无时区列）会产生晚于当前 UTC 的 createdAt，
       // 上海时间 0–12 点跑全套时把本单挤出默认队列首页（每页 20 条）。
       const { orderNo } = (await db.query('SELECT "orderNo" FROM "Order" WHERE id=$1', [orderId])).rows[0];
-      await adminPage.goto(`/orders?q=${encodeURIComponent(orderNo)}`);
+      await adminPage.goto(`/orders?queue=all&q=${encodeURIComponent(orderNo)}`);
       await expect(
         adminPage
           .locator('[data-slot="badge"]')
           .filter({ hasText: purpose })
           .first(),
-      ).toBeVisible();
+      ).toBeVisible({ timeout: 30_000 });
+      if (purpose === '寄样品') {
+        // 同一收货入口兼容已有待安排寄样；不要求先排单或单独下发。
+        if (entry === '/orders/new') await db.query('UPDATE "Order" SET status=\'CONFIRMED\', revision=revision+1 WHERE id=$1', [orderId]);
+        await adminPage.goto(`/orders/${orderId}`);
+        const delivery = adminPage.locator('#detail-delivery-records');
+        const shipment = delivery.locator('li').filter({ has: adminPage.getByRole('textbox', { name: '运单号', exact: true }) }).first();
+        await shipment.getByRole('textbox', { name: '运单号', exact: true }).fill(`SF-SAMPLE-${Date.now()}`);
+        await shipment.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('SF');
+        await shipment.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+        await adminPage.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
+        await expect(delivery.getByText('物流费用有变化，请先确认物流费用，再登记发货', { exact: true })).toBeVisible();
+        expect((await db.query('SELECT status FROM "Order" WHERE id=$1', [orderId])).rows[0].status).toBe(entry === '/orders/new' ? 'CONFIRMED' : 'PACKING');
+        expect((await db.query('SELECT status FROM "OrderShipment" WHERE "orderId"=$1', [orderId])).rows.every(row => row.status !== 'SHIPPED')).toBe(true);
+        // 本用例的任意改价先恢复为原价目簿费用，再验证正常直接发货。
+        if (await pricing.getAttribute('open') === null) await pricing.locator(':scope > summary').click();
+        await adminPage.getByRole('button', { name: '编辑全部收费', exact: true }).click();
+        await fees.getByLabel('收费金额（元）').last().fill(originalLastFee);
+        await fees.getByLabel('定价依据').fill('恢复已核对的原物流费用');
+        await fees.getByRole('button', { name: '保存收费', exact: true }).click();
+        await expect.poll(async () => (await db.query('SELECT "confirmedFee"::text AS fee FROM "Order" WHERE id=$1', [orderId])).rows[0].fee).toBe(originalConfirmedFee);
+        await adminPage.reload();
+        await shipment.getByRole('textbox', { name: '运单号', exact: true }).fill(`SF-SAMPLE-${Date.now()}`);
+        await shipment.getByRole('combobox', { name: '物流公司', exact: true }).selectOption('SF');
+        await shipment.getByRole('button', { name: '确认该地址已发货', exact: true }).click();
+        await adminPage.getByRole('alertdialog').getByRole('button', { name: '确认发货', exact: true }).click();
+        await expect.poll(async () => (await db.query('SELECT status FROM "Order" WHERE id=$1', [orderId])).rows[0].status).toBe('SETTLED');
+        expect((await db.query('SELECT id FROM "ProductionJob" WHERE "orderId"=$1', [orderId])).rowCount).toBe(0);
+        expect((await db.query('SELECT id FROM "ProductionOperation" WHERE "orderId"=$1', [orderId])).rowCount).toBe(0);
+      }
       await context.close();
       expect(errors).toEqual([]);
     } finally {
@@ -357,7 +397,7 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
     await contact(page);
     await page.getByRole('button', { name: '核对费用', exact: true }).click();
     const save = page.getByRole('button', { name: '保存工单', exact: true });
-    await expect(save).toBeEnabled();
+    await expect(save).toBeEnabled({ timeout: 30_000 });
     await save.click();
     await expect(page.getByText('请选择关联外部销售', { exact: true })).toBeVisible();
     await expect(sales).toBeFocused();
@@ -367,7 +407,7 @@ for (const entry of ['/workbench', '/orders/new']) for (const purpose of ['寄�
       await sales.selectOption(salesId);
       await expect(page.getByText('请选择关联外部销售', { exact: true })).toHaveCount(0);
       await page.getByRole('button', { name: '核对费用', exact: true }).click();
-      await expect(save).toBeEnabled();
+      await expect(save).toBeEnabled({ timeout: 30_000 });
       await save.click();
       await page.getByRole('button', { name: '查看已保存工单', exact: true }).click();
       await page.waitForURL(/\/orders\/(?!new$)[a-z0-9]+$/);

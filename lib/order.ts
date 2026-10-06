@@ -1,3 +1,4 @@
+import { ProductionOperationMaterializationError } from './production/operation-materialization-service';
 import { OrderItemPricingRoute } from '../generated/prisma/enums';
 import { assertBlankPriceAdmissionInTx, BlankPriceAdmissionError } from './order/blank-price-admission';
 import {
@@ -110,6 +111,7 @@ import {
   finalizeExternalOrderQuoteInTx,
 } from './order/submit-external-order';
 import { prepareOrderForProductionInTx } from './order/production-readiness';
+import { dispatchPreparedProduction, type PreparedProductionNotification } from './production/preparation-notification';
 import { getSetting } from './settings';
 import { dispatchProductionCompletionNotification, findRequiredOutsourceBlocker, type ProductionCompletionNotification, type ProductionCompletionTx } from './production-completion';
 import { completePlannedProductionBeforeShipInTx, PlannedCompletionError } from './production/planned-completion';
@@ -1204,7 +1206,7 @@ type TransitionOptions = {
    */
   prepare?: (
     tx: Prisma.TransactionClient,
-    order: TransitionVersions & { id: string; status: OrderStatus; simpleProduction?: boolean },
+    order: TransitionVersions & { id: string; status: OrderStatus; simpleProduction?: boolean; purpose?: string },
   ) => Promise<TransitionVersions | null>;
   // Optional authz guard that runs AFTER we've fetched the row (so it
   // can see submitterId / status) but BEFORE the status-machine check.
@@ -1506,6 +1508,8 @@ export async function submitOrder(
   let submissionNotificationKey = orderId;
   let submittedNotificationQueued = !submittedNotificationEnabled;
   let urgentNotificationQueued = false;
+  let preparationNotification: ProductionCompletionNotification | undefined;
+  let preparedProductionNotification: PreparedProductionNotification | undefined;
   const finalizedExternalQuote: {
     current: Awaited<
       ReturnType<typeof finalizeExternalOrderQuoteInTx>
@@ -1571,7 +1575,7 @@ export async function submitOrder(
           );
         }
       },
-      afterTransition: async (tx, lockedOrderId, previousOrder) => {
+      afterTransition: async (tx, lockedOrderId) => {
         const currentPricing = await tx.order.findUnique({
           where: { id: lockedOrderId },
           select: {
@@ -1580,9 +1584,9 @@ export async function submitOrder(
           },
         });
         if (!currentPricing) throw new OrderInvariantError('工单不存在');
-        const prepared = previousOrder.status === OrderStatus.REJECTED
-          ? { status: OrderStatus.PENDING_FACTORY, ready: false }
-          : await prepareOrderForProductionInTx(tx, lockedOrderId, actor, now);
+        const prepared = await prepareOrderForProductionInTx(tx, lockedOrderId, actor, now);
+        preparationNotification = prepared.notification;
+        preparedProductionNotification = prepared.scheduledNotification;
         if (backgroundJobsMode() !== 'durable') {
           return { status: prepared.status };
         }
@@ -1607,7 +1611,7 @@ export async function submitOrder(
               submitterName: payload.submitter.displayName,
               customerRef: payload.customerRef,
               urgentMark: payload.isUrgent ? '🚨 急单' : '',
-              summary: prepared.ready ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
+              summary: prepared.status === OrderStatus.PACKING ? '新工单已提交，待发货' : prepared.status === OrderStatus.RELEASED ? '新工单已提交，已进入履约' : prepared.ready ? '新工单已提交，待安排生产' : '新工单已提交，待处理资料或费用',
               deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
             },
             { dedupeKey: `notification:ORDER_SUBMITTED:${submissionNotificationKey}` },
@@ -1662,7 +1666,7 @@ export async function submitOrder(
           submitterName: payload.submitter.displayName,
           customerRef: payload.customerRef,
           urgentMark,
-          summary: result.status === OrderStatus.CONFIRMED ? '新工单已提交，待下发生产' : '新工单已提交，待处理资料或费用',
+          summary: result.status === OrderStatus.PACKING ? '新工单已提交，待发货' : result.status === OrderStatus.RELEASED ? '新工单已提交，已进入履约' : result.status === OrderStatus.CONFIRMED ? '新工单已提交，待安排生产' : '新工单已提交，待处理资料或费用',
           deepLink: `/orders#wo=${encodeURIComponent(payload.orderNo)}`,
         },
         { dedupeKey: `notification:ORDER_SUBMITTED:${submissionNotificationKey}` },
@@ -1686,6 +1690,8 @@ export async function submitOrder(
     }
   }
 
+  await dispatchProductionCompletionNotification(preparationNotification);
+  await dispatchPreparedProduction(preparedProductionNotification);
   return {
     ...result,
     quotedFee: finalizedExternalQuote.current?.quotedFee ?? sampleFinalized.current?.quotedFee ?? null,
@@ -2424,6 +2430,14 @@ export async function shipOrder(
       // 先按计划数量代师傅登记完成（同一事务，失败整体回滚），再按完工后的版本发货；
       // 幂等指纹仍按原始请求计算。调用方传入事务时由调用方负责（见 registerShipment）。
       ...(!transaction && commandGuard ? { prepare: async (tx: Prisma.TransactionClient, order: Parameters<NonNullable<TransitionOptions['prepare']>>[1]) => {
+        if (order.purpose === 'SAMPLE_SHIPMENT' && ['CONFIRMED', 'PENDING_FACTORY', 'SUBMITTED'].includes(order.status)) {
+          const expected = commandGuard!;
+          if (order.revision !== expected.expectedRevision || order.editVersion !== expected.expectedEditVersion || order.workOrderVersion !== expected.expectedWorkOrderVersion || order.priceRevision !== expected.expectedPriceRevision) return null;
+          if (actor.role !== Role.ADMIN) throw new OrderInvariantError('只有管理员可以登记发货');
+          const prepared = await prepareOrderForProductionInTx(tx, order.id, actor, now);
+          if (!prepared.ready) throw new OrderInvariantError(prepared.issues.join('；'));
+          return tx.order.findUniqueOrThrow({ where: { id: order.id }, select: { revision: true, editVersion: true, workOrderVersion: true, priceRevision: true } });
+        }
         let completion: Awaited<ReturnType<typeof completePlannedProductionBeforeShipInTx>>;
         try {
           completion = await completePlannedProductionBeforeShipInTx(tx, order, actor, commandGuard!);
@@ -2744,6 +2758,8 @@ async function updateOrderEditableFields(
   if (actor.role !== Role.ADMIN && actor.role !== Role.SALES) {
     throw new OrderInvariantError('无权编辑工单');
   }
+  let preparationNotification: ProductionCompletionNotification | undefined;
+  let scheduledNotification: PreparedProductionNotification | undefined;
   const work = async (tx: Prisma.TransactionClient): Promise<UpdateOrderResult> => {
     const txClient = tx as unknown as EditTxClient;
     await txClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
@@ -2987,14 +3003,30 @@ async function updateOrderEditableFields(
       },
     });
 
+    let finalStatus = updated.status;
+    if (!transaction && ['PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED'].includes(updated.status)) {
+      try {
+        const prepared = await prepareOrderForProductionInTx(tx, orderId, actor, new Date());
+        finalStatus = prepared.status;
+        preparationNotification = prepared.notification;
+        scheduledNotification = prepared.scheduledNotification;
+      } catch (error) {
+        if (error instanceof ProductionOperationMaterializationError) throw new OrderInvariantError('生产记录与当前工单不一致，本次未保存，请核对原生产记录后重试。');
+        throw error;
+      }
+    }
     return {
       id: updated.id,
-      status: updated.status,
+      status: finalStatus,
       changed: true,
       changedFields: [...Object.keys(changes), ...(shipmentEdits.length ? ['shipments'] : [])],
     };
   };
-  return transaction ? work(transaction) : db.$transaction(work);
+  if (transaction) return work(transaction);
+  const result = await db.$transaction(work);
+  await dispatchProductionCompletionNotification(preparationNotification);
+  await dispatchPreparedProduction(scheduledNotification);
+  return result;
 }
 
 export async function updateOrderFields(

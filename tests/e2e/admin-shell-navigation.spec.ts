@@ -6,18 +6,16 @@ import { Role } from '../../generated/prisma/enums';
 import { flattenAdminMenuItems, getAdminMenuItems, getAdminSidebarGroups } from '../../lib/navigation/admin-menu';
 import { assertActivatedE2eDatabase } from '../../scripts/lib/e2e-environment';
 import { E2E_PASSWORD, E2E_USERS } from './global-setup';
+import { isolateE2eLoginClient } from './_login-client';
 
 type NavigationRole = typeof Role.ADMIN | typeof Role.SALES;
 type Session = Awaited<ReturnType<BrowserContext['storageState']>>;
-type Records = { unnamedOrderId: string; namedOrderId: string; billId: string; itemId: string };
+type Records = { unnamedOrderId: string; namedOrderId: string; billId: string; itemId: string; longNameUsername: string };
 type NavigationState = { sessions: Record<NavigationRole, Session>; records: Records };
 const longOrderName = '新年快乐·烫金大号红包礼盒装（第二批加急补单，客户指定金色）';
 const longBillAgent = '外部销售货款核对记录及补充说明超长标题';
+const longAccountName = '外部销售LongDisplayNameABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const billLabel = `2026-08 · ${longBillAgent}`;
-const viewports = [
-  [320, 568], [375, 667], [390, 844], [393, 852], [430, 932],
-  [768, 1024], [1024, 768], [1280, 800], [1920, 1080],
-] as const;
 
 function observeErrors(page: Page) {
   const errors: string[] = [];
@@ -48,6 +46,7 @@ async function createRecords(): Promise<Records> {
       namedOrderId: `e2e-navigation-named-${suffix}`,
       billId: randomUUID(),
       itemId: randomUUID(),
+      longNameUsername: `e2e-navigation-long-name-${suffix}`,
     };
     await db.query('BEGIN');
     for (const [id, name] of [[records.unnamedOrderId, null], [records.namedOrderId, longOrderName]]) {
@@ -63,6 +62,11 @@ async function createRecords(): Promise<Records> {
       `INSERT INTO "User" (id, username, password, role, "displayName", "updatedAt")
        SELECT $1::text, $1::text, password, 'SALES', $2, NOW() FROM "User" WHERE id = $3`,
       [billingAgentId, longBillAgent, salesId],
+    );
+    await db.query(
+      `INSERT INTO "User" (id, username, password, role, "displayName", "updatedAt")
+       SELECT $1::text, $1::text, password, 'SALES', $2, NOW() FROM "User" WHERE id = $3`,
+      [records.longNameUsername, longAccountName, salesId],
     );
     const settledOrderId = `e2e-navigation-settled-${suffix}`;
     await db.query(
@@ -100,6 +104,7 @@ async function signIn(browser: Browser, baseURL: string, role: NavigationRole): 
   try {
     const page = await context.newPage();
     const errors = observeErrors(page);
+    await isolateE2eLoginClient(page);
     await page.goto('/login?from=%2Forders');
     await page.locator('#username').fill(E2E_USERS[role === Role.ADMIN ? 'owner' : 'sales'].username);
     await page.locator('#password').fill(E2E_PASSWORD);
@@ -129,7 +134,6 @@ const test = base.extend<{ navigationRole: NavigationRole }, { navigationState: 
 });
 
 test.setTimeout(120_000);
-test.use({ screenshot: 'off', video: 'off', trace: 'off' });
 
 const pageErrors = new WeakMap<Page, string[]>();
 test.beforeEach(async ({ page }) => { pageErrors.set(page, observeErrors(page)); });
@@ -248,9 +252,10 @@ async function noOverflow(page: Page, width: number) {
 for (const role of [Role.SALES, Role.ADMIN] as const) {
   test.describe(`${role} 导航`, () => {
     test.use({ navigationRole: role });
-    for (const theme of ['light', 'dark']) for (const [width, height] of viewports) {
-      test(`${theme} ${width}×${height}：布局、可访问操作及授权入口`, async ({ page }) => {
-        await page.setViewportSize({ width, height });
+    for (const theme of ['light', 'dark']) {
+      test(`${theme}：布局、可访问操作及授权入口`, async ({ page, viewport }) => {
+        if (!viewport) throw new Error('导航测试需要项目视口配置');
+        const { width } = viewport;
         await visit(page, role === Role.ADMIN ? '/owner/rules/customer-pricing?section=blank' : '/orders/new', theme);
         const header = page.locator('[data-slot="admin-header"]');
         await expect(header.locator('[aria-label="快捷导航"], button button')).toHaveCount(0);
@@ -354,9 +359,10 @@ for (const role of [Role.SALES, Role.ADMIN] as const) {
 
 for (const role of [Role.ADMIN, Role.SALES] as const) test.describe(`${role} 账号操作`, () => {
   test.use({ navigationRole: role });
-  for (const width of [393, 1280]) test(`${width}：主题和账号菜单支持键盘、焦点恢复及真实退出`, async ({ page }) => {
+  test('主题和账号菜单支持键盘、焦点恢复及真实退出', async ({ page, viewport }) => {
+    if (!viewport) throw new Error('导航测试需要项目视口配置');
+    const { width } = viewport;
     await page.emulateMedia({ reducedMotion: role === Role.ADMIN && width === 1280 ? 'reduce' : 'no-preference' });
-    await page.setViewportSize({ width, height: 852 });
     await visit(page, '/orders/new');
     const user = E2E_USERS[role === Role.ADMIN ? 'owner' : 'sales'];
     const roleLabel = role === Role.ADMIN ? '管理员后台' : '外部销售';
@@ -404,7 +410,7 @@ for (const role of [Role.ADMIN, Role.SALES] as const) test.describe(`${role} 账
     await page.keyboard.press('ArrowDown');
     const logout = page.getByRole('menuitem', { name: '退出登录' });
     await expect(logout).toBeFocused();
-    if (width === 393) await page.keyboard.press('Enter');
+    if (width < 768) await page.keyboard.press('Enter');
     else await logout.click();
     await expect(page).toHaveURL(/\/login/);
     await page.goto('/orders');
@@ -412,8 +418,94 @@ for (const role of [Role.ADMIN, Role.SALES] as const) test.describe(`${role} 账
   });
 });
 
+for (const theme of ['light', 'dark']) test(`200% 字体：${theme} 长账号菜单完整可用并真实退出`, async ({ page, viewport, navigationState }, testInfo) => {
+  if (!viewport) throw new Error('导航测试需要项目视口配置');
+  await page.context().clearCookies();
+  await isolateE2eLoginClient(page);
+  await page.goto('/login?from=%2Forders');
+  await page.locator('#username').fill(navigationState.records.longNameUsername);
+  await page.locator('#password').fill(E2E_PASSWORD);
+  await page.getByRole('button', { name: /登录|登 录/ }).click();
+  await expect(page).toHaveURL(/\/orders$/);
+  await visit(page, '/orders', theme);
+  await page.evaluate(() => { document.documentElement.style.fontSize = '32px'; });
+  const account = page.getByRole('button', { name: `用户菜单：${longAccountName}` });
+  await account.focus();
+  await page.keyboard.press('Enter');
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  await settle(page);
+  await expect(menu).toHaveCSS('opacity', '1');
+  const bounds = (await menu.boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+  const name = menu.getByText(longAccountName, { exact: true });
+  // 菜单可滚动，完整账号文字和操作须分别能够滚入可见区域。
+  await name.scrollIntoViewIfNeeded();
+  const textBounds = await name.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const box = range.getBoundingClientRect();
+    return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+  });
+  expect(textBounds.left).toBeGreaterThanOrEqual(bounds.x);
+  expect(textBounds.right).toBeLessThanOrEqual(bounds.x + bounds.width);
+  expect(textBounds.top).toBeGreaterThanOrEqual(bounds.y);
+  expect(textBounds.bottom).toBeLessThanOrEqual(bounds.y + bounds.height);
+  const icon = (await menu.locator('[data-slot="dropdown-menu-label"] > svg').boundingBox())!;
+  expect(icon.width).toBe(32);
+  expect(icon.height).toBe(32);
+  await testInfo.attach('200-percent-long-account-name', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.keyboard.press('Escape');
+  await expect(account).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(menu.getByRole('menuitem', { name: '修改密码', exact: true })).toHaveAttribute('href', '/account/password');
+  for (const label of ['修改密码', '退出登录']) {
+    // 长账号可使菜单纵向滚动；方向键必须将当前操作完整滚入视口。
+    if (label === '退出登录') await page.keyboard.press('ArrowDown');
+    const item = menu.getByRole('menuitem', { name: label, exact: true });
+    await expect(item).toBeFocused();
+    const action = (await item.boundingBox())!;
+    expect(action.x).toBeGreaterThanOrEqual(0);
+    expect(action.x + action.width).toBeLessThanOrEqual(viewport.width);
+    expect(action.y).toBeGreaterThanOrEqual(0);
+    expect(action.y + action.height).toBeLessThanOrEqual(viewport.height);
+    const visibleMenu = (await menu.boundingBox())!;
+    expect(action.x).toBeGreaterThanOrEqual(visibleMenu.x);
+    expect(action.x + action.width).toBeLessThanOrEqual(visibleMenu.x + visibleMenu.width);
+    expect(action.y).toBeGreaterThanOrEqual(visibleMenu.y);
+    expect(action.y + action.height).toBeLessThanOrEqual(visibleMenu.y + visibleMenu.height);
+  }
+  await testInfo.attach('200-percent-long-account-menu', { body: await page.screenshot(), contentType: 'image/png' });
+  await page.keyboard.press('Escape');
+  await expect(account).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(menu.getByRole('menuitem', { name: '修改密码', exact: true })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: '退出登录', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/login/);
+  await page.goto('/orders');
+  await expect(page).toHaveURL(/\/login/);
+});
+
+test.describe('桌面导航行为', () => {
+  test.beforeEach(async ({ viewport }) => {
+    test.skip(viewport?.width !== 1280, '固定桌面操作在 admin-1280x800 执行，其余视口由布局和账号操作覆盖');
+  });
+
+test('CDR 存储降级时汇总页和工作台仍显示恢复提示', async ({ page }) => {
+  await visit(page, '/foreman/cdr');
+  await expect(page.getByRole('heading', { name: 'CDR 汇总下载', exact: true })).toBeVisible();
+  await expect(page.getByText('下载功能暂不可用', { exact: true })).toBeVisible();
+  await visit(page, '/owner#cdr-download');
+  await expect(page.getByRole('heading', { name: 'CDR 下载', exact: true })).toBeVisible();
+  await expect(page.getByText('文件存储尚未启用，当前可查看工单和生成记录，暂不能下载文件。', { exact: true })).toBeVisible();
+});
+
 test('规则目录支持真实路由、当前模块标记和键盘收起', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
   await visit(page, '/owner/rules/customer-pricing?section=machine');
   const nav = page.getByRole('navigation', { name: '后台主导航' });
   await expect(nav.getByRole('link', { name: '规则配置中心', exact: true })).toHaveAttribute('aria-current', 'page');
@@ -423,8 +515,13 @@ test('规则目录支持真实路由、当前模块标记和键盘收起', async
   await page.keyboard.press('Enter');
   const local = page.getByRole('navigation', { name: '规则模块导航' });
   await expect(local.getByRole('link', { name: '局部烫金机烫费' })).toHaveAttribute('aria-current', 'page');
-  await local.getByRole('link', { name: '局部烫金机烫费' }).click();
-  await expect(page).toHaveURL(/\/owner\/rules\/customer-pricing\?section=machine$/);
+  const target = local.getByRole('link', { name: '空白封单价', exact: true });
+  await expect(target).not.toHaveAttribute('aria-current', 'page');
+  const targetHref = await target.getAttribute('href');
+  expect(targetHref).toBe('/owner/rules/customer-pricing?section=blank');
+  await target.click();
+  await expect(page).toHaveURL(/\/owner\/rules\/customer-pricing\?section=blank$/);
+  await expect(local.getByRole('link', { name: '空白封单价', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(local.locator('[aria-current="page"]')).toHaveCount(1);
   await summary.focus();
   await page.keyboard.press('Space');
@@ -435,7 +532,6 @@ test('规则目录支持真实路由、当前模块标记和键盘收起', async
 });
 
 test('分组开关记忆和子页当前位置随真实访问生效', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
   await visit(page, '/workbench');
   const toggle = page.getByRole('button', { name: '财务结算 展开' });
   const bill = page.locator('nav[aria-label="后台主导航"] a[href="/owner/agent-bills"]');
@@ -456,7 +552,6 @@ test('分组开关记忆和子页当前位置随真实访问生效', async ({ pa
 });
 
 test('已有分组设置兼容，图标模式保留全部入口及键盘焦点', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
   await visit(page, '/workbench');
   await page.evaluate(() => localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 财务: false, 运维: true, 规则: false })));
   await page.reload();
@@ -473,9 +568,9 @@ test('已有分组设置兼容，图标模式保留全部入口及键盘焦点',
   await expect(accounts).toBeHidden();
   await expect(nav.getByRole('link', { name: '账单', exact: true })).toBeVisible();
 });
+});
 
 test('鼠标切换主题后按 Escape 恢复焦点', async ({ page }) => {
-  await page.setViewportSize({ width: 393, height: 852 });
   await visit(page, '/orders/new');
   const theme = page.getByRole('button', { name: '切换界面主题' });
   await theme.click();
@@ -485,8 +580,8 @@ test('鼠标切换主题后按 Escape 恢复焦点', async ({ page }) => {
   await expect(theme).toBeFocused();
 });
 
-test('用户管理子页始终显示当前系统入口', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+test('用户管理子页始终显示当前系统入口', async ({ page, viewport }) => {
+  test.skip(viewport?.width !== 1280, '固定桌面操作在 admin-1280x800 执行');
   await visit(page, '/workbench');
   await page.evaluate(() => localStorage.setItem('print-shop-erp:admin-sidebar-collapsed', JSON.stringify({ 账号: true, 运维: true })));
   await visit(page, '/owner/accounts');
@@ -496,8 +591,10 @@ test('用户管理子页始终显示当前系统入口', async ({ page }) => {
   await expect(page.getByRole('button', { name: '系统管理 收起' })).toBeVisible();
 });
 
-for (const theme of ['light', 'dark']) for (const [width, height] of viewports) {
-  test(`${theme} ${width}：真实页面的父级链接、单层及长标题面包屑`, async ({ browser, baseURL, navigationState }) => {
+for (const theme of ['light', 'dark']) {
+  test(`${theme}：真实页面的父级链接、单层及长标题面包屑`, async ({ browser, baseURL, navigationState, viewport }) => {
+    if (!viewport) throw new Error('导航测试需要项目视口配置');
+    const { width, height } = viewport;
     const { records } = navigationState;
     for (const role of [Role.ADMIN, Role.SALES] as const) {
       const context = await browser.newContext({ baseURL, viewport: { width, height }, storageState: navigationState.sessions[role] });
@@ -558,8 +655,8 @@ for (const theme of ['light', 'dark']) for (const [width, height] of viewports) 
   });
 }
 
-test('折叠与展开保留导航节点及键盘焦点', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+test('折叠与展开保留导航节点及键盘焦点', async ({ page, viewport }) => {
+  test.skip(viewport?.width !== 1280, '固定桌面操作在 admin-1280x800 执行');
   await visit(page, '/orders/new');
   const link = page.locator('[data-sidebar="menu-button"][href="/orders/new"]');
   const original = await link.elementHandle();
@@ -572,9 +669,9 @@ test('折叠与展开保留导航节点及键盘焦点', async ({ page }) => {
   }
 });
 
-test('Reduced Motion 保持侧栏稳定及焦点边框可见', async ({ page }) => {
+test('Reduced Motion 保持侧栏稳定及焦点边框可见', async ({ page, viewport }) => {
+  test.skip(viewport?.width !== 1280, '固定桌面操作在 admin-1280x800 执行');
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.setViewportSize({ width: 1280, height: 800 });
   await visit(page, '/orders/new');
   const link = page.locator('a[data-sidebar="menu-button"]').first();
   await link.focus();

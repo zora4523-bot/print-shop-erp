@@ -12,6 +12,10 @@ vi.mock('@/lib/auth/permissions', () => ({
 }));
 vi.mock('@/lib/db', () => ({ db: {
   user: { findMany: mocks.workers },
+  orderChangeRequest: { count: vi.fn(async () => 0) },
+  productionOperation: { count: vi.fn(async () => 0) },
+  productionProgressStep: { count: vi.fn(async () => 0) },
+  productionTask: { count: vi.fn(async () => 0) },
   productionJob: { findMany: mocks.jobs },
 } }));
 vi.mock('@/lib/production/dispatch-targets', () => ({ currentDispatchTargets: mocks.targets }));
@@ -26,17 +30,34 @@ vi.mock('@/components/business/production/ProductionDispatchForm', () => ({
 }));
 
 import ProductionDispatchPage from '../orders/production/page';
+import { DispatchPlanValidationError } from '@/lib/production/dispatch-plan-error';
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.targets.mockResolvedValue({
-    order: { id: 'order', customName: '工单', revision: 2, workOrderVersion: 1 },
+    order: { status: 'CONFIRMED', pricingStatus: 'ADMIN_CONFIRMED', id: 'order', customName: '工单', revision: 2, workOrderVersion: 1 },
     targets: [{ key: 'PARTIAL:item', label: '局部烫金', quantity: '1000', operationType: 'PARTIAL' }],
   });
   mocks.jobs.mockResolvedValue([{
     sourceKey: 'PARTIAL:item', workerId: 'original', workerName: '原师傅',
     plannedQty: 1000, status: 'PENDING',
   }]);
+});
+
+it('renders an actionable incomplete-order notice without a partial batch form', async () => {
+  mocks.workers.mockResolvedValue([]);
+  mocks.targets.mockRejectedValueOnce(new DispatchPlanValidationError(
+    { id: 'bad', customName: '待完善工单', orderNo: 'BAD-1', revision: 1, workOrderVersion: 1 },
+    [{ code: 'NO_PACKAGING_GROUPS', message: '工单没有包装组，无法确定打包计件数' }],
+  ));
+  const html = renderToStaticMarkup(await ProductionDispatchPage({ searchParams: Promise.resolve({ ids: 'bad,order' }) }));
+  expect(html).toContain('所选工单暂不能一起安排生产');
+  expect(html).toContain('已选择 2 张工单');
+  expect(html).toContain('href="/orders/bad"');
+  expect(html).toContain('待完善工单');
+  expect(html).toContain('未填写包装组，请完善包装资料。');
+  expect(html).toContain('返回工单列表');
+  expect(mocks.form).not.toHaveBeenCalled();
 });
 
 it.each(['岗位调整', '账号停用'])('保留%s后的原生产归属选项', async scenario => {

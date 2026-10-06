@@ -125,6 +125,62 @@ test.describe('administrator workspace', () => {
     await checkRoutes(page, testInfo, routes, 'dark');
   });
 
+  test('analytics five views pass light and dark gates', async ({ page, browser }, testInfo) => {
+    const routes: AdminRoute[] = ['overview', 'orders', 'costs', 'structure', 'inventory'].map(view => ({
+      name: `analytics-${view}`, path: `/owner/analytics?view=${view}`, readyHeading: '经营概览',
+      prepareGateState: view === 'overview' ? prepareDashboardChartsState : async page => {
+        await expect(page.locator('[data-slot="analytics-report"]:visible')).toBeVisible();
+        await page.getByRole('navigation', { name: '分析明细分页' }).scrollIntoViewIfNeeded();
+        await expectViewportGate(page, testInfo);
+        await page.evaluate(() => window.scrollTo(0, 0));
+      },
+    }));
+    routes.push(...(['receipts', 'stock'] as const).map(inventoryKind => ({ name: `analytics-${inventoryKind}`, path: `/owner/analytics?view=inventory&inventoryKind=${inventoryKind}`, readyHeading: '经营概览', prepareGateState: routes[4]!.prepareGateState })));
+    await checkRoutes(page, testInfo, routes, 'light');
+    await checkRoutes(page, testInfo, routes, 'dark');
+    const nativeContext = await browser.newContext({ baseURL: new URL(page.url()).origin, storageState: await page.context().storageState(), javaScriptEnabled: false, viewport: testInfo.project.use.viewport, hasTouch: testInfo.project.use.hasTouch, isMobile: testInfo.project.use.isMobile });
+    try {
+      for (const theme of ['light', 'dark'] as const) {
+        const native = await nativeContext.newPage();
+        await native.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await native.goto('/owner/analytics');
+        const form = native.locator('form[action="/api/owner/analytics/export"]');
+        await expect(form).toBeVisible();
+        await native.evaluate(theme => {
+          document.documentElement.classList.toggle('dark', theme === 'dark');
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        }, theme);
+        expect(await native.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+        await attachCandidateScreenshot(native, testInfo, 'admin', `analytics-nojs-${theme}`);
+        // axe schedules JavaScript callbacks, which disabled-script documents
+        // cannot execute. Audit their rendered DOM in a script-free inspection
+        // document; keep real no-script geometry/screenshots and verify parity.
+        const html = await native.evaluate(() => {
+          const html = document.documentElement.cloneNode(true) as HTMLElement;
+          html.querySelectorAll('script, link[as="script"], link[rel="modulepreload"]').forEach(script => script.remove());
+          html.querySelectorAll('noscript').forEach(node => node.replaceWith(...node.childNodes));
+          const base = document.createElement('base'); base.href = location.origin;
+          html.querySelector('head')!.prepend(base);
+          return '<!doctype html>' + html.outerHTML;
+        });
+        const inspection = await page.context().newPage();
+        await inspection.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await inspection.route('**/__analytics_nojs_inspection', route => route.fulfill({ contentType: 'text/html', body: html }));
+        await inspection.goto(`${new URL(page.url()).origin}/__analytics_nojs_inspection`);
+        await inspection.evaluate(() => document.fonts.ready);
+        const before = await form.boundingBox();
+        const after = await inspection.locator('form[action="/api/owner/analytics/export"]').boundingBox();
+        for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(before![key] - after![key])).toBeLessThanOrEqual(1);
+        await expectViewportGate(inspection, testInfo);
+        await expectA11yGate(inspection);
+        await inspection.close();
+        await native.close();
+      }
+    } finally { await nativeContext.close(); }
+
+  });
+
   test('owner dashboard focused light and dark gates', async ({ page }, testInfo) => {
     const routes = ownerRoutes(fixture).filter((route) => route.path === '/owner' || route.path === '/owner/analytics' || route.path.startsWith('/owner/attention'));
     expect(routes).toHaveLength(6);
@@ -134,11 +190,11 @@ test.describe('administrator workspace', () => {
 
   test('owner pending release link opens the matching order filter', async ({ page }) => {
     await page.goto('/owner');
-    const entry = page.getByRole('region', { name: '工单待办' }).getByRole('link', { name: /待下发生产/ });
+    const entry = page.getByRole('region', { name: '工单待办' }).getByRole('link', { name: /待安排/ });
     await expect(entry).toHaveAttribute('href', '/orders?queue=all&signal=pending-release');
     await entry.click();
     await expect(page).toHaveURL(/queue=all&signal=pending-release/, { timeout: 30_000 });
-    await expect(page.getByRole('region', { name: '工单决定看板' }).getByRole('link', { name: /待下发生产/ })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('region', { name: '工单决定看板' }).getByRole('link', { name: /待安排/ })).toHaveAttribute('aria-current', 'page');
   });
 
   test('order creation, detail and editing pass focused light and dark gates', async ({
@@ -701,9 +757,13 @@ async function checkRoutes(
   });
   await page.addInitScript((requestedTheme) => {
     localStorage.setItem('erp-theme', requestedTheme);
-    document.documentElement.classList.toggle('dark', requestedTheme === 'dark');
-    document.documentElement.dataset.theme = requestedTheme;
-    document.documentElement.style.colorScheme = requestedTheme;
+    // 初始化脚本可能先于根元素执行；应用初始化仍会读取已保存主题。
+    const root = document.documentElement;
+    if (root) {
+      root.classList.toggle('dark', requestedTheme === 'dark');
+      root.dataset.theme = requestedTheme;
+      root.style.colorScheme = requestedTheme;
+    }
   }, theme);
   for (const route of routes) {
     await test.step(route.name, async () => {
@@ -751,11 +811,8 @@ async function checkRoutes(
   }
 }
 
-// Dashboard 的三张图走 next/dynamic + IntersectionObserver 延迟挂载
-// （components/business/dashboard/DeferredDashboardCharts.tsx）。checkRoutes
-// 只 goto + 等 heading，全程不滚动，于是 375/393/768 三个视口下门禁一直在
-// 对占位骨架做断言，图表本身（含 recharts 生成的 SVG）从未被 axe 或裁切
-// 检查看过。滚到容器可见并等 surface 出现，把这块真正纳入门禁。
+// 经营概览由 OwnerAnalytics 的独立 Suspense 区块承载。滚动到三张实际图表，
+// 等待内容出现，避免把加载占位当成图表的几何与可访问性检查。
 async function prepareDashboardChartsState(page: Page): Promise<void> {
   const deferred = page.locator('[data-slot="dashboard-chart-deferred"]:visible');
   await expect(deferred).toHaveCount(3);

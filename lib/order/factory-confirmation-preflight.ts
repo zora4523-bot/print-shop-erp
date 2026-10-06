@@ -40,10 +40,11 @@ export type FactoryConfirmationPreflight = {
  */
 export function evaluateFactoryConfirmationPreflight(
   facts: FactoryConfirmationPreflightFacts,
+  options: { allowConfirmed?: boolean } = {},
 ): FactoryConfirmationPreflight {
   const issues: string[] = [];
 
-  if (!isAwaitingFactoryConfirmation(facts.status)) {
+  if (!isAwaitingFactoryConfirmation(facts.status) && !(options.allowConfirmed && facts.status === OrderStatus.CONFIRMED)) {
     issues.push('当前不是待工厂确认状态');
   }
   if (facts.pendingChangeRequestCount > 0) {

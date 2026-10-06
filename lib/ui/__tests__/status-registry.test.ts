@@ -216,17 +216,17 @@ describe('status registry', () => {
       expect(ORDER_STATUS_REGISTRY[status].label).toContain('（历史）');
     }
     // SUBMITTED 与 PENDING_FACTORY 同名，标记它等于把枚举差异外显。
-    expect(ORDER_STATUS_REGISTRY[OrderStatus.SUBMITTED].label).toBe('待下发检查');
+    expect(ORDER_STATUS_REGISTRY[OrderStatus.SUBMITTED].label).toBe('待完善');
     expect(ORDER_STATUS_REGISTRY[OrderStatus.SHIPPED].label).toBe('已发货');
   });
 
   it('does not render queued, running, or unresolved work as danger', () => {
     expect(ORDER_STATUS_REGISTRY[OrderStatus.PENDING_FACTORY]).toMatchObject({
-      label: '待下发检查',
+      label: '待完善',
       tone: 'info',
     });
     expect(ORDER_STATUS_REGISTRY[OrderStatus.SUBMITTED].label).toBe(
-      '待下发检查',
+      '待完善',
     );
     expect(ORDER_STATUS_REGISTRY[OrderStatus.IN_PRODUCTION].tone).toBe('info');
     expect(BILL_STATUS_REGISTRY[BillStatus.ISSUED].tone).toBe('warning');

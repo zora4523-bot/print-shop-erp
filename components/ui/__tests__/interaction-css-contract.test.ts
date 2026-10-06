@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import ts from "typescript"
 
 const root = process.cwd()
 const eslintConfigSource = readFileSync(join(root, "eslint.config.mjs"), "utf8")
@@ -90,11 +91,22 @@ describe("shared interaction CSS contract", () => {
     expect(reducedMotionRule).toContain("transition-duration: 0.01ms !important")
   })
 
-  it("gives every interactive menu item a 44px target and focus ring", () => {
-    expect(dropdownSource.match(/min-h-11/g)?.length).toBeGreaterThanOrEqual(5)
-    expect(dropdownSource.match(/focus-visible:ring-3/g)?.length).toBeGreaterThanOrEqual(5)
-    expect(dropdownSource.match(/focus-visible:ring-ring/g)?.length).toBeGreaterThanOrEqual(5)
-  })
+  it.each(["DropdownMenuTrigger", "DropdownMenuItem", "DropdownMenuRadioItem"])(
+    "%s keeps its 44px target and focus ring",
+    (name) => {
+      // Check each live control: a file-wide count can pass while one control
+      // loses its contract, and counts unused template controls as coverage.
+      const source = ts.createSourceFile("dropdown-menu.tsx", dropdownSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const control = source.statements.find(
+        (node) => ts.isFunctionDeclaration(node) && node.name?.text === name
+      )
+      expect(control, `${name} must remain present`).toBeDefined()
+      const implementation = control!.getText(source)
+      for (const token of ["min-h-11", "focus-visible:ring-3", "focus-visible:ring-ring"]) {
+        expect(implementation, `${name}: ${token}`).toContain(token)
+      }
+    }
+  )
 
   it("keeps portal-mounted sheet controls inside the shared touch contract", () => {
     expect(sheetSource).toContain(

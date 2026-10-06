@@ -10,7 +10,7 @@ describe('admin business copy contract', () => {
   it('Dashboard 不展示原始状态和重复入口名', () => {
     const dashboard = source('app/(admin)/owner/page.tsx');
     const charts = source(
-      'components/business/dashboard/DashboardChartsContent.tsx',
+      'components/business/dashboard/OwnerAnalytics.tsx',
     );
 
     expect(dashboard).not.toContain('label="建单产品"');

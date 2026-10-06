@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "OrderList.tsx",
+      "reason": "组件文件 PascalCase 命名示例，不要求仓库存在同名组件。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "docker-compose.yml",
+      "reason": "文中明确说明仓库没有该文件，当前部署走 deploy/ecosystem.config.cjs；引用用于描述不存在的事实。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "lib/production.ts",
+      "reason": "文中明确说明旧模块已于 674cf8fc 删除，并指出现行 ProductionOperation 运行时；引用用于记录退役边界。"
+    },
+    {
+      "file": "CLAUDE.md",
+      "type": "path",
+      "reference": "machine-piecework.ts",
+      "reason": "代码文件 kebab-case 命名示例，不是当前实现路径。"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-identity-review.json",
+      "reason": "历史验证记录中的本机临时审查调用结果，属于日志产物而非仓库源文件；文中已说明调用返回 429、审查未完成。"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-review.json",
+      "reason": "历史数据回放验证中的本机临时审查调用结果，属于日志产物而非仓库源文件；文中已说明调用返回 429、审查未完成。"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-task1.json",
+      "reason": "历史账单验收中的本机临时审查调用结果，属于日志产物而非仓库源文件。"
+    },
+    {
+      "file": "DEVELOPMENT.md",
+      "type": "path",
+      "reference": "claude-task6-final.json",
+      "reason": "历史账单验收中的本机临时审查调用结果，属于日志产物而非仓库源文件；保留最终审查受 429 阻断的记录。"
+    },
+    {
+      "file": "docs/LOAD-TEST-PLAN.md",
+      "type": "path",
+      "reference": "load-test-users.json",
+      "reason": "压测 seed 运行时生成、正式压测读取的凭据文件；文档明确要求 chmod 600 并禁止放入仓库。"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "actions/paper-specifications.ts",
+      "reason": "清理清单明确标注启用 Action 已移除；有意保留旧组合启用协议的退役记录。"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "components/business/rules/catalog/PaperSpecificationsForm.tsx",
+      "reason": "清理清单明确标注纸张规格表单已移除；有意保留旧组合维护入口的退役记录。"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "components/business/rules/catalog/UnassignedPaperProducts.tsx",
+      "reason": "清理清单明确标注未归属产品提示已移除；有意保留旧组合维护入口的退役记录。"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "lib/price/paper-specification-view.ts",
+      "reason": "清理清单明确标注旧状态视图已移除；有意保留旧组合状态协议的退役记录。"
+    },
+    {
+      "file": "docs/PLAN-空白封按单价管理.md",
+      "type": "path",
+      "reference": "lib/price/read-paper-specifications.ts",
+      "reason": "清理清单明确标注旧读取模块已移除；有意保留旧组合读取协议的退役记录。"
+    },
+    {
+      "file": "docs/工单编辑-字段对照表.md",
+      "type": "path",
+      "reference": "SalesOrderEditWorkspace.tsx",
+      "reason": "F75 实现记录明确描述此组件已被替代并删除；517efcde 的删除与替代实现可核实。"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "PascalCase.tsx",
+      "reason": "React 组件文件命名模式示例，不是仓库文件引用。"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "decimal.js",
+      "reason": "package.json 声明的第三方 Decimal 计算依赖包名，不是仓库内 JavaScript 文件路径。"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "external-sales-quote.ts",
+      "reason": "命名约定表中的领域文件示例，不要求仓库存在同名文件。"
+    },
+    {
+      "file": "docs/编码规范.md",
+      "type": "path",
+      "reference": "kebab-case.ts",
+      "reason": "领域文件命名模式示例，不是仓库文件引用。"
+    }
+  ]
+}

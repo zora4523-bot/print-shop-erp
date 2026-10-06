@@ -1,0 +1,158 @@
+> 原文来自真实 Claude Code Opus 第四轮只读审查。审查时测试仍在运行；最终证据与条件是否满足见 [验收记录](./2026-10-03-production-entry-acceptance.md)。本文件保留原始结论，不回写评审文字。
+
+# 第 4 轮对抗审查：取消独立下发（基线 1fce730d + review4.diff）
+
+**实现评分：9.2 / 10。前提是串行全量单元测试跑完全绿；这一项现在还没有结果，所以还不能说已达到 >9 的验收。**
+
+上轮的 M-1 和低 1 都修对了，这轮没有发现新的阻塞问题，也没有发现事务、授权、金额、工资或通知方面的回归。
+
+本轮全程只读，没有执行任何命令。日志现状：
+- `/tmp/erp-production-entry-tests13.log` 里还没有汇总行，串行全量单元测试未完成，不能算通过。
+- `browser12.log`：88 个文件、1167 项全部通过。
+- `lint12.log`：0 个错误，2 个与本次无关的旧警告（`global-error.tsx` 等处的 `location.assign`）。
+- `type13.log`：没有错误输出。
+
+---
+
+## 上轮问题的复核
+
+### M-1 已修好
+- **销售改单（`lib/order.ts:3003-3029`）：**
+  - 只在不是嵌套事务时才调用准备。目前只有 `admin-edit` 传入事务，它会自己准备，所以不会重复。
+  - 保存内容没有变化时会提前返回，不会因此意外推进状态。
+  - 物化异常转成 `OrderInvariantError`，action 能把它显示给用户。
+  - 通知在事务提交后才发送。
+  - 有真实 Postgres 用例覆盖：销售补地址后工单进入 RELEASED，ORDER_SCHEDULED 只发一次。
+- **变更申请关闭后的复查（`change-request.ts:6363-6380`）：**
+  - 撤回、驳回、版本失效、状态失效、"无实际变化"失效，以及取消申请的驳回和失效，全部 7 个调用点都改成同时透传两类通知。
+  - 嵌套调用走 `onPreparedProduction` 回调，不嵌套时提交后发送。
+  - 取消审核事务里，加锁顺序仍是先结算截止锁、后订单锁，和 `registerShipment` 一致，没有新的死锁风险。
+  - 原来对单人生产工单的对账逻辑被移到 `else` 分支。CONFIRMED 且单人生产的组合在现有流程里不会出现，所以不算回归。
+- **授权：** 销售撤回或改单会以销售身份触发自动激活，这和提交时的行为一致，是业主决定的自动流转。管理员专属入口都没有放宽。
+
+### 低 1 已修好
+- `commercial-details` 和 `legacy-production-facts` 把物化异常映射成各自的领域错误，整个事务回滚。
+- 真实 Postgres 用例核对过：收费明细、priceRevision、旧 craft、revision 都保持不变。
+
+### 其他低项
+- **批量操作栏：** 只有至少一张可排单、或有跨页无法判断的选择时才显示"安排生产师傅"。纯结算的选择不再出现误导提示。
+- **文档：** DECISIONS 已并入四行结构的条目，SPEC 已移回 §3.2。
+- **修复脚本：** 参数错误用 TypeError 区分，会保留用法说明。
+- **排单焦点修复：**
+  - 进入核对时焦点到标题，返回修改时焦点回到第一个下拉框，发布成功后焦点到结果区。
+  - 浏览器用例覆盖 320 和 1280 两种宽度，以及开、关减少动效两种设置。
+
+---
+
+## 剩余低项（都不阻塞）
+
+1. **生产记录不一致时，"关闭申请 / 销售改单"整体失败，申请可能无法关闭**
+   - 位置：`change-request.ts:6374-6378`、`lib/order.ts:3016-3018`。
+   - 触发条件：一张 CONFIRMED（或刚被推进到 CONFIRMED）、无需派工的旧单，当前版本已有工序，但与当前方案不一致。
+   - 这时撤回、驳回、失效标记都会因为准备失败而回滚；批准路径同样会失败。结果是待审申请关不掉，而它又会挡住管理员编辑和核价。
+   - 处理是"拒绝写入"，不会写坏数据。这种数据组合需要人为造出来，现实中极少，所以定为低。
+   - 若要彻底消除：关闭申请和改联系方式这两类写入，可以像外协那样用 SAVEPOINT，只回滚附带的准备，让主写入照常成功。
+2. **待处理单的提前提示不一致（上轮低 3）**
+   - 列表和排单页对待处理单不做完整的就绪检查，例如缺联系方式或旧报价状态，要到发布时才在事务里整批拒绝，并给出具体原因。
+   - 我同意不阻塞：服务端会拒绝无效写入，详情页本身已有完整的就绪检查。这只是提示时机的问题，不影响数据正确性。
+3. **信号栏标签（上轮低 4）**：资料齐全、需要派工的旧待处理单，信号栏计入"待完善"，主操作却是"安排生产"。只影响旧数据的显示。
+
+---
+
+## 已确认无回归
+- **金额：** 保存价和 confirmedFee 的写入路径没有变化。各入口失败时整体回滚，不会出现半保存。
+- **工资：** 没有改动工价和快照逻辑。纯包装单仍是 `simpleProduction=false`。四处历史报工保护的判断口径一致。
+- **通知：** 新增的调用点都是事务内入队，非 durable 模式下提交后发送；ORDER_SCHEDULED 按工单去重。
+- **事务：** 准备都在同一把订单锁内执行，没有新的锁顺序问题。
+
+**结论：** 代码层面没有剩余的中级或以上问题，实现评分 9.2。要正式记为通过，还需要串行全量单元测试和生产构建 E2E 都跑完全绿，并把结果写进 audit。如果串行全量仍有失败，需要先确认那两条锁用例的失败与本次改动无关，并留下证据，才能维持这个分数。
+
+---
+
+# 第 4 轮门禁复核：已满足，维持 9.2，通过本地提交验收
+
+全程只读，只看了日志和两份测试的代码，业务代码没有重审。
+
+## 门禁证据
+| 门禁 | 证据 | 结论 |
+|---|---|---|
+| 串行全量单元测试 | `tests13.json`：`success:true`，通过 8675，失败 0，跳过 46，失败文件 0 | ✅ |
+| Browser Mode | `browser12.log`：88 个文件、1167 项全部通过 | ✅ |
+| 生产构建 | `release13.log`：编译成功，TypeScript 通过，69 个静态页生成完毕；只有 2 条与本次无关的旧 Turbopack 警告（`export-artifact` 的 readdir） | ✅ |
+| 同一构建的关键 E2E | `e2e19.log`：17 项全部通过 | ✅ |
+| 九视口 | `visual19.log`：45 项全部通过 | ✅ |
+| 类型检查与 lint | `type19.log`、`e2e-lint19.log` 都没有错误；`lint12.log` 0 个错误 | ✅ |
+
+`e2e19.log` 里的 WebServer 日志有两类报错，都属于正常现象：
+- "destination stream closed early"：页面跳转时中断了正在流式输出的响应。
+- "SALES 无 outsource:manage"：这正是第 4 项用例要验证的权限拒绝。
+
+## 新增的等待是否掩盖了逻辑失败：没有
+- **`order-production-readiness.spec.ts`：**
+  - 登录后等待真实的 h1（`:39`、`:71`），只是等页面流式加载完成。
+  - 发布后等待"排单结果"区域（`:46`、`:82`）。这个区域只在发布成功时才渲染，所以发布一旦失败，测试就会失败。这比原来直接查数据库更严格。
+  - 后面状态、工序数、打印数、费用的精确断言都保留着，`:51`、`:55` 对"刷新后不重新计价"的整体相等断言也还在。
+- **`sample-orders.spec.ts`：**
+  - 提交后轮询状态"不再是 DRAFT"（`:123-133`）。提交是在一个事务里完成的，不存在提交了一半的中间状态。
+  - 寄样品紧接着在 `:143` 断言状态必须是 PACKING，没有工序，也没有排单入口。
+  - 标签等待 30 秒（`:153`、`:201`）只影响显示时机。
+  - 改费后发货被拒、整体回滚的断言（`:212-214`），以及恢复原费后直接发货到 SETTLED、没有排单也没有工序的断言（`:227-229`），都保留着。
+
+## 残留的非阻塞项
+1. **第 4 轮的三个低项仍在：**
+   - 生产记录不一致时，关闭变更申请或销售改单会整体失败（极少见）。
+   - 待处理单的提前提示和发布时的判断不一致。
+   - 旧待处理单在信号栏的标签和主操作不一致。
+2. **订单列表的查询性能：**
+   - 本次在列表上增加了按页读取生产路由，以及带过滤的计数子查询。
+   - 隔离库里出现过 15 秒事务超时（P2028），对隔离库执行 ANALYZE 后，排单从 43 秒降到 4.1 秒。这说明这条查询对数据库统计信息比较敏感。
+   - 这是部署后的观察项，不是实现缺陷。建议上线后对 `/orders` 列表做一次 EXPLAIN 和延迟观测，不需要调高事务超时。
+3. **打样分支的状态断言偏宽：** 提交后只断言"不再是 DRAFT"，没有断言具体状态。这是原有写法，不影响本次结论。
+4. **E2E 并发数：** `e2e19` 用 2 个 worker 并发跑通。CLAUDE.md §14 要求 tests/e2e 串行，而这次运行用了 2 个 worker。这些用例各自建夹具，并发通过不会削弱结论，但正式门禁建议按文档串行跑。
+
+## 结论
+**最终评分维持 9.2 / 10，通过本地提交验收。** 第 4 轮提出的条件（串行全量单元测试，以及在生产构建上跑通 E2E 和九视口）都有日志证据，测试改动只是补等待，没有删除或放宽原有断言。本次没有部署，以上结论不代表生产环境验收。
+
+
+## PR CI 修正增量复审
+
+实际 Claude Code Opus 会话 `c8ea3f69-e904-4d21-b02d-e25698e68856`，只读审查，原始结果 `/tmp/erp-ci-followup-claude2.json`。第一轮 8.5 分指出缺项列表断言与临时截图语句；两项均解决后，第二轮原文如下：
+
+I've re-checked the final diff and the working tree: **both P2 issues are fixed, and nothing at P0, P1 or P2 is left. I give it 9.3/10, up from 8.5.** It can merge once the new missing-items assertions finish re-verifying and remote CI passes. Both are still conditions, not done.
+
+## P2-2 (debug screenshot line): fixed
+- The test file no longer contains `/tmp` or `screenshot`.
+- The diff for that file is identical to the first round: only the `>=96` card-width check and the 1280px split were added.
+
+## P2-1 (missing items not asserted): fixed
+- All three places (`order-pricing-materialization-error.spec.ts:96-99`, `:117-120`, `:153-156`) now check three things in order:
+  - the "待处理事项" heading is visible;
+  - `#admin-order-confirmation-preflight` contains "待处理事项";
+  - the first `listitem` is visible and has non-empty text.
+- That block only shows the "待处理事项" list when `issues.length > 0` (`AdminOrderDecisionPanel.tsx:97-118`). So these checks prove a real missing item is on screen, not just that the status is `SUBMITTED`.
+- **No duplicate id:** `AdminOrderDecisionPanel` has one production consumer (`AdminOrderDetailDecision.tsx:26`), and the readiness check renders once per panel (`:944`). The id is unique on the page, so these locators won't hit a strict-mode error.
+
+## Still holds from round one
+- The CSS module rule sits outside any cascade layer, so it beats the shared touch rule regardless of file order.
+- The container query resolves against the dashboard `<section>`, as before.
+- At 1024px the cards need about 944px against a 728px strip, so scrolling no longer depends on platform fonts.
+- No content is hidden, touch targets are not reduced, and test gates are not lowered.
+- Both "待安排" locators match exactly one link or text.
+
+## P3: acceptance doc is slightly out of date (not blocking)
+`docs/audits/2026-10-03-production-entry-acceptance.md` was added in this diff and lags the final code in two places:
+- **Line 69** still says only "改用唯一 heading 角色". It doesn't mention the three new checks on the readiness block's missing items.
+- **Line 71**:
+  - "12 项通过" was measured before the missing-items assertions were added, so it doesn't cover them.
+  - It still cites `/tmp/erp-ci-dashboard-*.png`. That's fine as a record of where the evidence came from, but it could mislead someone into thinking the screenshot step is still in the test.
+
+Once the new assertions pass, add one line with the result and log path so the doc doesn't overstate what was verified.
+
+## Merge decision
+Merge once both of these pass:
+1. the re-verification of the new missing-items assertions;
+2. the full remote CI run for PR #46.
+
+I'd also update the P3 doc lines before merging. Merging does not mean deploying to production.
+
+I didn't write any files or make any commits.

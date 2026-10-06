@@ -65,13 +65,13 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
           className="size-3.5 shrink-0 text-muted-foreground"
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" sticky className="w-56 max-w-(--available-width)">
         {/* DropdownMenuGroup 为标签提供 Base UI 分组上下文。 */}
         <DropdownMenuGroup>
           <DropdownMenuLabel className="flex items-center gap-2">
-            <UserCircle aria-hidden className="size-4 text-muted-foreground" />
-            <span className="flex flex-col">
-              <span className="text-sm font-medium">{displayName}</span>
+            <UserCircle aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex min-w-0 flex-col">
+              <span className="admin-wrap-anywhere text-sm font-medium">{displayName}</span>
               <span className="text-xs text-muted-foreground">{roleLabel}</span>
             </span>
           </DropdownMenuLabel>
@@ -86,7 +86,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         <form action={signOutAction}>
           <DropdownMenuItem
             nativeButton
-            render={<button type="submit" />}
+            render={<button type="submit" data-native-button-reason="共享菜单项负责样式与键盘行为，原生提交按钮保留退出表单提交" />}
             closeOnClick={false}
             data-slot="user-menu-logout"
             className="w-full"

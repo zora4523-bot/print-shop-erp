@@ -7,6 +7,8 @@ applies_to: repository UI implementation and design evidence at last_verified
 
 # UI 系统与 UX 规范
 
+> 2026-10-04 局部同步：当前生产入口、打印与共享门禁以下列说明及 [当前开发入口](docs/当前开发入口.md) 为准。日期化六视口结果保留为当时证据；现行共享门禁为九视口，PR 只执行两个代表视口，main 执行完整九视口。
+
 ## 仓库与库位维护（2026-09-27）
 
 仓库设置按对象提供“改名”“停用”“恢复使用”，停用/恢复沿用完整 L2 影响复核。停用项仍在设置区显示，可恢复；父仓停用时说明子库位不可办理出入库。默认对象说明不可停用。选项刷新后，原选库位失效时保留原选择并提示重新选择，不静默改为默认库位。
@@ -86,18 +88,18 @@ app/
 
 销售的 `/workbench` 为「工作台」，管理员同一路径为「销售工作台」，与 `/owner`「管理工作台」分开高亮；侧栏、面包屑、PageHeader 与页面 title 使用同源名称。三个分区沿用用户提供的销售工作台结构，金额与目录来自当前系统。页面正文使用紧凑功能栏承载分区，普通「新建工单」统一放在侧栏顶部，不重复展示顶部导航已有的工作台标题；保留仅供辅助技术读取的 PageHeader。
 报价计算复用建单的工艺、材料、规格与数量字段。宽屏为款式条件和报价两栏，窄屏纵向排列；只有匹配多个产品时显示产品选择。加价即时本地计算，费用明细按需展开；“按此款式创建工单”仅带入条件，遇已有草稿时提供继续原稿或另存本次款式的选择。
-实现及原型差异见 [销售工作台](./docs/销售工作台.md)；`SalesWorkbench.browser.spec.tsx` 覆盖六视口明暗、overflow、44px 触控与 axe，以及话术搜索/复制和报价条件失效。此记录为结构与交互契约对照，不表示逐像素复刻原型。
+实现及原型差异见 [销售工作台](./docs/销售工作台.md)；`components/business/workbench/__tests__/SalesWorkbench.browser.spec.tsx` 覆盖六视口明暗、overflow、44px 触控与 axe，以及话术搜索/复制和报价条件失效。此记录为结构与交互契约对照，不表示逐像素复刻原型。
 
 - 管理员与外部销售共用同一顶栏：左侧显示侧栏开关与当前位置，右侧仅保留环境提示、主题与账号操作；页面入口统一放在侧边栏。
 - 顶栏操作使用同一套轻量按钮，不叠加胶囊边框或阴影。非生产环境显示中文提示，角色详情保留在侧栏与账号菜单内。
-- 账号菜单支持键盘打开；按 Escape 关闭后恢复账号按钮焦点。管理员与销售共用 `UserMenu`，通过真实登录验证窄屏、桌面和明暗主题下的菜单可访问性、焦点返回及退出登录。
+- 账号菜单支持键盘打开；按 Escape 关闭后恢复账号按钮焦点。管理员与销售共用 `UserMenu`，通过真实登录验证窄屏、桌面和明暗主题下的菜单可访问性、焦点返回及退出登录。字体放大时浮层按可用宽度约束，长账号可换行并纵向滚动；`UserMenu` 单独启用定位器 `sticky`，锚点移出视口后菜单仍保持可见，其他 `DropdownMenuContent` 消费者沿用默认定位。
 - 普通「新建工单」独立放在侧栏顶部，不随目录滚动；销售工作台与管理工作台不重复此通用入口，报价区保留带入当前款式的新建入口。工单列表的上下文操作保留。
 - 不超过五个入口的角色直接平铺；管理员常用区固定管理工作台、销售工作台、工单列表、经营概览。其他入口按业务模块、生产与采购、财务结算、基础资料和系统管理组织，系统管理置底。
 - 生产与采购、财务结算、基础资料、系统管理默认收起；记忆用户折叠偏好并兼容旧分组键。进入分组内页面时自动展开，当前页仍可手动收起；图标模式展示所有授权入口，保证可达。
 - 全局只展示「规则配置中心」入口；总览使用已有分类卡片，子页提供默认收起的「规则目录」，沿用同一授权菜单的 11 个明细入口与查询参数选中规则。版本与发布栏、未保存修改离开保护保留。
 - 保留菜单权限、唯一选中态、按需预取、移动端抽屉和键盘操作；顶栏交互目标不小于 44×44 CSS px。
 - 面包屑链接使用居中的 44px 点击区，长文字在内部独立省略；不能用 `block truncate` 覆盖链接的居中布局。父级、当前页及不可点击的分组名称按真实文字行盒对齐，中心差不超过 2px。导航组件测试使用真实 `admin-viewport` 外壳，并覆盖窄屏、长标题、明暗主题与键盘焦点；通用几何门禁独立检查面包屑文字，不能仅以容器对齐或无溢出代替验收。
-- 二级页通过面包屑父级返回，规则见 [UI 规范 §8.3](docs/ui-规范.md)。页面经 `components/business/admin/breadcrumb-entity.tsx` 的 `BreadcrumbParent` 把列表上下文交给父级（`href` 只接受同路径加查询串 / hash，`resolveBreadcrumbParentHref` 拒绝换路径与外站），`FormPendingScope` 把提交中状态交给父级。`FormPendingScope.browser.spec.tsx` 覆盖父级禁止操作、恢复操作与同路径上下文，`tests/e2e/admin-shell-navigation.spec.ts` 通过真实页面检查九视口明暗主题下的父级可见性、≥44px 点击区域与键盘焦点。页头的 `back` 用于离开保护、返回其他来源页面、父级为不可点击分组以及没有面包屑的师傅端。
+- 二级页统一由面包屑父级负责返回（业主 2026-10-02「请保持一致性」，规则见 [UI 规范 §8.3](docs/ui-规范.md)）：页头不再放与父级同目标的「返回 X」。页面经 `components/business/admin/breadcrumb-entity.tsx` 的 `BreadcrumbParent` 把列表上下文交给父级（`href` 只接受同路径加查询串 / hash，`resolveBreadcrumbParentHref` 拒绝换路径与外站），`FormPendingScope` 把提交中状态交给父级（按 `PendingLink` 语义锁定）。`components/business/form/__tests__/FormPendingScope.browser.spec.tsx` 覆盖父级锁定 / 解锁与同路径上下文，`components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx` 覆盖六视口明暗下父级可见、≥44px、可聚焦。页头仍保留 `back` 的例外只有：离开保护、回到的不是父级、父级是不可点击分组、没有面包屑的师傅端。
 
 侧栏沿用 shadcn/ui Base Nova、Base UI 与 Tailwind CSS，字体继承全站系统无衬线字体栈。后台导航的字号集中在 `AppSidebar` 管理，不按页面或菜单层级另设字号。
 
@@ -114,22 +116,22 @@ app/
 - 管理端列表以用户提供的 `工单列表-管理端 (1).html` 为本次直接参考：标题与导出入口同排，数字看板、胶囊队列与筛选、筛选合计和独立圆角工单卡片依次排列。
 - 行布局按列表容器宽度切换：960px 及以上展示横向字段列，较窄容器纵向排列。桌面精确指针且视口大于 920px 时，工单行内允许 24px 紧凑交互目标，行尾按钮高 32px；其余区域、窄屏及触控设备维持 44px。标准短内容行高 84–92px，行间距 8px，长内容自然增高。
 - 数量单独呈现；进入生产、已有实际进度或存在进度异常时才展示“烫 · 包”一行与两条 3px 进度条。屏幕阅读器保留工序名称、已完成数量与工单总量，异常数量不隐藏。
-- 行空白区与行尾动作打开现有处理抽屉；业务员链接、星标和勾选独立操作。动作名称按真实能力显示（2026-10-01：下发前检查、下发生产、处理暂停、录价、裁决变更、录运单发货、结算），写操作继续由抽屉及服务端校验。窄容器（<960px）四列：数量（无进度条时）与行动作在右列，交期与数量、金额与按钮各占一行。
+- 行空白区与行尾动作打开现有处理抽屉；业务员链接、星标和勾选独立操作。动作名称按真实能力显示（2026-10-03：安排生产师傅、处理暂停、录价、裁决变更、录运单发货、结算；资料校验在提交／核价／修改事务内自动完成），写操作继续由抽屉及服务端校验。窄容器（<960px）四列：数量（无进度条时）与行动作在右列，交期与数量、金额与按钮各占一行。
 - 列表上方（2026-10-01，审查 L-8）：看板容器窄于 56rem、队列与筛选区窄于 960px 时，看板、队列胶囊和快捷筛选各排成一行，在条内横向滚动（`AdminOrderScrollStrip`），页面不横向溢出；条两侧留 4px 内边距保证焦点框不被裁切，选中项不在可见范围时只滚动条自身把它移入。卡片按内容取宽、最窄 6rem，375 宽露出下一张的一角提示可滑。宽容器的 9 列看板与换行排布不变。375 实屏首张工单从 914px 上移到 590px。
-- 本次直接核对桌面实屏；`AdminOrderListLayout.browser.spec.tsx` 覆盖六视口、明暗主题、横向溢出、触控目标、axe、六行密度、按需进度与选择/抽屉入口隔离、窄容器列表上方单行滚动与选中项移入。保留真实缩略图、金额口径和额外财务入口。
+- 本次直接核对桌面实屏；`components/business/order/__tests__/AdminOrderListLayout.browser.spec.tsx` 覆盖六视口、明暗主题、横向溢出、触控目标、axe、六行密度、按需进度与选择/抽屉入口隔离、窄容器列表上方单行滚动与选中项移入。保留真实缩略图、金额口径和额外财务入口。
 
 ### 管理端工单列表配色
 
 - 工单行与统计卡统一使用纯色卡片底和 1px 中性边框，不按待处理状态或非零数量染红，也不使用渐变；悬停只略加深中性边框。勾选行通过已有复选框与轻微中性底色表达，保留按钮、复选框及筛选链接的键盘焦点。
-- 状态徽章复用共享状态注册表：待确认/生产中为 info，暂停为 warning，驳回/取消为 danger。急单、临期、待核价及待审批风险使用 warning；已逾期、明确失败与确定的数据异常仅在相应文字或标签上使用 destructive。普通待办和待收款数字为中性，仅待核价、变更、暂停、今日待发及逾期的非零数字适度强调。确认/下发/发货/录价/审核/裁决入口使用深色操作，拒绝、取消等破坏性动作保留 destructive；不更改全局主题。
+- 状态徽章复用共享状态注册表：待确认/生产中为 info，暂停为 warning，驳回/取消为 danger。急单、临期、待核价及待审批风险使用 warning；已逾期、明确失败与确定的数据异常仅在相应文字或标签上使用 destructive。普通待办和待收款数字为中性，仅待核价、变更、暂停、今日待发及逾期的非零数字适度强调。安排/发货/录价/审核/裁决入口使用深色操作，拒绝、取消等破坏性动作保留 destructive；不更改全局主题。
 
 ### 管理端工单详情
 
 - 管理员 `/orders/[id]` 以 `工单详情-管理端 v2.dc.html` 为布局参考：普通流中文名称标题区、款式主栏与 320px 操作侧栏，内容最大宽度 1760px、列间距 22px；款式卡为中性 1px 边框、14px 圆角、132×178 设计图。960px 及以下侧栏前置并取消吸顶；640px 及以下款式改为单列、设计图高 140px，灯箱纵向排列（金额阶段卡已于 2026-10-01 按业主决定去掉）。使用项目语义 token、共享按钮/状态/空态/弹层，适配明暗主题。
 - 主栏按变更差异、款式及本款完整资料、工单费用与收费维护、工厂成本、分货包装、配送、生产与业务资料、报工、售后及工单动态排列。侧栏集中当前待办、维护操作、生产进度、版本与打印。管理一级栏目默认展开，但计价与收费维护、工厂成本两块低频维护区没有待处理事项时默认收起（业主 2026-10-02）；工单信息、包装和每款完整资料按需展开，摘要始终提供“展开/收起”提示。设计文件与上传编辑器按 OrderItem 只挂一次，折叠不清空输入。打印、下载 PDF、网页预览保留各自行为，归入版本与打印。设计灯箱支持循环切换、方向键、Esc 和焦点恢复，复制结果使用 `ActionNotice`。
 - 补充资料使用可收缩的单列网格，展开后的计价与维护表单不得撑出手机视口；长工单号在复制按钮内换行。内层款式的「展开/收起」提示仅跟随自身状态，外层分区展开不改变其提示。
-- 默认展开、手动收起状态保留与锚点焦点定位由 `AdminOrderDetailView.browser.spec.tsx` 覆盖；`admin-responsive.spec.ts` 的 `order detail expanded records pass focused light and dark gates` 用例独立验证真实详情的六视口明暗布局、触控与 axe，不依赖创建或编辑页先通过。
-- 原型只定义展示，不替换现有业务契约：确认锁价后仍需下发生产才能创建生产与打印任务；决策复用现有版本/报价凭证/幂等校验。打印即记已打印（业主 2026-10-02）：不再有「确认已打印」与勾选作废旧纸单的确认层，改单补打时只提醒打印后收回旧版纸单；系统只记录真实打印结果，不伪造通知或回收记录。已提交设计文件的修改仍遵守原有状态门禁；缺 CDR 的展示提示不能自行改变工厂确认条件。
+- 默认展开、手动收起状态保留与锚点焦点定位由 `components/business/order/__tests__/AdminOrderDetailView.browser.spec.tsx` 覆盖；`tests/visual/admin-responsive.spec.ts` 的 `order detail expanded records pass focused light and dark gates` 用例独立验证真实详情的六视口明暗布局、触控与 axe，不依赖创建或编辑页先通过。
+- 原型只定义展示，不替换现有业务契约：提交、核价、修改时自动校验生产资料；厂内工单安排师傅时在事务内准备生产与打印任务，寄样直接进入发货，外协通过外协工单履约（DECISIONS 2026-10-03）。权限、版本、报价凭证与幂等校验继续执行。打印即记已打印（业主 2026-10-02）：不再有「确认已打印」与勾选作废旧纸单的确认层，改单补打时只提醒打印后收回旧版纸单；系统只记录真实打印结果，不伪造通知或回收记录。已提交设计文件的修改仍遵守原有状态门禁；缺 CDR 的展示提示不能自行改变工厂确认条件。
 - 金额使用服务器 Decimal 字符串；有效零金额与待核价占位分开，可信人工报价必须绑定当前数量与规格。当前合计（「当前金额」）使用 `orderDetailAmounts`，保留估价和缺价语义；2026-10-01 起不再展示提交报价 / 确认金额 / 结算金额三阶段卡，金额变化见工单动态，历史快照不受影响。结算总额仍读取不可变 `settledFee`；历史回退金额显式标注。报工读取当前生产版本最近 100 条真实 W2 台账，概览使用完整累计，跨款工序不按比例虚构款级产量。
 - `/wo/[orderNo]` 继续承担扫码版本/权限校验及角色跳转，旧版拦截和师傅端金额隔离保持既有契约。详情附加读取仅允许管理员，并核对业务、编辑、生产和价格版本，避免将不同时间的明细与待办合并。原型演示切换、占位图片、虚构 POST 接口及通知成功提示不进入生产页面。
 
@@ -138,16 +140,16 @@ app/
 - 工单名称、列表行的非交互区域和处理入口直接进入 `/orders/[id]` 完整详情；显式“编辑草稿”继续进入编辑页。勾选、星标、业务员筛选各自独立，不触发行跳转。
 - 管理端不再挂载工单处理抽屉；详情页复用原有决策、核价、修改审核与发货表单，保留金额、版本、权限和幂等校验。修改申请的金额只展示一次，费用明细和拒绝备注按需展开。
 - 已分享的通知、账单 `#wo=` 链接继续兼容：当前页有工单时按 ID 进入详情，否则由受授权保护的管理端查询接口解析。使用替换历史记录避免返回时重复跳转；解析失败保留列表并提供重试，过时响应不得覆盖新目标。
-- `AdminOrderNameList.browser.spec.tsx`、`LegacyOrderDetailRedirect.browser.spec.tsx` 与 `AdminOrderDecisionLayout.browser.spec.tsx` 分别覆盖列表导航、历史链接和详情处理区的六视口明暗主题、触控、溢出及 axe 验证。
+- `components/business/order/__tests__/AdminOrderNameList.browser.spec.tsx`、`components/business/order/__tests__/LegacyOrderDetailRedirect.browser.spec.tsx` 与 `components/business/order/__tests__/AdminOrderDecisionLayout.browser.spec.tsx` 分别覆盖列表导航、历史链接和详情处理区的六视口明暗主题、触控、溢出及 axe 验证。
 
 ### 管理端工单操作补齐
 
-- 取消审批须先按当前已产数量取得参考价，再展示明确的最终结算金额与已有调整理由；数量改变、预览失败或工单版本变化时旧预览失效。确认、下发、结算及原因类裁决使用共享影响确认层，沿用现有业务字段，不新增未保存的理由。
+- 取消审批须先按当前已产数量取得参考价，再展示明确的最终结算金额与已有调整理由；数量改变、预览失败或工单版本变化时旧预览失效。安排、结算及原因类裁决使用共享影响确认层，沿用现有业务字段，不新增未保存的理由。
 - 详情处理区按需展开现有核价、物流费用确认与逐票发货表单；已确定费用默认收起，核价定位链接滚动至对应表单。所有金额计算、四版本与幂等校验沿用既有服务端契约。
 - 已驳回/待补正使用真实状态筛选，保留一句原因；变更摘要显示已校验的前后事实。暂无工单与筛选无结果分别提供切换队列、清除筛选路径；管理员使用看板和卡片形态的专用骨架。
 - 批量操作先显示适用数量与逐单影响，再提交确认时的对象/版本；完整回执位于列表选择器之外，工单移出队列仍可查看。`BatchActionResult` 可选 `summary` 与 `skipped / unknown / not-attempted` 表达跳过、结果未知和未执行；未知结果先核对，不能当作已失败直接重复提交。
-- 批量操作栏按所选工单的真实可执行条件显示「下发生产」「批量结算」等（业主 2026-10-02 起打印即记已打印，不再有「确认已打印」；「打印所选」生成后点「打开 PDF」「下载 PDF」：先取得文件再整批记录，记录成功才交付文件，失败可重试），数量为所选中可执行的张数；零适用数量的操作不展示。「加入待打印」收进「更多操作」，仍经过逐单复核；混合选择中的不适用工单在确认层列出原因。导出所选继续独立保留。
-- 下发生产或加入待打印的明确成功回执提供逐单「去打印」入口，在新标签页打开现有工单打印页；管理员在打印页关闭打印对话框即记本版已打印（业主 2026-10-02）。跳过、结果未知、未执行与结算的回执不提供此快捷入口。`AdminOrderBatchActions.browser.spec.tsx` 与 `AdminOrderBatchResultProvider.browser.spec.tsx` 覆盖适用操作、更多菜单的键盘与焦点、复核时的选择和版本保留、部分结果、打印链接及六视口明暗主题/触控/axe 门禁。
+- 批量操作栏按所选工单的真实可执行条件显示「安排生产师傅」「批量结算」等（业主 2026-10-02 起打印即记已打印，不再有「确认已打印」；「打印所选」生成后点「打开 PDF」「下载 PDF」：先取得文件再整批记录，记录成功才交付文件，失败可重试），数量为所选中可执行的张数；零适用数量的操作不展示。「加入待打印」收进「更多操作」，仍经过逐单复核；混合选择中的不适用工单在确认层列出原因。导出所选继续独立保留。
+- 加入待打印的明确成功回执提供逐单「去打印」入口，在新标签页打开现有工单打印页；管理员在打印页关闭打印对话框即记本版已打印（业主 2026-10-02）。跳过、结果未知、未执行与结算的回执不提供此快捷入口。`components/business/order/__tests__/AdminOrderBatchActions.browser.spec.tsx` 与 `components/business/order/__tests__/AdminOrderBatchResultProvider.browser.spec.tsx` 覆盖适用操作、更多菜单的键盘与焦点、复核时的选择和版本保留、部分结果、打印链接及六视口明暗主题/触控/axe 门禁。
 - 复制、星标、裁决使用可见的 `ActionNotice`；提交中锁定重复操作。业务阻断使用 `DisabledReason` 给出原因及处理路径。保持六视口明暗、44px 表单/列表外操作、桌面列表紧凑目标、无溢出及键盘焦点规范。
 - 本批按 B 级交互契约核对，以用户 HTML 的操作入口及本规范为依据；浏览器组件测试覆盖列表、抽屉、内嵌表单、关键确认和批量结果。实屏查看本地工单列表，不以测试通过代替所有业务状态的像素验收。
 
@@ -247,7 +249,7 @@ token 位于 [`app/globals.css`](./app/globals.css)，浅色 `:root` 与 `.dark`
 | 领域状态 | `StatusBadge` | 由 [`lib/ui/status-registry.ts`](./lib/ui/status-registry.ts) 的集中映射提供 label + tone；进行中可带 dot，仍保留文字 |
 | 横向表格 | `TableScrollArea` | 暴露滚动可能性与边缘状态，不允许 table 撑破 body |
 
-错误边界按当前安装的 Next.js 文档使用 `next/error` 的 `catchError` 和 `ErrorInfo.retry`；路由 `error.tsx` / `global-error.tsx` 接收 `retry`。不再引用已移除的 `unstable_catchError` / `unstable_retry`，以免模块加载失败或重试按钮失效。
+错误边界按当前安装的 Next.js 文档使用 `next/error` 的 `catchError` 和 `ErrorInfo.retry`；路由 `error.tsx` / `app/global-error.tsx` 接收 `retry`。不再引用已移除的 `unstable_catchError` / `unstable_retry`，以免模块加载失败或重试按钮失效。
 
 ### 五态最低要求
 
@@ -352,7 +354,8 @@ PageHeader
 |---|---|---|---|
 | `tests/visual/order-print.spec.ts` | 8 个打印 fixture 像素基线 | 相同环境下打印布局未发生非预期像素变化 | Web 全站与设计稿一致 |
 | `tests/visual/admin-responsive.spec.ts` | 九视口、light/dark、geometry、touch、axe | 被覆盖管理页面不触发已定义的裁切/无障碍门禁 | 与 `.dc.html` 自动像素匹配 |
-| `tests/e2e/admin-shell-navigation.spec.ts` | 管理员/销售真实页面导航九视口、明暗主题、overflow、touch、axe 与键盘操作 | 真实登录和页面中的导航、角色入口及交互行为 | 全部业务流程与图像验收 |
+| `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx` | 管理员/销售共享导航九视口、明暗主题、开发环境标签、触控与键盘 | 隔离组件的导航布局与交互 | 真实登录与跨页授权 |
+| `tests/e2e/admin-shell-navigation.spec.ts` | 真实登录、导航、明暗主题、触控、axe；PR 两视口，main 九视口 | 正式页面的导航与角色入口 | 全部业务流程与图像验收 |
 | `tests/visual/worker-responsive.spec.ts` | 九视口、light/dark、师傅端路由与历史/缺失状态、geometry、touch、axe | 被覆盖师傅端路由满足当前门禁 | 所有师傅端业务状态已逐像素审查 |
 | `/dev/showcase` | 人工组件检查 | token、状态和原子件在主题/尺寸下可目视比较 | 自动回归或页面采用率 |
 
@@ -369,13 +372,13 @@ PageHeader
 - 列表常驻展示 LIGHT worker 长连接状态。旧目标独立折叠为只读历史元数据，不提供旧编辑/测试入口；旧编辑 URL 显示迁移说明。
 - 事件规则与系统设置隐藏未绑定的旧目标，已有选中项保留并可取消，避免保存其他字段时静默改写存量路由。
 - 已删除事件（客服周期）的“送达未知”通知禁用“确认未送达并重发”并显示服务端给出的原因，只保留“确认已送达 / 忽略”；运维页对已删除功能的死信任务不渲染“重试”。
-- 新建表单与只读历史块由 `NotificationConfiguration.browser.spec.tsx` 覆盖六视口、明暗主题、overflow、44px touch、axe 和键盘/提交契约。
+- 新建表单与只读历史块由 `components/business/notification/__tests__/NotificationConfiguration.browser.spec.tsx` 覆盖六视口、明暗主题、overflow、44px touch、axe 和键盘/提交契约。
 
 ## 工单编辑与创建数据一致性
 
 - 编辑页读取原单事实；`OrderSavedConfiguration` 展示保存的款式、纸张规格、工艺、设计文件、每票分货、结构化包装和分阶段费用，不从当前创建默认值补写历史记录。缺失记录明确提示。
 - 创建与编辑共用 `OrderReceiverContactFields`。编辑展示全部配送联系人；修改基本信息与配送后直接保存，款式变更及费用通过已有申请、审批和核价组件处理。生产后锁定基本生产事实，待审批时锁定普通保存；终态返回详情页。
-- 款式、包装与费用以共享 Card / Disclosure 分区；逐款详情折叠，保存冲突保留用户输入。`EditOrderForm.browser.spec.tsx` 覆盖六视口、明暗主题、overflow、44px 控件、axe 及多地址/失败/状态交互；创建到编辑的真实数据往返由 `tests/e2e/order-create.spec.ts` 验证。
+- 款式、包装与费用以共享 Card / Disclosure 分区；逐款详情折叠，保存冲突保留用户输入。`components/business/order/__tests__/EditOrderForm.browser.spec.tsx` 覆盖六视口、明暗主题、overflow、44px 控件、axe 及多地址/失败/状态交互；创建到编辑的真实数据往返由 `tests/e2e/order-create.spec.ts` 验证。
 
 ## 建单费用与跨角色交互
 
@@ -387,7 +390,7 @@ PageHeader
 
 管理端与外部销售端的新建工单共用 CDR 文件选择器：上传区常显“可多选或拖放多个文件”，支持一次多选或拖放多个文件，后续选择追加到当前款式，按文件显示名称、大小并可逐个移除；无效文件单独报错，合法文件保留。设计图沿用单文件替换，上传沿用现有逐文件直传流程。
 
-2026-09-16 局部验证（基于 `4476a5ba` 的 CDR 多选增量）：`ExternalSalesOrderFormB.test.tsx` 14 项通过；`OrderFormBNavigation.browser.spec.tsx` 原有 57 项通过，新增 CDR 用例调整按钮触控尺寸后定向复验 12 项通过（六视口 × 明暗主题，含 axe、overflow 与 44px 触控检查）。`pnpm typecheck`、`pnpm lint` 通过（lint 保留 2 条既存导航警告，文案及令牌门禁为 0）；本地 `next dev` 的管理员 `/orders/new` 实测多选与单独移除，未提交工单、未写业务数据；真实 OSS 上传及外部销售账号登录未在本次复测，两端共用路径已核对。日志位于 `/tmp/cdr-unit.log`、`/tmp/cdr-browser.log`、`/tmp/cdr-browser-final.log`、`/tmp/cdr-types.log`，局部截图 `/tmp/erp-cdr-multi.png`。
+2026-09-16 局部验证（基于 `4476a5ba` 的 CDR 多选增量）：`components/business/order/__tests__/ExternalSalesOrderFormB.test.tsx` 14 项通过；`components/business/order/__tests__/OrderFormBNavigation.browser.spec.tsx` 原有 57 项通过，新增 CDR 用例调整按钮触控尺寸后定向复验 12 项通过（六视口 × 明暗主题，含 axe、overflow 与 44px 触控检查）。`pnpm typecheck`、`pnpm lint` 通过（lint 保留 2 条既存导航警告，文案及令牌门禁为 0）；本地 `next dev` 的管理员 `/orders/new` 实测多选与单独移除，未提交工单、未写业务数据；真实 OSS 上传及外部销售账号登录未在本次复测，两端共用路径已核对。日志位于 `/tmp/cdr-unit.log`、`/tmp/cdr-browser.log`、`/tmp/cdr-browser-final.log`、`/tmp/cdr-types.log`，局部截图 `/tmp/erp-cdr-multi.png`。
 
 2026-09-16 拖放提示补充验证（基于 `6e87dbd6`）：目标单测 14 项、六视口明暗主题浏览器用例 12 项通过（定向运行跳过其他 57 项），`pnpm typecheck` 与 `pnpm lint` 通过（2 条既存导航警告）。本地开发服务重启后，管理员新建页可见提示断言及局部截图检查通过；未提交工单。证据：`/tmp/cdr-hint-unit.log`、`/tmp/cdr-hint-browser-final.log`、`/tmp/cdr-hint-types.log`、`/tmp/cdr-hint-lint.log`、`/tmp/erp-cdr-hint.png`。
 
@@ -395,7 +398,7 @@ PageHeader
 
 管理员的人工定价、款式名称和稿件版本入口由操作者身份控制；纸张/工艺可选范围、必填资料及是否计入物流费用继续由原业务规则控制。外部销售不能使用管理员定价，工作台报价保留加工费加价比例，不混入建单包装/物流收费。
 
-验证入口：`ExternalSalesOrderFormRail.browser.spec.tsx`、`OrderCreateReview.browser.spec.tsx`、`OrderFormBNavigation.browser.spec.tsx`（六视口×明暗主题、overflow、44px、axe、键盘与输入稳定性）；真实框架和持久化回归为 `tests/e2e/order-create-ui-parity.spec.ts`、`tests/e2e/admin-create-pricing.spec.ts`。2026-09-14 的范围与证据见 [跨端建单修复记录](./docs/audits/2026-09-14-order-create-ui-parity.md)。
+验证入口：`components/business/order/__tests__/ExternalSalesOrderFormRail.browser.spec.tsx`、`components/business/order/__tests__/OrderCreateReview.browser.spec.tsx`、`components/business/order/__tests__/OrderFormBNavigation.browser.spec.tsx`（六视口×明暗主题、overflow、44px、axe、键盘与输入稳定性）；真实框架和持久化回归为 `tests/e2e/order-create-ui-parity.spec.ts`、`tests/e2e/admin-create-pricing.spec.ts`。2026-09-14 的范围与证据见 [跨端建单修复记录](./docs/audits/2026-09-14-order-create-ui-parity.md)。
 
 ## 当前采用状态
 
@@ -435,7 +438,7 @@ PageHeader
 - 页眉将工单名称放在独立行并允许换行，普通长名称不再因超过 18 个字符而独占附页；超长内容完整保留，实际分页继续核对 A4 高度与页脚页数，不通过裁切名称压页。
 - 页眉大字为工单归属的外部销售（业主 2026-09-27；收费工单即提交外部销售，免费重做取原单的外部销售），原“客户名称/简称”不再打印；缺失时显示“外部销售未填”并列入资料缺失提示。长姓名超出页眉预览时进“外部销售”续页；PDF 文件名同为“工单号_外部销售”。
 - 页眉状态沿用 `ORDER_STATUS_REGISTRY`，只有真实待审批修改申请才显示“变更待审批”。名称中的文字不解释为业务状态；已下发且未指定师傅的工单不显示“生产团队待排产”或由此产生资料缺失警告。
-- 工序表只呈现当前生产版本且未取消的生产工序；工序在下发生产时生成，尚无工序时整块不显示（2026-09-27 起不再占位“暂无生产工序记录”），首条工序进附页时主页仍提示“工序明细见附页”；不回退旧派工、不按工艺和包装字段拼出虚构任务或进度。网页、PDF 与打印标题遵守同一账号及资源范围。
+- 工序表只呈现当前生产版本且未取消的生产工序；工序在实际安排或自动准备生产的事务内生成，尚无工序时整块不显示（2026-09-27 起不再占位“暂无生产工序记录”），首条工序进附页时主页仍提示“工序明细见附页”；不回退旧派工、不按工艺和包装字段拼出虚构任务或进度。网页、PDF 与打印标题遵守同一账号及资源范围。
 - 常规 2/4 款、含 5 条工序和普通收货地址的样例应保持一张 A4；长内容显式续页，不静默裁切。字体及图片稳定后校正物理页高并统一页脚，收货地址优先与主单同页。二维码保持静区和物理模块尺寸，禁止为压页缩小码点。
 - 本次布局调整由用户确认执行；`tests/visual/order-print.spec.ts` 维护主单像素基线，验证实际 PDF 页数与声明页数一致。师傅选择页继续执行六视口、明暗、overflow、触控和 axe 门禁。
 
@@ -455,14 +458,14 @@ PageHeader
 
 ### 工单页面导航与标题去重
 
-- 顶部面包屑承担层级导航：工单列表 → 工单名称 → 编辑。工单 id 段显示工单名称，名称为空或首帧未提供名称时显示「工单详情」；末段在吸顶顶栏内省略、完整名称放在 `title`。窄屏保留工单列表入口。详情页头通过面包屑父级返回，`order-detail-commercial-visibility.test.tsx`、`AdminOrderDetailView.browser.spec.tsx` 与 `tests/e2e/admin-shell-navigation.spec.ts` 检查两种角色的返回入口及父级可见性与键盘焦点。
+- 顶部面包屑承担层级导航：工单列表 → 工单名称 → 编辑。工单 id 段显示工单名称（业主 2026-10-02：员工靠名称认单，工单号不重要），名称为空或首帧未交上来时显示「工单详情」，任何时候都不显示工单号；末段在吸顶顶栏内省略、完整名称放在 `title`，H1 滚走后仍能看出是哪张单。窄屏仍保留工单列表入口。详情页头不放「返回工单列表」（与面包屑父级同目标、同行为，按二级页统一规则），`app/(admin)/__tests__/order-detail-commercial-visibility.test.tsx`、`components/business/order/__tests__/AdminOrderDetailView.browser.spec.tsx` 与 `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx` 锁住两种角色无页头返回、面包屑父级六视口可见可聚焦。
 - 工单详情标题以中文名称和状态为主，业务员（工单归属的外部销售，免费重做显示原单外部销售；2026-09-27 起不再显示客户）与工艺作辅助信息；编号和版本在“工单信息”中按需展开，PDF、编辑保留。标题随正文滚动，侧栏及页内锚点只避让全局导航。
 - 管理端编辑、旧版详情、销售详情采用相同的名称优先原则。编辑页返回按钮保留未保存检查，保存/核价行为不变；不将有功能用途的底部保存栏、规则切换栏或表格固定列作为重复导航移除。
 
 ### PR #11 评审修正
 
 - 管理端决定看板包含七类信号和待收款，共八张卡；桌面八列，中等宽度四列。加载骨架与列表同用全宽容器和 `2xl` 密集列断点。
-- 名称保持可见主标题；勾选与星标的辅助标签同时包含名称和工单号，区分同名、未命名工单。待下发检查使用中性色，避免被误读为已完成。
+- 名称保持可见主标题；勾选与星标的辅助标签同时包含名称和工单号，区分同名、未命名工单。待完善使用中性色，避免被误读为已完成。
 - 管理端详情按已加载的内联操作去重核价、发货表单；补充区保留价格和配送记录。内联面板不提供的物流费用更正及原有回退入口继续保留。
 - 编辑确认仅在已确认、已下发、烫金、打包状态的款式或交期变更时提示纸质版本递增；更早状态保持纸质版本。
 - 打印合计仅出现在最后一张款式表中，拆页时至少随最后一行明细移动，不生成只有合计的续表。
@@ -476,7 +479,7 @@ PageHeader
 
 `/orders/[id]` 保留款式主栏与处理侧栏。每款、工单费用及当前待办各保留一层中性边框；规格字段、费用阶段和概览数值以对齐与间距分组，不嵌套装饰卡片。整单费用与当前金额共用费用区域，合计前保留细分隔线。历史、流水、版本、收货采用无外框分区，仅多条记录之间分隔；空态使用简短业务文字。补充资料从对应款式定位并展开，管理员不重复展示主栏已有规格；其他角色保留完整资料。审批输入、错误提示、按钮与键盘焦点继续保留必要边界；样式仅作用于详情页组合，不改变共享审批业务规则。
 
-详情侧栏通过 `AdminOrderDecisionPanel.hideHeading` 使用标准 `sr-only` 隐藏重复标题，保留区域的可访问名称；默认值为 false，独立面板和列表沿用可见标题。发货受限提示与恢复入口按 [UI 规范](docs/ui-规范.md#管理员工单详情布局2026-09-12)；`admin-responsive.spec.ts` 的 `shipping recovery exposes actual progress and respects address edit limits` 覆盖无计件进度、生产中禁发、历史完工单缺地址和可编辑单补地址的六视口明暗门禁。
+详情侧栏通过 `AdminOrderDecisionPanel.hideHeading` 使用标准 `sr-only` 隐藏重复标题，保留区域的可访问名称；默认值为 false，独立面板和列表沿用可见标题。发货受限提示与恢复入口按 [UI 规范](docs/ui-规范.md#管理员工单详情布局2026-09-12)；`tests/visual/admin-responsive.spec.ts` 的 `shipping recovery exposes actual progress and respects address edit limits` 覆盖无计件进度、生产中禁发、历史完工单缺地址和可编辑单补地址的六视口明暗门禁。
 
 ### 制版明细填写字段
 
@@ -486,7 +489,7 @@ PageHeader
 
 工单详情“配送与发货记录”按地址提供运单号、物流公司和面单照片。支持选图、粘贴截图、预览、取消本次图片与查看替换历史。新增输入保存在本地，只有“保存物流资料”或“确认该地址已发货”才提交；保存不变更发货状态。确认层显示运单变化及最后一票的应收后果，收款状态不随发货改变。各地址编辑状态独立，刷新其他地址不清空未保存输入。列表内发货入口跳转到详情登记区，旧整单发货组件不再作为管理员页面的重复入口。
 
-地址登记以一地址一卡片铺满详情主栏，多地址纵向排列，不按浏览器宽度再把主栏平分。卡片依次展示地址序号与状态、收件人和电话、完整地址、计费信息、款式数量、物流表单；保存后的运单在输入框中保留，不能编辑的历史单显示文本。地址原文保持完整。表单以自身可用宽度决定单列或双列，双列时运单号占较宽一侧；窄栏按钮上下排列，图片输入保持整行。该规则仅用于地址登记，不改变普通收货记录分区、权限、发货前置条件及应收确认。`ShipmentRegistrationForm.browser.spec.tsx` 覆盖窄桌面容器，`admin-responsive.spec.ts` 的 `shipping address cards use the full detail column in light and dark themes` 覆盖单地址、多地址、长地址及六视口明暗门禁。
+地址登记以一地址一卡片铺满详情主栏，多地址纵向排列，不按浏览器宽度再把主栏平分。卡片依次展示地址序号与状态、收件人和电话、完整地址、计费信息、款式数量、物流表单；保存后的运单在输入框中保留，不能编辑的历史单显示文本。地址原文保持完整。表单以自身可用宽度决定单列或双列，双列时运单号占较宽一侧；窄栏按钮上下排列，图片输入保持整行。该规则仅用于地址登记，不改变普通收货记录分区、权限、发货前置条件及应收确认。`components/business/order/__tests__/ShipmentRegistrationForm.browser.spec.tsx` 覆盖窄桌面容器，`tests/visual/admin-responsive.spec.ts` 的 `shipping address cards use the full detail column in light and dark themes` 覆盖单地址、多地址、长地址及六视口明暗门禁。
 
 局部验证（2026-09-29，基线 `40521d7a` 加本节所在提交的布局变更）：组件测试 19 项、详情页测试 75 项、独立测试库上的发布构建浏览器用例 7 项通过（六视口各检查单/多地址与明暗主题，以及实际逐地址登记、上传面单、保留另一地址草稿、最后一票应收确认和附件越权检查）；overflow、44px touch、axe 门禁通过。构建、类型与 lint 通过，lint 保留 2 条既有 Next 导航警告。详情页单测首次未加载数据库环境而在导入时报错，使用隔离库环境重跑后 75 项通过；未降低断言或修改业务规则。此验证使用 mock 通知与 inline jobs，不作为真实通知或后台 worker 验收。
 
@@ -510,11 +513,11 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 
 ### 跨设备打印入口（2026-09-11）
 
-打印打开标准 PDF，下载 PDF 保存文件；详情保留“网页预览”。API 链接使用原生锚点，禁止 Next 导航预取创建 PDF 任务。手机由系统支持的 PDF 阅读/分享能力接管，不能承诺自动弹出系统打印面板。字体或排版失败显示原因与恢复方式，停止自动打印。跨引擎检查功能/几何，固定环境维护截图；流程见 [跨设备打印](./docs/跨设备打印与可用性.md)。
+2026-10-02 起，「打印」打开 HTML 打印页，关闭浏览器打印对话框后记录打印尝试；「工单 PDF」只获取文件，不记回执。批量 PDF 在取得文件后记录，成功或结果未知时交付；详情保留“网页预览”。API 链接使用原生锚点，禁止 Next 导航预取创建 PDF 任务。手机由系统支持的 PDF 阅读/分享能力接管，不能承诺自动弹出系统打印面板。字体或排版失败显示原因与恢复方式，停止自动打印。跨引擎检查功能/几何，固定环境维护截图；流程见 [跨设备打印](./docs/跨设备打印与可用性.md)。
 
 ### 批量操作栏对齐（2026-09-13）
 
-管理员工单列表将下发生产、打印所选、导出所选放在同一操作行；
+管理员工单列表将安排生产师傅、打印所选、导出所选放在同一操作行（2026-10-03 已取消独立下发）；
 打印进度、PDF 链接、提示与失败详情放在下方独立区域。
 内嵌操作栏的已选数量与取消选择对齐首行，中间区域允许收缩，避免结果文字挤走取消选择。
 窄屏自然换行，保留 44px 触控目标。
@@ -568,7 +571,7 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 
 恢复补强基于 `4d0c1c31` 的本次工作区增量验证：原实现的连接失败用例已复现整页错误；修复后浏览器组件测试 66 项、单元与契约测试 22 项、真实页面 E2E 3 项通过，无跳过。E2E 使用本次源码重新构建的 `next build/start`、独立端口 3215 和经预检的 `erp_e2e_fee_recovery_20260929` 专用测试库，分别模拟请求未送达、成功入库后响应丢失和详情脚本加载失败；核对数据库记录、输入保留、新标签页入口和手动重新加载。六视口明暗主题、44px 触控、overflow、axe、类型、架构、UI 文案／令牌及 ESLint 检查通过（2 条既存导航警告）。Vitest 与 ESLint 显式排除 `.claude/` 下的另一份完整 checkout，未修改项目门禁配置。命令、工作区补丁及日志归档在 `/var/folders/1m/qlr1bwhj2h7ck5qbntt0xdcm0000gn/T/erp-action-recovery-20260929-q749q1pt`。本次为局部恢复验收，未运行完整发布矩阵，也未部署生产。
 
-2026-09-29 合并检查补充：[PR #31 首轮 Quality](https://github.com/zora4523-bot/print-shop-erp/actions/runs/36577764981) 对 `718ba15c` 的全量单测报告为 7,899 通过、1 失败、46 既有跳过。唯一失败是 `CommercialFeeRecovery.browser.spec.tsx` 的测试夹具使用原生按钮，被全仓共享按钮检查拦截；改为共享 `Button`，保留互锁断言及原检查范围，没有新增原生按钮豁免。本地复验 `button-components.test.ts` 1 项和费用恢复浏览器组件 20 项通过，目标 ESLint、typecheck 通过（Node 24.15.0、pnpm 10.33.1）；首轮未覆盖该全仓检查的局部通过记录不代表完整合并门禁通过。修正后仍以 PR 最新候选的完整检查结果作为合并依据。
+2026-09-29 合并检查补充：[PR #31 首轮 Quality](https://github.com/zora4523-bot/print-shop-erp/actions/runs/36577764981) 对 `718ba15c` 的全量单测报告为 7,899 通过、1 失败、46 既有跳过。唯一失败是 `components/business/order/__tests__/CommercialFeeRecovery.browser.spec.tsx` 的测试夹具使用原生按钮，被全仓共享按钮检查拦截；改为共享 `Button`，保留互锁断言及原检查范围，没有新增原生按钮豁免。本地复验 `components/business/admin/__tests__/button-components.test.ts` 1 项和费用恢复浏览器组件 20 项通过，目标 ESLint、typecheck 通过（Node 24.15.0、pnpm 10.33.1）；首轮未覆盖该全仓检查的局部通过记录不代表完整合并门禁通过。修正后仍以 PR 最新候选的完整检查结果作为合并依据。
 
 ### 师傅报工与工资明细（2026-09-17）
 
@@ -632,7 +635,7 @@ Next.js 16.3 的共享和价格区域错误边界使用稳定 `catchError` / `Er
 
 管理员包装单价与加工费编辑移至文件之后，显示当前规格；价格字段、错误、重核和权限逻辑沿用原实现。其他要求保持展开，避免折叠隐藏待处理字段。外部销售无收费内容时不渲染空区域。收货、包装补充说明、整单备注集中在末尾独立区域；费用侧栏沿用设计款与规格分组及移动端文档流。
 
-验证（基线 `ce3b6d37` 加本节增量）：三份表单目标 Vitest（`ExternalSalesOrderFormB`、`OrderFormBVisuals`、`OrderFormB-unified-quote`）27 项、`OrderFormBNavigation.browser.spec.tsx` 70 项通过。隔离库 `erp_e2e_releasefix20260917` 的 Release 构建与 TypeScript 检查通过；`order-creation-groups` 两角色用例、`admin-create-pricing`、`order-create-ui-parity` 及 `admin-responsive` 的 design and specification tabs 用例，共 20 项通过，无跳过，涵盖实际提交、调价、销售权限、文件归属与六视口明暗主题、触控/键盘、overflow、axe。已查看管理端手机上传区和销售端桌面暗色截图。完整 lint 0 错误、2 条既有导航警告，最后样式调整的目标 ESLint 和 UI 门禁通过；架构门禁通过。
+验证（基线 `ce3b6d37` 加本节增量）：三份表单目标 Vitest（`ExternalSalesOrderFormB`、`OrderFormBVisuals`、`OrderFormB-unified-quote`）27 项、`components/business/order/__tests__/OrderFormBNavigation.browser.spec.tsx` 70 项通过。隔离库 `erp_e2e_releasefix20260917` 的 Release 构建与 TypeScript 检查通过；`order-creation-groups` 两角色用例、`admin-create-pricing`、`order-create-ui-parity` 及 `admin-responsive` 的 design and specification tabs 用例，共 20 项通过，无跳过，涵盖实际提交、调价、销售权限、文件归属与六视口明暗主题、触控/键盘、overflow、axe。已查看管理端手机上传区和销售端桌面暗色截图。完整 lint 0 错误、2 条既有导航警告，最后样式调整的目标 ESLint 和 UI 门禁通过；架构门禁通过。
 
 本轮先发现旧“文件”标题断言需随已批准文案更新；新增高度断言两次检出全局 `.admin-viewport` 触控下限覆盖上传框自身高度，最终用控件属性选择器提高局部优先级后通过，未降低断言。上传区域提取后亦消除了超长函数增长。证据：`/tmp/erp-hierarchy-{unit,browser,e2e,lint,final-lint,architecture}.log`；初轮失败保留为 `/tmp/erp-hierarchy-e2e-initial.log` 和 `/tmp/erp-hierarchy-e2e-height-debug.log`；最终截图在 `test-results/release/`。
 

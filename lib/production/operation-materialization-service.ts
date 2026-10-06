@@ -250,7 +250,7 @@ async function activateSampleShipmentInTx(
   if (order.status !== OrderStatus.PACKING) transitionOrder(OrderStatus.RELEASED, OrderStatus.PACKING);
   if (order.status === OrderStatus.PACKING) return { orderId, orderStatus: OrderStatus.PACKING, operationIds: [], operationsCreated: 0, progressStepIds: [], progressStepsCreated: 0, idempotentReplay: true };
   await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.PACKING, scheduledAt: at ?? new Date(), revision: { increment: 1 } } });
-  await tx.orderLog.create({ data: { orderId, operatorId: actorId, action: 'SAMPLE_READY_TO_SHIP', remark: '寄样品已下发，待打包发货' } });
+  await tx.orderLog.create({ data: { orderId, operatorId: actorId, action: 'SAMPLE_READY_TO_SHIP', remark: '寄样工单已就绪，待发货' } });
   return { orderId, orderStatus: OrderStatus.PACKING, operationIds: [], operationsCreated: 0, progressStepIds: [], progressStepsCreated: 0, idempotentReplay: false };
 }
 
@@ -388,7 +388,7 @@ export async function activateProductionOperationsInTx(
               after: requiresOutsource,
             },
           },
-          remark: '复用已物化工序并下发生产',
+          remark: '复用已有工序并完成生产准备',
         },
       });
     }
@@ -538,7 +538,7 @@ export async function activateProductionOperationsInTx(
         options.allowVersionRematerialization
           ? `工单升至 v${order.workOrderVersion}，追加新生产代次；旧代次未完成工序已取消，报工事实保持只读`
           : targetStatus === OrderStatus.RELEASED
-          ? '工厂确认后下发生产并物化工序，未进行人员或机器匹配'
+          ? '工单准备完成，生成当前版本生产工序'
           : '价格确认后自动物化计件工序与无计件进度步骤，未进行人员或机器匹配',
     },
   });

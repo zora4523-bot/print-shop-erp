@@ -8,18 +8,22 @@ import '@/app/globals.css';
 const m = vi.hoisted(() => ({ create: vi.fn(), progress: vi.fn(), refresh: vi.fn(), router: { refresh: vi.fn() } }));
 vi.mock('@/actions/cdr-workbench', () => ({ createWorkbenchBundleAction: m.create, getWorkbenchBundleProgressAction: m.progress }));
 vi.mock('next/navigation', () => ({ useRouter: () => m.router }));
-vi.mock('../RevokeBundleForm', () => ({ RevokeBundleForm: () => null }));
+vi.mock('@/components/business/cdr/RevokeBundleForm', () => ({ RevokeBundleForm: () => null }));
 import { CdrWorkbench } from '../CdrWorkbench';
+const NOW = '2026-10-02T00:00:00Z';
 const old: CdrHistoryRow = { id: 'old', status: 'FAILED', isMock: false, downloadUrl: '', expiresAt: '2026-10-04T00:00:00Z', revokedAt: null, createdAt: '2026-10-01T00:00:00Z', createdByName: '管理员', orderCount: 1, fileCount: 2, downloadCount: 0, failureMessage: '打包失败' };
 const pendingRow = { ...old, id: 'new', status: 'PENDING', failureMessage: null };
 let host: HTMLDivElement; let root: Root;
 let download: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   vi.resetAllMocks();
+  // Freeze expiry comparisons before mounting; keep browser timers running normally.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(NOW));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
   m.create.mockResolvedValue({ status: 'queued', bundleId: 'new' });
-  flushSync(() => root.render(<CdrWorkbench orders={[]} bundles={[old]} mock={false} now="2026-10-02T00:00:00Z" />));
+  flushSync(() => root.render(<CdrWorkbench orders={[]} bundles={[old]} mock={false} now={NOW} />));
 });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); download.mockRestore(); vi.useRealTimers(); });
 async function regenerate() {
@@ -58,8 +62,6 @@ it('replaces a prior progress warning when a new history submission is accepted'
 });
 
 it('expires an open history row without a route refresh and offers regeneration', async () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
   const now = new Date().toISOString();
   const ready = { ...old, status: 'READY', failureMessage: null, downloadUrl: '/api/cdr/bundles/history-token', expiresAt: new Date(Date.now() + 60_000).toISOString() };
   flushSync(() => root.render(<CdrWorkbench orders={[]} bundles={[ready]} mock={false} now={now} />));
@@ -74,8 +76,6 @@ it('expires an open history row without a route refresh and offers regeneration'
   expect(m.router.refresh).not.toHaveBeenCalled();
 });
 it('removes the active receipt download when its newly generated package expires', async () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
   m.progress.mockResolvedValue({ ...pendingRow, status: 'READY', downloadUrl: '/api/cdr/bundles/new-token', expiresAt: new Date(Date.now() + 60_000).toISOString() });
   await regenerate();
   await expect.element(page.getByText('下载包已就绪', { exact: true })).toBeVisible();
@@ -88,8 +88,6 @@ it('removes the active receipt download when its newly generated package expires
 });
 
 it('schedules the next expiry once instead of polling the entire list every second', async () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-02T00:00:00Z'));
   const schedule = vi.spyOn(globalThis, 'setTimeout');
   const interval = vi.spyOn(globalThis, 'setInterval');
   const ready = { ...old, status: 'READY', downloadUrl: '/api/cdr/bundles/expiry', expiresAt: '2026-10-02T00:01:00Z' };

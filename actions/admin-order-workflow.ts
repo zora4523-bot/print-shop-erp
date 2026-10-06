@@ -9,7 +9,6 @@ import {
   confirmFactoryOrder,
   holdFactoryOrder,
   rejectFactoryOrder,
-  releaseFactoryOrder,
   resumeFactoryOrder,
   settleFactoryOrder,
 } from '@/lib/order/admin-workflow';
@@ -205,20 +204,12 @@ export async function resumeFactoryOrderAction(
 export async function releaseFactoryOrderAction(
   raw: unknown,
 ): Promise<AdminOrderWorkflowActionResult> {
-  const actor = await requirePermission('order:change:review');
+  await requirePermission('order:change:review');
   const parsed = releaseSchema.safeParse(raw);
   if (!parsed.success) {
     return { status: 'invalid', fieldErrors: fieldErrors(parsed.error) };
   }
-  try {
-    const result = await releaseFactoryOrder(parsed.data, actor);
-    revalidateOrder(result.orderId);
-    return { status: 'success', orderId: result.orderId };
-  } catch (error) {
-    const handled = handledError(error);
-    if (handled) return handled;
-    throw error;
-  }
+  return { status: 'error', message: '工单无需单独下发；厂内生产请安排师傅，寄样请处理发货。' };
 }
 
 export async function settleFactoryOrderAction(

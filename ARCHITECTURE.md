@@ -7,16 +7,23 @@ applies_to: repository source at last_verified
 
 # 系统架构
 
+## 2026-10-04 现行入口与领域边界
+
+最近变更与历史文档阅读规则见 [当前开发入口](docs/当前开发入口.md)。本节只更新生产入口与经营分析边界，不重签全文旧验证日期。
+
+- `lib/order/production-readiness.ts` 在已授权写事务中复核保存的报价、收货资料、待审批和工艺／包装事实；`lib/production/routing.ts` 区分厂内安排、寄样、外协、包装、直接履约和资料异常。
+- `lib/production/dispatch.ts` 在同一事务准备厂内工序、保存单负责人和打印请求；内部 release 物化仍被使用，但不再暴露独立管理员下发步骤。自动准备不产生结算，也不绕过存量报工守卫。
+- `/owner/analytics` 与 CSV 导出共用 `lib/analytics/filters.ts`、`service.ts` 及分视图报表；五个视图定义于 `views.ts`。分析只读，页面分页与全量导出采用同一筛选口径；不把现金收款、加工费、出账或当前库存混成同一日期指标。
+
 ## 2026-09-28 单负责人生产与工资边界
 
-`actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用事务内下发；`completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。
+`actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用内部工序准备与状态推进；`lib/production/completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`lib/production/revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。
 
 生产人、操作人、工资受益人是不同事实。生产归属在排单时确定，协作受益人仅出现在管理员提成核定入口。新旧报工写入口互斥，统一日结/导出读取两种账本；新增事实不伪装成历史报告。管理专用异步 ProductionJobPanel 不传入销售模型，师傅工资按当前会话受益人读取。
 
-
 ## 2026-09-27 录入页恢复边界
 
-采购、BOM、供应商、物料及产品结构分类的五个新建页位于 `app/(admin-forms)/owner/`，URL 保持不变。该路由组复用管理端外壳和 OwnerLayout 的服务端授权，分类页继续复用规则工作区布局；不继承管理端 `loading.tsx`，避免禁用 JavaScript 时流式占位无法切换为可提交表单。其他管理路由保留原加载行为。
+采购、BOM、供应商、物料及产品结构分类的五个新建页位于 `app/(admin-forms)/owner/`，URL 保持不变。该路由组复用管理端外壳和 OwnerLayout 的服务端授权，分类页继续复用规则工作区布局；不继承管理端 `app/(admin)/loading.tsx`，避免禁用 JavaScript 时流式占位无法切换为可提交表单。其他管理路由保留原加载行为。
 
 `components/business/form-drafts` 与 `lib/form-drafts` 只服务采购/BOM 录入，不替换工单已有草稿。服务器提供 actor 与每次登录独立的 `draftSessionScope`；浏览器按身份和表单类型隔离 sessionStorage，有限时间与容量保存白名单字段。BroadcastChannel 仅用于提示活跃标签页冲突，服务器创建记录承担实际去重保证。认证外壳负责清理非当前用户、过期或失去权限的暂存；登录页和原生登出不依赖草稿清理。
 
@@ -100,7 +107,7 @@ App Router 页面
 - 修改状态窗口统一使用 `lib/order/editable-fields.ts`。详情按钮与编辑页遵循待审批锁定，服务端继续独立校验所有权、状态和版本。
 - 管理员编辑页的外部销售关联查询与冻结条件集中在 `lib/order/external-sales-association.ts`。保存由原编辑事务校验管理员身份、工单及账号锁、财务关联和编辑版本后更新 `submitterId`，使访问范围与后续对账使用同一归属；不修改 `createdById`、`submitterRole`、`settlementType` 或价格快照。内部业务、已确认或已入账工单不能通过此入口转为外部销售业务。
 - 发货可用性与配送 DTO 分别放在 `lib/order/shipping-availability.ts`、`lib/order/shipping-fields.ts`。详情、抽屉及服务端操作查询消费这些纯契约；UI 目录保留兼容导出，不再由领域代码引用组件。
-- 销售详情使用 `sales-detail-query.ts` 的显式 select 和映射；包装只传模式、实际袋数、每袋组成等客户可见事实，不附带内部规则、生产工资或成本快照。
+- 销售详情使用 `lib/order/sales-detail-query.ts` 的显式 select 和映射；包装只传模式、实际袋数、每袋组成等客户可见事实，不附带内部规则、生产工资或成本快照。
 - 本次跨页审查范围与证据见 [工单页面审查记录](./docs/archive/order-pages-audit-2026-09-07.md)。
 
 ### HTTP Route Handler
@@ -239,9 +246,9 @@ worker 逐单复用生产打印模板，以 pdf-lib 合并页，进度更新遵�
 
 ### 2026-09-17 分档计薪边界
 
-`foil-wage.ts` 承载 Decimal 纯公式；`foil-report-wage.ts` 根据工序来源、个人有效工价和不可变报工历史计算本次金额。同人分次报工用累计金额差防止分次舍入漂移，固定费仅首次正产量领取。专版按去重颜色数，不按面数叠加。局部按计薪过版次数。
+`lib/salary/foil-wage.ts` 承载 Decimal 纯公式；`lib/salary/foil-report-wage.ts` 根据工序来源、个人有效工价和不可变报工历史计算本次金额。同人分次报工用累计金额差防止分次舍入漂移，固定费仅首次正产量领取。专版按去重颜色数，不按面数叠加。局部按计薪过版次数。
 
-`order-wage-review.ts` 是管理员工单提成核定领域入口，按人员／工作日保留原报工并追加金额差额。多人不自动分摊固定费，统一转人工核定；账号工价仍在账号页面设置，工单页面仅核定这张工单的实际提成。
+`lib/salary/order-wage-review.ts` 是管理员工单提成核定领域入口，按人员／工作日保留原报工并追加金额差额。多人不自动分摊固定费，统一转人工核定；账号工价仍在账号页面设置，工单页面仅核定这张工单的实际提成。
 
 分档烫金结算还要求工序处于 COMPLETED 或 CANCELLED；未结束前固定费仍可能需要在接手师傅之间重新分配，因此不能提前冻结个人日结。判断使用报工关联的已发布工价规则，不依赖可缺失的 JSON 展示快照；旧线性工价与包装不受此限制。跨日冲正分组允许按原负数金额核定，但不可单独改价，可编辑组目标仍必须非负。净额为负的工作日仍不能锁定结算。
 

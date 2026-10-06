@@ -1,3 +1,22 @@
+# 会话交接
+
+## 当前交接（2026-10-06）
+
+本分支当前任务：PR #52 对抗审查修复，已同步 main `793bf6fa`，恢复 CDR 配置容错与既有导航组件测试，将真实导航接入 admin 视口矩阵，统一测试分层规则。验证与剩余边界见 [修复记录](docs/audits/2026-10-06-pr52-review-fixes.md)。本轮仅本地修改与验证，未 push、未合并 PR、未部署；下方 PR #50 段落保留先前交接内容。
+
+上一已记录任务：死代码清理与开发文档同步已推送至 [PR #50](https://github.com/zora4523-bot/print-shop-erp/pull/50)，合入最新 main 并保留双方文档规则。18 个模板组件的删除依据见 [死代码清理记录](docs/audits/2026-10-04-dead-code-cleanup.md)。首轮 CI 发现既有间接依赖漏洞，已修复并通过本地审计、类型及脱敏测试，详见 [依赖修复记录](docs/audits/2026-10-06-pr50-dependency-security.md)。合并状态与完整 CI 以 PR 最新 checks 为准；本次未部署生产。
+
+先读 [当前开发入口](docs/当前开发入口.md)，再按任务范围查领域契约与源代码。
+最近已记录生产发布为 `f084d34e`（PR #46），188 条迁移；10-04 00:58:22 上海时间恢复服务。
+生产入口简化、Analytics 重构与此前 CDR／打印／账单更新已包含在该版本。
+证据、CI 范围及尚未执行的真实业务验收见 [发布记录](docs/audits/2026-10-04-production-release-f084d34e.md)。
+2026-10-04 的历史任务仅同步开发文档，未重跑生产验收或变更生产。核对记录见 [文档同步审计](docs/audits/2026-10-04-development-doc-sync.md)。
+
+## 历史交接记录
+
+下文所有旧生产 SHA、迁移数、未推送／未部署、待验证和下一步均是对应日期的历史快照；
+不自动构成当前待办，也不能直接照抄旧发布目录与一次性操作。当前发布方式只看 [部署入口](DEPLOYMENT.md)。
+
 2026-10-02（集成导航测试契约）：第二轮完整CI发现销售视图已完成、管理工作台面包屑、基础资料及生产与采购折叠分组的旧定位。测试按现行文案和真实展开操作更新，保留导航、输入恢复、可访问性与亮暗主题断言。Darwin打印回归通过；所有失败均待最新提交CI复验，不把被取消分片记为通过。
 
 2026-10-02（CDR CI 状态契约）：真实 ZIP 测试发现旧用例在撤销后仍断言文件更新，而 b40bba50 已规定仅有效未撤销包作为比较基准。保持该业务规则，移到撤销前验证更新标记，撤销后新增尚未打包断言；分享404、真实下载与过期404仍保留。第二轮CI静态、单测、组件、兼容性和导出durable步骤通过。
@@ -8,23 +27,27 @@
 
 2026-10-02（集成主线）：PR #41 创建时 main 已更新至 `0d0d3020`，已合并最新主线以解除冲突。保留双方新增回归测试，批量打印沿用主线的取得文件后记录流程，保留 CDR 分支的超时与权限恢复。适配结算更正的可空快照和免收项目过滤，并补充两条回归。类型检查、lint、91 项组件浏览器测试及25项定向单测通过；远端 CI 以 PR Checks 为准。
 
-# 会话交接
-
-## 当前生产状态（2026-09-27 更新）
+## 2026-09-27 生产状态快照
 
 生产已运行 `b658328c`（PR #27 合并提交），166 条迁移；2026-09-27 13:23（上海时间）完成切换，停机约 66 秒，上线后检查通过。本批含删除客服 / 清废厨师、GPT-6 修复、设计款名称、打印抬头与停用客户字段；6 条迁移在正式库副本演练后执行，数据只有通知规则按预期变化（15 → 13，逾期模板改为外部销售）。crontab 按业主选择只删除已下线的 `cs-settle`、`cs-period-ending`、`hourly-payroll`，现行 4 行保留，示例里生产从未安装的 `pending-factory-backlog`、`production-alerts`、`order-export-cleanup` 仍不安装；cron 包装脚本已换为现行版本；nginx 访问日志已遮蔽 CDR token。Web/LIGHT/HEAVY 同一 SHA 在线，OSS 双仓库备份通过，企业微信 `CONNECTED`。正式库仍只有 1 个管理员 + 3 个销售账号，工单 / 账单 / 报工 / CDR 包为空，历史数据清理 dry-run 为 0。详见 [09-27 发布记录](docs/audits/2026-09-27-production-release-b658328c.md)；此前 [09-21](docs/audits/2026-09-21-production-release-ef6fa012.md)、[09-19](docs/audits/2026-09-19-production-release-09f1a1ca.md)、[09-17](docs/audits/2026-09-17-production-application-release.md) 发布保留为历史证据。
 
-发布方式（当前生产沿用，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包（容器至少 6 GB、`NODE_OPTIONS=--max-old-space-size=4096`、`CIRCLE_NODE_TOTAL=2`；4 GB 会在类型检查阶段无具体错误地失败；打包排除 `.next/cache` 用 `--exclude='.next/cache'`，不要带 `./` 前缀）→ 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。本批迁移不是空白封价格迁移，用发布目录里的 `migrate.cjs`（直接 `prisma migrate deploy`，带锁 / 语句超时、输出过滤连接串），不要复用 09-21 的 `deploy-blank-price-migrations.ts`（它遇到其他待执行迁移会拒绝）。步骤与脚本以 09-27 发布记录及应用机 `/root/erp-release-20260927/` 为准。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。
+当时发布方式（历史操作记录，**不要用 `deploy/update.sh`**——生产目录不是 `main` 分支检出，且应用机 1.6 GiB 内存扛不住构建）：本机 Docker 构建 linux/amd64 运行包（容器至少 6 GB、`NODE_OPTIONS=--max-old-space-size=4096`、`CIRCLE_NODE_TOTAL=2`；4 GB 会在类型检查阶段无具体错误地失败；打包排除 `.next/cache` 用 `--exclude='.next/cache'`，不要带 `./` 前缀）→ 上传 + git bundle 建候选目录 → 正式库副本演练迁移 + 影子进程冒烟 → 停写、逻辑备份 + 两份 pgBackRest full + 门禁 → `cutover-app.sh` → `APP_VERSION=<sha> pm2 restart … --update-env`（PM2 不会自动带上新版本号）→ `post-cutover-check.cjs` + `deploy-smoke`。本批迁移不是空白封价格迁移，用发布目录里的 `migrate.cjs`（直接 `prisma migrate deploy`，带锁 / 语句超时、输出过滤连接串），不要复用 09-21 的 `deploy-blank-price-migrations.ts`（它遇到其他待执行迁移会拒绝）。步骤与脚本以 09-27 发布记录及应用机 `/root/erp-release-20260927/` 为准。应用机 `47.110.247.150`、数据库主机 `120.26.184.160` 均已可用开发机密钥登录。
 
 未验收（不得写成已验收）：登录后的各角色页面逐页检查、真实写入、实体手机扫码、企业微信真实消息实收；Sentry 未配置。
 
-> **每次新对话开始前，先读这份文件。** 它记录了上次会话停在哪、下次该接着做什么。
->
-> 本文件每次 session 结束前**整体重写**（除"历史"小节是追加式时间线）。
+> 历史交接格式保留供追溯；开始新任务先读本文件页首与当前开发入口，不按下文旧“当前任务”恢复工作。
 
 ---
 
-## 当前任务
+## 历史任务（原会话状态）
+
+2026-10-04（文档漂移门禁交接与规范冲突修正）：
+
+- PR #47 已合并到 `main`（合并提交 `fe197b0c`）：`AGENTS.md` 新增「文档与代码同步」；新增 `pnpm check:docs`（`scripts/check-doc-drift.mjs`、`scripts/lib/doc-drift.mjs`、`config/doc-drift-baseline.json`），接入 `quality.yml` 的 static 作业，并新增 `.github/workflows/docs.yml` 覆盖纯文档改动。当前基线 20 条，均带 reason，属有意保留。
+- PR #47 修正 30 份文档的失效引用，将 `docs/codex-ui-brief.md` 归档至 [docs/archive/codex-ui-brief.md](docs/archive/codex-ui-brief.md)；修复 `components/business/cdr/__tests__/CdrWorkbench.browser.spec.tsx` 对真实日期的依赖（fixture 于 2026-10-04 到期后在所有分支失败）。
+- 本分支 `codex/spec-conflicts-handoff` 基于 `fe197b0c`：核对源码后修正 `CLAUDE.md` §4.6 的权限定义位置与新增权限流程，同步 §15.2；按监督者裁决，将 §6.3 / §10 的提交前验证统一指向 `CONTRIBUTING.md`「测试要求」，高风险改动的全量 Vitest 等适用要求不变。两种单次 Vitest 写法经本地 CLI 核实等效，CONTRIBUTING 表与 CLAUDE §14 统一为 `pnpm test run`；追加两条决策记录。本分支只改文档，经 PR 回 `main`，合并前以该 PR 的 CI 结果为准。
+- 本地验证（`fe197b0c` + 本分支四份文档增量）：`pnpm check:docs` 通过（20 occurrences / 20 unique entries，基线匹配）；`git diff --check` 通过；`pnpm lint` 退出 0（0 错误，`app/global-error.tsx` 与 `OrderCreatedSuccessView.tsx` 各 1 条既有导航警告；UI 文案 0 处未豁免命中、UI 令牌 0 处新增违例）。本次未运行应用测试或连接数据库。
+- 已确认（2026-10-05 查看）：PR #47 合并后 `main`（`fe197b0c`）的 Quality 运行 37205283593 中 `static` 与 `viewports-main`（九视口全量）均成功；PR #48 已合并（`b5e02d43`），纯文档改动只触发 Docs 工作流并通过，该提交没有新的九视口运行。
 
 2026-10-02（UI 与 CDR 集成）：按用户要求合并 UI 分支 `ce6e0f76` 与 CDR 分支 `e32ff42a`，保留双方历史；仅手工合并 DECISIONS/HANDOFF 文档冲突。集成分支 `codex/ui-cdr-integration`，将创建 PR 并以 GitHub CI 记录最终远端验证结果。186 条迁移已在一次性空库验证；预览/生产数据库未迁移。此前 OSS 秒数取整遗留由 CDR 分支的现有修复一并纳入。
 
@@ -38,13 +61,14 @@
 
 2026-10-02：管理工作台新增按外部销售分组的 CDR 批量下载，支持附件版本核对、异常工单、下载历史、重生成和撤销。两条前向迁移；预览 3107 未配置真实 OSS，专项测试使用隔离 HTTP 存储。Claude 对抗复审与最终验证记录见 [本次审计](docs/audits/2026-10-02-cdr-workbench.md)。本地开发，未发布。
 
-2026-10-02（三个 PR 待合并）：**本次会话的业主决定已实现并开 PR，均未合并、未部署。三个 PR 的 CI 均已全绿（#40 最新一次推送的 CI 以 PR 页为准）。**
-- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) `claude/settled-correction`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。CI 曾因销售账单导出合计行改名「抵扣 / 补收」而 E2E 失败，已改断言。
-- [#39](https://github.com/zora4523-bot/print-shop-erp/pull/39) `claude/order-detail-nav-layout`：二级页统一由面包屑负责返回（37 个路由，例外见 ui-规范 §8.3）、工单面包屑显示工单名称；Codex 2 轮 9.5；隔离库 Playwright 通过。
-- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) `claude/print-on-click-and-fold`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）。Codex 7 轮 6.5 → 7 → 7 → 8.0 → 8.4 → 8.5 → **9.2（可合并）**，最后两项 P3 已修。批量打印交付在列表外的 `BatchPrintDeliveryProvider`：先取文件 → 整批记录 → 成功或结果未知才交付；记录按尝试串行、尝试键绑定打印任务。隔离库 Playwright：相关 E2E、`admin-responsive` 两视口、release 配置打印视觉回归均通过。
-- **下一步**：业主审阅后按 #38 → #39 → #40 或任意顺序合并；后合并的 PR 在 DECISIONS / UI 规范 / HANDOFF 上有文本冲突，两边都保留。开发库（:3003）未执行两条新迁移，切到这些分支看页面前需 `migrate deploy`（不要用 `migrate dev`）。上线需按现行发布流程演练两条迁移。
-- 本次建的隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`、`erp_e2e_print40_1002`、`erp_e2e_print40r_1002`、`erp_e2e_print40c_1002` 用完后 `DROP DATABASE`；`erp_e2e_merge_1001` 也已执行 #40 迁移。
-- 本机负载高（30–40）时，`admin-workspace-pg-client-serialization.postgres.test.ts`（子进程 10 秒探测）会超时，与本次改动无关，CI 上通过。
+2026-10-03（三个 PR 已合并）：**#38、#39、#40 均已合并进 `main`，未部署。** 之后 Codex 的 #41（UI 与 CDR 集成）也已合并，`main` 现为 `e2aed6d6`，共 188 条迁移。
+- [#38](https://github.com/zora4523-bot/print-shop-erp/pull/38) → `16debfb1`：结算后金额更正分两段（账单确认前改结算、确认后录补收），含迁移 `20261001120000_agent_bill_surcharge`；Codex 4 轮 9.1。
+- [#39](https://github.com/zora4523-bot/print-shop-erp/pull/39) → `004832a5`：二级页统一由面包屑负责返回（37 个路由，例外见 ui-规范 §8.3）、工单面包屑显示工单名称；Codex 2 轮 9.5。
+- [#40](https://github.com/zora4523-bot/print-shop-erp/pull/40) → `0d0d3020`：点「打印」即记已打印（去掉「确认已打印」/`MARK_PRINTED`）、工单详情「计价与收费维护」「工厂成本」默认收起（有待处理时展开）；含迁移 `20261002100000_order_print_attempt`（打印尝试账本，只新增表）；Codex 7 轮，终评 9.2。`0d0d3020` 的 main CI 全绿。
+- 开发库 `print_shop_erp` 已用 `migrate deploy` 执行到 188 条（开发服务 :3003 跑 `main` 最新）。临时隔离库 `erp_e2e_printfold_1002`、`erp_e2e_navcrumb_1002`、`erp_e2e_print40_1002`、`erp_e2e_print40r_1002`、`erp_e2e_print40c_1002` 已删；`erp_e2e_merge_1001` 保留。三个分支的本地 / 远端分支及 #39 的 agent 工作区已清理。
+- 注意：`20261002100000_order_print_attempt` 与 #41 的 `20261002100000_agent_bill_cancellation_detail` 时间戳相同，两者互不依赖，按目录名排序执行；仓库没有拦截同时间戳的门禁。
+- **下一步（需业主授权）**：生产仍是 `b658328c`（166 条迁移），上线 `main` 需按现行发布流程在正式库副本演练全部新增迁移后由业主说「切」。未经授权不做任何生产操作。
+- 本机负载高（30–40）时，`admin-workspace-pg-client-serialization.postgres.test.ts`（子进程 10 秒探测）会超时，与这些改动无关，CI 上通过。
 - 待业主决定：浏览器标签页标题仍是「工单号 · 工单」，是否也改成工单名称；`/orders/new` 点面包屑 / 侧栏离开不弹「保存草稿并离开」（原有问题）。
 
 2026-10-02（结算更正与补收）：**业主拍板「结算后金额更正分两段」并已实现**，分支 `claude/settled-correction`（基于 main `e47f59e8`，已合并为 #38 `16debfb1`，未部署）。① 发货确认弹窗只列应收金额（「月账单确认前仍可更正」）、代师傅登记提成、运单号；② 月账单确认前，工单详情「计价与收费维护 › 结算更正」以一行「结算更正」调整补收或少收，同步结算金额与草稿账单本单快照，最低到加工费（`Order_receivable_amounts_valid`）；③ 月账单确认后，账单工单行「录入抵扣或补收」，补收为正数，迁移 `20261001120000_agent_bill_surcharge` 放开只能为负的约束；分摊先锁后读，补收只进最早草稿、放不进金额上限时暂缓，录入按销售串行并按最坏情况校验上限。规则见 SPEC §J.5、DECISIONS 2026-10-01 最后一条。Codex `gpt-6-astra` 对抗审查 4 轮 7.5 → 8.5 → 8.5 → 9.1，末轮 P3 已修。验证：全量 Vitest 通过（满载时 7 个无关 postgres 用例 5 秒超时，放宽超时单跑通过）、相关 Browser Mode、真实库触发器与并发回归；**未跑** E2E（已同步 3 个账单 E2E 的文案断言）。开发库未执行新迁移（避免未合并时 `migrate dev` 要求重置），合并后需 `prisma migrate deploy`。同日另一 worktree `agent-a2f5802dd2b1ab435`（分支 `claude/order-detail-nav-layout`，提交 `a41abebb`）去掉工单详情与面包屑重复的「返回工单列表」并提了详情页布局方案，待业主看。
@@ -370,6 +394,13 @@ blank-paper-pricing:315 与 price-versions-layout:52 的 `getByText` 严格模�
 
 ## 下一步具体指令（给下次 AI）
 
+**2026-10-04 新增：**
+
+- 新增或修改文档后运行 `pnpm check:docs`；修复了基线条目时同步收紧 `config/doc-drift-baseline.json`，不要把新失效引用直接吸收到基线。
+- [UI 现状盘点](docs/UI现状盘点.md)、[UI 迁移清单](docs/UI迁移清单.md)、[UI 对抗审查](docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)、[空白封 PLAN](docs/PLAN-空白封按单价管理.md) 四份文档仍在原地，待各自待办完成后再归档。
+- `tests/e2e/admin-fees.spec.ts` 与 `tests/e2e/order-create.spec.ts` 使用固定交期，页面随真实时间显示逾期提示；当前断言不受影响，但仍属于潜在日期依赖，后续修改这些测试时处理。
+- 文档漂移检查核对引用目标与 pnpm 命令名是否存在，不验证锚点、行号和文档中的数字；`HANDOFF.md` / `DECISIONS.md` / `PROGRESS.md` 等历史记录只查 Markdown 相对链接，仍需人工核对语义与事实。
+
 **2026-09-23 新增：**
 
 - **生产上架 8 种彩色珠光纸**（须业主授权，§12）：
@@ -622,6 +653,7 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 
 
 - 2026-10-02：点打印即记已打印 + 低频维护区默认收起（#40）、二级页面包屑返回 + 工单名称（#39）、结算后更正与补收（#38）开 PR。
+- 2026-10-03：#38–#40 合并进 main（#41 随后由 Codex 合并），开发库迁移到 188 条，清理临时隔离库、已合并分支与 agent 工作区；生产发布待业主授权。
 - 2026-09-27：完成建单整款删除、规格选择与历史名称修复；Claude Code Opus 5.5 三轮审查及负控补测完成，本地提交，3000 开发服务保留。详见 [验收记录](docs/audits/2026-09-27-design-removal.md)。
 
 - 2026-09-21：按要求启动 3000 本地预览；日常开发库预检、备份及两条空白封迁移完成，价格页面实际打开，未改纸张资料或发布草稿；生产未操作。
@@ -736,3 +768,5 @@ Codex 对抗审查两轮（只读，`gpt-6-astra`）：第一轮 0 P1/P2、1 P3�
 - 2026-09-30：寄样品快递费默认按收件省份中通首重、提交即自动确认，超重由管理员在履约费用中更正（`b07e1f5c`）。
 - 2026-10-01：整理本地分支开 PR #35–#37，Codex gpt-6-astra 对抗审查均达 9 分以上；#36、#37 已合入 main，#35 随本条合并。寄样首重默认标记改为三态规则，覆盖全部写入口。
 - 2026-10-02：结算后金额更正两段（工单结算更正 / 账单补收）与发货确认文案，Codex 4 轮 9.1 分，分支 `claude/settled-correction` 未推送。
+- 2026-10-04：记录 PR #47（`fe197b0c`）已合并的文档同步规则、文档漂移门禁、30 份文档引用修复、执行稿归档与 CDR 日期依赖修复；本分支修正 CLAUDE.md §4.6 / §15.2 与 §6.3 / §10 的规范冲突，统一 test 命令并追加两条决策；保留九视口作业未确认及后续文档/日期依赖待办。
+- 2026-10-05：确认 `main`（`fe197b0c`）九视口全量作业通过；PR #48（`b5e02d43`）已合并，移除对应的未验证项与待办。

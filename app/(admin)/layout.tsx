@@ -1,3 +1,4 @@
+import { AnalyticsNoScript } from '@/components/business/analytics/AnalyticsNoScript';
 import { AuthenticatedDraftCleanup } from '@/components/business/form-drafts/FormDraftControls';
 import { hasPermission } from '@/lib/auth/permissions-dict';
 import type { FormKind } from '@/lib/form-drafts/model';
@@ -69,7 +70,8 @@ export default async function AdminShellLayout({
             environmentLabel={environmentLabel}
             role={user.role}
           />
-          <div className="admin-safe-inline admin-safe-bottom min-w-0 flex-1 py-4 sm:py-6">
+          {user.role === Role.ADMIN ? <AnalyticsNoScript /> : null}
+          <div data-slot="admin-route-content" className="admin-safe-inline admin-safe-bottom min-w-0 flex-1 py-4 sm:py-6">
             {children}
           </div>
         </BreadcrumbEntityProvider>

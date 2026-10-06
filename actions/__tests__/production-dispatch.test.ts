@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ permission: vi.fn(), publish: vi.fn(), complete: vi.fn(), allocate: vi.fn(), correct: vi.fn(), refresh: vi.fn() }));
+const mocks = vi.hoisted(() => ({ permission: vi.fn(), publish: vi.fn(), complete: vi.fn(), allocate: vi.fn(), correct: vi.fn(), review: vi.fn(), refresh: vi.fn() }));
 vi.mock('server-only', () => ({}));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.refresh }));
 vi.mock('@/lib/auth/permissions', () => ({ requirePermission: mocks.permission }));
@@ -7,7 +7,9 @@ vi.mock('@/lib/production/dispatch', async importOriginal => ({ ...await importO
 vi.mock('@/lib/production/completion-registration', async importOriginal => ({ ...await importOriginal<object>(), registerProductionCompletion: mocks.complete }));
 vi.mock('@/lib/salary/production-wages', async importOriginal => ({ ...await importOriginal<object>(), allocateProductionWages: mocks.allocate }));
 vi.mock('@/lib/production/correct-registration', async importOriginal => ({ ...await importOriginal<object>(), correctProductionRegistration: mocks.correct }));
-import { allocateProductionWagesAction, correctProductionRegistrationAction, publishProductionDispatchAction, registerProductionCompletionAction } from '../production-dispatch';
+vi.mock('@/lib/production/fact-review', async importOriginal => ({ ...await importOriginal<object>(), reviewProductionFact: mocks.review }));
+import { DispatchPlanValidationError } from '@/lib/production/dispatch-plan-error';
+import { reviewProductionFactAction, allocateProductionWagesAction, correctProductionRegistrationAction, publishProductionDispatchAction, registerProductionCompletionAction } from '../production-dispatch';
 const actor = { id: 'session-actor', role: 'ADMIN' };
 const payload = (value: unknown) => { const form = new FormData(); form.set('payload', JSON.stringify(value)); return form; };
 const dispatch = { requestKey: 'request-001', orders: [{ id: 'o1', revision: 1, version: 1, assignments: { partial: 'worker' } }] };
@@ -49,6 +51,28 @@ describe('production actions', () => {
     expect(await allocateProductionWagesAction(null, payload({ jobId: 'j1', requestKey: 'manual-001', reason: '核定', allocations: [{ workerId: 'worker', amount: '0.001', expectedRevision: 0 }] }))).toMatchObject({ ok: false });
     expect(await correctProductionRegistrationAction({ jobId: 'j1', requestKey: 'correct-001', revision: 0, reason: '误登记' })).toMatchObject({ ok: false });
     expect(mocks.allocate).not.toHaveBeenCalled(); expect(mocks.correct).not.toHaveBeenCalled();
+  });
+  it.each(['publish', 'recover', 'review'])('shows safe planning reasons for %s without reporting success', async entry => {
+    const error = new DispatchPlanValidationError(
+      { id: 'o1', customName: '待核对工单', orderNo: 'GD-1', revision: 1, workOrderVersion: 1 },
+      [{ code: 'INACTIVE_CRAFT', message: '款式 #2 引用 canonical PRIVATE_CRAFT_CODE 已停用' }],
+    );
+    let result;
+    if (entry === 'publish') {
+      mocks.publish.mockRejectedValue(error);
+      result = await publishProductionDispatchAction(null, payload(dispatch));
+    } else if (entry === 'recover') {
+      mocks.complete.mockRejectedValue(error);
+      result = await registerProductionCompletionAction(null, completion('RECOVER'));
+    } else {
+      mocks.review.mockRejectedValue(error);
+      const form = new FormData();
+      Object.entries({ jobId: 'j1', jobRevision: '0', reviewRevision: '0', mode: 'UNPRODUCED', reason: '核实未生产', notActuallyProduced: 'on' }).forEach(([key, value]) => form.set(key, value));
+      result = await reviewProductionFactAction(null, form);
+    }
+    expect(result).toEqual({ ok: false, message: '待核对工单：款式 #2：所选工艺已停用，请核对并选择可用工艺。' });
+    expect(result?.message).not.toMatch(/canonical|PRIVATE_CRAFT_CODE/);
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
   it('does not disclose SQL or internal errors', async () => {
     mocks.publish.mockRejectedValue(new Error('SELECT secret FROM database'));

@@ -43,7 +43,7 @@ function renderRankingTick({ x, y, payload }: YAxisTickContentProps) {
 // 配色按角色：SALES = 蓝色。收费工单都归属外部销售；历史上管理员
 // 自己接的工单也可能上榜 → 用 muted 灰色。
 
-export type SalesRankingChartProps = {
+type SalesRankingChartProps = {
   data: ReadonlyArray<{
     userId: string;
     displayName: string;

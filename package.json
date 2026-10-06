@@ -33,6 +33,7 @@
     "check:backup": "node scripts/check-backup-readiness.mjs",
     "check:architecture": "tsx scripts/check-architecture.ts --check",
     "check:dead-code": "node scripts/dead-code-scan.mjs",
+    "check:docs": "node scripts/check-doc-drift.mjs --check",
     "audit:review-data": "tsx scripts/audit-review-data-integrity.ts",
     "agent:next": "node scripts/agent-next-task.mjs",
     "db:migrate": "prisma migrate dev",
@@ -56,7 +57,7 @@
     "@opentelemetry/api": "^1.9.1",
     "@prisma/adapter-pg": "7.7.0",
     "@prisma/client": "7.7.0",
-    "@sentry/nextjs": "^10.49.0",
+    "@sentry/nextjs": "^10.76.0",
     "@wecom/aibot-node-sdk": "1.0.7",
     "ali-oss": "^6.23.0",
     "archiver": "^8.0.0",
@@ -126,7 +127,8 @@
       "@opentelemetry/core@>=2.0.0 <2.8.0": "2.8.0",
       "esbuild@>=0.27.0 <0.28.1": "0.28.1",
       "fast-uri@>=3.0.0 <3.1.8": "3.1.8",
-      "brace-expansion@>=5.0.0 <5.0.12": "5.0.12"
+      "brace-expansion@>=5.0.0 <5.0.12": "5.0.12",
+      "source-map-js@<1.2.2": "1.2.2"
     }
   },
   "engines": {

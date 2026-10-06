@@ -2,12 +2,14 @@
 status: maintained
 owner: project-maintainers
 last_verified: 2026-08-24
-sections_verified: 2026-09-11
+sections_verified: 2026-10-04
 applies_to: repository development workflow
-verification_scope: scripts, CI and test configuration sections at sections_verified
+verification_scope: package scripts, CI job scope and shared viewport configuration; not a full runtime verification
 ---
 
 # 本地开发指南
+
+> 业务与源码导航先看 [当前开发入口](docs/当前开发入口.md)。以下日期化实测段落保留原证据；本次仅复核命令、CI 配置与共享视口，不将旧测试结果视作当前通过。
 
 计件工价发布入口 `pnpm piecework:publish` 支持版本递增及按盒费率；默认只读，旧 `piecework:publish-v1` 兼容保留。正式配置填写和发布参数见 [工价发布步骤](./docs/管理员建单定价与装盒修复-20260913.md#员工按盒工价发布)。专项数据库回归需显式设置 `ERP_PRICING_REPAIR_DB_TEST=1`，仅连接准备过包装 E2E fixture 的独立测试库。
 
@@ -52,7 +54,7 @@ pnpm dev
 ### 补齐工作台演示工单
 
 已有 `e2e-dash-<16位runId>-sub-1/sub-2/sub-3-urgent` 空工单可使用
-[`complete-dashboard-order-fixtures.ts`](./scripts/complete-dashboard-order-fixtures.ts) 原位补齐。
+[`scripts/complete-dashboard-order-fixtures.ts`](./scripts/complete-dashboard-order-fixtures.ts) 原位补齐。
 它只接受本机非生产数据库和停用的工作台测试销售账号，保留编号、归属、状态和已有基本资料；
 有业务明细、金额、快照或账本引用的记录会跳过。默认运行完整计价事务后回滚：
 
@@ -103,6 +105,7 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | 架构门禁 | `pnpm check:architecture` |
 | 死代码候选盘点（生成 `.review/dead.json`） | `pnpm check:dead-code` |
 | 死代码候选增量门禁（与 CI 一致） | `pnpm check:dead-code --check` |
+| 文档路径、链接与 pnpm 命令漂移门禁 | `pnpm check:docs` |
 | 目标 Vitest | `pnpm test --run <path>` |
 | 全量 Vitest | `pnpm test --run` |
 | 全量单测与覆盖率 | `pnpm exec vitest run --coverage` |
@@ -110,9 +113,10 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 | 修复测试纸张目录并发布非生产测试工价（仅隔离库） | `pnpm test:e2e:prepare` |
 | 发布构建、业务与视觉门禁 | `pnpm test:release` |
 | 持久任务排队/重试/下载门禁 | `pnpm test:release:durable` |
+| CDR 独立库、真实 ZIP 与下载门禁 | `pnpm test:release:cdr` |
 | 开发专用价格视觉 fixture | `pnpm test:release:dev-fixtures` |
 | 浏览器组件（独立 Vitest 配置） | `pnpm test:browser` |
-| 真实页面导航、角色菜单与键盘操作 | `pnpm exec playwright test --config=playwright.navigation.config.ts` |
+| 真实页面导航、角色菜单与键盘操作 | `pnpm exec playwright test tests/e2e/admin-shell-navigation.spec.ts --config=playwright.release.config.ts --project=admin-375x667 --project=admin-1280x800` |
 | Playwright 全套（先满足隔离前置；现行配置启动 `next dev`） | `pnpm test:e2e` |
 | 业务 E2E 与无 JS 路径 | `pnpm exec playwright test tests/e2e --project=chromium --project=no-js` |
 | 打印像素与分页门禁 | `pnpm exec playwright test tests/visual/order-print.spec.ts --project=chromium` |
@@ -134,6 +138,8 @@ node --conditions=react-server --import tsx scripts/complete-dashboard-order-fix
 
 完整 lint 不能用 `pnpm exec eslint .` 代替；后者不执行 UI 文案与令牌检查。单独运行 `vitest` 不会执行 `.browser.spec.tsx`。全量单测通过也不能替代浏览器或覆盖率门禁。若资源争用导致超时，可记录原因后用 `pnpm exec vitest run --coverage --maxWorkers=2` 复测；不得降低阈值或把未解释的失败记作通过。
 
+文档漂移基线 `config/doc-drift-baseline.json` 的条目支持可选字符串 `reason`，说明有意保留或待确认的引用；核实后运行 `node scripts/check-doc-drift.mjs --write-baseline`，会保留同一 `file` / `type` / `reference` 的已有理由并删除已解决条目。更新基线不能代替修复失效引用。
+
 ### 死代码候选审查
 
 `config/dead-code-baseline.json` 登记现存待核实候选，不代表其中代码可以删除。
@@ -147,28 +153,25 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 在同一审查中更新对应基线条目；不能批量刷新基线来消除红灯。
 测试引用不能证明生产使用，模块内使用也不代表整个函数可删；扫描绿灯不证明全仓没有遗留逻辑。
 本次已清理项和保留项见 [旧产品代码审查](docs/audits/2026-09-21-legacy-code-cleanup.md)。
+后续已核实的清理见 [2026-10-04 UI 模板组件清理](docs/audits/2026-10-04-dead-code-cleanup.md)：逐项记录删除／保留／待确认和消费者证据。不要把模块内仍在使用的导出当作整个函数无用；重新生成组件模板前核对这些本地裁剪，避免把已清理的死代码带回。
 
 ## 当前 CI 与发布验证缺口
 
-[Quality 工作流](./.github/workflows/quality.yml) 的执行范围如下：
-
-- PR 与 `main`：`static` 执行冻结安装、依赖安全审计、Prisma generate/validate、架构、备份脚本、完整 lint、typecheck 和未使用代码候选增量检查；`build` 使用 `scripts/e2e-release-build.ts` 构建 `.next-release`，通过 tarball 保留 Turbopack 外部包符号链接；`navigation` 复用构建，在独立数据库中通过真实登录验证管理员和销售的九视口、明暗主题、导航与键盘操作。
-- PR：`unit` 执行完整 fresh 迁移链、业务数据审计、全量单测与覆盖率；`browser-components` 使用两个分片；`e2e` 使用六个分片，包含三个业务 E2E 分片、`admin-375x667`、`admin-1280x800`、`worker + no-js`，页面视口为 375×667 / 1280×800。各分片以 `E2E_PREBUILT=1` 复用构建，独立运行数据库与服务，片内使用 `workers: 1`。`durable` 检查真实 worker 的排队、重试与授权下载，`compat` 检查跨浏览器行为并安装 WebKit，`dev-fixtures` 检查两个视口的开发专用价格页面。
-- `push: main`：`viewports-main` 执行管理端、师傅端及 dev fixtures 的全部九视口检查。
-
-`navigation` 使用 `playwright.navigation.config.ts`，关闭 screenshot、video 与 trace，结果写入 `.review/playwright-release.json`。本地诊断可设置 `E2E_NAVIGATION_MODE=development`，结果写入 `.review/playwright-development.json`；运行前按下文准备隔离数据库。
-
-纯文档改动（`**/*.md`、`docs/**`）不触发工作流。公共步骤位于 `.github/actions/setup` 与 `.github/actions/browsers`，负责依赖安装、浏览器缓存和按需安装。
+[Quality 工作流](./.github/workflows/quality.yml) 自 2026-09-19 起拆成并行作业（等待时间优先，见 DECISIONS 同日条目）：`static`（冻结安装、依赖安全审计、Prisma generate/validate、架构 / 文档漂移 / 备份脚本 / 完整 lint / typecheck、死代码候选增量门禁，无数据库、无浏览器，PR 与 `main` 都跑）、`unit`（完整 fresh 迁移链、业务数据审计、全量单测与覆盖率）、`browser-components`（2 片）、`build`（用 `scripts/e2e-release-build.ts` 构建一次 `.next-release`，以 tarball 传给分片——`upload-artifact` 不保留 Turbopack 的外部包符号链接，直接传目录会让 `sharp` 找不到依赖）、`e2e` 六个分片（`chromium` 1/3–3/3 业务 E2E、`admin-375x667`、`admin-1280x800`、`worker + no-js`；即 **两视口**门禁 375×667 / 1280×800；各自 `E2E_PREBUILT=1` 复用共享构建，独占 runner / 库 / 服务，片内仍 `workers: 1`）、`durable`（真实 durable worker 排队 / 重试 / 授权下载，随后在独立 CDR 测试库执行 `test:release:cdr`）、`compat`（跨浏览器，唯一需要 WebKit 的作业）、`dev-fixtures`（开发专用价格 fixture，两视口）。合并进 `main` 后由 `viewports-main` 跑管理端与师傅端全部九视口及九视口 dev fixtures（2026-10-02 补齐 320/390/430px）；`push: main` 不再重复 PR 已验证过的其余套件。纯文档改动（`**/*.md`、`docs/**`）不触发 Quality，由独立的 [Docs 工作流](./.github/workflows/docs.yml) 使用 Node.js 24 直接运行 `node scripts/check-doc-drift.mjs --check`，无需安装依赖。公共步骤在 `.github/actions/setup` 与 `.github/actions/browsers`（浏览器缓存、按需安装）。
 
 2026-09-29 补齐 `unit` 的隔离前置：fresh 链验证后的 `erp_e2e_ci` 单独 seed，并通过现有 `test:e2e:prepare` 发布仅用于测试的工价和目录 fixture；Vitest 进程显式使用 `DATABASE_URL="$E2E_DATABASE_URL"`，与确认的 E2E 库一致。仓库维护、表单创建幂等、工价取消、排单完工四组 PostgreSQL 套件必须实际执行；合并时核对 JSON 报告，不把前置不足导致的 skip 计作通过。覆盖率门槛保持不变。
 
 现有打印像素基线仅有 Darwin 版，独立的 [Print (Darwin) 工作流](./.github/workflows/print-darwin.yml) 使用固定 `macos-26`、Node 24、PG16 的专属临时数据目录和 55432 端口，真实生产构建后运行原打印规格，明确 `--update-snapshots=none`；macOS 按 10 倍计费，因此只在打印相关路径变动或手动 `workflow_dispatch` 时运行。Linux 排除打印与开发专用 fixture 时保留两项过滤，避免 CLI 覆盖配置后误执行生产不可达页面。每个作业每次都上传 `.review/`（审计与各套件 JSON，用于分析耗时），覆盖率、报告、截图和 trace 只在失败时上传；均启用 `include-hidden-files`，使 `.review` 和 `.vitest-attachments` 不被默认忽略。通用 Playwright 配置在 CI 中使用 `trace: on-first-retry`，各专用配置按其验证要求设置。
 
-2026-09-11 PR #16 前两轮远端执行分别暴露了导入文案扫描、全仓按钮 AST 扫描的 5 秒超时。这两项集成扫描使用独立的 20 秒执行上限，扫描范围及全部语义断言保持。Darwin 仍有 13 项字体截图差异：CI PDF 出现额外 Helvetica 回退，对齐系统语言偏好未消除差异，该尝试已撤回。截图基线与比较阈值未改，CI 专用基线须先取得业务确认，修正结果以最新 PR checks 为准。
+2026-09-11 PR #16 前两轮远端执行分别暴露了导入文案扫描、全仓按钮 AST 扫描的 5 秒超时。这两项集成扫描使用独立的 20 秒执行上限，扫描范围及全部语义断言保持。该轮 Darwin 曾有 13 项字体截图差异（历史结果；后续 PR #46 打印门禁已通过，见 [10-04 发布记录](docs/audits/2026-10-04-production-release-f084d34e.md)）：CI PDF 出现额外 Helvetica 回退，对齐系统语言偏好未消除差异，该尝试已撤回。截图基线与比较阈值未改，CI 专用基线须先取得业务确认，修正结果以最新 PR checks 为准。
 
-下述为此前本地整改时的仓库配置与保护查询记录：当时尚未推送或运行远端 CI。2026-09-11 只读查询显示 main 的 `protected=false`；保护与规则集接口返回 403，提示当前私有仓库套餐限制，因此 required checks 尚未强制执行。工作流语法通过不能替代远端通过与分支保护验收。真实通知、生产 worker、生产存量与部署 smoke 仍须按 REL-07 独立留证。认证配置的 `skipProxyUrlNormalize` 用于保留 Next 16.3 预取标头；修改时必须重跑登出晚响应竞态与公共/受保护路径回归。当前本地实测与未通过项见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
+下述为此前本地整改时的仓库配置与保护查询记录：当时尚未推送或运行远端 CI。2026-09-11 只读查询显示 main 的 `protected=false`；保护与规则集接口返回 403，提示当前私有仓库套餐限制，因此 required checks 尚未强制执行。工作流语法通过不能替代远端通过与分支保护验收。真实通知、生产 worker、生产存量与部署 smoke 仍须按 REL-07 独立留证。认证配置的 `skipProxyUrlNormalize` 用于保留 Next 16.3 预取标头；修改时必须重跑登出晚响应竞态与公共/受保护路径回归。该轮本地实测与未通过项见 [整改执行记录](./docs/audits/2026-09-11-remediation-validation.md)。
 
 发布验证必须记录冻结候选 SHA、命令、运行模式、数据库隔离方式、通过/失败/跳过数量、跳过原因与证据。所需验证层级及放行标准只在 [贡献指南](./CONTRIBUTING.md#测试要求) 维护；本次历史实测在 [2026-09-10 审查](./docs/audits/2026-09-10-release-readiness.md)，不能沿用为后续候选的通过记录。
+
+导航 E2E 与既有管理端响应式规格共用 `admin-*` projects、隔离数据库和生产构建：PR 执行 375×667 / 1280×800，main 随九视口作业执行完整矩阵。桌面分组与快捷键专项只在 1280×800 执行，其余视口保留明暗布局、账号菜单、父级导航、触控和 axe 检查。开发环境标签等稳定组件覆盖保留在 `components/business/admin/__tests__/AdminShellNavigation.browser.spec.tsx`；失败截图和 trace 沿用通用配置。
+
+文案扫描测试在 `test-results/ui-copy/` 创建及清理临时源码夹具；常规、release 与 durable TypeScript 配置均排除此生成目录，避免并行验证时把测试夹具当作应用源码。
 
 ## 测试环境约束
 
@@ -177,7 +180,7 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 - `E2E_DATABASE_URL` 与匹配库名的 `E2E_DATABASE_CONFIRM_DATABASE` 必填。库名须含独立 `test` / `e2e` / `ci` 分段且不含 `prod` / `production` / `live`；数据库名称必须与日常 `DATABASE_URL` 不同，即使主机不同也拒绝同名，避免 DNS 别名绕过隔离。主机百分号解码、大小写与末尾点规范化后比较，localhost、127.0.0.1、::1 视为同一主机。原目标标记只在已激活的 Playwright 子进程重载中保留；普通启动重新读取当前 URL。不要设置内部标记或 URL query 来替换主机/库名。`--list` 只收集，不连接；实际执行在 webServer/globalSetup 双重预检。
 - 全量 Vitest 的 PostgreSQL 测试也只对专用测试库运行，不能用 fixture 名称唯一代替隔离。CI unit 使用 `erp_e2e_unit`；生成 `.review/unit-tests.json` 后执行 `node scripts/check-blank-migration-tests.mjs`，强制空白封价格与 BOM 迁移套件实际通过，缺失、失败或跳过均失败。
 - 先 migrate/seed 隔离库，再执行 `test:e2e:prepare`。测试进程同时提供 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`（或明确 E2E_ADMIN 覆盖）；只设置数据库不能完成登录前置。
-- `test:e2e:prepare` 先在已确认的隔离库执行 `prepare-e2e-catalog.ts`，复用 `retire-unused-paper-imports` 的完整库存、外键、历史快照、标准纸张唯一性检查及审计，再发布测试工价。空库迁移仍会恢复旧导入记录，因此不能省略此步骤或放宽工单纸张身份校验；记录已使用或改变时直接失败。此入口拒绝日常/生产库，不代替正式环境按运维流程演练和确认修复，也不修改旧迁移。
+- `test:e2e:prepare` 先在已确认的隔离库执行 `scripts/prepare-e2e-catalog.ts`，复用 `retire-unused-paper-imports` 的完整库存、外键、历史快照、标准纸张唯一性检查及审计，再发布测试工价。空库迁移仍会恢复旧导入记录，因此不能省略此步骤或放宽工单纸张身份校验；记录已使用或改变时直接失败。此入口拒绝日常/生产库，不代替正式环境按运维流程演练和确认修复，也不修改旧迁移。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
 - 报工会产生不可删除的历史记录，必须使用隔离库及已发布、已经生效且覆盖所需操作类型的测试工价。仓库 `config/piecework-price-books/v1.json` 是待填写模板，seed 不代表已经发布工价；测试工价须明确标注非生产并通过正式发布服务建立。执行 `pnpm test:e2e:prepare` 通过正式服务发布并等待生效，工价清楚标记 E2E ONLY，重复准备幂等。发布配置缺少这些前置直接失败，不能以 skip 验收。重复运行时保留既有报工，按已有累计量断言；合格量与工单件数进度分别填写。打印基线所用提交人名称也须与固定 fixture 一致。
 - 同一工作树内，先完成全量单测，再启动 E2E 开发服务器；避免路由/配置回归测试的临时文件被 Next 文件监听器读入。发生测试期间路由缓存异常时，停止该隔离服务器并重建它的 `.next`，不要清理日常工作区或重置数据库。
@@ -186,7 +189,7 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 - CI 的业务 E2E 使用 `erp_e2e_ci`，调价用例会发布不可变的后继工价。后台任务、跨浏览器及开发价格 fixture 使用另建的 `erp_e2e_artifacts_ci`，独立 migrate/seed/prepare，不重置前一套数据库、不回写已发布工价。手动串行运行这些套件时也应切换至具备初始工价的独立 E2E 库。
 - `playwright.durable.config.ts` 使用 `BACKGROUND_JOBS_MODE=durable`、独立 `.next-durable` 产物和 `tsconfig.durable.json`；默认端口 3300，可用 `E2E_DURABLE_BASE_URL` 指定受同一预检约束的地址。该组由用例启动真实 HEAVY worker，验证持久队列、失败重试和下载；通知及 CDR 仍为 mock，不代表真实外部服务通过。
 - 同一工作目录不要同时运行 `next dev` 与 `next build`，也不要让生产测试复用未知开发实例。先停止开发服务再构建、启动，或使用独立工作目录及产物目录；切换模式后重新确认进程、端口和候选 SHA。
-- `test:admin-ui` 与 `test:worker-ui` 分别覆盖六个视口、明暗主题、overflow/touch/axe 等契约。
+- `test:admin-ui` 与 `test:worker-ui` 分别覆盖九个视口、明暗主题、overflow/touch/axe 等契约。
 - 只有打印规格保存了像素截图基线。管理端和师傅端门禁不是设计稿像素 diff，不能据此声称全站逐页还原。
 - `/owner/prices/external-sales/visual-fixture` 明确在 production 返回 not-found。依赖此页面的视觉场景在开发模式单独验收；生产构建验证正式业务入口与真实数据 fixture，并确认视觉专用路由仍不可访问。不得为了通过生产测试而开放该页面，也不得把其预期 not-found 记为真实价格页故障；两层覆盖都需留证。
 - 打印二维码包含 origin；隔离模式通过测试服务的 `APP_PUBLIC_URL` 保持基线 origin 为 `http://localhost:3000`，避免把测试端口变化误判为版式变化。

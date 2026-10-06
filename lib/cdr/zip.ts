@@ -54,9 +54,15 @@ const MS_PER_HOUR = 60 * 60 * 1000;
 const DEFAULT_EXPIRE_HOURS = SETTING_DEFINITIONS.cdr_link_expire_hours.fallback.hours;
 
 export function isMockMode(env: NodeJS.ProcessEnv = process.env): boolean {
-  const cfg = readOssConfig(env);
   if (env.CDR_BUNDLE_MOCK_MODE === 'true') return true;
   if (env.CDR_BUNDLE_MOCK_MODE === 'false') return false;
+  // 缺少或错误的配置沿用页面降级提示；显式模式仍由调用方决定。
+  let cfg: ReturnType<typeof readOssConfig>;
+  try {
+    cfg = readOssConfig(env);
+  } catch {
+    return true;
+  }
   if (!cfg.configured) return true;
   // 留空 + 已配齐：非生产默认 mock——dev/E2E 会自动触发打包流程，
   // 不能因为 .env 里有真实凭证就往生产 bucket 写测试包
@@ -88,10 +94,10 @@ function deriveObjectKey(fileUrl: string, cfg: OssConfig): string {
 
 /** 校验设计文件地址，使用打包器的 object key 规则。 */
 export function isBundleSourceAddressValid(fileUrl: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const config = readOssConfig(env);
   try {
     const url = new URL(fileUrl);
     if (!['http:', 'https:'].includes(url.protocol)) return false;
+    const config = readOssConfig(env);
     if (config.configured) { deriveObjectKey(fileUrl, config.cfg); return true; }
     return decodeURIComponent(url.pathname).replace(/^\/+/, '').startsWith('design/');
   } catch { return false; }

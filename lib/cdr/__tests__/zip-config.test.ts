@@ -11,16 +11,19 @@ const configuredEnv: NodeJS.ProcessEnv = {
 };
 
 describe('CDR 配置校验', () => {
-  it.each([undefined, 'true', 'false'])('模式 %s 下配置错误立即终止', (mode) => {
+  it.each([
+    [undefined, true],
+    ['true', true],
+    ['false', false],
+  ] as const)('非法 endpoint 时模式 %s 返回 %s，地址校验失败', (mode, expected) => {
     const env: NodeJS.ProcessEnv = {
       ...configuredEnv,
       NODE_ENV: 'production',
       CDR_BUNDLE_MOCK_MODE: mode,
       OSS_ENDPOINT: 'invalid endpoint',
     };
-    expect(() => isMockMode(env)).toThrow('OSS_ENDPOINT');
-    expect(() => isBundleSourceAddressValid('https://example.com/design/a.cdr', env))
-      .toThrow('OSS_ENDPOINT');
+    expect(isMockMode(env)).toBe(expected);
+    expect(isBundleSourceAddressValid('https://example.com/design/a.cdr', env)).toBe(false);
   });
 
   it('读取明确指定的模式', () => {

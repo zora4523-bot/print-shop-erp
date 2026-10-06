@@ -1,3 +1,7 @@
+vi.mock('server-only', () => ({}));
+vi.mock('../production-readiness', () => ({ prepareOrderForProductionInTx: vi.fn(async () => ({ ready: false, status: 'SUBMITTED', issues: [] })) }));
+vi.mock('@/lib/production-completion', () => ({ dispatchProductionCompletionNotification: vi.fn() }));
+vi.mock('@/lib/production/preparation-notification', () => ({ dispatchPreparedProduction: vi.fn() }));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OrderCustomerChargeStatus,

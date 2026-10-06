@@ -8,7 +8,7 @@ applies_to: deploy smoke script and repository test configuration; production st
 
 # 备份与部署 Smoke 清单
 
-本文维护 [`deploy-smoke.mjs`](../scripts/deploy-smoke.mjs) 的运行方式与能力边界；本次只核对仓库代码，未复验生产环境。发布总入口见 [DEPLOYMENT.md](../DEPLOYMENT.md)，各项所需测试以 [CONTRIBUTING.md](../CONTRIBUTING.md#测试要求) 为准；现行命令见 [常用命令](../DEVELOPMENT.md#常用命令)，CI 实际覆盖与待补项见 [当前 CI 与发布验证缺口](../DEVELOPMENT.md#当前-ci-与发布验证缺口)。
+本文维护 [`scripts/deploy-smoke.mjs`](../scripts/deploy-smoke.mjs) 的运行方式与能力边界；本次只核对仓库代码，未复验生产环境。发布总入口见 [DEPLOYMENT.md](../DEPLOYMENT.md)，各项所需测试以 [CONTRIBUTING.md](../CONTRIBUTING.md#测试要求) 为准；现行命令见 [常用命令](../DEVELOPMENT.md#常用命令)，CI 实际覆盖与待补项见 [当前 CI 与发布验证缺口](../DEVELOPMENT.md#当前-ci-与发布验证缺口)。
 
 本清单不能替代 [上线前置操作清单](上线前置操作清单.md) 中的历史迁移证据、无效索引与业务前置验收。生产写入、真实通知、cron 任务触发、迁移与恢复操作仍须按已有授权和 runbook 执行；文档示例不是执行这些操作的授权。
 

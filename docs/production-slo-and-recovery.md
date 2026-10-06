@@ -71,7 +71,7 @@ pnpm check:backup
 
 ```bash
 NODE_ENV=production pnpm check:env
-pnpm prisma migrate status
+pnpm exec prisma migrate status
 pnpm typecheck
 pnpm lint
 pnpm exec vitest run

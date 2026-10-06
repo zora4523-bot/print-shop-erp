@@ -52,22 +52,21 @@ export function statusFilterLabel(definition: StatusDefinition): string {
 
 export const ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
-  // 业主 2026-10-01：原「待处理」与工单队列「待办」近义；改用管理员实际要做的事，
-  // 与详情「下发前检查」、列表行动作同词。
-  [OrderStatus.PENDING_FACTORY]: { label: '待下发检查', tone: 'info' },
+  // 业主 2026-10-03：校验随业务提交执行，不保留独立下发步骤。
+  [OrderStatus.PENDING_FACTORY]: { label: '待完善', tone: 'info' },
   [OrderStatus.REJECTED]: { label: '已驳回', tone: 'danger' },
-  [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'success' },
+  [OrderStatus.CONFIRMED]: { label: '待安排', tone: 'success' },
   [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'warning', dot: true },
   [OrderStatus.RELEASED]: { label: '生产中', tone: 'info', dot: true },
   [OrderStatus.FOILING]: { label: '生产中', tone: 'info', dot: true },
   [OrderStatus.PACKING]: { label: '待打包发货', tone: 'info', dot: true },
   [OrderStatus.SETTLED]: { label: '已结算', tone: 'success' },
-  [OrderStatus.SUBMITTED]: { label: '待下发检查', tone: 'info' },
+  [OrderStatus.SUBMITTED]: { label: '待完善', tone: 'info' },
   // SCHEDULING / IN_PRODUCTION / COMPLETED / FINISHED 只存在于迁移前的老行
   // （见 lib/order/status-machine.ts 的转换表注释）。它们的名字与在产状态
   // 高度相似，不加标记会让管理员误判「我到底下发过没有」，因此把「（历史）」
   // 写进 label 本身——只在工作台加后缀会让同一状态在管理端出现两个名字。
-  // SUBMITTED 保持「待下发检查」不加标记：它与 PENDING_FACTORY 同名，加标记等于
+  // SUBMITTED 保持「待完善」不加标记：它与 PENDING_FACTORY 同名，加标记等于
   // 把枚举差异外显给用户。
   [OrderStatus.SCHEDULING]: {
     label: '排产中（历史）',

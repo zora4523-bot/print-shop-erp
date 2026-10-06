@@ -22,5 +22,5 @@
 - 定价表单对照现状：[`docs/archive/定价表单优化-2026-08-24.md`](../archive/定价表单优化-2026-08-24.md)
 - 给 Codex 的定价首批 prompt：[`docs/archive/codex-prompt-定价表单优化-2026-08-24.md`](../archive/codex-prompt-定价表单优化-2026-08-24.md)
 - 当前全站 UI 规范与验收护栏：[`UI-SYSTEM.md`](../../UI-SYSTEM.md)
-- 初始 UI brief（仅历史背景，现状描述已过期）：[`docs/codex-ui-brief.md`](../codex-ui-brief.md)
+- 初始 UI brief（仅历史背景，现状描述已过期）：[`docs/archive/codex-ui-brief.md`](../archive/codex-ui-brief.md)
 - 当前覆盖、backlog 与对抗审查：[`UI-DESIGN-COVERAGE.md`](../UI-DESIGN-COVERAGE.md)、[`UI-REMEDIATION-BACKLOG.md`](../UI-REMEDIATION-BACKLOG.md)、[`UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](../UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)

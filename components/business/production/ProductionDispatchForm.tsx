@@ -23,11 +23,21 @@ export function ProductionDispatchForm({ orders, actorId }: { orders: OrderRow[]
   const [reviewing, setReviewing] = useState(false);
   const [draftNotice, setDraftNotice] = useState('');
   const submittedDraftKey = useRef<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const reviewHeadingRef = useRef<HTMLHeadingElement>(null);
+  const resultRef = useRef<HTMLElement>(null);
+  const wasReviewing = useRef(false);
   const draftKey = `production-dispatch:${actorId}:${orders.map(order => `${order.id}:${order.version}:${order.revision}`).join(',')}`;
   useEffect(() => {
     // Revalidation can advance the props to a new revision before the receipt arrives.
     if (state?.ok && submittedDraftKey.current) localStorage.removeItem(submittedDraftKey.current);
+    if (state?.ok) resultRef.current?.focus();
   }, [state]);
+  useEffect(() => {
+    if (reviewing) reviewHeadingRef.current?.focus();
+    else if (wasReviewing.current) formRef.current?.querySelector<HTMLElement>('select:enabled, button:enabled')?.focus();
+    wasReviewing.current = reviewing;
+  }, [reviewing]);
   const complete = orders.every(order => order.tasks.length > 0 && order.tasks.every(task => assignments[order.id]?.[task.key]));
 
   function restoreDraft() {
@@ -58,7 +68,7 @@ export function ProductionDispatchForm({ orders, actorId }: { orders: OrderRow[]
 
   if (state?.ok) {
     return (
-      <section aria-label="排单结果" className="min-w-0 space-y-4">
+      <section ref={resultRef} tabIndex={-1} aria-label="排单结果" className="min-w-0 space-y-4">
         <ActionNotice tone="success" title={state.message} />
         <ul className="min-w-0 divide-y">
           {orders.map(order => (
@@ -80,7 +90,7 @@ export function ProductionDispatchForm({ orders, actorId }: { orders: OrderRow[]
   }
 
   return (
-    <form action={action} aria-busy={pending} className="min-w-0 space-y-5"
+    <form ref={formRef} action={action} aria-busy={pending} className="min-w-0 space-y-5"
       onSubmit={() => { submittedDraftKey.current = draftKey; }}
       // A failed action is still a resolved action: retain the controlled selection for retry.
       onReset={event => event.preventDefault()}>
@@ -98,15 +108,16 @@ export function ProductionDispatchForm({ orders, actorId }: { orders: OrderRow[]
                 <option value="">选择生产师傅</option>
                 {task.options.map(worker => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
               </NativeSelect>
+              {task.options.length === 0 && <p className="text-sm text-destructive sm:col-span-2">没有符合此工序的在职师傅，请先在员工管理中配置师傅岗位。</p>}
             </div>
           ))}
         </fieldset>
       ))}
       {reviewing ? (
         <Card>
-          <CardHeader><h2 className="font-semibold">发布排单</h2></CardHeader>
+          <CardHeader><h2 ref={reviewHeadingRef} tabIndex={-1} className="font-semibold">发布排单</h2></CardHeader>
           <CardContent className="space-y-3">
-            <p>已选择的师傅负责对应生产。尚未下发的工单将下发并生成打印任务。</p>
+            <p>所选师傅负责对应生产；新安排的工单同时生成打印任务。</p>
             <div className="flex flex-wrap gap-2">
               <Button type="submit" className="min-h-11" disabled={pending}>{pending ? '正在发布…' : '发布排单'}</Button>
               <Button type="button" variant="outline" className="min-h-11" disabled={pending} onClick={() => setReviewing(false)}>返回修改</Button>

@@ -1,3 +1,5 @@
+import { repairLegacyProductionFacts } from '@/lib/order/legacy-production-facts';
+import { saveOrderManualCharge } from '@/lib/order/commercial-details';
 import { preserveCarriedCompletionInTx, reconcileProductionOrderInTx } from '../order-state';
 import { createReworkOrder } from '@/lib/order/rework';
 import { repairProductionMetadata, scanProductionRecovery } from '../recovery';
@@ -28,11 +30,15 @@ import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
 import { writePdfArtifact } from '@/lib/pdf/artifacts';
 import { BACKGROUND_JOB_TYPES } from '@/lib/background-jobs/types';
 import { registerShipment } from '@/lib/order/shipment-registration';
-import { assertShipOrderReadinessInTx } from '@/lib/order';
+import { assertShipOrderReadinessInTx, shipOrder, updateOrderFields } from '@/lib/order';
 import { reportProductionOperation } from '../operation-reporting';
 import { resolveWorkerWorkOrderScan } from '../work-order-scan';
 import { correctProductionRegistration } from '../correct-registration';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
+import { prepareOrderForProductionInTx } from '@/lib/order/production-readiness';
+import { createOutsourceOrder } from '@/lib/outsource';
+import { repairLegacyProductionEntry } from '../legacy-entry';
+import { finalizeSampleOrderInTx, SampleQuoteChangedError } from '@/lib/order/sample-order';
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/notification/dispatch', () => ({ dispatchNotification: vi.fn() }));
@@ -84,6 +90,214 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     await db.user.create({ data: { id: `${prefix}_sales`, username: `${prefix}_sales`, displayName: '验收销售', role: 'SALES', password: 'not-a-login-hash' } });
     worker = await newWorker(); collaborator = await newWorker();
     expect(await db.pieceworkPriceBook.count({ where: { status: 'PUBLISHED', workerId: null } })).toBeGreaterThan(0);
+  });
+  async function readyPending() {
+    const f = await fixture();
+    await db.order.update({ where: { id: f.order.id }, data: { status: 'PENDING_FACTORY', receiverAddress: '广东省广州市测试路', receiverPhone: '13800000000', processingAmount: '100', packagingAmount: '0' } });
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { subtotal: '100' } });
+    await db.orderPackagingGroup.updateMany({ where: { orderId: f.order.id }, data: { subtotal: '0' } });
+    return f;
+  }
+  it('prepares pending packing when sales fills the missing shipping address', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [], backFoilColors: [] } });
+    const before = await db.order.update({ where: { id: f.order.id }, data: { receiverName: '测试收件人', receiverAddress: null, isSfCollect: true } });
+    await db.orderShipment.create({ data: { orderId: f.order.id, sequence: 1, receiverName: before.receiverName, receiverPhone: before.receiverPhone } });
+    const result = await updateOrderFields(f.order.id, { expectedEditVersion: before.editVersion, receiverAddress: '广东省广州市测试路' }, { id: before.submitterId, role: 'SALES' });
+    expect(result.status).toBe('RELEASED');
+    const after = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    expect(after.status).toBe('RELEASED');
+    expect(after.confirmedFee?.toString()).toBe('100');
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_SCHEDULED' && 'orderId' in payload && payload.orderId === f.order.id)).toHaveLength(1);
+  });
+  it.each(['WITHDRAW', 'DENY', 'STALE'] as const)('prepares pending packing after a legacy pending change becomes %s', async mode => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [], backFoilColors: [] } });
+    // Reproduce a historical pending request, before automatic preparation existed.
+    const request = await db.orderChangeRequest.create({ data: { orderId: f.order.id, requesterId: f.order.submitterId, baseRevision: mode === 'STALE' ? 0 : f.order.revision, baseWorkOrderVersion: f.order.workOrderVersion, type: 'MODIFY', reason: '旧单资料核对', beforeSnapshot: {}, proposedChanges: {} } });
+    if (mode === 'WITHDRAW') await withdrawOrderChangeRequest({ requestId: request.id }, { id: f.order.submitterId, role: 'SALES' });
+    else await reviewOrderChangeRequest({ requestId: request.id, decision: mode === 'DENY' ? 'DENY' : 'APPROVE', reviewRemark: '完成核对', pendingChargeResolutions: [] }, admin);
+    expect((await db.orderChangeRequest.findUniqueOrThrow({ where: { id: request.id } })).status).toBe(mode === 'WITHDRAW' ? 'WITHDRAWN' : mode === 'DENY' ? 'DENIED' : 'STALE');
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('RELEASED');
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_SCHEDULED' && 'orderId' in payload && payload.orderId === f.order.id)).toHaveLength(1);
+  });
+  it('returns a readable commercial conflict and rolls back the charge and pricing revision', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [] } });
+    await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    await db.productionOperation.updateMany({ where: { orderId: f.order.id }, data: { plannedQty: '999' } });
+    const before = await db.order.update({ where: { id: f.order.id }, data: { status: 'CONFIRMED', totalAmount: '101', confirmedFee: '101' } });
+    await expect(saveOrderManualCharge({ orderId: f.order.id, expectedPriceRevision: before.priceRevision, chargeId: null, categoryCode: 'APPROVED_ADJUSTMENT', amount: '1', description: '隔离测试附加费', approvalReference: '隔离测试审批', reason: '补齐收费明细' }, admin)).rejects.toMatchObject({ name: 'OrderCommercialDetailsError', message: expect.stringContaining('本次收费未保存') });
+    expect(await db.orderCustomerCharge.count({ where: { orderId: f.order.id } })).toBe(0);
+    const after = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    expect(after.priceRevision).toBe(before.priceRevision);
+    expect(after.status).toBe('CONFIRMED');
+  });
+  it('returns a readable facts-repair conflict and preserves the previous facts and revision', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [] } });
+    await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    await db.productionOperation.updateMany({ where: { orderId: f.order.id }, data: { plannedQty: '999' } });
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: null } });
+    const before = await db.order.update({ where: { id: f.order.id }, data: { status: 'CONFIRMED' } });
+    await expect(repairLegacyProductionFacts({ orderId: f.order.id, expectedOrderRevision: before.revision, items: [{ itemId: f.order.items[0].id, craft: 'PRINT' }] }, admin)).rejects.toMatchObject({ name: 'LegacyProductionFactsError', message: expect.stringContaining('本次补录未保存') });
+    expect((await db.orderItem.findUniqueOrThrow({ where: { id: f.order.items[0].id } })).craft).toBeNull();
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).revision).toBe(before.revision);
+  });
+  it('does not convert legacy tasks with production history into new owner jobs', async () => {
+    const f = await fixture();
+    const craft = await db.craft.findUniqueOrThrow({ where: { code: 'FLAT_FOIL_PARTIAL' } });
+    const task = await db.productionTask.create({ data: { orderItemId: f.order.items[0].id, craftId: craft.id, workerId: worker.id, plannedQty: 1000, status: 'IN_PROGRESS' } });
+    await expect(publishProductionDispatch(f.request, admin)).rejects.toThrow('已有历史报工');
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).simpleProduction).toBe(false);
+    expect((await db.productionTask.findUniqueOrThrow({ where: { id: task.id } })).status).toBe('IN_PROGRESS');
+  });
+  it('assigns a pending order in one transaction and preserves saved prices on replay', async () => {
+    const f = await readyPending();
+    await publishProductionDispatch(f.request, admin);
+    await publishProductionDispatch(f.request, admin);
+    const saved = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    expect(saved).toMatchObject({ status: 'RELEASED', simpleProduction: true });
+    expect(saved.confirmedFee?.toString()).toBe('100');
+    expect(await db.orderLog.count({ where: { orderId: saved.id, action: 'ORDER_READY_FOR_PRODUCTION' } })).toBe(1);
+    expect(await db.productionJob.count({ where: { orderId: saved.id } })).toBe(1);
+    expect(await db.orderPrintJob.count({ where: { orderId: saved.id } })).toBe(1);
+  });
+  it('rolls back pending preparation for invalid fees without creating jobs or printing', async () => {
+    const f = await readyPending();
+    await db.order.update({ where: { id: f.order.id }, data: { totalAmount: '999' } });
+    await expect(publishProductionDispatch(f.request, admin)).rejects.toThrow('费用明细');
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('PENDING_FACTORY');
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect(await db.orderPrintJob.count({ where: { orderId: f.order.id } })).toBe(0);
+  });
+  it('automatically prepares samples for shipping with no production assignment or wage records', async () => {
+    const f = await readyPending();
+    await db.order.update({ where: { id: f.order.id }, data: { purpose: 'SAMPLE_SHIPMENT' } });
+    const prepared = await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    expect(prepared).toMatchObject({ ready: true, status: 'PACKING' });
+    expect(await db.productionOperation.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+    const current = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    await expect(publishProductionDispatch({ ...f.request, orders: [{ ...f.request.orders[0], revision: current.revision }] }, admin)).rejects.toThrow('寄样');
+  });
+  it('automatically activates packing-only orders without switching their packing wage mode', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [], backFoilColors: [] } });
+    const prepared = await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    expect(prepared).toMatchObject({ ready: true, status: 'RELEASED' });
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).simpleProduction).toBe(false);
+    expect(await db.productionOperation.findMany({ where: { orderId: f.order.id }, select: { operationType: true } })).toEqual([{ operationType: 'PACKING' }]);
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+  });
+  it('prepares legacy packing automatically after missing production facts are repaired', async () => {
+    const f = await readyPending();
+    await db.orderPackagingGroup.deleteMany({ where: { orderId: f.order.id } });
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: null, crafts: [], hasLocalFoil: false, frontFoilColors: [], pack: 10 } });
+    const result = await repairLegacyProductionFacts({ orderId: f.order.id, expectedOrderRevision: f.order.revision, packagingMode: 'SINGLE_STYLE', items: [{ itemId: f.order.items[0].id, craft: 'PRINT' }] }, admin);
+    expect(result).toMatchObject({ ready: true, status: 'RELEASED' });
+    const saved = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    expect(result.revision).toBe(saved.revision);
+    expect(saved.confirmedFee?.toFixed(2)).toBe('100.00');
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+  });
+  it('prepares legacy packing after a commercial fee correction and returns the final price revision', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [] } });
+    await db.order.update({ where: { id: f.order.id }, data: { totalAmount: '101', confirmedFee: '101' } });
+    const result = await saveOrderManualCharge({ orderId: f.order.id, expectedPriceRevision: f.order.priceRevision, chargeId: null, categoryCode: 'APPROVED_ADJUSTMENT', amount: '1', description: '隔离测试附加费', approvalReference: '隔离测试审批', reason: '补齐收费明细' }, admin);
+    const saved = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    expect(saved.status).toBe('RELEASED');
+    expect(result.priceRevision).toBe(saved.priceRevision);
+    expect(saved.confirmedFee?.toFixed(2)).toBe('101.00');
+  });
+  it('advances revision and notification when reusing existing packing operations', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [] } });
+    await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    const before = await db.order.update({ where: { id: f.order.id }, data: { status: 'CONFIRMED' } });
+    const prepared = await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    expect(prepared.scheduledNotification?.payload.orderId).toBe(f.order.id);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).revision).toBe(before.revision + 1);
+    expect(await db.productionOperation.count({ where: { orderId: f.order.id } })).toBe(1);
+  });
+  it('creates an external work order and prepares pending fulfillment without assigning factory workers', async () => {
+    const f = await readyPending();
+    const craft = await db.craft.create({ data: { code: `OUT_${randomUUID()}`, name: `验收外协${randomUUID()}`, isOutsource: true } });
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [craft.id], hasLocalFoil: false, frontFoilColors: [] } });
+    const input = { idempotencyKey: randomUUID(), orderId: f.order.id, orderItemIds: [f.order.items[0].id], supplierName: '隔离测试供应商', craftDescription: '外协印刷', amount: '50', supplierContact: null, specialRequirement: null, totalQty: null, expectedDate: null, remark: null };
+    const created = await createOutsourceOrder(input, admin);
+    await expect(createOutsourceOrder(input, admin)).resolves.toEqual(created);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).status).toBe('RELEASED');
+    expect(await db.productionJob.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect(await db.outsourceOrder.count({ where: { orderId: f.order.id } })).toBe(1);
+  });
+  it('creates an external work order even when old operations conflict with automatic preparation', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [] } });
+    await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    await db.productionOperation.updateMany({ where: { orderId: f.order.id }, data: { plannedQty: '999' } });
+    const before = await db.order.update({ where: { id: f.order.id }, data: { status: 'CONFIRMED' } });
+    const input = { idempotencyKey: randomUUID(), orderId: f.order.id, orderItemIds: [f.order.items[0].id], supplierName: '隔离测试供应商', craftDescription: '外协印刷', amount: '50', supplierContact: null, specialRequirement: null, totalQty: null, expectedDate: null, remark: null };
+    const created = await createOutsourceOrder(input, admin);
+    await expect(createOutsourceOrder(input, admin)).resolves.toEqual(created);
+    expect(await db.outsourceOrder.count({ where: { orderId: f.order.id } })).toBe(1);
+    const after = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    expect(after.status).toBe('CONFIRMED');
+    expect(after.revision).toBe(before.revision);
+    expect((await db.productionOperation.findFirstOrThrow({ where: { orderId: f.order.id } })).plannedQty.toString()).toBe('999');
+  });
+  it('prepares an unpacked print-only order for shipment through the shared completion gate', async () => {
+    const f = await readyPending();
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [] } });
+    await db.orderPackagingGroup.updateMany({ where: { orderId: f.order.id }, data: { mode: 'UNPACKED', actualBagCount: 0 } });
+    const prepared = await db.$transaction(tx => prepareOrderForProductionInTx(tx, f.order.id, admin, new Date()));
+    expect(prepared).toMatchObject({ ready: true, status: 'PACKING', notification: { payload: { orderId: f.order.id } } });
+    expect(await db.productionOperation.count({ where: { orderId: f.order.id } })).toBe(0);
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).completedAt).not.toBeNull();
+  });
+  it('repairs legacy packing orders explicitly and idempotently, while dry-run and invalid prices never mutate', async () => {
+    const f = await readyPending();
+    await db.order.update({ where: { id: f.order.id }, data: { status: 'CONFIRMED' } });
+    await db.orderItem.updateMany({ where: { orderId: f.order.id }, data: { craft: 'PRINT', crafts: [], hasLocalFoil: false, frontFoilColors: [] } });
+    await expect(repairLegacyProductionEntry(f.order.id, admin)).resolves.toMatchObject({ eligible: true, changed: false, before: 'CONFIRMED', after: 'CONFIRMED' });
+    expect(await db.productionOperation.count({ where: { orderId: f.order.id } })).toBe(0);
+    await expect(repairLegacyProductionEntry(f.order.id, worker, true)).rejects.toThrow('无权');
+    await expect(repairLegacyProductionEntry(f.order.id, admin, true)).resolves.toMatchObject({ changed: true, after: 'RELEASED' });
+    const after = await db.order.findUniqueOrThrow({ where: { id: f.order.id } });
+    expect(after.revision).toBe(f.order.revision + 1);
+    await expect(repairLegacyProductionEntry(f.order.id, admin, true)).resolves.toMatchObject({ changed: false });
+    expect((await db.order.findUniqueOrThrow({ where: { id: f.order.id } })).revision).toBe(after.revision);
+    expect(await db.productionOperation.count({ where: { orderId: f.order.id } })).toBe(1);
+    expect(vi.mocked(dispatchNotification).mock.calls.filter(([event, payload]) => event === 'ORDER_SCHEDULED' && 'orderId' in payload && payload.orderId === f.order.id)).toHaveLength(1);
+    const bad = await readyPending();
+    await db.order.update({ where: { id: bad.order.id }, data: { purpose: 'SAMPLE_SHIPMENT', totalAmount: '999' } });
+    await expect(repairLegacyProductionEntry(bad.order.id, admin, true)).resolves.toMatchObject({ changed: false, issues: expect.arrayContaining(['费用明细与工单合计不一致，请先核对费用']) });
+  });
+  it('ships a legacy confirmed sample directly, rejecting stale versions before preparation and replaying safely', async () => {
+    const f = await readyPending();
+    let order = await db.order.update({ where: { id: f.order.id }, data: { status: 'DRAFT', purpose: 'SAMPLE_SHIPMENT', isSfCollect: true } });
+    const shipment = await db.orderShipment.create({ data: { orderId: order.id, sequence: 1, receiverName: '寄样验收', receiverPhone: '13800000000', receiverAddress: '广东省广州市测试路', destinationProvince: '广东',
+      lines: { create: { orderItemId: f.order.items[0].id, quantity: 1000 } } } });
+    await db.$transaction(async tx => {
+      let token: string | null = null;
+      try { await finalizeSampleOrderInTx(tx, order.id, admin.id, new Date(), token); }
+      catch (error) { if (error instanceof SampleQuoteChangedError) token = error.quote.quoteToken; else throw error; }
+      const quote = await finalizeSampleOrderInTx(tx, order.id, admin.id, new Date(), token);
+      await tx.order.update({ where: { id: order.id }, data: { status: 'CONFIRMED', confirmedFee: quote.quotedFee } });
+    });
+    order = await db.order.findUniqueOrThrow({ where: { id: order.id } });
+    const command = { expectedRevision: order.revision, expectedEditVersion: order.editVersion, expectedWorkOrderVersion: order.workOrderVersion, expectedPriceRevision: order.priceRevision,
+      idempotencyKey: randomUUID(), trackingNo: 'SF-LEGACY-SAMPLE', shipments: [{ shipmentId: shipment.id, trackingNo: 'SF-LEGACY-SAMPLE', weightKg: null }] };
+    await expect(shipOrder(order.id, admin, { ...command, expectedRevision: order.revision + 1 })).rejects.toThrow();
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('CONFIRMED');
+    await expect(shipOrder(order.id, admin, command)).resolves.toMatchObject({ status: 'SHIPPED' });
+    await expect(shipOrder(order.id, admin, command)).resolves.toMatchObject({ idempotentReplay: true });
+    expect(await db.productionJob.count({ where: { orderId: order.id } })).toBe(0);
+    expect(await db.productionOperation.count({ where: { orderId: order.id } })).toBe(0);
   });
   it('atomically publishes, replays after printing, rejects a different payload, and enforces personal scan ownership', async () => {
     const f = await assigned();

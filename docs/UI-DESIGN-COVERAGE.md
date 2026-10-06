@@ -7,7 +7,7 @@ applies_to: docs/ux-redesign and current worktree
 
 # UI 设计覆盖与验证边界
 
-本表回答两个不同问题：设计包对一个页面族提供了多少证据，以及当前实现经过了什么验证。它不把“共享组件已统一”写成“85 页均已逐像素还原”。整改任务、严重度和成本另见 [`UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md)，提交 `41abe65` 后的证据化对抗复审见 [`UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)。
+本表回答两个不同问题：设计包对一个页面族提供了多少证据，以及当前实现经过了什么验证。它不把“共享组件已统一”写成“85 页均已逐像素还原”。整改任务、严重度和成本另见 [`docs/UI-REMEDIATION-BACKLOG.md`](./UI-REMEDIATION-BACKLOG.md)，提交 `41abe65` 后的证据化对抗复审见 [`docs/UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md`](./UI-UX-ADVERSARIAL-REVIEW-2026-08-24.md)。
 
 ## 判定口径
 

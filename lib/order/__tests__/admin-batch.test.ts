@@ -99,8 +99,8 @@ describe('admin order batch whitelist', () => {
   });
 
   it('runs each order independently and returns stable skip codes', async () => {
-    mocks.release
-      .mockResolvedValueOnce({ status: OrderStatus.RELEASED })
+    mocks.settle
+      .mockResolvedValueOnce({ status: OrderStatus.SETTLED })
       .mockRejectedValueOnce(
         new AdminOrderWorkflowError(
           'INVALID_STATUS',
@@ -111,13 +111,13 @@ describe('admin order batch whitelist', () => {
     const result = await runAdminOrderBatch(
       {
         requestId: 'batch-release-20260902',
-        command: 'RELEASE_AND_CREATE_PRINT',
+        command: 'SETTLE',
         items: [item('order-1'), item('order-2')],
       },
       admin,
     );
 
-    expect(mocks.release).toHaveBeenCalledTimes(2);
+    expect(mocks.settle).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ successCount: 1, skippedCount: 1 });
     expect(result.items).toEqual([
       { orderId: 'order-1', status: 'success', code: 'OK' },
@@ -179,8 +179,8 @@ describe('admin order batch whitelist', () => {
 
   it('preserves prior successes and stops with a distinct observable failure on unknown errors', async () => {
     const databaseFailure = new Error('connection terminated unexpectedly');
-    mocks.release
-      .mockResolvedValueOnce({ status: OrderStatus.RELEASED })
+    mocks.settle
+      .mockResolvedValueOnce({ status: OrderStatus.SETTLED })
       .mockRejectedValueOnce(databaseFailure);
     const consoleError = vi
       .spyOn(console, 'error')
@@ -189,7 +189,7 @@ describe('admin order batch whitelist', () => {
     const result = await runAdminOrderBatch(
       {
         requestId: 'batch-release-unknown-error',
-        command: 'RELEASE_AND_CREATE_PRINT',
+        command: 'SETTLE',
         items: [item('order-1'), item('order-2'), item('order-3')],
       },
       admin,
@@ -214,7 +214,7 @@ describe('admin order batch whitelist', () => {
         },
       ],
     });
-    expect(mocks.release).toHaveBeenCalledTimes(2);
+    expect(mocks.settle).toHaveBeenCalledTimes(2);
     expect(consoleError).toHaveBeenCalledWith(
       '[admin-order-batch] unexpected item failure',
       expect.objectContaining({
@@ -224,5 +224,12 @@ describe('admin order batch whitelist', () => {
       }),
     );
     consoleError.mockRestore();
+  });
+  it('refuses old batch release clients without mutating any selected order', async () => {
+    const result = await runAdminOrderBatch({ requestId: 'old-release-request', command: 'RELEASE_AND_CREATE_PRINT', items: [item('a'), item('b')] }, admin);
+    expect(result).toMatchObject({ successCount: 0, skippedCount: 2 });
+    expect(result.items.every(row => row.code === 'INVALID_INPUT')).toBe(true);
+    expect(mocks.release).not.toHaveBeenCalled();
+    expect(mocks.createPrint).not.toHaveBeenCalled();
   });
 });

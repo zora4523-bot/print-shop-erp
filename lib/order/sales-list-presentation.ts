@@ -15,7 +15,7 @@ const SALES_ORDER_STATUS_REGISTRY: StatusRegistry<OrderStatus> = {
   [OrderStatus.DRAFT]: { label: '草稿', tone: 'neutral' },
   [OrderStatus.PENDING_FACTORY]: { label: '待工厂处理', tone: 'info' },
   [OrderStatus.REJECTED]: { label: '已驳回', tone: 'danger' },
-  [OrderStatus.CONFIRMED]: { label: '待下发生产', tone: 'success' },
+  [OrderStatus.CONFIRMED]: { label: '待安排', tone: 'success' },
   [OrderStatus.ON_HOLD]: { label: '已暂停', tone: 'warning', dot: true },
   [OrderStatus.RELEASED]: { label: '生产中', tone: 'info', dot: true },
   [OrderStatus.FOILING]: { label: '生产中', tone: 'info', dot: true },

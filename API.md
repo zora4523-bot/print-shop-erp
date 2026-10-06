@@ -7,6 +7,16 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 管理员经营分析 CSV（本地候选，2026-10-03）
+
+`GET /api/owner/analytics/export`：会话经 `requireSessionPermission('report:all')` 核对当前账号，仅管理员可导出。
+
+- `view=overview|orders|costs|structure|inventory`；默认 overview。`from/to=YYYY-MM-DD` 使用上海自然日、包含结束日期，默认本月截至今天，最多 366 天。
+- `sales` 为销售用户 ID；`customer/paper/supplier` 为全称；`craft` 为工艺枚举或字典 ID；`q` 为工单或物料关键词。采购库存不应用销售/客户/工艺/纸张条件；总览仅应用日期与销售。`inventoryKind=purchases|receipts|stock` 选择采购库存明细，默认 purchases。
+- `page` 只影响页面；CSV 导出全部匹配明细和汇总。每类源记录最多 30,000 条（成本含关联重做）；超限、日期/视图/页码非法或重复参数返回 400，提示缩小范围，不输出截断合计。未登录、账号停用或角色无权限返回 401。数据库异常不伪装成空报表。
+- 返回 UTF-8 BOM CSV，附件下载、`private, no-store`、`nosniff`；Decimal 金额两位、原单价四位，文本转义并防公式注入，未知金额标为“待核对”。当前库存和当前待收款不代表所选历史日余额。
+- 分析使用只读、RepeatableRead 事务和查询超时；不创建/修改订单、账单、工资、采购或库存记录。日期和金额口径详见[经营概览方案](docs/audits/2026-10-03-analytics-refactor-plan.md)。
+
 ## 2026-10-01 导出展示名称
 
 月账单 XLSX 的工作表为“月账单 / 工单明细 / 跨月抵扣 / 收款回执”，外部销售账号、金额及日期列的取值边界不变；工单状态使用与账单页面相同的业务名称，未知状态不回显原始枚举。计件结算 XLSX 的前两表为“计件结算 / 报工明细”，工序、条目和单位使用业务名称；规则校验码连同结算/报工编号与工价版本放在独立“核验记录”表。已生成文件不重写，下载地址、权限、金额精度和源数据版本约束不变。
@@ -24,7 +34,7 @@ applies_to: repository source at last_verified
 
 `actions/production-dispatch.ts` 提供五个写入口。返回 `{ok,message}`，成功或幂等重放刷新管理工单、师傅任务/工资及工资结算页面；销售与管理员使用同一 `/orders` 权威状态。
 
-- `publishProductionDispatchAction(previous, form)`：`production:manage`（仅 ADMIN）。payload 为 requestKey、1–20 个订单的 id/revision/version/assignments（任务来源键→师傅）；最多 100 项。同事务复核、下发、生成打印待办和记录单一归属。只接收已确认或有效生产中的订单；旧版或已有历史报工不能静默转入新流程。完全相同批次可重放。转派前需在生产记录核实原师傅未生产；已打印的任务更换负责人时追加待重印任务；已有待打印任务复用，不重复创建。
+- `publishProductionDispatchAction(previous, form)`：`production:manage`（仅 ADMIN）。payload 为 requestKey、1–20 个订单的 id/revision/version/assignments（任务来源键→师傅）；最多 100 项。同事务复核、准备工序、生成打印待办和记录单一归属。接收满足校验的已确认／有效生产中订单，以及可自动准备的 `PENDING_FACTORY / SUBMITTED` 存量单；旧版或已有历史报工不能静默转入新流程。完全相同批次可重放。转派前需在生产记录核实原师傅未生产；已打印的任务更换负责人时追加待重印任务；已有待打印任务复用，不重复创建。
 - `registerProductionCompletionAction(previous, form)`：jobId/revision/quantity/mode/reason/workDate，另支持 itemQuantities、notActuallyProduced、confirmedSettledDay、reviewRevision。COMPLETE 用 `task:report`，且为当前启用的归属师傅；BACKFILL/APPROVE/REJECT/RECOVER 必须当前启用 ADMIN。数量非默认值产生申请并冻结计价依据；APPROVE 可据证核定正确数量，保留原申请量、师傅及工作日。REJECT 仅用于明确确认未实际生产，需理由及 notActuallyProduced=true；已生产不能用驳回取消工资。补登记在暂停/待审期间可处理，但交付等待恢复/最后一条申请关闭。旧版或关闭工单使用 RECOVER 并校验核对修订，不能恢复旧扫码入口；后续生产冲突持久标记，生产及工资不写入。原日已结算时管理员明确确认后仅登记生产事实及待补工资，不改原账；普通提成及更正仍禁止写原日。
 - `reviewProductionFactAction(previous, form)`：ADMIN；jobId/jobRevision/reviewRevision（首次 -1）/mode/reason。UNPRODUCED 须 notActuallyProduced=true 且无待审批数量；OPEN 保留原任务下发以来的待核对期间；DISMISS_WAGE 仅据证关闭待补发义务，保留已完成生产和审计。INCLUDED_LATER 须原师傅/原日/相同实物/数量已含在后续完成，提交 relatedJobId、quantity、workDate、confirmedIncluded=true，旧申请量必须全部包含，关联累计量不能超出后续完成量；关闭旧义务但不新增产量工资。核对均检查工单/任务/核对修订；内部证据不进入销售 DTO。
 
@@ -247,9 +257,9 @@ Server Actions 位于 [`actions/`](./actions/)，不是稳定的外部 HTTP API�
 - `previewOrderChangeRequestPricingAction` 接受 `requestId`、可选的 `expectedPriceRevision` 与 `pendingChargeResolutions`。人工物流决议只适用于本次预览实际待核的收费，需携带收费业务键、发货记录、预览数量、省份、金额和依据。
 - 批准修改须提交 `expectedPriceRevision`；涉及重新计价时，还须将预览返回的 `quoteToken` 作为 `expectedQuoteToken` 提交（`order-change-approval-v1:` 前缀）。服务端持有订单锁后重新核对报价、版本及人工收费内容，变化时拒绝写入并要求刷新预览。无需重新计价的修改不提交报价令牌；拒绝申请不依赖价格版本。
 - 取消参考结算预览返回原参考金额、明细及价目依据，并附 `priceRevision`、`quoteToken`。批准取消必须提交对应的 `expectedPriceRevision` 与 `expectedQuoteToken`；服务端持订单锁重算，核对材料补核、产量、发布价目与参考金额是否变化。过期预览拒绝批准；人工调整结算额仍保留原有依据要求。
-- `confirmFactoryOrderAction` 除工单修订号与生产版本外，要求提交 `expectedQuoteToken`：外部销售工单使用当前价预览的 `create-order-quote-v2:` 令牌，其他结算类型显式传 `null`。
+- `confirmFactoryOrderAction` 的 `expectedQuoteToken` 仅保留旧请求解析兼容；自动准备使用已保存费用，不要求最新目录报价令牌。工单修订号、生产版本及其他守卫保留，详见下文「工单准备与生产安排」。
 - 以上令牌是预览一致性证据，不授予权限，也不替代资源范围、状态机及服务端金额校验。
-- `finalizeOrderPricingAction` 将生产工序生成的预期校验失败返回为 `{ status: 'error', message }`，核价表单保留在当前页面。款式或包装信息缺失时不确认价格、不生成工序；事务继续整体回滚，不返回内部 `detail`，也不执行成功路径的缓存失效。未知异常仍交给错误边界处理。
+- `finalizeOrderPricingAction` 成功结果包含 `productionReadiness`：终价可以先保存，资料不齐时返回 `ready: false` 与具体问题，并记录 `PRICING_CONFIRMED_NOT_READY`；不能把核价成功等同于已经可生产。若实际工序物化抛出预期异常，则事务整体回滚并返回 `{ status: 'error', message }`，不暴露内部 `detail`。未知异常仍交给错误边界处理。
 
 ## 兼容性规则
 
@@ -281,12 +291,13 @@ pnpm test --run
 预览不持久化；保存把资料修改及管理员批准的款式/交期修改纳入同一事务。`UPDATE` 款式支持已有包装组的 `pack` 每包数量，服务端按分袋组成重算袋数及费用。待核运费沿用 `pendingChargeResolutions`，携带票 ID、序号、投影数量、省份、金额与依据；重新预览与保存使用相同核定数据。纯资料或交期修改不接受重算运费。详细约束与演示稿差异见 [管理端编辑工单](./docs/admin-order-edit-design.md)。
 
 
-### 工单准备与生产下发（2026-09-08）
+### 工单准备与生产安排（2026-10-03）
 
-- 创建动作成功响应的可选 `readyForProduction` 表示是否已进入待下发，用于成功页提示；未提供时不得视为可生产。
-- `submitOrder`、人工核价及管理员保存/修改审批完成后，在原事务自动检查保存价与生产事实；完整订单返回或进入 `CONFIRMED`（待下发），不提前创建生产/打印任务。异常订单保留待处理。
-- `releaseFactoryOrderAction` 与批量 `RELEASE_AND_CREATE_PRINT` 接受满足准备校验的 `PENDING_FACTORY / SUBMITTED` 存量单。单张工单界面传 `createPrint: false`，事务仅完成准备和下发，不读取或创建打印任务；省略该可选布尔值时保留组合下发与首次打印行为，供现有批量调用使用。仍限 ADMIN，保留 revision、workOrderVersion、请求键校验；独立下发不使用打印任务作为重放凭证，过期版本按原规则拒绝，需刷新核对后再操作。领域结果 `printJobId` 在不创建打印时为 null。
-- `confirmFactoryOrderAction` 保留兼容：使用已保存费用进入待下发；`expectedQuoteToken` 仅为旧请求兼容字段，不触发最新目录报价，工单版本仍须匹配。新 UI 不再展示独立确认步骤。
+- 创建动作的可选 `readyForProduction` 保留兼容；成功页以“已提交”提示，不据此承诺生产完成。
+- `submitOrder`、人工核价及管理员保存/修改审批完成后，在原事务自动检查保存价与生产事实。厂内待安排、寄样待发货、无需派工的工单自动进入履约；异常订单保留具体问题。
+- `releaseFactoryOrderAction` 保留鉴权和输入校验，合法旧请求返回 `status: error` 并提示改用生产安排或寄样发货，不写入。批量 `RELEASE_AND_CREATE_PRINT` 保留解析兼容，每项返回 `INVALID_INPUT`，不创建工序或打印任务。
+- `publishProductionDispatchAction` 接受满足校验的 `PENDING_FACTORY / SUBMITTED` 存量单，在同一事务准备并安排师傅、创建打印任务。仍执行管理员、版本、待审批、工艺、师傅资格、历史报工和幂等校验，每批 1–20 张且最多 100 项，整批原子提交。寄样与无厂内任务不能通过排单推进。
+- `confirmFactoryOrderAction` 保留兼容：使用已保存费用自动进入对应履约流程；`expectedQuoteToken` 仅为旧请求兼容字段，不触发最新目录报价，工单版本仍须匹配。新 UI 不再展示独立确认步骤。
 - 下发不形成财务结算；后续费用沿用既有更正接口，已结算记录不能覆盖。
 
 ### 管理端工单读取的工艺标识
@@ -454,9 +465,9 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 
 - 工作台以 `quoteSampleOrderAction` 使用既有 `order:create` 权限和已发布价表读取器；返回整单 `total`（未知为 null）、`knownTotal`、快递/包装明细、可选包装规则及 `quoteToken`。独立 Server Action 位于现有建单报价模块，不增加 REST 路由。
 - `createOrderAction` 接受 `purpose=STANDARD|SAMPLE_SHIPMENT|PROOF` 和仅寄样可用的 `samplePackagingRuleCode`。不传用途兼容普通单。`pricingMode` 由服务端推导；外部销售仍不能提交金额、状态、价目版本或管理员定价字段。用途在建单后不可切换。
-- 特殊用途先存无价格草稿，再复用 `submitOrderAction(orderId,quoteToken)` 事务、所有权校验及报价变化响应。寄样保留真实数量，不要求生产工艺或设计图；打样须真实工艺与设计图片。寄样包装取当前已发布的最小数量档或指定有效规则，未录实际重量的寄付运费待核价。
+- 特殊用途先存无价格草稿，再复用 `submitOrderAction(orderId,quoteToken)` 事务、所有权校验及报价变化响应。寄样保留真实数量，不要求生产工艺或设计图；打样须真实工艺与设计图片。寄样包装取当前已发布的最小数量档或指定有效规则。2026-09-30 起，寄付样品按收件省份与物流价目首重默认计费并自动确认；缺少有效价目或必要依据时仍须处理，超重由管理员在履约费用调整，不能套用到顺丰到付。
 - 打样复用 `previewOrderPricingReviewAction` / `finalizeOrderPricingAction`，仅管理员填写单一「整单总价」。账本唯一收费键 `ORDER:PROOF:TOTAL`（SAMPLE_FEE）；款式、入袋加工均含在整单价内，保持零分项。空值、负数、超限、额外加工费及过期版本拒绝；明确 0 元须有定价依据。确认后的打样在下发/生产/打包阶段可沿此入口调整整单价，已结算禁止调整。普通工单核价状态范围保持原样。
-- 寄样下发进入 PACKING，不生成加工工序或计件工资；打样沿正常生产流程。打样发货不重算物流应收，附加收费/顺丰到付金额更正入口不适用。寄样沿原价目版本补录实际重量与运费，包装规格保持选中档位。
+- 寄样在费用与资料校验通过后自动进入 PACKING，直接登记发货，不需下发或安排师傅，也不生成加工工序或计件工资；打样沿正常生产流程。打样发货不重算物流应收，附加收费/顺丰到付金额更正入口不适用。寄样沿原价目版本补录实际重量与运费，包装规格保持选中档位。
 - 首版样品用途的生产款式修改申请暂不开放；收件信息、备注、交期和取消沿原权限路径。变更生产款式应新建工单，保留原单历史。
 
 实现、测试及本地操作见 [寄样与打样开发任务](./docs/寄样与打样开发任务.md)。

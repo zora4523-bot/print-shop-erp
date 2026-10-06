@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { currentDispatchTargets } from '@/lib/production/dispatch-targets';
 import { operationTypeForReporterAccount } from '@/lib/production/reporter-operation-lane';
 import { progressCraftIdsForReporter } from '@/lib/production/progress-reporter-lane';
+import { DispatchPlanValidationError } from './dispatch-plan-error';
 
 type Client = typeof db;
 
@@ -20,6 +21,7 @@ type DispatchPageOrder = {
   revision: number;
   version: number;
   tasks: DispatchPageTask[];
+  issues?: string[];
 };
 
 /**
@@ -37,7 +39,31 @@ export async function loadDispatchPageOrders(ids: string[], client: Client = db)
 
   const rows: DispatchPageOrder[] = [];
   for (const id of ids) {
-    const { order, targets } = await currentDispatchTargets(client, id);
+    let current;
+    try {
+      current = await currentDispatchTargets(client, id);
+    } catch (error) {
+      if (!(error instanceof DispatchPlanValidationError)) throw error;
+      rows.push({ ...error.order, tasks: [], issues: error.issues });
+      continue;
+    }
+    const { order, targets } = current;
+    if (!targets.length) {
+      rows.push({ id, name: order.customName || order.orderNo, revision: order.revision, version: order.workOrderVersion, tasks: [],
+        issues: [order.purpose === 'SAMPLE_SHIPMENT' ? '寄样工单无需安排生产师傅，请在工单中处理发货。' : '此工单没有需要分配师傅的厂内任务，请在工单中处理外协、包装或发货。'] });
+      continue;
+    }
+    const issues: string[] = [];
+    if (order.status === 'CONFIRMED' && !['AUTO_CONFIRMED', 'ADMIN_CONFIRMED'].includes(order.pricingStatus)) issues.push('历史报价缺少完整核价依据，请先核对费用。');
+    if (!['PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED', 'RELEASED', 'FOILING', 'PACKING'].includes(order.status)) issues.push('当前状态不能安排生产，请返回工单处理。');
+    if (await client.orderChangeRequest.count({ where: { orderId: id, status: 'PENDING' } })) issues.push('有待审批的工单修改，请先处理变更。');
+    if (!order.simpleProduction && (await client.productionOperation.count({ where: { orderId: id, OR: [{ reports: { some: {} } }, { workOrderProgress: { some: {} } }, { carriedCompletedQty: { gt: 0 } }, { carriedWorkOrderProgressQty: { gt: 0 } }] } })
+      || await client.productionProgressStep.count({ where: { orderId: id, OR: [{ reports: { some: {} } }, { carriedCompletedQty: { gt: 0 } }] } })
+      || await client.productionTask.count({ where: { orderItem: { orderId: id }, OR: [{ status: { in: ['IN_PROGRESS', 'COMPLETED'] } }, { completedQty: { gt: 0 } }, { pieceworkAmount: { gt: 0 } }] } }))) issues.push('已有历史报工，请继续按原工序登记。');
+    if (issues.length) {
+      rows.push({ id, name: order.customName || order.orderNo, revision: order.revision, version: order.workOrderVersion, tasks: [], issues });
+      continue;
+    }
     const jobs = await client.productionJob.findMany({ where: { orderId: id, workOrderVersion: order.workOrderVersion } });
     rows.push({
       id,

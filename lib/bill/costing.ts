@@ -95,7 +95,8 @@ function directCost(order: CostOrder) {
   // cost evidence. Suppress them only when the corresponding authoritative
   // ledger actually has evidence; otherwise retain them as the historical
   // fallback instead of silently understating an old bill.
-  const hasAutomaticPiecework = hasOperationLedger || completedTasks.length > 0;
+  const hasPricedCompletionWages = (order.productionJobs ?? []).some(job => job.wages.some(wage => wage.amount !== null));
+  const hasAutomaticPiecework = hasOperationLedger || completedTasks.length > 0 || hasPricedCompletionWages;
   const hasAutomaticOutsource = postedOutsourceOrders.length > 0;
   const legacyPiecework = order.costEntries.reduce(
     (sum, entry) =>
