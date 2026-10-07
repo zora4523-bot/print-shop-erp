@@ -7,6 +7,10 @@ applies_to: repository source at last_verified
 
 # 系统架构
 
+## 历史财务快照（2026-10-07）
+
+历史订单分析由独立 `finance-dashboard` 仓库维护，ERP 只提供管理员入口与授权文件读取。`lib/historical-finance/files.ts` 从私有目录读取，`app/historical-finance/[file]/route.ts` 经现有会话与报表权限检查后返回文件。原有 ERP 经营概览继续读取业务数据库，两个数据范围分别展示，避免将历史订单重复计入。历史原始工作簿不进入 ERP 仓库或业务表。
+
 ## 2026-09-28 单负责人生产与工资边界
 
 `actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用事务内下发；`completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。

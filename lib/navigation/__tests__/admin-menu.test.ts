@@ -58,7 +58,7 @@ describe('getAdminMenuItems', () => {
       '规则',
       '系统管理',
     ]);
-    expect(items).toHaveLength(37);
+    expect(items).toHaveLength(38);
     expect(items.map((i) => i.label)).toEqual([
       '管理工作台',
       '经营概览',
@@ -71,6 +71,7 @@ describe('getAdminMenuItems', () => {
       '车间用料',
       '工时录入',
       '账单',
+      '历史财务看板',
       '薪资总览',
       '工序计件结算',
       '历史日薪档案',
@@ -437,7 +438,7 @@ describe('全局侧栏与模块目录', () => {
     const global = getAdminSidebarGroups(full);
     const rules = full.flatMap((group) => group.items).find((item) => item.href === '/owner/rules');
     expect(rules?.children).toHaveLength(11);
-    expect(flatten(global)).toHaveLength(26);
+    expect(flatten(global)).toHaveLength(27);
     expect(flatten(global).every((item) => !item.children?.length)).toBe(true);
     expect(getActiveAdminMenuHref('/owner/rules/customer-pricing', flatten(global), new URLSearchParams('section=machine'))).toBe('/owner/rules');
     expect(getActiveAdminMenuHref('/owner/rules/customer-pricing', rules!.children!, new URLSearchParams('section=machine'))).toBe('/owner/rules/customer-pricing?section=machine');
