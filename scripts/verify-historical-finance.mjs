@@ -40,7 +40,7 @@ try {
   for (const filename of filenames) {
     const anonymous = await check(filename, null, filename === 'index.html' ? 307 : 401);
     if (filename === 'index.html') {
-      const login = new URL(anonymous.headers.get('location'));
+      const login = new URL(anonymous.headers.get('location'), base);
       assert.equal(login.origin, base);
       assert.equal(login.pathname, '/login');
       assert.equal(login.searchParams.get('from'), '/historical-finance/index.html');
@@ -63,7 +63,7 @@ try {
   await check('data.js', `${token.slice(0, -8)}modified`, 401);
   await check('index.html', `${token.slice(0, -8)}modified`, 307);
   const returnPath = await check('index.html?view=materials', null, 307);
-  assert.equal(new URL(returnPath.headers.get('location')).searchParams.get('from'), '/historical-finance/index.html?view=materials');
+  assert.equal(new URL(returnPath.headers.get('location'), base).searchParams.get('from'), '/historical-finance/index.html?view=materials');
   const landing = await fetch(`${base}/owner/historical-finance`, { headers: { Cookie: `authjs.session-token=${token}` } });
   assert.equal(landing.status, 200);
   assert.match(await landing.text(), /打开看板/);

@@ -23,7 +23,8 @@ describe('historical finance authorization', () => {
     const input = { ...request('index.html?view=materials&from=https://untrusted.test'), auth } as NextAuthRequest;
     const response = await handleHistoricalFinance(input);
     expect(response.status).toBe(307);
-    const target = new URL(response.headers.get('location')!);
+    expect(response.headers.get('location')).toMatch(/^\/login\?/);
+    const target = new URL(response.headers.get('location')!, 'https://example.test');
     expect(target.origin).toBe('https://example.test');
     expect(target.pathname).toBe('/login');
     expect(target.searchParams.get('from')).toBe('/historical-finance/index.html?view=materials&from=https://untrusted.test');
@@ -31,6 +32,13 @@ describe('historical finance authorization', () => {
     expect(response.headers.get('vary')).toBe('Cookie');
     expect(mocks.session).toHaveBeenCalledWith(auth);
     expect(mocks.file).not.toHaveBeenCalled();
+  });
+  it('does not expose an internal upstream origin in a login redirect', async () => {
+    mocks.permission.mockRejectedValue(new UnauthorizedError('denied'));
+    mocks.session.mockResolvedValue(null);
+    const input = { ...request('index.html'), url: 'https://127.0.0.1:3000/historical-finance/index.html' } as NextAuthRequest;
+    const response = await handleHistoricalFinance(input);
+    expect(response.headers.get('location')).toBe('/login?from=%2Fhistorical-finance%2Findex.html');
   });
   it('does not send an authenticated account without permission into a login loop', async () => {
     mocks.permission.mockRejectedValue(new UnauthorizedError('denied'));

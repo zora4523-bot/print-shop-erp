@@ -20,7 +20,9 @@ export async function handleHistoricalFinance(request: NextAuthRequest): Promise
         login.searchParams.set('from', url.pathname + url.search);
         return new Response(null, {
           status: 307,
-          headers: { ...privateHeaders, Location: login.toString() },
+          // Next's internal request origin can contain the upstream hostname.
+          // A relative Location keeps the browser on the public HTTPS origin.
+          headers: { ...privateHeaders, Location: login.pathname + login.search },
         });
       }
       return new Response('当前账号无权查看经营数据，请联系管理员开通权限。', {
