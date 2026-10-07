@@ -9,6 +9,7 @@ import { Prisma } from '../../generated/prisma/client';
 const { dbMock } = vi.hoisted(() => {
   const mock = {
     user: { findUnique: vi.fn() },
+    pieceworkSettlement: { findUnique: vi.fn() },
     attendance: {
       upsert: vi.fn(),
       findUnique: vi.fn(),
@@ -64,6 +65,7 @@ function workerFixture(
 }
 
 beforeEach(() => {
+  dbMock.pieceworkSettlement.findUnique.mockReset().mockResolvedValue(null);
   dbMock.user.findUnique.mockReset();
   dbMock.attendance.upsert.mockReset().mockImplementation(async ({
     create,
@@ -91,6 +93,17 @@ beforeEach(() => {
   dbMock.$transaction.mockReset().mockImplementation(
     async (callback: (tx: typeof dbMock) => unknown) => callback(dbMock),
   );
+});
+
+it.each(['record', 'remove'])('日薪锁定后禁止考勤 %s', async action => {
+  dbMock.user.findUnique.mockResolvedValue(workerFixture());
+  dbMock.pieceworkSettlement.findUnique.mockResolvedValue({ id: 'locked' });
+  const request = action === 'record'
+    ? recordAttendance('worker-1', '2026-10-06', { normalHours: 8, otHours: 0 }, foremanActor)
+    : removeAttendance('worker-1', '2026-10-06', foremanActor);
+  await expect(request).rejects.toThrow('该日工资已锁定');
+  expect(dbMock.attendance.upsert).not.toHaveBeenCalled();
+  expect(dbMock.attendance.delete).not.toHaveBeenCalled();
 });
 
 describe('parseShanghaiMonth', () => {

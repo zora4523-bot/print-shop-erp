@@ -13,6 +13,8 @@ import { shanghaiDayRange } from './daily-common';
 import { reportUsesTieredFoilWage } from './tiered-foil-report';
 import { salaryIdentityLockKey } from './hourly-lock';
 import { listProductionWageObligations } from '@/lib/production/wage-obligations';
+import { DAILY_MINIMUM, dailyMinimumPay, hasMinimumProduction } from './daily-minimum';
+import { dailyMinimumAttendance } from './daily-minimum-attendance';
 import {
   pieceworkReportingDayGateLockKey,
   pieceworkSettlementLockKey,
@@ -117,7 +119,7 @@ export async function getPieceworkSettlementDay(input: {
     );
   }
   const { start, end } = shanghaiDayRange(input.workDate);
-  const [settlements, reports, productionWages, obligations] = await Promise.all([
+  const [settlements, reports, productionWages, obligations, attendance] = await Promise.all([
     db.pieceworkSettlement.findMany({
       where: {
         workDate: dateCol,
@@ -150,16 +152,21 @@ export async function getPieceworkSettlementDay(input: {
         id: true,
         reporterId: true,
         amount: true,
+        reportedCompletedQty: true,
         reporter: { select: { displayName: true, username: true } },
         operation: {
-          select: { orderId: true, operationType: true },
+          select: { id: true, orderId: true, operationType: true },
         },
       },
     }),
     db.productionWage.findMany({ where: { workDate: dateCol, settlementId: null, ...(input.reporterId ? { workerId: input.reporterId } : {}) },
-      include: { worker: { select: { displayName: true, username: true } }, job: { select: { orderId: true, label: true } } } }),
+      include: { worker: { select: { displayName: true, username: true } }, job: { select: { orderId: true, label: true, workDate: true, completedQty: true } } } }),
     listProductionWageObligations(db, { workDate: dateCol, workerId: input.reporterId }),
+    dailyMinimumAttendance(db, input.workDate, input.reporterId),
   ]);
+
+  // Status-filtered settlement rows cannot be used to discover unconsumed attendance.
+  const frozenWorkers = attendance.length ? await db.pieceworkSettlement.findMany({ where: { workDate: dateCol, reporterId: { in: attendance.map(row => row.workerId) } }, select: { reporterId: true } }) : [];
 
   const candidates = new Map<
     string,
@@ -210,6 +217,12 @@ export async function getPieceworkSettlementDay(input: {
     candidates.set(item.workerId, current);
   }
 
+  for (const row of attendance) {
+    if (frozenWorkers.some(worker => worker.reporterId === row.workerId) || candidates.has(row.workerId)) continue;
+    candidates.set(row.workerId, { reporterId: row.workerId, reporterName: row.worker.displayName, username: row.worker.username,
+      reportAmount: new Decimal(0), reportCount: 0, orderIds: new Set<string>(), operationCounts: {}, pendingPricing: 0 });
+  }
+
   return {
     workDate: input.workDate,
     settlements: settlements.map((row) => ({
@@ -220,7 +233,9 @@ export async function getPieceworkSettlementDay(input: {
       reporterId: row.reporterId,
       reporterName: row.reporterName,
       username: row.username,
-      reportAmount: row.reportAmount.toFixed(2),
+      ...(row.reportAmount.isNegative() ? { reportAmount: row.reportAmount.toFixed(2), payableAmount: row.reportAmount.toFixed(2), adjustmentAmount: '0.00', applies: false }
+        : dailyMinimumPay(row.reportAmount, input.workDate, input.workDate >= DAILY_MINIMUM.effectiveFrom && !frozenWorkers.some(item => item.reporterId === row.reporterId)
+          && (attendance.some(item => item.workerId === row.reporterId) || hasMinimumProduction(reports.filter(item => item.reporterId === row.reporterId), productionWages.filter(item => item.workerId === row.reporterId), input.workDate)))),
       reportCount: row.reportCount,
       orderCount: row.orderIds.size,
       operationCounts: row.operationCounts,
@@ -502,6 +517,7 @@ export async function lockPieceworkSettlement(input: {
         id: true,
         amount: true,
         entryType: true,
+        reportedCompletedQty: true,
         reportedAt: true,
         unit: true,
         priceBook: { select: { rules: { select: { operationType: true, unit: true, smallOrderAmount: true } } } },
@@ -512,12 +528,13 @@ export async function lockPieceworkSettlement(input: {
     });
     if (await tx.productionJob.count({ where: { workerId: input.reporterId, workDate: dateCol, status: 'REQUESTED' } })) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在生产数量待审批，请先处理对应工单');
     if (await tx.productionFactReview.count({ where: { job: { workerId: input.reporterId }, status: { in: ['OPEN', 'CONFLICT'] }, periodStart: { lte: dateCol }, periodEnd: { gte: dateCol } } })) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待核对历史生产，请从工资待办打开对应工单');
-    const productionWages = await tx.productionWage.findMany({ where: { workerId: input.reporterId, workDate: dateCol, settlementId: null }, include: { job: { select: { orderId: true, label: true } }, entries: { select: { id: true } } } });
+    const productionWages = await tx.productionWage.findMany({ where: { workerId: input.reporterId, workDate: dateCol, settlementId: null }, include: { job: { select: { orderId: true, label: true, workDate: true, completedQty: true } }, entries: { select: { id: true } } } });
     if (productionWages.some(wage => wage.amount === null)) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待补录提成，请先在工单详情补录');
-    if (reports.length === 0 && productionWages.length === 0) {
+    const attendance = await dailyMinimumAttendance(tx, input.workDate, input.reporterId);
+    if (reports.length === 0 && productionWages.length === 0 && attendance.length === 0) {
       throw new PieceworkSettlementError(
         'NO_REPORTS',
-        '该报工人在所选日期没有待结算的新工序报工',
+        '该师傅在所选日期没有待结算提成或符合日薪条件的出勤',
       );
     }
     if (reports.some((report) => report.operation.payrollReviewRequired)) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '存在待人工核定的工单提成，请先在工单详情核定');
@@ -529,9 +546,10 @@ export async function lockPieceworkSettlement(input: {
     );
     if (unfinished) throw new PieceworkSettlementError('SETTLEMENT_STATE_CONFLICT', '分档烫金工序尚未结束，请待工序完成或取消并核定提成后结算');
     const aggregate = aggregatePieceworkSettlementReports([...reports, ...productionWages.map(wage => ({ id: wage.id, amount: wage.amount!, entryType: 'PRODUCTION_WAGE', operation: { id: wage.jobId, orderId: wage.job.orderId, operationType: wage.job.label } }))]);
+    const pay = dailyMinimumPay(aggregate.reportAmount, input.workDate, input.workDate >= DAILY_MINIMUM.effectiveFrom && (attendance.length > 0 || hasMinimumProduction(reports, productionWages, input.workDate)));
     const lockedAt = await databaseNow(tx);
     const snapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       ledger: 'PRODUCTION_REPORT_AND_COMPLETION',
       productionWages: productionWages.map(wage => ({ id: wage.id, amount: wage.amount!.toString(), entryIds: wage.entries.map(entry => entry.id) })),
       legacyProductionTaskIncluded: false,
@@ -543,8 +561,10 @@ export async function lockPieceworkSettlement(input: {
       orderCount: aggregate.orderCount,
       operationCounts: aggregate.operationCounts,
       reportAmount: aggregate.reportAmount.toFixed(2),
-      adjustmentAmount: '0.00',
-      payableAmount: aggregate.reportAmount.toFixed(2),
+      adjustmentAmount: pay.adjustmentAmount,
+      payableAmount: pay.payableAmount,
+      dailyMinimum: { ...DAILY_MINIMUM, applies: pay.applies, eligibility: attendance.length ? 'ATTENDANCE' : 'PRODUCTION',
+        attendance: attendance.map(row => ({ id: row.id, workUnits: row.workUnits.toString(), role: row.roleSnapshot, workerType: row.workerTypeSnapshot })) },
       lockedAt: lockedAt.toISOString(),
     } satisfies Prisma.InputJsonObject;
 
@@ -554,8 +574,8 @@ export async function lockPieceworkSettlement(input: {
         workDate: dateCol,
         status: PieceworkSettlementStatus.LOCKED,
         reportAmount: aggregate.reportAmount.toFixed(2),
-        adjustmentAmount: '0.00',
-        payableAmount: aggregate.reportAmount.toFixed(2),
+        adjustmentAmount: pay.adjustmentAmount,
+        payableAmount: pay.payableAmount,
         snapshot,
         lockedAt,
         items: {
@@ -627,6 +647,9 @@ export async function lockPieceworkSettlementsForDate(input: {
     const manualReporters = await tx.productionWage.findMany({ where: { workDate: parseStrictYmd(input.workDate)!, settlementId: null }, distinct: ['workerId'], select: { workerId: true, worker: { select: { displayName: true } } } });
     for (const wage of manualReporters) if (!reporters.some(row => row.reporterId === wage.workerId)) reporters.push({ reporterId: wage.workerId, reporter: wage.worker });
     for (const item of await listProductionWageObligations(tx, { workDate: parseStrictYmd(input.workDate)! })) if (!reporters.some(row => row.reporterId === item.workerId)) reporters.push({ reporterId: item.workerId, reporter: { displayName: item.workerName } });
+    const attendance = await dailyMinimumAttendance(tx, input.workDate);
+    const frozen = attendance.length ? await tx.pieceworkSettlement.findMany({ where: { workDate: parseStrictYmd(input.workDate)!, reporterId: { in: attendance.map(row => row.workerId) } }, select: { reporterId: true } }) : [];
+    for (const row of attendance) if (!frozen.some(item => item.reporterId === row.workerId) && !reporters.some(item => item.reporterId === row.workerId)) reporters.push({ reporterId: row.workerId, reporter: row.worker });
     return { now, reporters };
   });
   const settled: PieceworkSettlementReceipt[] = [];

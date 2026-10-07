@@ -18,6 +18,7 @@ import {
   formatDateTimeShanghai,
 } from '@/lib/format/dates';
 import { getPieceworkSettlementDetail } from '@/lib/salary/piecework-settlement';
+import { settlementAdjustmentLabel } from '@/lib/salary/daily-minimum';
 import { MarkPieceworkSettlementPaidForm } from '@/components/business/salary/PieceworkSettlementActions';
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -87,7 +88,7 @@ export default async function PieceworkSettlementDetailPage({
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <Summary label="状态" value={<SettlementStatus status={settlement.status} />} />
         <Summary label="报工金额" value={formatMoney(settlement.reportAmount)} />
-        <Summary label="调整" value={formatMoney(settlement.adjustmentAmount)} />
+        <Summary label={settlementAdjustmentLabel(settlement.snapshot)} value={formatMoney(settlement.adjustmentAmount)} />
         <Summary label="应发" value={formatMoney(settlement.payableAmount)} strong />
         <Summary label="明细数" value={`${settlement.items.length + settlement.productionWages.length} 条`} />
         <Summary

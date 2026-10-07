@@ -11,6 +11,7 @@ import { orderCascadeLockKey } from '@/lib/order/locks';
 import { salaryIdentityLockKey } from '@/lib/salary/hourly-lock';
 import { pieceworkReportingDayGateLockKey, pieceworkSettlementLockKey } from '@/lib/salary/piecework-lock';
 import { employmentCoversDate } from '@/lib/salary/employment';
+import { lateDailyMinimumEvidence } from '@/lib/salary/late-daily-minimum';
 import { dispatchProductionCompletionNotification } from '@/lib/production-completion';
 import { completionPricingBasis } from './completion-pricing';
 import { priceCompletionQuantity } from './completion-wage';
@@ -152,7 +153,8 @@ export async function registerProductionCompletionInTx(tx: Prisma.TransactionCli
       fulfilledQuantities: Object.fromEntries(items.map(item => [item.id, String(item.quantity)])) },
     recordedById: actor.id, recordSource: options.recordSource ?? (input.mode === 'COMPLETE' ? 'WORKER_SCAN' : input.mode === 'BACKFILL' ? 'ADMIN_BACKFILL' : input.mode === 'RECOVER' ? 'HISTORICAL_REVIEW' : 'QUANTITY_APPROVAL'), revision: { increment: 1 } } });
   if (settlement && job.operationId) {
-    const evidence = { ...wageSnapshot, settlementId: settlement.id, expectedAmount: amount, paidAmount: '0' };
+    const evidence = { ...wageSnapshot, settlementId: settlement.id,
+      ...await lateDailyMinimumEvidence(tx, { workerId: job.workerId, workDate, jobId: job.id, amount, settlement }) };
     await tx.productionFactReview.upsert({ where: { jobId: job.id }, create: { jobId: job.id, jobRevision: job.revision + 1, status: 'WAGES_DUE', periodStart: workDate, periodEnd: workDate, reason: input.reason, evidence, createdById: actor.id, resolvedById: actor.id, resolvedAt: now },
       update: { jobRevision: job.revision + 1, status: 'WAGES_DUE', periodStart: workDate, periodEnd: workDate, reason: input.reason, evidence, resolvedById: actor.id, resolvedAt: now, revision: { increment: 1 } } });
   } else {

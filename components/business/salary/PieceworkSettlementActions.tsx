@@ -60,8 +60,8 @@ export function LockPieceworkSettlementForm({
         }
         formId={formId}
         disabled={pending}>
-        <ConfirmActionDialog action={`结算 ${reporterName} ${workDate} 的计件工资`} changes={[{label: `${reportCount} 条报工`, old: "未结算", new: formatMoney(amount)}]} consequences={[
-          '锁定后不能删除或重建明细；更正须通过追加冲正报工处理。',
+        <ConfirmActionDialog action={`结算 ${reporterName} ${workDate} 的工资`} changes={[{label: reportCount ? `${reportCount} 条报工及适用日薪` : '出勤日薪', old: "未结算", new: formatMoney(amount)}]} consequences={[
+          '锁定后当日考勤和结算明细不可修改，补登记须核对补发差额。',
         ]} confirmText="锁定结算" />
       </ConfirmActionController>
       {error ? (
@@ -102,7 +102,7 @@ export function LockPieceworkSettlementDayForm({
         disabled={pending || candidateCount === 0}>
         <ConfirmActionDialog action={`锁定 ${workDate} 的全部待结算报工？`} changes={[]} consequences={[
           `结算 ${candidateCount} 人的当日报工，结算明细不可修改。`,
-          '结算金额以各条报工金额为准。',
+          '当日提成合计后，按适用日薪规则补足；仅有出勤的师傅也会结算。',
         ]} confirmText="确认批量锁定" />
       </ConfirmActionController>
       {error ? (

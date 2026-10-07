@@ -302,9 +302,12 @@ postgres.sequential('piecework cancellation · real isolated PostgreSQL', () => 
     expect(await db.productionReport.count({ where: { operationId: op.id } })).toBe(0);
   });
 
-  it('historical reports, rates and locked settlement amounts stay byte-equivalent', async () => {
+  it.each([
+    { reportedAt: '2026-10-05T02:00:00.000Z', payable: '1.23', supplement: '0.00' },
+    { reportedAt: '2026-10-06T02:00:00.000Z', payable: '100.00', supplement: '98.77' },
+  ])('historical reports, rates and locked settlement amounts stay byte-equivalent ($reportedAt)', async ({ reportedAt, payable, supplement }) => {
     const workerId = await worker(); const draft = await createPersonalPieceworkDraft(workerId, actor); const c = await client();
-    const at = new Date(Date.now() - 86400000); const op = await operation();
+    const at = new Date(reportedAt); const op = await operation();
     try {
       await c.query('BEGIN'); await c.query("SELECT pg_advisory_xact_lock(hashtext('print-shop-erp:piecework-price-book:publish'))");
       await c.query('UPDATE "PieceworkPriceBook" SET "useUnifiedRates"=false WHERE id=$1', [draft.id]);
@@ -319,7 +322,10 @@ postgres.sequential('piecework cancellation · real isolated PostgreSQL', () => 
     const before = await snapshot();
     const s = await publish(workerId, future(10)); await cancelPieceworkSchedule(await input(workerId, s.id), actor);
     expect(await snapshot()).toEqual(before);
-    expect(before.settlement.payableAmount.toFixed(2)).toBe('1.23'); expect(before.settlement.items).toHaveLength(1);
+    expect(before.settlement.payableAmount.toFixed(2)).toBe(payable);
+    expect(before.settlement.reportAmount.toFixed(2)).toBe('1.23');
+    expect(before.settlement.adjustmentAmount.toFixed(2)).toBe(supplement);
+    expect(before.settlement.items).toHaveLength(1);
   });
 
   it('SQL reporting takes the order boundary before shared publication and cannot block cancellation while waiting for an order', async () => {

@@ -139,6 +139,18 @@ export const ADMIN_MODULES: readonly AdminModuleMetadata[] = [
     requiredPermission: 'report:all',
   },
   {
+    id: 'owner.historicalFinance',
+    label: '历史财务看板',
+    routeBase: '/owner/historical-finance',
+    iconName: 'TrendingUp',
+    breadcrumbLabel: '历史财务看板',
+    menuSection: 'finance',
+    status: 'implemented',
+    menuOrder: 35,
+    menuRoles: [Role.ADMIN],
+    requiredPermission: 'report:all',
+  },
+  {
     id: 'owner.orders',
     label: '工单列表',
     routeBase: '/orders',

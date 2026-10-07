@@ -7,6 +7,14 @@ applies_to: repository source at last_verified
 
 # API 与 Server Action 契约
 
+## 历史财务看板文件（2026-10-07）
+
+`GET /historical-finance/[file]` 使用 ERP 会话及 `requireSessionPermission('report:all')`，每次核对数据库中的账号状态与角色；只有当前有效管理员可读。入口为 `/owner/historical-finance`，位于财务结算菜单。
+
+HTML、JS、CSS、CSV、Markdown 全部使用同一授权，返回 `Cache-Control: private, no-store`。直接打开 `/historical-finance/index.html` 时，未登录、会话过期或账号已停用/删除者返回 307 至 `/login?from=<原站内路径及查询参数>`，登录成功后返回看板；有效账号没有权限时返回 403，不跳登录，避免循环。JS、CSS、CSV、Markdown 等文件的未授权请求仍返回 401。已授权请求中不存在、不合法路径与符号链接返回 404。仅接受单层小写文件名和上述扩展名。数据库异常或目录配置缺失按服务异常处理，不开放读取。
+
+`HISTORICAL_FINANCE_DIR` 是服务器私有绝对目录，不能放在 `public/`，不能通过 Nginx alias 或对象存储另开公开地址。该接口只读历史快照，不导入 ERP 业务表。数据说明和部署步骤见 [部署指南](docs/部署指南.md#历史财务看板)。
+
 ## 管理员经营分析 CSV（本地候选，2026-10-03）
 
 `GET /api/owner/analytics/export`：会话经 `requireSessionPermission('report:all')` 核对当前账号，仅管理员可导出。
@@ -20,6 +28,8 @@ applies_to: repository source at last_verified
 ## 2026-10-01 导出展示名称
 
 月账单 XLSX 的工作表为“月账单 / 工单明细 / 跨月抵扣 / 收款回执”，外部销售账号、金额及日期列的取值边界不变；工单状态使用与账单页面相同的业务名称，未知状态不回显原始枚举。计件结算 XLSX 的前两表为“计件结算 / 报工明细”，工序、条目和单位使用业务名称；规则校验码连同结算/报工编号与工价版本放在独立“核验记录”表。已生成文件不重写，下载地址、权限、金额精度和源数据版本约束不变。
+
+2026-10-06 每日保底补充：现有计件锁定 Action 同时发现有出勤但无报工的师傅，单人和批量结算按 SPEC §K.1 计算 100 元日薪。预览和回执的 `reportAmount` 是提成，`adjustmentAmount` 是补足，`payableAmount` 是应发。导出“调整”列标为“日薪补足 / 历史调整”，保持列位置和金额类型；零报工日薪也有汇总行。考勤 Action 拒绝修改新规则生效日起已经锁定工资的日期，成功修改会刷新计件结算页。锁定权限、本人读取范围及幂等请求不变。
 
 ## 2026-09-30 外部销售账单与导出
 

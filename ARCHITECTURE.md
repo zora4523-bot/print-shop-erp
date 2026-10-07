@@ -15,6 +15,10 @@ applies_to: repository source at last_verified
 - `lib/production/dispatch.ts` 在同一事务准备厂内工序、保存单负责人和打印请求；内部 release 物化仍被使用，但不再暴露独立管理员下发步骤。自动准备不产生结算，也不绕过存量报工守卫。
 - `/owner/analytics` 与 CSV 导出共用 `lib/analytics/filters.ts`、`service.ts` 及分视图报表；五个视图定义于 `views.ts`。分析只读，页面分页与全量导出采用同一筛选口径；不把现金收款、加工费、出账或当前库存混成同一日期指标。
 
+## 历史财务快照（2026-10-07）
+
+历史订单分析由独立 `finance-dashboard` 仓库维护，ERP 只提供管理员入口与授权文件读取。`lib/historical-finance/files.ts` 从私有目录读取，`app/historical-finance/[file]/route.ts` 经现有会话与报表权限检查后返回文件。原有 ERP 经营概览继续读取业务数据库，两个数据范围分别展示，避免将历史订单重复计入。历史原始工作簿不进入 ERP 仓库或业务表。
+
 ## 2026-09-28 单负责人生产与工资边界
 
 `actions/production-dispatch.ts` 负责权限、输入验证、用户结果和路径失效；`lib/production/dispatch.ts` 负责排单事务，复用内部工序准备与状态推进；`lib/production/completion-registration.ts` 负责数量申请/审批、实际完成及自动工资快照；`lib/production/revision-jobs.ts` 只追加版本任务/独立重做归属；`lib/salary/production-wages.ts` 管理最终提成与差额流水。共享完成/发货门禁根据权威 `Order.simpleProduction` 排除包装登记，外协、核价和权限边界保留。
@@ -232,6 +236,8 @@ worker 逐单复用生产打印模板，以 pdf-lib 合并页，进度更新遵�
 
 发布和草稿保存使用同一工价锁；报工取得该锁的共享模式，再确定报工时间并保存取价依据。
 旧日薪模块仅提供历史查询与导出，不能重新启用为新计件写入来源。
+
+2026-10-06 起的每日保底在 `piecework-settlement` 内汇总后计算，规则版本由 `daily-minimum` 定义，考勤依据由 `daily-minimum-attendance` 读取原身份快照。考勤写入与结算均先持有师傅身份锁，结算冻结后不再变更原日考勤。补登记在同一师傅／日锁内由 `late-daily-minimum` 按原应发及先前补登记计算增量；明细和导出继续消费不可变结算值，具体规则见 SPEC §K.1。
 
 局部工序的计薪次数由 `production-payroll-pass` Action 授权，
 `lib/production/payroll-pass-admin.ts` 复核管理员、当前工序版本与状态，使用与报工一致的订单→工序锁。

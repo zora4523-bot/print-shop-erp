@@ -3,6 +3,7 @@ import { listWorkerSettlementPage } from '@/lib/salary/worker-settlement-page';
 import { WorkerPendingReports } from '@/components/business/salary/WorkerPendingReports';
 import { AdminPagination } from '@/components/business/admin/AdminDataTable';
 import Decimal from 'decimal.js';
+import { settlementAdjustmentLabel } from '@/lib/salary/daily-minimum';
 import Link from 'next/link';
 import Form from 'next/form';
 import { cache, Suspense } from 'react';
@@ -192,7 +193,7 @@ async function SettlementList(props: SettlementSectionProps) {
                       </Badge>
                     </div>
                     <p className="worker-wrap-anywhere mt-2 text-sm text-muted-foreground">
-                      报工金额 {formatMoney(settlement.reportAmount)} · 调整{' '}
+                      报工金额 {formatMoney(settlement.reportAmount)} · {settlementAdjustmentLabel(settlement.snapshot)}{' '}
                       {formatMoney(settlement.adjustmentAmount)}
                     </p>
                   </div>

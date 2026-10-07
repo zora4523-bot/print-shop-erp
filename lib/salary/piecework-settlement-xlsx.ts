@@ -150,7 +150,7 @@ export async function buildPieceworkSettlementWorkbook(
     '账号',
     '报工条数',
     '报工金额',
-    '调整',
+    '日薪补足 / 历史调整',
     '应发',
     '状态',
     '锁定时间',

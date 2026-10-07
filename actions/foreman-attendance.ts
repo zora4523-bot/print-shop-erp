@@ -19,6 +19,7 @@ function revalidateAttendanceAndPayrollPaths(): void {
   // A real attendance change invalidates the unpaid hourly derivative in the
   // same transaction, so both owner and worker payroll reads must refresh.
   revalidatePath('/owner/salary');
+  revalidatePath('/owner/salary/piecework');
   revalidatePath('/owner/salary/hourly');
   revalidatePath('/worker/salary');
 }

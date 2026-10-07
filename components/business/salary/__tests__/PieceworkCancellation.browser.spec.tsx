@@ -19,6 +19,31 @@ beforeEach(() => {
   host = document.createElement('div'); host.className = 'p-4'; document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
+it('统一工价说明数量来源、包含边界、个人工价优先及包装单位', async () => {
+  flushSync(() => root.render(<PieceworkPriceBookForm books={[]} now="2026-10-06T00:00:00.000Z" />));
+  expect(host.textContent).toContain('同一生产任务的实际完成件数');
+  expect(host.textContent).toContain('1–1000 个（含 1000 个）');
+  expect(host.textContent).toContain('1001 个及以上');
+  expect(host.textContent).toContain('按账号中生效的个人工价计算');
+  expect(host.textContent).toContain('包装按实际完成袋数或盒数');
+  const summary = page.getByText('分批报工的数量规则', { exact: false });
+  await summary.click();
+  await expect.element(page.getByText('使用扫码分批报工的工单', { exact: false })).toBeVisible();
+  await summary.click();
+  await expect.element(page.getByText('使用扫码分批报工的工单', { exact: false })).not.toBeVisible();
+});
+it('包装师傅个人工价仅说明包装计费，不展示烫金分档', () => {
+  flushSync(() => root.render(<PieceworkPriceBookForm books={[]} now="2026-10-06T00:00:00.000Z" personal={{ workerId: 'packer', lane: 'PACKING', canEdit: true, unifiedBooks: [] }} />));
+  expect(host.textContent).toContain('适用于本账号的生产计件工资');
+  expect(host.textContent).toContain('包装按实际完成袋数或盒数');
+  expect(host.textContent).not.toContain('烫金数量与工资');
+  expect(host.textContent).not.toContain('分批报工');
+});
+it('烫金师傅个人工价说明数量区间，省略无关包装工价', () => {
+  flushSync(() => root.render(<PieceworkPriceBookForm books={[]} now="2026-10-06T00:00:00.000Z" personal={{ workerId: 'machine', lane: 'PARTIAL', canEdit: true, unifiedBooks: [] }} />));
+  expect(host.textContent).toContain('烫金数量与工资');
+  expect(host.textContent).not.toContain('包装按实际完成');
+});
 it('failed cancellation preserves reason and request key; a fresh review clears the old error and refreshes the key', async () => {
   flushSync(() => root.render(<CancelPieceworkPlan workerId={null} targetId="future" />));
   await page.getByRole('button', { name: '取消调价计划', exact: true }).click();
@@ -72,8 +97,9 @@ it('keeps cancellation feedback, history and draft continuation visible and retu
   await expect.element(page.getByRole('status')).toHaveTextContent('调价计划已取消');
   render({ ...future, status: 'CANCELLED', cancelReason: '计划时间误填' });
   await expect.element(page.getByRole('link', { name: '继续编辑调价草稿' })).toBeVisible();
-  expect(host.querySelector('details')!.open).toBe(true);
-  await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('summary')));
+  const cancelledHistory = host.querySelector('a[href="#piecework-draft"]')!.closest('details')!;
+  expect(cancelledHistory.open).toBe(true);
+  await vi.waitFor(() => expect(document.activeElement).toBe(cancelledHistory.querySelector('summary')));
   // A later action replaces the old cancellation message instead of leaving
   // two conflicting live statuses in the same region.
   mocks.mutate.mockResolvedValue({ status: 'success', message: '草稿已保存' });

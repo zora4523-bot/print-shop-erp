@@ -1,5 +1,6 @@
 'use client';
-import { DEFAULT_FOIL_WAGES } from '@/lib/salary/foil-wage';
+import { DEFAULT_FOIL_WAGES, FOIL_WAGE_THRESHOLD } from '@/lib/salary/foil-wage';
+import { DAILY_MINIMUM } from '@/lib/salary/daily-minimum';
 
 import Link from 'next/link';
 import { CancelPieceworkPlan } from './CancelPieceworkPlan';
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Input } from '@/components/ui/input';
 import { FormMessage } from '@/components/ui-business';
-import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
+import { Disclosure, DisclosureIndicator, DisclosureSummary } from '@/components/ui/disclosure';
 import { Badge } from '@/components/ui/badge';
 
 function rateFor(book: PieceworkAdminBook | undefined, field: RateField) {
@@ -52,10 +53,30 @@ export function PieceworkPriceBookForm({ books, now, personal, cancellationEnabl
   }, [books, cancelled]);
   return <section className="space-y-5 rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="piecework-heading">
     <h2 id="piecework-heading" className="font-semibold">计件工价</h2>
-    <div className="space-y-1 text-sm text-muted-foreground">
-      {personal ? <p>当前模式：{current && !current.useUnifiedRates ? '个人工价' : '统一工价'}</p> : <Link href="/owner/accounts" className="inline-flex min-h-11 items-center underline underline-offset-4">到师傅账号设置个人工价</Link>}
-      <p>小单 ≤1000 个：小单工资 × 次数，含装版。大单 ≥1001 个：数量 × 计件单价 × 次数 ＋ 装版费 × 次数。</p>
-      <p>局部按过版次数；专版按颜色数，不按正反面翻倍。</p>
+    <div className="space-y-3 text-sm text-muted-foreground">
+      {personal ? <p>当前模式：{current && !current.useUnifiedRates ? '个人工价' : '统一工价'}，适用于本账号的生产计件工资。</p> : <>
+        <p>统一工价适用于使用统一工价的生产师傅。已启用个人工价的师傅，按账号中生效的个人工价计算。</p>
+        <Link href="/owner/accounts" className="inline-flex min-h-11 items-center underline underline-offset-4">到师傅账号设置个人工价</Link>
+      </>}
+      {(!personal || personal.lane === 'PARTIAL' || personal.lane === 'FULL') && <div className="space-y-3">
+        <p className="font-medium text-foreground">烫金数量与工资</p>
+        <p>按同一生产任务的实际完成件数选择计费区间；默认取该任务的计划件数，多款合并生产时合计这些款式的件数。</p>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1"><dt className="font-medium text-foreground">1–{FOIL_WAGE_THRESHOLD} 个（含 {FOIL_WAGE_THRESHOLD} 个）</dt><dd>该区间工资 × 次数，已含装版费。</dd></div>
+          <div className="space-y-1"><dt className="font-medium text-foreground">{FOIL_WAGE_THRESHOLD + 1} 个及以上</dt><dd>实际完成件数 × 计件单价 × 次数 ＋ 装版费 × 次数。</dd></div>
+        </dl>
+        <p>件数按红包个数计算；局部烫金的次数为过版次数，专版烫金的次数为不同颜色数，同色在正反两面只算一种颜色。</p>
+        <Disclosure>
+          <DisclosureSummary className="gap-2">分批报工的数量规则<DisclosureIndicator /></DisclosureSummary>
+          <p className="mt-2">使用扫码分批报工的工单，按该工序关联款式的工单总件数选择计费区间。每批只计算本批工资，1–{FOIL_WAGE_THRESHOLD} 个的固定工资或 {FOIL_WAGE_THRESHOLD + 1} 个及以上的装版费在同一工序只计一次；多人协作、改版或颜色数不同的合并生产，由管理员核定提成。</p>
+        </Disclosure>
+      </div>}
+      {(!personal || personal.lane === 'PACKING') && <p>包装按实际完成袋数或盒数 × 对应工价计算，不按数量分档。</p>}
+      <div className="space-y-1">
+        <p className="font-medium text-foreground">师傅日薪保底：100 元</p>
+        <p>从 {DAILY_MINIMUM.effectiveFrom} 起，按上海工作日合计同一师傅当天全部提成：不超过 100 元只发 100 元，超过则只发提成，不另加日薪。</p>
+        <p>当天有生产登记或已确认的出勤即可计薪；有出勤但提成为 0 元、半天出勤也发 100 元。无出勤且无生产记录不计薪。统一与个人工价均适用，历史已锁定工资不重算。</p>
+      </div>
     </div>
     {state && !cancelled && <div role={state.status === 'error' ? 'alert' : undefined}><FormMessage fieldId="piecework-result" tone={state.status}>{state.message}</FormMessage></div>}
     {cancelled && <FormMessage fieldId="piecework-cancellation-result" tone="success">{cancelled.message}</FormMessage>}
