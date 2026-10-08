@@ -20,7 +20,7 @@ it.each(['movement', 'receipt'] as const)('%s confirms and submits the same defa
   const action = vi.fn().mockResolvedValue({ status: 'success', message: '已过账' });
   flushSync(() => root.render(kind === 'movement'
     ? <StockTransactionForm action={action} unit="件" initialIdempotencyKey="request" locationOptions={locationOptions} />
-    : <PurchaseReceiptForm action={action} unit="件" initialIdempotencyKey="request" locationOptions={locationOptions} purchaseOrderItemId="item" remainingQuantity="100" defaultUnitCost="1" />));
+    : <PurchaseReceiptForm action={action} materialName="采购物料甲" unit="件" initialIdempotencyKey="request" locationOptions={locationOptions} purchaseOrderItemId="item" remainingQuantity="100" defaultUnitCost="1" />));
   const location = page.getByRole('combobox', { name: kind === 'movement' ? '库位' : '收货库位', exact: true });
   const quantity = page.getByRole('textbox', { name: kind === 'movement' ? '数量（件）' : '本次收货数量（件）', exact: true });
   const prepare = page.getByRole('button', { name: kind === 'movement' ? '核对并提交出入库' : '核对并确认收货过账', exact: true });
@@ -30,6 +30,7 @@ it.each(['movement', 'receipt'] as const)('%s confirms and submits the same defa
   }
   await location.selectOptions('side'); await quantity.fill('2'); await prepare.click();
   await expect.element(page.getByRole('alertdialog')).toHaveTextContent('分仓 / 旁库位');
+  if (kind === 'receipt') await expect.element(page.getByRole('alertdialog')).toHaveTextContent('物料：采购物料甲');
   await page.getByRole('alertdialog').getByRole('button', { name: kind === 'movement' ? '确认提交出入库' : '收货过账', exact: true }).click();
   await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(1));
   await expect.element(quantity).toHaveValue('');

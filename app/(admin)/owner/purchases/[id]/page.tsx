@@ -130,6 +130,7 @@ export default async function OwnerPurchaseDetailPage({ params, searchParams }: 
                   <PurchaseReceiptForm
                     action={boundReceiptAction}
                     purchaseOrderItemId={item.id}
+                    materialName={externalPriceBusinessText(item.material.name)}
                     unit={item.material.unit}
                     defaultUnitCost={item.unitCost ? String(item.unitCost) : null}
                     remainingQuantity={remain}
