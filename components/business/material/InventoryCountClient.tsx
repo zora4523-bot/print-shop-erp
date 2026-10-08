@@ -91,10 +91,10 @@ async function fetchCountMaterials(q: string): Promise<ApiResponse> {
   return res.json();
 }
 
-export function InventoryCountClient({ action, initialIdempotencyKey, initialRows }: Props) {
+function useInventoryCountController({ action, initialIdempotencyKey, initialRows }: Props) {
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
-  const restoredQuery = useRef('');
+  const restoredQueryRef = useRef('');
   const [rows, setRows] = useState<InventoryCountMaterialRow[]>(initialRows ?? []);
   // 账面基线在每个库位**首次展示**时钉住，不等到首次录入。
   // 否则操作员数完但还没输入时的一次刷新，会把基线推进到库存变动之后。
@@ -142,7 +142,7 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
 
   const invalidatePendingFetch = useCallback(() => { fetchSequence.current++; }, []);
   useEffect(() => {
-    fetchRows(restoredQuery.current, true);
+    fetchRows(restoredQueryRef.current, true);
     return invalidatePendingFetch;
   }, [fetchRows, invalidatePendingFetch]);
   useEffect(() => {
@@ -331,49 +331,123 @@ export function InventoryCountClient({ action, initialIdempotencyKey, initialRow
     }
   }
 
+  return {
+    action,
+    query,
+    setQuery,
+    submittedQuery,
+    setSubmittedQuery,
+    restoredQueryRef,
+    rows,
+    bookSnapshots,
+    counts,
+    setCounts,
+    touchedKeys,
+    setStaleKeys,
+    idempotencyKey,
+    fetchPending,
+    formRef,
+    confirmationTriggerRef,
+    remarkInputRef,
+    confirmationOpen,
+    fetchRows,
+    formAction,
+    actionPending,
+    submittedItems,
+    totals,
+    itemError,
+    actionError,
+    successReceipt,
+    summaryErrors,
+    fetchError,
+    staleKeySet,
+    prepareConfirmation,
+    handleSubmit,
+    handleConfirmationOpenChange,
+    submitFromConfirmation,
+  };
+}
+
+function InventoryCountSearch({ model }: { model: ReturnType<typeof useInventoryCountController> }) {
+  const { query, setQuery, submittedQuery, setSubmittedQuery, restoredQueryRef, fetchPending, fetchRows } = model;
+  return (<>
+    <form
+      id="inventory-count-search-form"
+      aria-busy={fetchPending}
+      className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm sm:flex-row"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setSubmittedQuery(query);
+        restoredQueryRef.current = query;
+        fetchRows(query);
+      }}
+    >
+      <div className="relative min-w-0 flex-1">
+        <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id="inventory-count-search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="搜索物料编码、名称、规格、拼音"
+          aria-label="搜索盘点物料"
+          className="pl-8"
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button type="submit" disabled={fetchPending} aria-busy={fetchPending}>
+          {fetchPending ? '正在读取…' : '搜索'}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={fetchPending}
+          aria-busy={fetchPending}
+          onClick={() => fetchRows(submittedQuery)}
+        >
+          <RefreshCw
+            aria-hidden
+            className={fetchPending ? 'size-4 animate-spin' : 'size-4'}
+          />
+          {fetchPending ? '正在读取…' : '刷新'}
+        </Button>
+      </div>
+    </form>
+  </>);
+}
+
+export function InventoryCountClient(props: Parameters<typeof useInventoryCountController>[0]) {
+  const model = useInventoryCountController(props);
+  const {
+    rows,
+    bookSnapshots,
+    counts,
+    setCounts,
+    touchedKeys,
+    setStaleKeys,
+    idempotencyKey,
+    fetchPending,
+    formRef,
+    confirmationTriggerRef,
+    remarkInputRef,
+    confirmationOpen,
+    formAction,
+    actionPending,
+    submittedItems,
+    totals,
+    itemError,
+    actionError,
+    successReceipt,
+    summaryErrors,
+    fetchError,
+    staleKeySet,
+    prepareConfirmation,
+    handleSubmit,
+    handleConfirmationOpenChange,
+    submitFromConfirmation,
+  } = model;
   return (
     <section className="space-y-4">
-      <form
-        id="inventory-count-search-form"
-        aria-busy={fetchPending}
-        className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm sm:flex-row"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setSubmittedQuery(query);
-          restoredQuery.current = query;
-          fetchRows(query);
-        }}
-      >
-        <div className="relative min-w-0 flex-1">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            id="inventory-count-search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索物料编码、名称、规格、拼音"
-            aria-label="搜索盘点物料"
-            className="pl-8"
-          />
-        </div>
-        <div className="flex gap-2">
-          <Button type="submit" disabled={fetchPending} aria-busy={fetchPending}>
-            {fetchPending ? '正在读取…' : '搜索'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={fetchPending}
-            aria-busy={fetchPending}
-            onClick={() => fetchRows(submittedQuery)}
-          >
-            <RefreshCw
-              aria-hidden
-              className={fetchPending ? 'size-4 animate-spin' : 'size-4'}
-            />
-            {fetchPending ? '正在读取…' : '刷新'}
-          </Button>
-        </div>
-      </form>
+      <InventoryCountSearch model={model} />
 
       <div className="grid gap-3 md:grid-cols-3">
         <Summary label="有差异库位" value={`${totals.changed}`} />

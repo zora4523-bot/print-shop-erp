@@ -52,23 +52,88 @@ for (const actor of ['owner', 'sales'] as const) {
         await expect(perBox).toHaveAttribute('max', variant.mode === 'BOX_TACTILE' ? '8' : '10');
         await expect(perBox).toHaveValue(variant.mode === 'BOX_TACTILE' ? '8' : '10');
       }
+      if (variant.mode === 'BOX_TACTILE') {
+        const viewport = page.viewportSize()!;
+        await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+        try {
+          for (const width of [viewport.width, 390, 320]) {
+            await page.setViewportSize({ width, height: viewport.height });
+            await expect.poll(() => page.evaluate(() => ({
+              fits: document.documentElement.scrollWidth <= window.innerWidth + 1,
+              overflowing: [...document.querySelectorAll('body *')].flatMap((element) => {
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0 && rect.right > window.innerWidth + 1
+                  ? [{ tag: element.tagName, slot: element.getAttribute('data-slot'), className: element.className, right: rect.right }]
+                  : [];
+              }).slice(-12),
+            })), { message: `${actor}: 200% text at ${width}px must fit` }).toMatchObject({ fits: true });
+            const designName = page.getByRole('textbox', { name: '设计款名称', exact: true });
+            expect((await designName.boundingBox())!.width).toBeGreaterThan(100);
+            const perBox = page.getByRole('spinbutton', { name: '每盒数量', exact: true });
+            await perBox.fill('7');
+            await expect(perBox).toHaveValue('7');
+            await perBox.fill('8');
+            await expect(perBox).toHaveValue('8');
+            // 滚动到费用区域，确保延迟渲染的页面末尾也接受溢出检查。
+            await page.locator('[data-slot="order-form-rail"]').scrollIntoViewIfNeeded();
+            await expect.poll(() => page.evaluate(
+              () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+            ), { message: `${actor}: price rail at 200% / ${width}px must fit` }).toBe(true);
+            if (width === 320) {
+              for (const trigger of [
+                page.getByRole('button', { name: '切换界面主题', exact: true }),
+                page.getByRole('button', { name: /^用户菜单：/ }),
+              ]) {
+                await trigger.focus();
+                await page.keyboard.press('Enter');
+                const menu = page.getByRole('menu');
+                await expect(menu).toBeVisible();
+                await expect.poll(async () => {
+                  const box = await menu.boundingBox();
+                  return !!box && box.x >= 0 && box.x + box.width <= width + 1;
+                }).toBe(true);
+                await page.keyboard.press('Escape');
+                await expect(menu).toBeHidden();
+                await expect(trigger).toBeFocused();
+              }
+              const navigation = page.getByRole('button', { name: '打开/关闭侧边栏菜单', exact: true });
+              await navigation.focus();
+              await page.keyboard.press('Space');
+              const drawer = page.getByRole('dialog');
+              await expect(drawer).toBeVisible();
+              await expect.poll(async () => {
+                const box = await drawer.boundingBox();
+                return !!box && box.x >= 0 && box.x + box.width <= width + 1;
+              }).toBe(true);
+              await page.keyboard.press('Escape');
+              await expect(drawer).toBeHidden();
+              await expect(navigation).toBeFocused();
+            }
+          }
+        } finally {
+          await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
+          await page.setViewportSize(viewport);
+        }
+      }
+      const receiverAddress = '张先生 13800138000 广东省佛山市南海区包装测试路1号';
       await page
         .getByRole('textbox', { name: '收货地址', exact: true })
-        .fill('张先生 13800138000 广东省佛山市南海区包装测试路1号');
+        .fill(receiverAddress);
       await expect
         .poll(() =>
           page.evaluate(
-            (mode) =>
+            ({ mode, address }) =>
               Object.entries(localStorage).some(
-                ([key, value]) => key.includes('order') && value.includes(mode),
+                ([key, value]) => key.includes('order') && value.includes(mode) && value.includes(address),
               ),
-            variant.mode,
+            { mode: variant.mode, address: receiverAddress },
           ),
         )
         .toBe(true);
       await page.reload();
       // 外部销售自动恢复本地草稿；管理员须在恢复/放弃提示里明确选择。
       if (actor === 'owner') await page.getByRole('button', { name: /恢复.*草稿/ }).click();
+      await expect(page.getByRole('textbox', { name: '收货地址', exact: true })).toHaveValue(receiverAddress);
       await expect(
         type.getByRole('button', {
           name: variant.mode === 'UNPACKED' ? '不包装' : '装盒',

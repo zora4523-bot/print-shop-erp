@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateFoilJobWage, DEFAULT_FOIL_WAGES, fullFoilColorCount } from '../foil-wage';
+import { calculateFoilJobWage, DEFAULT_FOIL_WAGES, FoilWageInputError, fullFoilColorCount } from '../foil-wage';
 
 describe('已确认的烫金师傅整单工资', () => {
   it.each([
@@ -22,7 +22,7 @@ describe('已确认的烫金师傅整单工资', () => {
     expect(calculateFoilJobWage(2000, 2, { pieceRate: '0.0125', smallOrderAmount: '30', setupAmount: '15' }).totalAmount).toBe('80.00');
   });
   it.each([-1, 0, 1.5, NaN, Infinity])('非法数量 %s 拒绝计算', (quantity) => {
-    expect(() => calculateFoilJobWage(quantity, 1, DEFAULT_FOIL_WAGES.FULL)).toThrow();
+    expect(() => calculateFoilJobWage(quantity, 1, DEFAULT_FOIL_WAGES.FULL)).toThrow(FoilWageInputError);
   });
   it.each(['-1', '0.00001', '1e3', 'NaN'])('非法工价 %s 拒绝计算', (pieceRate) => {
     expect(() => calculateFoilJobWage(2000, 1, { ...DEFAULT_FOIL_WAGES.FULL, pieceRate })).toThrow();
@@ -34,7 +34,7 @@ describe('已确认的烫金师傅整单工资', () => {
     expect(fullFoilColorCount(['亚金', '红色', '蓝色'], [])).toBe(3);
   });
   it('缺颜色或超过三个颜色不能默认为单色', () => {
-    expect(() => fullFoilColorCount([], [])).toThrow();
-    expect(() => fullFoilColorCount(['1', '2', '3', '4'], [])).toThrow();
+    expect(() => fullFoilColorCount([], [])).toThrow(FoilWageInputError);
+    expect(() => fullFoilColorCount(['1', '2', '3', '4'], [])).toThrow(FoilWageInputError);
   });
 });

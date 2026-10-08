@@ -1,3 +1,4 @@
+import { ProductionInputError } from '@/lib/production/input-error';
 import { createHash } from 'node:crypto';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
@@ -18,31 +19,31 @@ type ProductionWageInput = z.infer<typeof productionWageSchema>;
 export async function allocateProductionWages(raw: ProductionWageInput, actor: ProductionActor) {
   const input = productionWageSchema.parse(raw);
   const allocations = [...input.allocations].sort((a, b) => a.workerId.localeCompare(b.workerId));
-  if (new Set(allocations.map(row => row.workerId)).size !== allocations.length) throw new Error('参与师傅重复，请核对提成分配');
+  if (new Set(allocations.map(row => row.workerId)).size !== allocations.length) throw new ProductionInputError('参与师傅重复，请核对提成分配');
   const requestHash = createHash('sha256').update(JSON.stringify({ ...input, allocations })).digest('hex');
   return db.$transaction(async tx => {
     await assertProductionAdmin(tx, actor);
     const locator = await tx.productionJob.findUnique({ where: { id: input.jobId }, select: { orderId: true } });
-    if (!locator) throw new Error('生产记录不存在，请刷新查看');
+    if (!locator) throw new ProductionInputError('生产记录不存在，请刷新查看');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(locator.orderId)}))`;
     const replay = await tx.productionDispatchBatch.findUnique({ where: { id: `wage:${input.requestKey}` } });
     if (replay) {
-      if (replay.requestHash !== requestHash || replay.actorId !== actor.id) throw new Error('提交内容已变化，请刷新后核对提成');
+      if (replay.requestHash !== requestHash || replay.actorId !== actor.id) throw new ProductionInputError('提交内容已变化，请刷新后核对提成');
       return locator.orderId;
     }
     const job = await tx.productionJob.findUniqueOrThrow({ where: { id: input.jobId }, include: { wages: true } });
-    if (job.status !== 'COMPLETED' || !job.workDate || !job.completedQty) throw new Error('尚未登记实际生产完成，请先核对生产记录');
+    if (job.status !== 'COMPLETED' || !job.workDate || !job.completedQty) throw new ProductionInputError('尚未登记实际生产完成，请先核对生产记录');
     const currentWages = job.wages.filter(wage => wage.workDate.getTime() === job.workDate!.getTime());
-    if (!allocations.some(row => row.workerId === job.workerId) || currentWages.some(wage => !allocations.some(row => row.workerId === wage.workerId))) throw new Error('请核对生产师傅及全部已登记参与人的最终提成');
+    if (!allocations.some(row => row.workerId === job.workerId) || currentWages.some(wage => !allocations.some(row => row.workerId === wage.workerId))) throw new ProductionInputError('请核对生产师傅及全部已登记参与人的最终提成');
     // Same sorted identity -> day -> worker/day order as account/report/settlement writers.
     for (const row of allocations) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(row.workerId)}))`;
     const workDate = job.workDate.toISOString().slice(0, 10);
     for (const row of allocations) await lockProductionWageDay(tx, row.workerId, workDate);
     for (const row of allocations) {
       const existing = currentWages.find(wage => wage.workerId === row.workerId);
-      if ((existing?.revision ?? -1) !== row.expectedRevision || existing?.settlementId) throw new Error('提成已调整或结算，请刷新后核对');
+      if ((existing?.revision ?? -1) !== row.expectedRevision || existing?.settlementId) throw new ProductionInputError('提成已调整或结算，请刷新后核对');
       const worker = await tx.user.findUnique({ where: { id: row.workerId } });
-      if (!worker || worker.role !== 'WORKER' || !employmentCoversDate(job.workDate, worker)) throw new Error('参与人或生产日期无效，请核对实际参与师傅');
+      if (!worker || worker.role !== 'WORKER' || !employmentCoversDate(job.workDate, worker)) throw new ProductionInputError('参与人或生产日期无效，请核对实际参与师傅');
       const amount = new Decimal(row.amount).toFixed(2);
       const difference = new Decimal(amount).minus(existing?.amount?.toString() ?? '0').toFixed(2);
       const snapshot: Prisma.InputJsonObject = { schemaVersion: 1, mode: 'MANUAL_ALLOCATION', jobId: job.id, workerName: worker.displayName, productionOwnerId: job.workerId,

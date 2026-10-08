@@ -130,14 +130,14 @@ export function OrderFormBRail(props: OrderFormBRailProps) {
         aria-labelledby={headingId}
         className="rounded-xl border bg-card p-4"
       >
-        <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 id={headingId} className="text-sm font-semibold">
               费用明细
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">{itemCount} 条规格明细</p>
           </div>
-          <Badge variant="outline">{settlementLabel}</Badge>
+          <Badge variant="outline" className="h-auto max-w-full whitespace-normal">{settlementLabel}</Badge>
         </div>
         <OrderCreateFeeDetails {...props} />
         <div className="mt-3 border-t-2 border-foreground pt-3">

@@ -71,7 +71,13 @@ describe.skipIf(!isolated)('real PostgreSQL + XLSX export snapshot', () => {
       const artifact = orderExportArtifactPath(exported.artifactName!);
       const xml = (sheet: number) => execFileSync('unzip', ['-p', artifact, `xl/worksheets/sheet${sheet}.xml`], { encoding: 'utf8' });
       expect(xml(1)).toMatch(/<c r="S2"[^>]*><v>122\.00<\/v>/);
-      expect(xml(2)).toMatch(/<c r="P2"[^>]*><v>122\.00<\/v>/);
+      const itemsXml = xml(2);
+      expect(itemsXml).toMatch(/<c r="P1"[^>]*>.*?成交单价<\/t>/);
+      expect(itemsXml).toMatch(/<c r="Q1"[^>]*>.*?一次性费用<\/t>/);
+      expect(itemsXml).toMatch(/<c r="R1"[^>]*>.*?成交小计<\/t>/);
+      expect(itemsXml).toMatch(/<c r="P2"[^>]*><v>0\.1207<\/v>/);
+      expect(itemsXml).toMatch(/<c r="Q2"[^>]*><v>0\.09<\/v>/);
+      expect(itemsXml).toMatch(/<c r="R2"[^>]*><v>122\.00<\/v>/);
       expect(Object.keys(exported.rowCounts as object)).toHaveLength(15);
       expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).totalAmount.toFixed(2)).toBe('222.00');
       appendFileSync(join(tmpdir(), 'first-use-export-measurements.jsonl'), JSON.stringify({ case: 'concurrent-export', sheets: 15, orders: 1, elapsedMs: Math.round(performance.now() - start) }) + '\n');

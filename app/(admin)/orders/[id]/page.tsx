@@ -161,42 +161,10 @@ export async function generateMetadata({ params }: PageProps) {
   return { title: orderDetailTitle(ref?.orderNo ?? null) };
 }
 
-export default async function OrderDetailPage({ params, searchParams }: PageProps) {
-  const { user } = await requireSession();
-  const { id } = await params;
-  const receipt = readReceipt(await searchParams);
-  // SALES uses a narrow, customer-facing query and operation page. The legacy
-  // shared detail includes production tasks/workers, audit logs, plate data,
-  // pricing snapshots and internal costs, so SALES must branch before that
-  // query runs. Keep real draft/design/change actions on the safe surface.
-  if (user.role === Role.SALES) {
-    const [salesOrder, catalogProducts, foilColors] = await Promise.all([
-      getSalesOrderDetailById({ id: user.id, role: user.role }, id),
-      listActiveOrderChangeCatalogProducts(),
-      listExternalCreateOrderFoilOptions(),
-    ]);
-    if (!salesOrder) notFound();
-    return (
-      <div className="space-y-4">
-        <ReceiptNotice receipt={receipt} noun="工单" />
-        <SalesOrderDetailView
-          order={salesOrder}
-          catalogProducts={catalogProducts}
-          foilColorNames={foilColors.map((foil) => foil.name)}
-        />
-      </div>
-    );
-  }
-  // 业主 2026-09-24：后台只剩管理员与外部销售两类账号，销售已在上面分流。
-  if (user.role !== Role.ADMIN) notFound();
-  const order = await getOrderDetail(id, { id: user.id, role: user.role });
-  // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
-  // 不是整单累加。
-  const maxDesignsPerItem = Math.max(
-    0,
-    ...(order?.items ?? []).map((item) => item.designs.length),
-  );
-  if (!order) notFound();
+async function readAdminDetailContext(
+  order: NonNullable<Awaited<ReturnType<typeof getOrderDetail>>>,
+  user: Awaited<ReturnType<typeof requireSession>>['user'],
+) {
   const reportDisputes = await listOrderReportDisputes(order.id, user);
   const adminActivity = await readOrderActivity(order.id, user);
   const historicalBlankPrices = await readHistoricalBlankPriceEditor(order.id, user);
@@ -414,7 +382,85 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
     (canAdminManageCommercialDetails && priceRevision !== null) ||
     (canViewCommercialAmounts && order.customerCharges.length > 0);
 
-  const detailSections = {
+  return {
+    order,
+    user,
+    reportDisputes,
+    adminActivity,
+    historicalBlankPrices,
+    canViewCommercialAmounts,
+    canCreateRework,
+    materialEstimate,
+    pieceworkSummary,
+    taskDisputes,
+    reworkCraftOptions,
+    productionOperations,
+    productionProgressSteps,
+    canSubmit,
+    canCancel,
+    canShipOrSettle,
+    canRepairProductionFacts,
+    repairFacts,
+    billsLogistics,
+    isChargeableOrder,
+    pricingStatus,
+    priceRevision,
+    savedPricingReadiness,
+    isPricingPending,
+    pendingChangeRequest,
+    canEdit,
+    canToggleUrgent,
+    canAdminManageCommercialDetails,
+    canShowPricingReviewForm,
+    canReviewFulfillmentPricing,
+    settledCorrection,
+    manualFreightToWaive,
+    canToggleSfCollect,
+    canEditDesigns,
+    canManageBom,
+    canManageOutsource,
+    canCreateOutsource,
+    assignedWorkerNames,
+    hasProductionOperations,
+    operationsByOrderItemId,
+    progressByOrderItemId,
+    canShip,
+    shipDisabledReason,
+    shippingRecoveryHref,
+    shippingBlocker,
+    shipmentAutoCompletion,
+    cancelImpact,
+    manualCustomerCharges,
+    presentation,
+    inlineOperations,
+    pricingNeedsAttention,
+    hasPricingDetails,
+  };
+}
+
+type AdminDetailContext = Awaited<ReturnType<typeof readAdminDetailContext>>;
+
+function renderAdminDetailPricing(context: AdminDetailContext) {
+  const {
+    order,
+    historicalBlankPrices,
+    canViewCommercialAmounts,
+    canRepairProductionFacts,
+    repairFacts,
+    isChargeableOrder,
+    pricingStatus,
+    priceRevision,
+    savedPricingReadiness,
+    isPricingPending,
+    pendingChangeRequest,
+    canAdminManageCommercialDetails,
+    canShowPricingReviewForm,
+    canReviewFulfillmentPricing,
+    settledCorrection,
+    manualCustomerCharges,
+    inlineOperations,
+  } = context;
+  return {
     readiness: (<Fragment key="readiness"><ProductionReadinessWarning readiness={savedPricingReadiness} saved />{repairFacts ? <LegacyProductionFactsRepairForm canRepair={canRepairProductionFacts} key={`repair-${order.revision}`} facts={repairFacts} /> : null}</Fragment>),
     pricing: (<Fragment key="pricing">{isChargeableOrder && pricingStatus ? (
         <section
@@ -466,7 +512,7 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           {historicalBlankPrices ? <HistoricalBlankPriceEditor
             key={`material-${historicalBlankPrices.orderRevision}-${historicalBlankPrices.priceRevision}`}
             {...historicalBlankPrices} /> : null}
-          {!pendingChangeRequest && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
+          {!pendingChangeRequest && 'settlementType' in order && canEditAllOrderFees(order) ? <AdminOrderFeeEditor canEditCommercial={canAdminManageCommercialDetails} key={`all-fees-${order.revision}-${priceRevision}`} orderId={order.id} /> : null}
           {canShowPricingReviewForm && inlineOperations?.pricing !== 'factory' ? (
             <div className="border-t pt-4">
               <OrderPricingReviewForm
@@ -552,6 +598,123 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           })}
         />
       ) : null}</Fragment>),
+    customerCharges: (<Fragment key="customerCharges">{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
+        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <h3 className="text-base font-semibold">对客收费明细</h3>
+          <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
+            {order.customerCharges.map((charge) => (
+              <li
+                key={charge.id}
+                className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium">
+                      {charge.shipment
+                        ? `地址 ${charge.shipment.sequence} · `
+                        : ''}
+                      {charge.category.name}
+                    </p>
+                    {/* 说明与收费类别同名时（如「对客快递费」）不再重复一行。 */}
+                    {charge.description && charge.description.trim() !== charge.category.name ? (
+                      <p className="text-xs text-muted-foreground">
+                        {charge.description}
+                      </p>
+                    ) : null}
+                  </div>
+                  {/* 收费状态走注册表（ui-规范 §6「Badge 不承载状态」，审查 D-10）。 */}
+                  {(() => {
+                    const definition = CUSTOMER_CHARGE_STATUS_REGISTRY[customerChargeDisplayStatus(
+                      String(charge.status),
+                      isTrustedAdminChargePricingSnapshot(charge.pricingSnapshot, charge),
+                    )];
+                    return <StatusBadge tone={definition.tone}>{definition.label}</StatusBadge>;
+                  })()}
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  <div>
+                    <dt className="text-muted-foreground">{charge.status === 'ESTIMATED' ? '估算收费' : charge.status === 'FINAL' ? '已确认收费' : '收费金额'}</dt>
+                    <dd className="font-sans font-medium tabular-nums">
+                      <OrderAmount status={order.status} amount={charge.amount?.toString() ?? null} estimated={charge.status === 'ESTIMATED'} />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">报价表建议</dt>
+                    <dd className="font-sans tabular-nums">
+                      {charge.suggestedAmount === null
+                        ? charge.status === 'PENDING_AMOUNT'
+                          ? '待定'
+                          : '人工确认'
+                        : formatMoney(charge.suggestedAmount)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">计费数量</dt>
+                    <dd>
+                      {charge.quantity === null
+                        ? '—'
+                        : `${String(charge.quantity)} ${charge.unit ?? ''}`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">规则版本</dt>
+                    <dd>
+                      {charge.priceBook
+                        ? `报价第 ${charge.priceBook.version} 版`
+                        : '人工收费'}
+                    </dd>
+                  </div>
+                </dl>
+                {charge.overrideReason ? (
+                  <p className="mt-2 rounded-md bg-warning/10 p-2 text-xs text-warning-foreground">
+                    原因：{charge.overrideReason}
+                  </p>
+                ) : null}
+                {charge.approvalReference ? (
+                  <p className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
+                    审批信息：{charge.approvalReference}
+                  </p>
+                ) : null}
+                {charge.finalizedBy ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    确认人：{charge.finalizedBy.displayName}
+                    {charge.finalizedAt
+                      ? ` · ${formatDateTimeShanghai(charge.finalizedAt)}`
+                      : ''}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}</Fragment>),
+  };
+}
+
+function renderAdminDetailActions(context: AdminDetailContext) {
+  const {
+    order,
+    canViewCommercialAmounts,
+    productionOperations,
+    productionProgressSteps,
+    canSubmit,
+    canCancel,
+    billsLogistics,
+    priceRevision,
+    isPricingPending,
+    canEdit,
+    canToggleUrgent,
+    canReviewFulfillmentPricing,
+    manualFreightToWaive,
+    canToggleSfCollect,
+    canManageOutsource,
+    assignedWorkerNames,
+    hasProductionOperations,
+    canShip,
+    cancelImpact,
+    inlineOperations,
+  } = context;
+  return {
     printActions: (<Fragment key="printActions"><div className="flex min-w-0 flex-wrap items-center gap-2">
             <PrintPageLink orderId={order.id} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               打印
@@ -644,96 +807,29 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
         <div className="grid gap-3 sm:grid-cols-2">{productionOperations.filter((op) => op.operationType === 'PARTIAL' && ['PENDING', 'IN_PROGRESS'].includes(op.status)).map((op) => <PayrollPassForm key={`${op.id}:${op.payrollRevision}`} operationId={op.id} revision={op.payrollRevision} passCount={op.payrollPassCount ?? productionOperationPassCount(op.operationType, op.sources)} sequences={op.sources.flatMap((s) => s.orderItem ? [s.orderItem.sequence] : [])} />)}</div>
       </section>}
     </Fragment>),
-    customerCharges: (<Fragment key="customerCharges">{canViewCommercialAmounts && order.customerCharges.length > 0 ? (
-        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <h3 className="text-base font-semibold">对客收费明细</h3>
-          <ol className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
-            {order.customerCharges.map((charge) => (
-              <li
-                key={charge.id}
-                className="admin-wrap-anywhere min-w-0 rounded-lg border p-3 text-sm"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium">
-                      {charge.shipment
-                        ? `地址 ${charge.shipment.sequence} · `
-                        : ''}
-                      {charge.category.name}
-                    </p>
-                    {/* 说明与收费类别同名时（如「对客快递费」）不再重复一行。 */}
-                    {charge.description && charge.description.trim() !== charge.category.name ? (
-                      <p className="text-xs text-muted-foreground">
-                        {charge.description}
-                      </p>
-                    ) : null}
-                  </div>
-                  {/* 收费状态走注册表（ui-规范 §6「Badge 不承载状态」，审查 D-10）。 */}
-                  {(() => {
-                    const definition = CUSTOMER_CHARGE_STATUS_REGISTRY[customerChargeDisplayStatus(
-                      String(charge.status),
-                      isTrustedAdminChargePricingSnapshot(charge.pricingSnapshot, charge),
-                    )];
-                    return <StatusBadge tone={definition.tone}>{definition.label}</StatusBadge>;
-                  })()}
-                </div>
-                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                  <div>
-                    <dt className="text-muted-foreground">{charge.status === 'ESTIMATED' ? '估算收费' : charge.status === 'FINAL' ? '已确认收费' : '收费金额'}</dt>
-                    <dd className="font-sans font-medium tabular-nums">
-                      <OrderAmount status={order.status} amount={charge.amount?.toString() ?? null} estimated={charge.status === 'ESTIMATED'} />
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">报价表建议</dt>
-                    <dd className="font-sans tabular-nums">
-                      {charge.suggestedAmount === null
-                        ? charge.status === 'PENDING_AMOUNT'
-                          ? '待定'
-                          : '人工确认'
-                        : formatMoney(charge.suggestedAmount)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">计费数量</dt>
-                    <dd>
-                      {charge.quantity === null
-                        ? '—'
-                        : `${String(charge.quantity)} ${charge.unit ?? ''}`}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">规则版本</dt>
-                    <dd>
-                      {charge.priceBook
-                        ? `报价第 ${charge.priceBook.version} 版`
-                        : '人工收费'}
-                    </dd>
-                  </div>
-                </dl>
-                {charge.overrideReason ? (
-                  <p className="mt-2 rounded-md bg-warning/10 p-2 text-xs text-warning-foreground">
-                    原因：{charge.overrideReason}
-                  </p>
-                ) : null}
-                {charge.approvalReference ? (
-                  <p className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
-                    审批信息：{charge.approvalReference}
-                  </p>
-                ) : null}
-                {charge.finalizedBy ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    确认人：{charge.finalizedBy.displayName}
-                    {charge.finalizedAt
-                      ? ` · ${formatDateTimeShanghai(charge.finalizedAt)}`
-                      : ''}
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : null}</Fragment>),
+    packaging: (<Fragment key="packaging"><OrderPackagingGroupsSection
+        order={order}
+        canViewCommercialAmounts={canViewCommercialAmounts}
+      /></Fragment>),
+  };
+}
+
+function renderAdminDetailDelivery(context: AdminDetailContext) {
+  const {
+    order,
+    canShipOrSettle,
+    isChargeableOrder,
+    priceRevision,
+    isPricingPending,
+    canEdit,
+    canCreateOutsource,
+    canShip,
+    shipDisabledReason,
+    shippingRecoveryHref,
+    shippingBlocker,
+    shipmentAutoCompletion,
+  } = context;
+  return {
     shipments: (<Fragment key="shipments">{order.simpleProduction && <ProductionDeliverySummary orderId={order.id} version={order.workOrderVersion} />}<section id="shipment-registration" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-base font-semibold">
@@ -803,45 +899,80 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           ))}
         </ol>
       </section></Fragment>),
-    rework: (<Fragment key="rework">{order.sourceOrder || order.reworkOrders.length > 0 ? (
-        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-          <h3 className="text-base font-semibold">重做关联</h3>
-          {order.sourceOrder ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-              <span className="text-muted-foreground">原工单</span>
-              <Link
-                href={`/orders/${order.sourceOrder.id}`}
-                className="admin-wrap-anywhere font-sans tabular-nums text-primary underline"
-              >
-                {order.sourceOrder.orderNo}
-              </Link>
-              <OrderStatusBadge status={order.sourceOrder.status} />
-            </div>
-          ) : null}
-          {order.reworkOrders.length > 0 ? (
-            <ul className="space-y-2">
-              {order.reworkOrders.map((rework) => (
-                <li
-                  key={rework.id}
-                  className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
-                >
-                  <Badge variant="outline">重做单</Badge>
-                  <Link
-                    href={`/orders/${rework.id}`}
-                    className="admin-wrap-anywhere font-sans tabular-nums text-primary underline"
-                  >
-                    {rework.orderNo}
-                  </Link>
-                  <span className="admin-wrap-anywhere text-muted-foreground">
-                    {rework.customName}
-                  </span>
-                  <OrderStatusBadge status={rework.status} />
-                </li>
-              ))}
-            </ul>
+    shippingForm: null,
+    completionBlock: (<Fragment key="completionBlock">{(order.status === OrderStatus.SCHEDULING ||
+        order.status === OrderStatus.IN_PRODUCTION) &&
+      order.uncoveredOutsourceItems.length > 0 ? (
+        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
+          <h3 className="text-base font-semibold">暂不能完工</h3>
+          <p className="text-sm text-muted-foreground">
+            以下款式含外协工艺，但外协履约数量不足，或还没有未取消的
+            外协单。请先创建或补足外协单：
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm">
+            {order.uncoveredOutsourceItems.map((item) => (
+              <li key={item.id}>
+                款式 {item.sequence}：{item.name}
+              </li>
+            ))}
+          </ul>
+          {canCreateOutsource ? (
+            <Link
+              href={`/foreman/outsource/new?orderId=${order.id}`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              新建外协单
+            </Link>
           ) : null}
         </section>
       ) : null}</Fragment>),
+    shippingBlock: (<Fragment key="shippingBlock">{canShipOrSettle &&
+      (order.status === OrderStatus.PACKING ||
+        order.status === OrderStatus.COMPLETED) &&
+      !canShip ? (
+        <section
+          id="ship-order"
+          className="scroll-mt-28 space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6"
+        >
+          <h3 className="text-base font-semibold">暂不能发货</h3>
+          <p className="text-sm text-muted-foreground">
+            {shipDisabledReason ?? '请先补齐发货前置事实。'}
+          </p>
+          {shippingRecoveryHref ? (
+            <Link href={shippingRecoveryHref} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              {shippingBlocker === 'PRODUCTION' ? '查看生产进度' : '处理发货前置条件'}
+            </Link>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              该工单已完工，无法补充发货地址，请核对历史收货资料。
+            </p>
+          )}
+        </section>
+      ) : null}</Fragment>),
+    settlementBlock: (<Fragment key="settlementBlock">{canShipOrSettle &&
+      order.status === OrderStatus.SHIPPED &&
+      isPricingPending ? (
+        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
+          <h3 className="text-base font-semibold">暂不能结算</h3>
+          <p className="text-sm text-muted-foreground">
+            工单费用待确认，请先核定费用再结算。
+          </p>
+          <Link href="#pricing-review" className={buttonVariants({ variant: 'outline', size: 'sm' })}>处理核价</Link>
+        </section>
+      ) : null}</Fragment>),
+  };
+}
+
+function renderAdminDetailItems(context: AdminDetailContext) {
+  const {
+    order,
+    canViewCommercialAmounts,
+    canEditDesigns,
+    hasProductionOperations,
+    operationsByOrderItemId,
+    progressByOrderItemId,
+  } = context;
+  return {
     itemDetails: order.items.map((item) => ({ itemId: item.id, content: (
               <Disclosure key={item.id} id={`detail-design-item-${item.id}`} className="group/design-item min-w-0">
                 <DisclosureSummary className="flex-wrap items-start justify-between gap-2 px-4 py-3">
@@ -1065,10 +1196,18 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
               />
               </div>
               </Disclosure>    ) })),
-    packaging: (<Fragment key="packaging"><OrderPackagingGroupsSection
-        order={order}
-        canViewCommercialAmounts={canViewCommercialAmounts}
-      /></Fragment>),
+  };
+}
+
+function renderAdminDetailHistory(context: AdminDetailContext) {
+  const {
+    order,
+    reportDisputes,
+    canViewCommercialAmounts,
+    taskDisputes,
+    pendingChangeRequest,
+  } = context;
+  return {
     changeHistory: (<Fragment key="changeHistory">{order.changeRequests.length > 0 ? (
         <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1156,6 +1295,71 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           }))}
         />
       )}</Fragment>),
+    logs: (<Fragment key="logs"><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+        <h3 className="text-base font-semibold">修改日志</h3>
+        {order.logs.length === 0 ? (
+          <TableEmptyState
+            variant="compact"
+            title="尚无修改记录"
+          />
+        ) : (
+          <ul className="divide-y text-sm">
+            {order.logs.slice(0, 10).map((log) => {
+              const changes = formatOrderLogChanges(
+                canViewCommercialAmounts && 'changedFields' in log
+                  ? log.changedFields
+                  : undefined,
+              );
+              return (
+                <li key={log.id} className="py-3 first:pt-0 last:pb-0">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">
+                      {formatDateTimeShanghai(log.createdAt)}
+                    </span>
+                    <span className="font-medium">{actionLabel(log.action)}</span>
+                    <span className="text-muted-foreground">
+                      · {log.operator.displayName}（{roleLabel(log.operator.role)}）
+                    </span>
+                    {canViewCommercialAmounts &&
+                    'remark' in log &&
+                    log.remark ? (
+                      <span className="text-muted-foreground">· {String(log.remark)}</span>
+                    ) : null}
+                  </div>
+                  {changes.length > 0 && (
+                    <ul className="mt-2 space-y-1 text-xs">
+                      {changes.map((c) => (
+                        <li key={c.field} className="flex min-w-0 flex-wrap items-start gap-2">
+                          <span className="min-w-20 text-muted-foreground">
+                            {c.label}
+                          </span>
+                          <span className="admin-wrap-anywhere line-through text-muted-foreground">
+                            {c.before}
+                          </span>
+                          <span>→</span>
+                          <span className="admin-wrap-anywhere font-medium">{c.after}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section></Fragment>),
+  };
+}
+
+function renderAdminDetailCosts(context: AdminDetailContext) {
+  const {
+    order,
+    user,
+    materialEstimate,
+    pieceworkSummary,
+    canManageBom,
+  } = context;
+  return {
     material: (<Fragment key="material"><OrderMaterialUsageEstimate headingLevel={3} estimate={materialEstimate} canManageBom={canManageBom} /></Fragment>),
     piecework: (<Fragment key="piecework"><OrderWagePanel headingLevel={3} orderId={order.id} actor={user} />{pieceworkSummary && (!order.simpleProduction || pieceworkSummary.items.length > 0) ? (
         <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
@@ -1271,118 +1475,53 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           </Disclosure>
         </section>
       )}</Fragment>),
-    logs: (<Fragment key="logs"><section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <h3 className="text-base font-semibold">修改日志</h3>
-        {order.logs.length === 0 ? (
-          <TableEmptyState
-            variant="compact"
-            title="尚无修改记录"
-          />
-        ) : (
-          <ul className="divide-y text-sm">
-            {order.logs.slice(0, 10).map((log) => {
-              const changes = formatOrderLogChanges(
-                canViewCommercialAmounts && 'changedFields' in log
-                  ? log.changedFields
-                  : undefined,
-              );
-              return (
-                <li key={log.id} className="py-3 first:pt-0 last:pb-0">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-muted-foreground">
-                      {formatDateTimeShanghai(log.createdAt)}
-                    </span>
-                    <span className="font-medium">{actionLabel(log.action)}</span>
-                    <span className="text-muted-foreground">
-                      · {log.operator.displayName}（{roleLabel(log.operator.role)}）
-                    </span>
-                    {canViewCommercialAmounts &&
-                    'remark' in log &&
-                    log.remark ? (
-                      <span className="text-muted-foreground">· {String(log.remark)}</span>
-                    ) : null}
-                  </div>
-                  {changes.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-xs">
-                      {changes.map((c) => (
-                        <li key={c.field} className="flex min-w-0 flex-wrap items-start gap-2">
-                          <span className="min-w-20 text-muted-foreground">
-                            {c.label}
-                          </span>
-                          <span className="admin-wrap-anywhere line-through text-muted-foreground">
-                            {c.before}
-                          </span>
-                          <span>→</span>
-                          <span className="admin-wrap-anywhere font-medium">{c.after}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section></Fragment>),
-    shippingForm: null,
-    completionBlock: (<Fragment key="completionBlock">{(order.status === OrderStatus.SCHEDULING ||
-        order.status === OrderStatus.IN_PRODUCTION) &&
-      order.uncoveredOutsourceItems.length > 0 ? (
-        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
-          <h3 className="text-base font-semibold">暂不能完工</h3>
-          <p className="text-sm text-muted-foreground">
-            以下款式含外协工艺，但外协履约数量不足，或还没有未取消的
-            外协单。请先创建或补足外协单：
-          </p>
-          <ul className="list-disc space-y-1 pl-5 text-sm">
-            {order.uncoveredOutsourceItems.map((item) => (
-              <li key={item.id}>
-                款式 {item.sequence}：{item.name}
-              </li>
-            ))}
-          </ul>
-          {canCreateOutsource ? (
-            <Link
-              href={`/foreman/outsource/new?orderId=${order.id}`}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              新建外协单
-            </Link>
+  };
+}
+
+function renderAdminDetailRework(context: AdminDetailContext) {
+  const {
+    order,
+    canCreateRework,
+    reworkCraftOptions,
+  } = context;
+  return {
+    rework: (<Fragment key="rework">{order.sourceOrder || order.reworkOrders.length > 0 ? (
+        <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+          <h3 className="text-base font-semibold">重做关联</h3>
+          {order.sourceOrder ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">原工单</span>
+              <Link
+                href={`/orders/${order.sourceOrder.id}`}
+                className="admin-wrap-anywhere font-sans tabular-nums text-primary underline"
+              >
+                {order.sourceOrder.orderNo}
+              </Link>
+              <OrderStatusBadge status={order.sourceOrder.status} />
+            </div>
           ) : null}
-        </section>
-      ) : null}</Fragment>),
-    shippingBlock: (<Fragment key="shippingBlock">{canShipOrSettle &&
-      (order.status === OrderStatus.PACKING ||
-        order.status === OrderStatus.COMPLETED) &&
-      !canShip ? (
-        <section
-          id="ship-order"
-          className="scroll-mt-28 space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6"
-        >
-          <h3 className="text-base font-semibold">暂不能发货</h3>
-          <p className="text-sm text-muted-foreground">
-            {shipDisabledReason ?? '请先补齐发货前置事实。'}
-          </p>
-          {shippingRecoveryHref ? (
-            <Link href={shippingRecoveryHref} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-              {shippingBlocker === 'PRODUCTION' ? '查看生产进度' : '处理发货前置条件'}
-            </Link>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              该工单已完工，无法补充发货地址，请核对历史收货资料。
-            </p>
-          )}
-        </section>
-      ) : null}</Fragment>),
-    settlementBlock: (<Fragment key="settlementBlock">{canShipOrSettle &&
-      order.status === OrderStatus.SHIPPED &&
-      isPricingPending ? (
-        <section className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-6">
-          <h3 className="text-base font-semibold">暂不能结算</h3>
-          <p className="text-sm text-muted-foreground">
-            工单费用待确认，请先核定费用再结算。
-          </p>
-          <Link href="#pricing-review" className={buttonVariants({ variant: 'outline', size: 'sm' })}>处理核价</Link>
+          {order.reworkOrders.length > 0 ? (
+            <ul className="space-y-2">
+              {order.reworkOrders.map((rework) => (
+                <li
+                  key={rework.id}
+                  className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+                >
+                  <Badge variant="outline">重做单</Badge>
+                  <Link
+                    href={`/orders/${rework.id}`}
+                    className="admin-wrap-anywhere font-sans tabular-nums text-primary underline"
+                  >
+                    {rework.orderNo}
+                  </Link>
+                  <span className="admin-wrap-anywhere text-muted-foreground">
+                    {rework.customName}
+                  </span>
+                  <OrderStatusBadge status={rework.status} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       ) : null}</Fragment>),
     reworkForm: (<Fragment key="reworkForm">{canCreateRework ? (
@@ -1414,6 +1553,64 @@ export default async function OrderDetailPage({ params, searchParams }: PageProp
           </div>
         </Disclosure>
       ) : null}</Fragment>),
+  };
+}
+
+export default async function OrderDetailPage({ params, searchParams }: PageProps) {
+  const { user } = await requireSession();
+  const { id } = await params;
+  const receipt = readReceipt(await searchParams);
+  // SALES uses a narrow, customer-facing query and operation page. The legacy
+  // shared detail includes production tasks/workers, audit logs, plate data,
+  // pricing snapshots and internal costs, so SALES must branch before that
+  // query runs. Keep real draft/design/change actions on the safe surface.
+  if (user.role === Role.SALES) {
+    const [salesOrder, catalogProducts, foilColors] = await Promise.all([
+      getSalesOrderDetailById({ id: user.id, role: user.role }, id),
+      listActiveOrderChangeCatalogProducts(),
+      listExternalCreateOrderFoilOptions(),
+    ]);
+    if (!salesOrder) notFound();
+    return (
+      <div className="space-y-4">
+        <ReceiptNotice receipt={receipt} noun="工单" />
+        <SalesOrderDetailView
+          order={salesOrder}
+          catalogProducts={catalogProducts}
+          foilColorNames={foilColors.map((foil) => foil.name)}
+        />
+      </div>
+    );
+  }
+  // 业主 2026-09-24：后台只剩管理员与外部销售两类账号，销售已在上面分流。
+  if (user.role !== Role.ADMIN) notFound();
+  const order = await getOrderDetail(id, { id: user.id, role: user.role });
+  // 打印网格是按款式排的，所以阈值也按「单个款式的设计图数」判定，
+  // 不是整单累加。
+  const maxDesignsPerItem = Math.max(
+    0,
+    ...(order?.items ?? []).map((item) => item.designs.length),
+  );
+  if (!order) notFound();
+  const context = await readAdminDetailContext(order, user);
+  const {
+    adminActivity,
+    canCreateRework,
+    productionOperations,
+    productionProgressSteps,
+    canEdit,
+    presentation,
+    pricingNeedsAttention,
+    hasPricingDetails,
+  } = context;
+  const detailSections = {
+    ...renderAdminDetailPricing(context),
+    ...renderAdminDetailActions(context),
+    ...renderAdminDetailDelivery(context),
+    ...renderAdminDetailItems(context),
+    ...renderAdminDetailHistory(context),
+    ...renderAdminDetailCosts(context),
+    ...renderAdminDetailRework(context),
   };
 
   if (!presentation) return <ActionNotice tone="warning" title="工单已更新，请刷新后查看最新资料"

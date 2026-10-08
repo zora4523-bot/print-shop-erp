@@ -1075,33 +1075,7 @@ function processingIssues(
   return issues;
 }
 
-function logisticsIssues(
-  rules: DraftPriceRuleForValidation[],
-): DraftPriceBookValidationIssue[] {
-  const issues: DraftPriceBookValidationIssue[] = [];
-  const active = rules.filter((rule) => rule.isActive);
-  const shipping = active.filter((rule) => rule.category.code === 'SHIPPING_FEE');
-  const packaging = active.filter(
-    (rule) => rule.category.code === 'PACKING_MATERIAL',
-  );
-  const unsupported = active.filter(
-    (rule) => !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(rule.category.code),
-  );
-
-  if (shipping.length === 0) {
-    issues.push({ path: 'rules', message: '物流价目簿至少需要一条启用的快递费规则' });
-  }
-  if (packaging.length === 0) {
-    issues.push({ path: 'rules', message: '物流价目簿至少需要一条启用的打包耗材规则' });
-  }
-  for (const rule of unsupported) {
-    issues.push({
-      path: `rules.${rule.id}.categoryId`,
-      ruleId: rule.id,
-      message: `物流计算器尚不支持收费类目“${rule.category.name}”`,
-    });
-  }
-
+function validateLogisticsShippingRules(shipping: DraftPriceRuleForValidation[], issues: DraftPriceBookValidationIssue[]) {
   const provinceOwner = new Map<string, DraftPriceRuleForValidation>();
   for (const rule of shipping) {
     const prefix = `rules.${rule.id}`;
@@ -1280,6 +1254,37 @@ function logisticsIssues(
       message: `中通地区规则未完整覆盖（缺失：${missingProvinces.join('、') || '无'}；额外：${unsupportedProvinces.join('、') || '无'}）`,
     });
   }
+
+}
+
+function logisticsIssues(
+  rules: DraftPriceRuleForValidation[],
+): DraftPriceBookValidationIssue[] {
+  const issues: DraftPriceBookValidationIssue[] = [];
+  const active = rules.filter((rule) => rule.isActive);
+  const shipping = active.filter((rule) => rule.category.code === 'SHIPPING_FEE');
+  const packaging = active.filter(
+    (rule) => rule.category.code === 'PACKING_MATERIAL',
+  );
+  const unsupported = active.filter(
+    (rule) => !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(rule.category.code),
+  );
+
+  if (shipping.length === 0) {
+    issues.push({ path: 'rules', message: '物流价目簿至少需要一条启用的快递费规则' });
+  }
+  if (packaging.length === 0) {
+    issues.push({ path: 'rules', message: '物流价目簿至少需要一条启用的打包耗材规则' });
+  }
+  for (const rule of unsupported) {
+    issues.push({
+      path: `rules.${rule.id}.categoryId`,
+      ruleId: rule.id,
+      message: `物流计算器尚不支持收费类目“${rule.category.name}”`,
+    });
+  }
+
+  validateLogisticsShippingRules(shipping, issues);
 
   const sortedPackaging = [...packaging].sort(
     (left, right) => (left.minQty ?? 0) - (right.minQty ?? 0),

@@ -115,7 +115,7 @@ test.describe('shared workbench calculator', () => {
     ).toBe('unrelated');
     expect(errors).toEqual([]);
     await page.screenshot({
-      path: '/tmp/workbench-transfer-order.png',
+      path: test.info().outputPath('workbench-transfer-order.png'),
       fullPage: true,
     });
   });
@@ -469,7 +469,7 @@ test.describe('shared workbench calculator', () => {
       quote(page).getByRole('button', { name: '按此款式新建工单' }),
     ).toBeEnabled();
     await page.screenshot({
-      path: '/tmp/workbench-printed.png',
+      path: test.info().outputPath('workbench-printed.png'),
       fullPage: true,
     });
   });

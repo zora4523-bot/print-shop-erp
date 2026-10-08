@@ -1,3 +1,4 @@
+import { ProductionInputError } from '@/lib/production/input-error';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@/generated/prisma/client';
 
@@ -9,11 +10,11 @@ export async function assertProductionFactsReadyForChange(tx: Prisma.Transaction
   if (!order.simpleProduction) return;
   const jobs = await tx.productionJob.findMany({ where: { orderId }, include: { factReview: true } });
   for (const job of jobs) {
-    if (job.status === 'REQUESTED') throw new Error(`请先核定${job.workerName}的${job.label}数量申请（工单 v${job.workOrderVersion}）`);
-    if (job.factReview && UNRESOLVED_FACT_STATUSES.includes(job.factReview.status)) throw new Error(`请先核对${job.workerName}的${job.label}历史生产记录（工单 v${job.workOrderVersion}）`);
+    if (job.status === 'REQUESTED') throw new ProductionInputError(`请先核定${job.workerName}的${job.label}数量申请（工单 v${job.workOrderVersion}）`);
+    if (job.factReview && UNRESOLVED_FACT_STATUSES.includes(job.factReview.status)) throw new ProductionInputError(`请先核对${job.workerName}的${job.label}历史生产记录（工单 v${job.workOrderVersion}）`);
     if (!metadataOnly && job.status === 'PENDING' && job.workOrderVersion === order.workOrderVersion
       && !(job.factReview?.status === 'UNPRODUCED' && job.factReview.jobRevision === job.revision)) {
-      throw new Error(`请先核实${job.workerName}的${job.label}是否已生产；已做请补登记，未做请记录核对依据`);
+      throw new ProductionInputError(`请先核实${job.workerName}的${job.label}是否已生产；已做请补登记，未做请记录核对依据`);
     }
   }
 }
@@ -27,7 +28,7 @@ export async function assertNoHistoricalProductionReview(tx: Prisma.TransactionC
       { workOrderVersion: { lt: order.workOrderVersion }, status: 'REQUESTED' },
     ],
   } });
-  if (pending) throw new Error(`请先核对工单 v${pending.workOrderVersion} 中${pending.workerName}的${pending.label}生产记录`);
+  if (pending) throw new ProductionInputError(`请先核对工单 v${pending.workOrderVersion} 中${pending.workerName}的${pending.label}生产记录`);
 }
 
 /** Bind review previews to facts, including a zero-production verification. */

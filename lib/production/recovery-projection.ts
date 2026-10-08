@@ -1,3 +1,4 @@
+import { ProductionInputError } from '@/lib/production/input-error';
 import { productionScopesOverlap, type ProductionScope } from './production-scope';
 import type { Prisma } from '@/generated/prisma/client';
 import { currentDispatchTargets } from './dispatch-targets';
@@ -12,9 +13,9 @@ async function reconcileRecoveredProductionInTx(tx: Prisma.TransactionClient, or
   const history = await tx.productionJob.findMany({ where: { orderId, workOrderVersion: { lt: order.workOrderVersion } } });
   for (const job of jobs) {
     if (job.status === 'CANCELLED' || !sources.some(source => productionScopesOverlap(source, job))) continue;
-    if (job.status !== 'PENDING' || job.factReview?.status !== 'UNPRODUCED' || job.factReview.jobRevision !== job.revision) throw new Error('后续生产已有事实或未核实，请先核对后续任务');
+    if (job.status !== 'PENDING' || job.factReview?.status !== 'UNPRODUCED' || job.factReview.jobRevision !== job.revision) throw new ProductionInputError('后续生产已有事实或未核实，请先核对后续任务');
     const target = targets.find(row => row.key === job.sourceKey);
-    if (!target) throw new Error('后续生产资料不完整，请核对工单');
+    if (!target) throw new ProductionInputError('后续生产资料不完整，请核对工单');
     const production = revisionProductionQuantities(target, history);
     const snapshot = job.snapshot as Prisma.JsonObject;
     const updated = await tx.productionJob.update({ where: { id: job.id }, data: {

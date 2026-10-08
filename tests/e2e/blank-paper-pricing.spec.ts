@@ -108,7 +108,7 @@ test('空白封新增、矩阵与纸张页：六视口明暗、触控、键盘�
           await expectA11yGate(ui);
           if (theme === 'light' && (width === 375 || width === 1280)) {
             await ui.screenshot({
-              path: `/tmp/blank-paper-${width}.png`,
+              path: test.info().outputPath(`blank-paper-${width}.png`),
               fullPage: true,
             });
           }

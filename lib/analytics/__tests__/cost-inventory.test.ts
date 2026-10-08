@@ -8,7 +8,7 @@ import { parseAnalyticsFilters } from '../filters';
 import type { AnalyticsOrder, AnalyticsTx } from '../queries';
 const filters = parseAnalyticsFilters({ view: 'costs' });
 const root = { id: 'root', sourceOrderId: null, status: 'COMPLETED', settledFee: new Decimal('100'), customName: '测试单', orderNo: 'A', agentMonthlyBillItem: null } as AnalyticsOrder;
-const row = { id: 'root', tasks: BigInt(1), taskAmount: '999', operations: BigInt(1), reports: BigInt(2), reportAmount: '30', wages: BigInt(1), wageAmount: '5', pendingWages: BigInt(0), outsources: BigInt(1), outsourceAmount: '10', pendingOutsources: BigInt(0) };
+const row = { id: 'root', tasks: BigInt(1), taskAmount: '999', operations: BigInt(1), reports: BigInt(2), reportAmount: '30', wages: BigInt(1), wageAmount: '5', pendingWages: BigInt(0), pendingProduction: BigInt(0), outsources: BigInt(1), outsourceAmount: '10', pendingOutsources: BigInt(0) };
 function tx(rows = [row], entries: unknown[] = [], reworks: unknown[] = []) { return { $queryRaw: vi.fn().mockResolvedValue(rows), order: { findMany: vi.fn().mockResolvedValue(reworks) }, orderCostEntry: { groupBy: vi.fn().mockResolvedValue(entries) } } as unknown as AnalyticsTx; }
 describe('analytics cost evidence', () => {
   it('uses reports instead of legacy tasks, includes wages once and adds rework to original', async () => {
@@ -32,6 +32,15 @@ describe('analytics cost evidence', () => {
   it('retains cancellation costs without reporting revenue or difference', async () => {
     const result = await costReport(tx(), [{ ...root, status: 'CANCELLED' }], filters);
     expect(result.metrics[1].value).toBe('45.00'); expect(result.details.rows[0][2].value).toBe('100'); expect(result.details.rows[0][8].value).toBeNull();
+  });
+  it.each(['root', 'child'])('excludes unresolved production obligations on %s without adding unallocated wages', async id => {
+    const rows = id === 'root' ? [{ ...row, pendingProduction: BigInt(1) }] : [row, { ...row, id, pendingProduction: BigInt(1) }];
+    const reworks = id === 'child' ? [{ id, sourceOrderId: 'root', orderNo: 'B' }] : [];
+    const result = await costReport(tx(rows, [], reworks), [root], filters);
+    expect(result.metrics[1].value).toBe(id === 'root' ? '45.00' : '90.00');
+    expect(result.metrics[2].value).toBeNull();
+    expect(result.metrics[3].value).toBe('1');
+    expect(result.details.rows[0][9].value).toBe('有金额待核');
   });
   it('lists later credits separately and excludes adjusted orders from comparable difference', async () => {
     const result = await costReport(tx(), [{ ...root, agentMonthlyBillItem: { bill: { id: 'b', status: 'PAID' }, settledFeeSnapshot: new Decimal('80'), settlementDetailSnapshot: null, credits: [{ requestedAmount: new Decimal('-20'), allocations: [{ amount: new Decimal('-8'), bill: { status: 'CONFIRMED' } }, { amount: new Decimal('-12'), bill: { status: 'DRAFT' } }] }] } }], filters);

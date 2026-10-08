@@ -55,11 +55,11 @@ function choiceType(choice: RowChoice): [PackagingType, PackagingBoxType] {
   return [choice === 'UNPACKED' ? 'UNPACKED' : 'BAG', 'RED_CARD'];
 }
 
-// Wide containers read as a table; narrow ones stack each cell with its own label.
-const ROW_GRID = '@min-[640px]:grid-cols-[minmax(0,1fr)_5.5rem_11rem_9rem]';
+// 容器条件与固定列宽使用同一字体单位，放大文字时及时切换为带标签的单列。
+const ROW_GRID = '@min-[40rem]:grid-cols-[minmax(0,1fr)_5.5rem_11rem_9rem]';
 // Narrow containers show a caption per cell; wide ones rely on the header row. The
 // accessible label stays a plain sr-only <label> (the clipping gate exempts only that).
-const CELL_CAPTION = 'mb-1.5 block text-xs font-bold tracking-widest text-muted-foreground @min-[640px]:hidden';
+const CELL_CAPTION = 'mb-1.5 block text-xs font-bold tracking-widest text-muted-foreground @min-[40rem]:hidden';
 
 function CellLabel({ htmlFor, children }: { htmlFor: string; children: string }) {
   return (
@@ -163,7 +163,7 @@ export function OrderPackagingSection({
       <div data-slot="order-packaging-rows" className="mt-5 min-w-0">
         <div
           aria-hidden="true"
-          className={`hidden gap-3 border-b pb-2 text-xs font-bold text-muted-foreground @min-[640px]:grid ${ROW_GRID}`}
+          className={`hidden gap-3 border-b pb-2 text-xs font-bold text-muted-foreground @min-[40rem]:grid ${ROW_GRID}`}
         >
           <span>{grouped ? '规格' : '款式'}</span>
           <span className="text-right">数量</span>
@@ -212,15 +212,15 @@ function PackagingRow({
   const unpacked = packagingType(row.mode) === 'UNPACKED';
   const quantity = `${row.quantity.toLocaleString('zh-CN')} 个`;
   return (
-    <li className={`grid grid-cols-1 gap-3 py-3 @min-[640px]:items-start ${ROW_GRID}`}>
-      <p id={`${prefix}-packaging-row`} className="min-w-0 text-sm font-semibold @min-[640px]:pt-2.5">
+    <li className={`grid grid-cols-1 gap-3 py-3 @min-[40rem]:items-start ${ROW_GRID}`}>
+      <p id={`${prefix}-packaging-row`} className="min-w-0 text-sm font-semibold @min-[40rem]:pt-2.5">
         {row.label}
-        <span className="font-normal text-muted-foreground @min-[640px]:hidden"> · {quantity}</span>
+        <span className="font-normal text-muted-foreground @min-[40rem]:hidden"> · {quantity}</span>
       </p>
-      <p className="hidden text-right text-sm tabular-nums @min-[640px]:block @min-[640px]:pt-2.5">{quantity}</p>
+      <p className="hidden text-right text-sm tabular-nums @min-[40rem]:block @min-[40rem]:pt-2.5">{quantity}</p>
       <div className="min-w-0">
         {mixed ? (
-          <p className="text-sm @min-[640px]:pt-2.5">{packagingModeLabel(row.mode)}</p>
+          <p className="text-sm @min-[40rem]:pt-2.5">{packagingModeLabel(row.mode)}</p>
         ) : (
           <>
             <CellLabel htmlFor={`${prefix}-packaging-choice`}>包装类型</CellLabel>
@@ -243,7 +243,7 @@ function PackagingRow({
       </div>
       <div className="min-w-0">
         {unpacked ? (
-          <p className="text-sm text-muted-foreground @min-[640px]:pt-2.5">包装费 ¥0.00</p>
+          <p className="text-sm text-muted-foreground @min-[40rem]:pt-2.5">包装费 ¥0.00</p>
         ) : (
           <>
             <CellLabel htmlFor={`${prefix}-units-per-bag`}>{box ? '每盒数量' : '每包数量'}</CellLabel>

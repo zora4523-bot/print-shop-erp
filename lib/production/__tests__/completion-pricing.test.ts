@@ -4,6 +4,7 @@ import type { Prisma, ProductionJob, ProductionOperation } from '@/generated/pri
 import { completionPricingBasis } from '../completion-pricing';
 import { priceCompletionQuantity } from '../completion-wage';
 import { resolveReporterPieceworkRate } from '@/lib/salary/piecework-rate-selection';
+import { ProductionInputError } from '../input-error';
 
 vi.mock('@/lib/salary/piecework-rate-selection', () => ({ resolveReporterPieceworkRate: vi.fn() }));
 const tx = {} as Prisma.TransactionClient;
@@ -20,6 +21,16 @@ function oldRate() {
   });
 }
 describe('original production inputs and wage rule freezing', () => {
+  it.each([{ priceBookId: null }, { rate: 'not-money' }, { smallOrderAmount: '-1' }, { setupAmount: '1.23456' }])('历史计薪资料异常 %j 提示核对历史且不重新读取工价', async invalid => {
+    oldRate();
+    const task = job('PARTIAL');
+    const basis = await completionPricingBasis(tx, task, originalDay);
+    task.snapshot = { registrationPricing: { ...basis, ...invalid } } as Prisma.JsonObject;
+    vi.mocked(resolveReporterPieceworkRate).mockClear();
+    await expect(completionPricingBasis(tx, task, originalDay)).rejects.toBeInstanceOf(ProductionInputError);
+    await expect(completionPricingBasis(tx, task, originalDay)).rejects.toThrow('原计薪资料不完整，请先核对历史记录');
+    expect(resolveReporterPieceworkRate).not.toHaveBeenCalled();
+  });
   it.each(['PARTIAL', 'FULL'] as const)('uses original %s passes/colors and original worker/date at 990 / 1000 / 1001 / 1300', async type => {
     oldRate(); const task = job(type);
     const basis = await completionPricingBasis(tx, task, originalDay);

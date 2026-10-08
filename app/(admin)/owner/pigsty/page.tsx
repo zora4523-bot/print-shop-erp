@@ -91,6 +91,122 @@ function Section({
   );
 }
 
+function PigstyReadinessSummary({ ops, searchIndexes, security, partitions }: {
+  ops: ReadState<Awaited<ReturnType<typeof getOpsExtensionReadiness>>>;
+  searchIndexes: ReadState<Awaited<ReturnType<typeof listSearchIndexReadiness>>>;
+  security: ReadState<Awaited<ReturnType<typeof getSecurityExtensionReadiness>>>;
+  partitions: ReadState<Awaited<ReturnType<typeof getPartitionMaintenanceReadiness>>>;
+}) {
+  return (
+    <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      {ops.ok ? (
+        <>
+          <StatCard
+            label="HTTP Cron"
+            value={ops.data.readyForPgCronHttp ? '就绪' : '未就绪'}
+            icon={Timer}
+            tone={ops.data.readyForPgCronHttp ? 'success' : 'warning'}
+            hint={`${ops.data.enabledCronJobCount} 个候选任务 · ${blockersLabel(
+              ops.data.blockers.filter((b) =>
+                b.startsWith('pg_cron') ||
+                b.startsWith('pg_net') ||
+                b.startsWith('cron_') ||
+                b.startsWith('app_'),
+              ),
+            )}`}
+          />
+          <StatCard
+            label="查询观测"
+            value={ops.data.readyForQueryStats ? '就绪' : '未就绪'}
+            icon={Activity}
+            tone={ops.data.readyForQueryStats ? 'success' : 'warning'}
+            hint={`${ops.data.queryObservationCandidateCount} 个诊断候选`}
+          />
+        </>
+      ) : (
+        <StatCard
+          label="调度与观测"
+          value="待迁移"
+          icon={Database}
+          tone="warning"
+          hint="app_ops.ops_extension_readiness 不可读"
+        />
+      )}
+      {searchIndexes.ok ? (
+        <StatCard
+          label="搜索索引"
+          value={`${searchIndexes.data.filter((row) => row.readyForSearch).length}/${searchIndexes.data.length}`}
+          icon={Search}
+          tone={
+            searchIndexes.data.every((row) => row.readyForSearch)
+              ? 'success'
+              : 'warning'
+          }
+          hint={
+            searchIndexes.data.some((row) => row.blockers.length > 0)
+              ? '存在必需扩展或索引缺口'
+              : '工单/商品搜索必需索引就绪'
+          }
+        />
+      ) : (
+        <StatCard
+          label="搜索索引"
+          value="待迁移"
+          icon={Search}
+          tone="warning"
+          hint="app_ops.search_index_readiness 不可读"
+        />
+      )}
+      {security.ok ? (
+        <StatCard
+          label="脱敏审计"
+          value={
+            security.data.readyForAnonMasking || security.data.readyForPgaudit
+              ? '部分就绪'
+              : '未就绪'
+          }
+          icon={ShieldCheck}
+          tone={
+            security.data.readyForAnonMasking && security.data.readyForPgaudit
+              ? 'success'
+              : 'warning'
+          }
+          hint={`${security.data.policyCount} 条敏感列策略 · ${security.data.auditTableCount} 张审计候选表`}
+        />
+      ) : (
+        <StatCard
+          label="脱敏审计"
+          value="待迁移"
+          icon={ShieldCheck}
+          tone="warning"
+          hint="app_ops.security_extension_readiness 不可读"
+        />
+      )}
+      {partitions.ok ? (
+        <StatCard
+          label="分区维护"
+          value={`${partitions.data.length} 张候选表`}
+          icon={ListChecks}
+          tone={partitions.data.some((row) => row.readyForPartman) ? 'success' : 'warning'}
+          hint={
+            partitions.data.some((row) => row.blockers.length > 0)
+              ? '仍有表结构切换阻塞项'
+              : '候选表无阻塞项'
+          }
+        />
+      ) : (
+        <StatCard
+          label="分区维护"
+          value="待迁移"
+          icon={ListChecks}
+          tone="warning"
+          hint="app_ops.partition_readiness 不可读"
+        />
+      )}
+    </section>
+  );
+}
+
 export default async function PigstyOpsPage() {
   await requirePermission('ops:pigsty:view');
 
@@ -151,112 +267,7 @@ export default async function PigstyOpsPage() {
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        {ops.ok ? (
-          <>
-            <StatCard
-              label="HTTP Cron"
-              value={ops.data.readyForPgCronHttp ? '就绪' : '未就绪'}
-              icon={Timer}
-              tone={ops.data.readyForPgCronHttp ? 'success' : 'warning'}
-              hint={`${ops.data.enabledCronJobCount} 个候选任务 · ${blockersLabel(
-                ops.data.blockers.filter((b) =>
-                  b.startsWith('pg_cron') ||
-                  b.startsWith('pg_net') ||
-                  b.startsWith('cron_') ||
-                  b.startsWith('app_'),
-                ),
-              )}`}
-            />
-            <StatCard
-              label="查询观测"
-              value={ops.data.readyForQueryStats ? '就绪' : '未就绪'}
-              icon={Activity}
-              tone={ops.data.readyForQueryStats ? 'success' : 'warning'}
-              hint={`${ops.data.queryObservationCandidateCount} 个诊断候选`}
-            />
-          </>
-        ) : (
-          <StatCard
-            label="调度与观测"
-            value="待迁移"
-            icon={Database}
-            tone="warning"
-            hint="app_ops.ops_extension_readiness 不可读"
-          />
-        )}
-        {searchIndexes.ok ? (
-          <StatCard
-            label="搜索索引"
-            value={`${searchIndexes.data.filter((row) => row.readyForSearch).length}/${searchIndexes.data.length}`}
-            icon={Search}
-            tone={
-              searchIndexes.data.every((row) => row.readyForSearch)
-                ? 'success'
-                : 'warning'
-            }
-            hint={
-              searchIndexes.data.some((row) => row.blockers.length > 0)
-                ? '存在必需扩展或索引缺口'
-                : '工单/商品搜索必需索引就绪'
-            }
-          />
-        ) : (
-          <StatCard
-            label="搜索索引"
-            value="待迁移"
-            icon={Search}
-            tone="warning"
-            hint="app_ops.search_index_readiness 不可读"
-          />
-        )}
-        {security.ok ? (
-          <StatCard
-            label="脱敏审计"
-            value={
-              security.data.readyForAnonMasking || security.data.readyForPgaudit
-                ? '部分就绪'
-                : '未就绪'
-            }
-            icon={ShieldCheck}
-            tone={
-              security.data.readyForAnonMasking && security.data.readyForPgaudit
-                ? 'success'
-                : 'warning'
-            }
-            hint={`${security.data.policyCount} 条敏感列策略 · ${security.data.auditTableCount} 张审计候选表`}
-          />
-        ) : (
-          <StatCard
-            label="脱敏审计"
-            value="待迁移"
-            icon={ShieldCheck}
-            tone="warning"
-            hint="app_ops.security_extension_readiness 不可读"
-          />
-        )}
-        {partitions.ok ? (
-          <StatCard
-            label="分区维护"
-            value={`${partitions.data.length} 张候选表`}
-            icon={ListChecks}
-            tone={partitions.data.some((row) => row.readyForPartman) ? 'success' : 'warning'}
-            hint={
-              partitions.data.some((row) => row.blockers.length > 0)
-                ? '仍有表结构切换阻塞项'
-                : '候选表无阻塞项'
-            }
-          />
-        ) : (
-          <StatCard
-            label="分区维护"
-            value="待迁移"
-            icon={ListChecks}
-            tone="warning"
-            hint="app_ops.partition_readiness 不可读"
-          />
-        )}
-      </section>
+      <PigstyReadinessSummary {...{ ops, searchIndexes, security, partitions }} />
 
       {ops.ok ? (
         <Section

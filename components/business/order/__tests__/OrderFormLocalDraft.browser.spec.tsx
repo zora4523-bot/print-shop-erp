@@ -111,3 +111,22 @@ it('external salesperson gets the stored local draft restored automatically with
   await expect.element(page.getByRole('button', { name: '恢复本地草稿', exact: true })).not.toBeInTheDocument();
   await expect.element(page.getByRole('button', { name: '放弃本地草稿', exact: true })).not.toBeInTheDocument();
 });
+
+it('增减规格立即保存草稿，重新打开后保留原有款式', async () => {
+  mount('external-sales');
+  await orderName().fill(DRAFT_NAME);
+  const readDraft = () => JSON.parse(localStorage.getItem(localOrderFormDraftStorageKey(DRAFT_SCOPE, true))!);
+  await page.getByRole('button', { name: '＋ 添加规格', exact: true }).click();
+  expect(editor!.capture().values.items).toHaveLength(2);
+  expect(readDraft().values.items).toHaveLength(2);
+  const original = readDraft().values.items[0];
+
+  await page.getByRole('button', { name: '移除当前规格', exact: true }).click();
+  expect(editor!.capture().values.items).toHaveLength(1);
+  expect(readDraft().values.items).toEqual([original]);
+  unmount();
+  mount('external-sales');
+  await expect.element(orderName()).toHaveValue(DRAFT_NAME);
+  expect(editor!.capture().values.items).toHaveLength(1);
+  expect(editor!.capture().values.items[0]).toMatchObject(original);
+});

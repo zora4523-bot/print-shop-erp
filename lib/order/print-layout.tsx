@@ -107,7 +107,7 @@ const CARRIER_LABEL: Record<string, string> = {
   DEPPON: '德邦',
 };
 
-export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() }: Props) {
+function prepareOrderPrintLayout(order: PrintOrder, factoryName: string) {
   const totalQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
   const itemPackaging = buildItemPackaging(order.packagingGroups);
   const packagingComplete = hasCompleteBagFacts(order, itemPackaging);
@@ -250,6 +250,67 @@ export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() 
     artworks.length >= 5 ||
     order.shipments.length > 1 ||
     order.productionSteps.length > 0;
+  return {
+    totalQuantity,
+    itemPackaging,
+    packagingComplete,
+    totalBags,
+    artworks,
+    showItemPaper,
+    mainItems,
+    itemAnnexPages,
+    craft,
+    paper,
+    foil,
+    packageRequirement,
+    remark,
+    supplementPages,
+    hasArtworkOnMainPage,
+    artworkAnnexPages,
+    warnings,
+    flowRows,
+    mainFlowRows,
+    flowAnnexPages,
+    shipments,
+    hasShipmentAnnex,
+    mainShipments,
+    shipmentAnnexPages,
+    pageCount,
+    orderDate,
+    denseMainSheet,
+  };
+}
+
+export function OrderPrintLayout({ order, factoryName, fontCss = printFontCss() }: Props) {
+  const {
+    totalQuantity,
+    itemPackaging,
+    packagingComplete,
+    totalBags,
+    artworks,
+    showItemPaper,
+    mainItems,
+    itemAnnexPages,
+    craft,
+    paper,
+    foil,
+    packageRequirement,
+    remark,
+    supplementPages,
+    hasArtworkOnMainPage,
+    artworkAnnexPages,
+    warnings,
+    flowRows,
+    mainFlowRows,
+    flowAnnexPages,
+    shipments,
+    hasShipmentAnnex,
+    mainShipments,
+    shipmentAnnexPages,
+    pageCount,
+    orderDate,
+    denseMainSheet,
+  } = prepareOrderPrintLayout(order, factoryName);
 
   return (
     <>

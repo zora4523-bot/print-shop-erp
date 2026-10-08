@@ -14,6 +14,8 @@ applies_to: repository source at last_verified
 - `lib/order/production-readiness.ts` 在已授权写事务中复核保存的报价、收货资料、待审批和工艺／包装事实；`lib/production/routing.ts` 区分厂内安排、寄样、外协、包装、直接履约和资料异常。
 - `lib/production/dispatch.ts` 在同一事务准备厂内工序、保存单负责人和打印请求；内部 release 物化仍被使用，但不再暴露独立管理员下发步骤。自动准备不产生结算，也不绕过存量报工守卫。
 - `/owner/analytics` 与 CSV 导出共用 `lib/analytics/filters.ts`、`service.ts` 及分视图报表；五个视图定义于 `views.ts`。分析只读，页面分页与全量导出采用同一筛选口径；不把现金收款、加工费、出账或当前库存混成同一日期指标。
+- 分析销售归属共用 `lib/analytics/sales-scope.ts`，免费重做跟随原单销售。生产核对和待补工资属于成本完整性证据，不能因尚无工资行而视为零成本；历史客户列只供管理员分析读取。
+- 超长函数门禁仍为 300 行，`config/architecture-debt.json` 已无豁免。订单写入按输入准备、计价计划与事务持久化组织；页面按读取上下文和业务区块组织，创建表单按状态、本地草稿、上传、提交、编辑与报价职责组织，事务和授权入口保持。
 
 ## 历史财务快照（2026-10-07）
 
@@ -196,8 +198,9 @@ HTTP 接口只用于 Auth.js、健康检查、cron、下载、导出和少量查
 ## 外部销售读取边界（2026-09-12）
 
 销售详情及编辑复用 `lib/order/sales-detail-query.ts` 的同一查询/序列化契约；
-`SalesOrderEditor` 不接触通用工单 DTO。工单“客户名称/简称”自 2026-09-27 停用，
+`SalesOrderEditor` 不接触通用工单 DTO。工单录入的“客户名称/简称”自 2026-09-27 停用，
 销售端不再读取或返回客户；按工单指认归属一律用 `lib/order/external-sales-name.ts`。
+管理员经营分析继续按历史客户列筛选与汇总，属于单独的只读消费方。
 `lib/agent-monthly-billing/sales-query.ts` 只读取本人的 `AgentMonthlyBill` 及冻结明细，
 不复用包含管理员内部关系的月账单详情。旧 Bill 仅保留管理历史归档用途。
 

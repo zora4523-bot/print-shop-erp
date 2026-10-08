@@ -798,100 +798,12 @@ async function linkFinalizedQuoteRevision(
   });
 }
 
-/**
- * Finalize the server-owned external-sales quote inside the caller's order
- * submission transaction. The caller remains responsible for the subsequent
- * DRAFT -> PENDING_FACTORY status transition.
- */
-export async function finalizeExternalOrderQuoteInTx(
+async function persistExternalItemAndPackagingPricesInTx(
   tx: Prisma.TransactionClient,
-  orderId: string,
-  actorId: string,
-  now: Date,
-  expectedQuoteToken?: string | null,
-): Promise<FinalizeExternalOrderQuoteResult> {
-  if (!orderId.trim() || !actorId.trim() || Number.isNaN(now.getTime())) {
-    throw new ExternalOrderQuoteFinalizeError('提交报价参数无效');
-  }
-
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
-    orderId,
-  )}))`;
-
-  const prepared = await prepareExternalOrderQuote(tx, orderId);
-  if (prepared.kind === 'REUSE') return prepared.result;
-  const { order } = prepared;
-
-  let priceSnapshot: CreateOrderPriceSnapshot;
-  let pureInput: CreateOrderQuoteInput;
-  try {
-    priceSnapshot = await readPublishedCreateOrderPriceSnapshot(tx, {
-      now,
-      snapshotLockHeld: true,
-    });
-    await assertBlankPriceAdmissionInTx(tx, order.items, now, { snapshot: priceSnapshot });
-    pureInput = await buildCreateOrderQuoteInputFromCatalog(
-      tx,
-      persistedQuoteFacts(order),
-    );
-  } catch (error) {
-    if (
-      error instanceof BlankPriceAdmissionError ||
-      error instanceof CreateOrderQuoteFactsAdapterError ||
-      error instanceof PublishedCreateOrderPriceAdapterError
-    ) {
-      throw new ExternalOrderQuoteFinalizeError(error.message);
-    }
-    throw error;
-  }
-  const quote = calculateCreateOrderQuote(pureInput, priceSnapshot);
-  if (!quote.submittable) {
-    throw new ExternalOrderQuoteFinalizeError(
-      quote.errors.join('；') || '提交报价事实无效',
-    );
-  }
-  const { presentation, logisticsPreview } = assertFinalizedQuoteAcknowledged(order, pureInput, priceSnapshot, quote, expectedQuoteToken);
-
-  let logistics: Awaited<
-    ReturnType<typeof resolveExternalOrderChargesForProvisionalCreation>
-  >;
-  try {
-    logistics = await resolveExternalOrderChargesForProvisionalCreation(
-      tx,
-      {
-        isSfCollect: pureInput.isSfCollect,
-        // Finalization has no client amount input. The resolver is retained
-        // only to bind category/rule ids; canonical amounts come from the
-        // pure result below and unresolved lines remain null.
-        shipments: logisticsPersistenceInput(pureInput),
-      },
-      now,
-      { snapshotLockHeld: true },
-    );
-  } catch (error) {
-    if (error instanceof OrderCustomerChargeError) {
-      throw new ExternalOrderQuoteFinalizeError(error.message);
-    }
-    throw error;
-  }
-  const pureLogisticsLines = assertResolvedLogisticsMatchesPure({
-    resolved: logistics,
-    pure: logisticsPreview,
-    quote,
-    snapshot: priceSnapshot,
-  });
-  const hasPendingPlate = quoteHasPendingPlateCharge(quote);
-  let plateCategoryId: string | null = null;
-  if (hasPendingPlate) {
-    try {
-      plateCategoryId = await requireActivePlateCategoryIdInTx(tx);
-    } catch (error) {
-      if (error instanceof PendingPlateChargeError) {
-        throw new ExternalOrderQuoteFinalizeError(error.message);
-      }
-      throw error;
-    }
-  }
+  order: FinalizeOrderRow,
+  quote: CreateOrderQuoteResult,
+  presentation: ReturnType<typeof assertFinalizedQuoteAcknowledged>['presentation'],
+) {
   const manualItemIds: string[] = [];
   let knownItemAmount = new Decimal(0);
   let adminPriceDelta = new Decimal(0);
@@ -1065,7 +977,18 @@ export async function finalizeExternalOrderQuoteInTx(
       });
     }
   }
+  return { manualItemIds, knownItemAmount, adminPriceDelta, adminPriceCount, knownPackagingAmount, hasManualPackaging };
+}
 
+async function persistExternalLogisticsPricesInTx(
+  tx: Prisma.TransactionClient,
+  order: FinalizeOrderRow,
+  logistics: Awaited<ReturnType<typeof resolveExternalOrderChargesForProvisionalCreation>>,
+  pureLogisticsLines: ReturnType<typeof assertResolvedLogisticsMatchesPure>,
+  quote: CreateOrderQuoteResult,
+  actorId: string,
+  now: Date,
+) {
   const shipmentIdByKey = new Map(
     order.shipments.map((shipment) => [String(shipment.sequence), shipment.id]),
   );
@@ -1161,6 +1084,106 @@ export async function finalizeExternalOrderQuoteInTx(
       },
     });
   }
+  return { knownLogisticsAmount, hasManualLogistics };
+}
+
+/**
+ * 在调用方的提交事务中定稿外部销售报价；后续 DRAFT → PENDING_FACTORY 由调用方推进。
+ */
+export async function finalizeExternalOrderQuoteInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  actorId: string,
+  now: Date,
+  expectedQuoteToken?: string | null,
+): Promise<FinalizeExternalOrderQuoteResult> {
+  if (!orderId.trim() || !actorId.trim() || Number.isNaN(now.getTime())) {
+    throw new ExternalOrderQuoteFinalizeError('提交报价参数无效');
+  }
+
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(
+    orderId,
+  )}))`;
+
+  const prepared = await prepareExternalOrderQuote(tx, orderId);
+  if (prepared.kind === 'REUSE') return prepared.result;
+  const { order } = prepared;
+
+  let priceSnapshot: CreateOrderPriceSnapshot;
+  let pureInput: CreateOrderQuoteInput;
+  try {
+    priceSnapshot = await readPublishedCreateOrderPriceSnapshot(tx, {
+      now,
+      snapshotLockHeld: true,
+    });
+    await assertBlankPriceAdmissionInTx(tx, order.items, now, { snapshot: priceSnapshot });
+    pureInput = await buildCreateOrderQuoteInputFromCatalog(
+      tx,
+      persistedQuoteFacts(order),
+    );
+  } catch (error) {
+    if (
+      error instanceof BlankPriceAdmissionError ||
+      error instanceof CreateOrderQuoteFactsAdapterError ||
+      error instanceof PublishedCreateOrderPriceAdapterError
+    ) {
+      throw new ExternalOrderQuoteFinalizeError(error.message);
+    }
+    throw error;
+  }
+  const quote = calculateCreateOrderQuote(pureInput, priceSnapshot);
+  if (!quote.submittable) {
+    throw new ExternalOrderQuoteFinalizeError(
+      quote.errors.join('；') || '提交报价事实无效',
+    );
+  }
+  const { presentation, logisticsPreview } = assertFinalizedQuoteAcknowledged(order, pureInput, priceSnapshot, quote, expectedQuoteToken);
+
+  let logistics: Awaited<
+    ReturnType<typeof resolveExternalOrderChargesForProvisionalCreation>
+  >;
+  try {
+    logistics = await resolveExternalOrderChargesForProvisionalCreation(
+      tx,
+      {
+        isSfCollect: pureInput.isSfCollect,
+        // Finalization has no client amount input. The resolver is retained
+        // only to bind category/rule ids; canonical amounts come from the
+        // pure result below and unresolved lines remain null.
+        shipments: logisticsPersistenceInput(pureInput),
+      },
+      now,
+      { snapshotLockHeld: true },
+    );
+  } catch (error) {
+    if (error instanceof OrderCustomerChargeError) {
+      throw new ExternalOrderQuoteFinalizeError(error.message);
+    }
+    throw error;
+  }
+  const pureLogisticsLines = assertResolvedLogisticsMatchesPure({
+    resolved: logistics,
+    pure: logisticsPreview,
+    quote,
+    snapshot: priceSnapshot,
+  });
+  const hasPendingPlate = quoteHasPendingPlateCharge(quote);
+  let plateCategoryId: string | null = null;
+  if (hasPendingPlate) {
+    try {
+      plateCategoryId = await requireActivePlateCategoryIdInTx(tx);
+    } catch (error) {
+      if (error instanceof PendingPlateChargeError) {
+        throw new ExternalOrderQuoteFinalizeError(error.message);
+      }
+      throw error;
+    }
+  }
+  const { manualItemIds, knownItemAmount, adminPriceDelta, adminPriceCount, knownPackagingAmount, hasManualPackaging } =
+    await persistExternalItemAndPackagingPricesInTx(tx, order, quote, presentation);
+
+  const { knownLogisticsAmount, hasManualLogistics } =
+    await persistExternalLogisticsPricesInTx(tx, order, logistics, pureLogisticsLines, quote, actorId, now);
   if (hasPendingPlate) {
     try {
       await upsertPendingPlateChargeInTx({

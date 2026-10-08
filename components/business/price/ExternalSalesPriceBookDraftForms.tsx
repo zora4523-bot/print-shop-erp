@@ -1271,7 +1271,7 @@ function MatcherNumberField({
   );
 }
 
-export function CustomerPriceBookDraftRuleForm({
+function useDraftRuleEditor({
   context,
   rule,
   successHref,
@@ -1338,6 +1338,555 @@ export function CustomerPriceBookDraftRuleForm({
     ),
   });
 
+  return {
+    context,
+    rule,
+    router,
+    state,
+    formAction,
+    pending,
+    formRef,
+    errors,
+    conditionTarget,
+    prefix,
+    isProcessing,
+    isShipping,
+    isPackaging,
+    displayName,
+    craftValues,
+    craftLabels,
+    hasMatchErrors,
+    errorIdFor,
+    fieldA11y,
+  };
+}
+
+function DraftRuleCoreFields({ model }: { model: ReturnType<typeof useDraftRuleEditor> }) {
+  const {
+    context,
+    rule,
+    errors,
+    prefix,
+    isProcessing,
+    isShipping,
+    isPackaging,
+    displayName,
+    errorIdFor,
+    fieldA11y,
+  } = model;
+  return (<>
+    <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+      <Field
+        label="收费项目名称"
+        htmlFor={`${prefix}-name`}
+        errorId={errorIdFor('name')}
+        errors={errors.name}
+      >
+        <Input
+          id={`${prefix}-name`}
+          name="name"
+          className={controlClass}
+          defaultValue={displayName}
+          maxLength={120}
+          required
+          aria-required="true"
+          {...fieldA11y('name')}
+        />
+      </Field>
+      {isProcessing ? (
+        <>
+          <Field
+            label="费用分类"
+            htmlFor={`${prefix}-category`}
+            errorId={errorIdFor('categoryId')}
+            errors={errors.categoryId}
+          >
+            <NativeSelect
+              id={`${prefix}-category`}
+              name="categoryId"
+              defaultValue={rule.categoryId}
+              required
+              aria-required="true"
+              {...fieldA11y('categoryId')}
+            >
+              {context.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {externalPriceBusinessText(category.name)}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field
+            label="适用产品"
+            htmlFor={`${prefix}-product`}
+            hint="基础费用必须选择产品；其他费用留空表示通用。"
+            hintId={`${prefix}-product-hint`}
+            errorId={errorIdFor('productId')}
+            errors={errors.productId}
+          >
+            <NativeSelect
+              id={`${prefix}-product`}
+              name="productId"
+              defaultValue={rule.productId ?? ''}
+              {...fieldA11y('productId', `${prefix}-product-hint`)}
+            >
+              <option value="">通用（不限产品）</option>
+              {context.products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {externalPriceBusinessText(product.name)}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field
+            label="费用类型"
+            htmlFor={`${prefix}-kind`}
+            errorId={errorIdFor('kind')}
+            errors={errors.kind}
+          >
+            <NativeSelect
+              id={`${prefix}-kind`}
+              name="kind"
+              defaultValue={rule.kind}
+              required
+              aria-required="true"
+              {...fieldA11y('kind')}
+            >
+              {Object.values(CustomerPriceRuleKind).map((kind) => (
+                <option key={kind} value={kind}>
+                  {RULE_KIND_LABELS[kind]}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+        </>
+      ) : (
+        <>
+          <div className="min-w-0 space-y-2 text-sm">
+            <p className="font-medium">费用分类</p>
+            <p className="admin-wrap-anywhere min-h-11 rounded-lg border bg-muted/40 px-3 py-2.5">
+              {rule.categoryName}
+            </p>
+          </div>
+        </>
+      )}
+      {isShipping ? (
+        <div className="min-w-0 space-y-2 text-sm">
+          <p className="font-medium">适用地区</p>
+          <p className="admin-wrap-anywhere min-h-11 rounded-lg border bg-muted/40 px-3 py-2.5">
+            {rule.shippingScopeLabel}
+          </p>
+        </div>
+      ) : null}
+      {isProcessing || isPackaging ? (
+        <>
+          <Field
+            label="最小数量"
+            htmlFor={`${prefix}-minQty`}
+            errorId={errorIdFor('minQty')}
+            errors={errors.minQty}
+          >
+            <Input
+              id={`${prefix}-minQty`}
+              name="minQty"
+              type="number"
+              inputMode="numeric"
+              className={controlClass}
+              defaultValue={rule.minQty ?? ''}
+              min={1}
+              max={9_999_999}
+              step={1}
+              {...fieldA11y('minQty')}
+            />
+          </Field>
+          <Field
+            label="最大数量"
+            htmlFor={`${prefix}-maxQty`}
+            errorId={errorIdFor('maxQty')}
+            errors={errors.maxQty}
+          >
+            <Input
+              id={`${prefix}-maxQty`}
+              name="maxQty"
+              type="number"
+              inputMode="numeric"
+              className={controlClass}
+              defaultValue={rule.maxQty ?? ''}
+              min={1}
+              max={9_999_999}
+              step={1}
+              {...fieldA11y('maxQty')}
+            />
+          </Field>
+        </>
+      ) : (
+        null
+      )}
+      {isProcessing ? (
+        <Field
+          label="计价方式"
+          htmlFor={`${prefix}-calculationType`}
+          errorId={errorIdFor('calculationType')}
+          errors={errors.calculationType}
+        >
+          <NativeSelect
+            id={`${prefix}-calculationType`}
+            name="calculationType"
+            defaultValue={rule.calculationType ?? ''}
+            {...fieldA11y('calculationType')}
+          >
+            <option value="">人工报价（无自动金额）</option>
+            {Object.values(CustomerPriceCalculationType).map((type) => (
+              <option key={type} value={type}>
+                {CALCULATION_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+      ) : (
+        null
+      )}
+      {isProcessing ? (
+        <Field
+          label="每张含几个"
+          htmlFor={`${prefix}-unitsPerSheet`}
+          hint="选择“按张”计价时必填，例如每张可生产 4 个。"
+          hintId={`${prefix}-unitsPerSheet-hint`}
+          errorId={errorIdFor('unitsPerSheet')}
+          errors={errors.unitsPerSheet}
+        >
+          <Input
+            id={`${prefix}-unitsPerSheet`}
+            name="unitsPerSheet"
+            type="number"
+            inputMode="numeric"
+            className={controlClass}
+            defaultValue={rule.unitsPerSheet ?? ''}
+            min={1}
+            max={9_999_999}
+            step={1}
+            placeholder="仅按张计价需要填写"
+            {...fieldA11y(
+              'unitsPerSheet',
+              `${prefix}-unitsPerSheet-hint`,
+            )}
+          />
+        </Field>
+      ) : null}
+      <Field
+        label={isShipping ? '首重金额（元）' : '金额（元）'}
+        htmlFor={`${prefix}-amount`}
+        errorId={errorIdFor('amount')}
+        errors={errors.amount}
+      >
+        <Input
+          id={`${prefix}-amount`}
+          name="amount"
+          inputMode="decimal"
+          className={controlClass}
+          defaultValue={rule.amount ?? ''}
+          placeholder="人工报价规则可留空"
+          {...fieldA11y('amount')}
+        />
+      </Field>
+    </div>
+  </>);
+}
+
+function DraftRuleProcessingFields({ model }: { model: ReturnType<typeof useDraftRuleEditor> }) {
+  const {
+    rule,
+    pending,
+    errors,
+    conditionTarget,
+    prefix,
+    isProcessing,
+    craftValues,
+    craftLabels,
+    hasMatchErrors,
+    errorIdFor,
+  } = model;
+  return (<>
+    {isProcessing ? (
+      <Disclosure
+        className="min-w-0 rounded-xl border bg-muted/20 p-3"
+        open={hasMatchErrors || undefined}
+      >
+        <DisclosureSummary className="font-semibold">
+          适用范围
+        </DisclosureSummary>
+        <div className="mt-3 space-y-4">
+          <p className="text-xs leading-5 text-muted-foreground">
+            仅在适用范围变化时修改。
+          </p>
+          {rule.matchValidationErrors.length > 0 ? (
+            <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              <p className="font-medium">原适用条件需重新确认：</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                {rule.matchValidationErrors.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <FieldErrorMessages
+            id={`${prefix}-match-error`}
+            messages={errors.match}
+          />
+          <div className="min-w-0 space-y-2">
+            <p className="text-sm font-medium">计价对象</p>
+            <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+              {conditionTarget === 'PACKAGING_GROUP' ? '包装组' : '款式'}
+            </p>
+            <input type="hidden" name="match.target" value={conditionTarget} />
+            <FieldErrorMessages
+              id={errorIdFor('match.target')}
+              messages={errors['match.target']}
+            />
+          </div>
+          {conditionTarget === 'PACKAGING_GROUP' ? (
+            <MatchCheckboxGroup
+              legend="包装模式"
+              name="match.packagingModes"
+              labels={PACKAGING_MODE_LABELS}
+              defaultValues={rule.match.packagingModes}
+              required
+              disabled={pending}
+              errors={errors['match.packagingModes']}
+              errorId={`${prefix}-packagingModes-error`}
+            />
+          ) : (
+            <>
+              <MatchCheckboxGroup
+                legend="适用计价方式"
+                name="match.pricingRoutes"
+                labels={ORDER_PRICING_ROUTE_LABELS}
+                values={NEW_ORDER_PRICING_ROUTES}
+                defaultValues={rule.match.pricingRoutes}
+                required
+                disabled={pending}
+                errors={errors['match.pricingRoutes']}
+                errorId={`${prefix}-pricingRoutes-error`}
+              />
+              {rule.match.pricingRoutes.includes(
+                OrderItemPricingRoute.MANUAL_QUOTE,
+              ) ? (
+                <p className="rounded-lg border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
+                  历史规则仅可查看；新规则限选三种计价方式。
+                </p>
+              ) : null}
+          <MatchCheckboxGroup
+            legend="产品结构"
+            name="match.productStructures"
+            labels={PRODUCT_STRUCTURE_LABELS}
+            defaultValues={rule.match.productStructures}
+            disabled={pending}
+            errors={errors['match.productStructures']}
+            errorId={`${prefix}-productStructures-error`}
+          />
+          <MatchCheckboxGroup
+            legend="烫金方式"
+            name="match.foilTechniques"
+            labels={FOIL_TECHNIQUE_LABELS}
+            defaultValues={rule.match.foilTechniques}
+            disabled={pending}
+            errors={errors['match.foilTechniques']}
+            errorId={`${prefix}-foilTechniques-error`}
+          />
+          <MatchCheckboxGroup
+            legend="覆膜方式"
+            name="match.laminations"
+            labels={LAMINATION_LABELS}
+            defaultValues={rule.match.laminations}
+            disabled={pending}
+            errors={errors['match.laminations']}
+            errorId={`${prefix}-laminations-error`}
+          />
+
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+            <MatcherTextField
+              id={`${prefix}-specifications`}
+              name="match.specifications"
+              label="尺寸规格名称"
+              defaultValues={rule.match.specifications}
+              errors={errors['match.specifications']}
+              placeholder="例如：大号、中号"
+            />
+            <MatcherTextField
+              id={`${prefix}-paperTypes`}
+              name="match.paperTypes"
+              label="纸张名称"
+              defaultValues={rule.match.paperTypes}
+              errors={errors['match.paperTypes']}
+              placeholder="例如：160克触感纸、触感纸"
+            />
+            <MatchCheckboxGroup<string>
+              legend="适用工艺"
+              name="match.craftCodes"
+              labels={craftLabels}
+              values={craftValues}
+              defaultValues={rule.match.craftCodes}
+              disabled={pending}
+              errors={errors['match.craftCodes']}
+              errorId={`${prefix}-craftCodes-error`}
+            />
+            <Field
+              label="多工艺条件"
+              htmlFor={`${prefix}-craftMode`}
+              errorId={`${prefix}-craftMode-error`}
+              errors={errors['match.craftMode']}
+            >
+              <NativeSelect
+                id={`${prefix}-craftMode`}
+                name="match.craftMode"
+                defaultValue={rule.match.craftMode === 'ALL' ? 'ALL' : ''}
+              >
+                <option value="">命中任一工艺（默认）</option>
+                <option value="ALL">必须同时包含全部工艺</option>
+              </NativeSelect>
+            </Field>
+            <MatchCheckboxGroup<string>
+              legend="排除工艺"
+              name="match.noneOfCraftCodes"
+              labels={craftLabels}
+              values={craftValues}
+              defaultValues={rule.match.noneOfCraftCodes}
+              disabled={pending}
+              errors={errors['match.noneOfCraftCodes']}
+              errorId={`${prefix}-noneOfCraftCodes-error`}
+            />
+            <MatchCheckboxGroup<string>
+              legend="已覆盖工艺（出现其他工艺时触发）"
+              name="match.anyCraftCodeOutside"
+              labels={craftLabels}
+              values={craftValues}
+              defaultValues={rule.match.anyCraftCodeOutside}
+              disabled={pending}
+              errors={errors['match.anyCraftCodeOutside']}
+              errorId={`${prefix}-anyCraftCodeOutside-error`}
+            />
+            <MatcherTextField
+              id={`${prefix}-foilColors`}
+              name="match.foilColors"
+              label="烫金颜色"
+              defaultValues={rule.match.foilColors}
+              errors={errors['match.foilColors']}
+              placeholder="例如：金、银"
+            />
+            <MatcherTextField
+              id={`${prefix}-printColors`}
+              name="match.printColors"
+              label="彩印颜色"
+              defaultValues={rule.match.printColors}
+              errors={errors['match.printColors']}
+              placeholder="例如：C、M、Y、K"
+            />
+            <MatcherTriStateField
+              id={`${prefix}-isDoubleSided`}
+              name="match.isDoubleSided"
+              label="单双面"
+              defaultValue={rule.match.isDoubleSided}
+              trueLabel="双面"
+              falseLabel="单面"
+              errors={errors['match.isDoubleSided']}
+            />
+            <MatcherTriStateField
+              id={`${prefix}-isDoubleColor`}
+              name="match.isDoubleColor"
+              label="单双色"
+              defaultValue={rule.match.isDoubleColor}
+              trueLabel="双色"
+              falseLabel="单色"
+              errors={errors['match.isDoubleColor']}
+            />
+            <MatcherTriStateField
+              id={`${prefix}-hasLocalFoil`}
+              name="match.hasLocalFoil"
+              label="局部烫金"
+              defaultValue={rule.match.hasLocalFoil}
+              trueLabel="是"
+              falseLabel="否"
+              errors={errors['match.hasLocalFoil']}
+            />
+          </div>
+
+          <fieldset className="min-w-0 rounded-lg border p-3">
+            <legend className="px-1 text-sm font-medium">颜色与烫金道数</legend>
+            <p className="mt-1 text-xs text-muted-foreground">
+              精确值与范围不能同时填写。
+            </p>
+            <div className="mt-3 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <MatcherNumberField id={`${prefix}-foilColorCount`} name="match.foilColorCount" label="烫金颜色精确数" defaultValue={rule.match.foilColorCount} errors={errors['match.foilColorCount']} />
+              <MatcherNumberField id={`${prefix}-minFoilColorCount`} name="match.minFoilColorCount" label="烫金颜色最小数" defaultValue={rule.match.minFoilColorCount} errors={errors['match.minFoilColorCount']} />
+              <MatcherNumberField id={`${prefix}-maxFoilColorCount`} name="match.maxFoilColorCount" label="烫金颜色最大数" defaultValue={rule.match.maxFoilColorCount} errors={errors['match.maxFoilColorCount']} />
+              <MatcherNumberField id={`${prefix}-foilPassCount`} name="match.foilPassCount" label="烫金精确道数（正面＋背面）" defaultValue={rule.match.foilPassCount} errors={errors['match.foilPassCount']} />
+              <MatcherNumberField id={`${prefix}-minFoilPassCount`} name="match.minFoilPassCount" label="烫金最少道数（正面＋背面）" defaultValue={rule.match.minFoilPassCount} errors={errors['match.minFoilPassCount']} />
+              <MatcherNumberField id={`${prefix}-maxFoilPassCount`} name="match.maxFoilPassCount" label="烫金最多道数（正面＋背面）" defaultValue={rule.match.maxFoilPassCount} errors={errors['match.maxFoilPassCount']} />
+              <MatcherNumberField id={`${prefix}-printColorCount`} name="match.printColorCount" label="彩印颜色精确数" defaultValue={rule.match.printColorCount} errors={errors['match.printColorCount']} />
+              <MatcherNumberField id={`${prefix}-minPrintColorCount`} name="match.minPrintColorCount" label="彩印颜色最小数" defaultValue={rule.match.minPrintColorCount} errors={errors['match.minPrintColorCount']} />
+              <MatcherNumberField id={`${prefix}-maxPrintColorCount`} name="match.maxPrintColorCount" label="彩印颜色最大数" defaultValue={rule.match.maxPrintColorCount} errors={errors['match.maxPrintColorCount']} />
+            </div>
+          </fieldset>
+
+          <fieldset className="min-w-0 rounded-lg border p-3">
+            <legend className="px-1 text-sm font-medium">实际尺寸、克重与订单范围</legend>
+            <div className="mt-2 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MatcherNumberField id={`${prefix}-minWidthMm`} name="match.minWidthMm" label="最小宽度（mm）" defaultValue={rule.match.minWidthMm} errors={errors['match.minWidthMm']} min={0.01} step={0.01} />
+              <MatcherNumberField id={`${prefix}-maxWidthMm`} name="match.maxWidthMm" label="最大宽度（mm）" defaultValue={rule.match.maxWidthMm} errors={errors['match.maxWidthMm']} min={0.01} step={0.01} />
+              <MatcherNumberField id={`${prefix}-minHeightMm`} name="match.minHeightMm" label="最小高度（mm）" defaultValue={rule.match.minHeightMm} errors={errors['match.minHeightMm']} min={0.01} step={0.01} />
+              <MatcherNumberField id={`${prefix}-maxHeightMm`} name="match.maxHeightMm" label="最大高度（mm）" defaultValue={rule.match.maxHeightMm} errors={errors['match.maxHeightMm']} min={0.01} step={0.01} />
+              <MatcherNumberField id={`${prefix}-minPaperWeightGsm`} name="match.minPaperWeightGsm" label="最小克重（g）" defaultValue={rule.match.minPaperWeightGsm} errors={errors['match.minPaperWeightGsm']} min={1} />
+              <MatcherNumberField id={`${prefix}-maxPaperWeightGsm`} name="match.maxPaperWeightGsm" label="最大克重（g）" defaultValue={rule.match.maxPaperWeightGsm} errors={errors['match.maxPaperWeightGsm']} min={1} />
+              <MatcherNumberField id={`${prefix}-minItemCount`} name="match.minItemCount" label="订单最少款式数" defaultValue={rule.match.minItemCount} errors={errors['match.minItemCount']} min={1} />
+              <MatcherNumberField id={`${prefix}-maxItemCount`} name="match.maxItemCount" label="订单最多款式数" defaultValue={rule.match.maxItemCount} errors={errors['match.maxItemCount']} min={1} />
+            </div>
+          </fieldset>
+
+              <fieldset className="grid min-w-0 gap-2 rounded-lg border p-3 sm:grid-cols-2">
+            <legend className="px-1 text-sm font-medium">计算倍数</legend>
+            {[
+              ['match.perFoilColor', '按实际烫金颜色数乘算', rule.match.perFoilColor],
+              ['match.perFoilPass', '按实际烫金道数乘算', rule.match.perFoilPass],
+              ['match.perPrintColor', '按实际彩印颜色数乘算', rule.match.perPrintColor],
+            ].map(([name, label, checked]) => (
+              <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
+                <Checkbox
+                  name={String(name)}
+                  value="true"
+                  defaultChecked={Boolean(checked)}
+                  disabled={pending}
+                  aria-label={String(label)}
+                />
+                <span>{String(label)}</span>
+              </label>
+            ))}
+              </fieldset>
+            </>
+          )}
+        </div>
+      </Disclosure>
+    ) : null}
+  </>);
+}
+
+export function CustomerPriceBookDraftRuleForm(props: Parameters<typeof useDraftRuleEditor>[0]) {
+  const model = useDraftRuleEditor(props);
+  const {
+    context,
+    rule,
+    router,
+    state,
+    formAction,
+    pending,
+    formRef,
+    errors,
+    prefix,
+    isProcessing,
+    isShipping,
+    displayName,
+    errorIdFor,
+    fieldA11y,
+  } = model;
   return (
     <form
       key={rule.id}
@@ -1351,481 +1900,9 @@ export function CustomerPriceBookDraftRuleForm({
       <input type="hidden" name="ruleId" value={rule.id} />
       <input type="hidden" name="expectedUpdatedAt" value={rule.updatedAt} />
 
-      <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-        <Field
-          label="收费项目名称"
-          htmlFor={`${prefix}-name`}
-          errorId={errorIdFor('name')}
-          errors={errors.name}
-        >
-          <Input
-            id={`${prefix}-name`}
-            name="name"
-            className={controlClass}
-            defaultValue={displayName}
-            maxLength={120}
-            required
-            aria-required="true"
-            {...fieldA11y('name')}
-          />
-        </Field>
-        {isProcessing ? (
-          <>
-            <Field
-              label="费用分类"
-              htmlFor={`${prefix}-category`}
-              errorId={errorIdFor('categoryId')}
-              errors={errors.categoryId}
-            >
-              <NativeSelect
-                id={`${prefix}-category`}
-                name="categoryId"
-                defaultValue={rule.categoryId}
-                required
-                aria-required="true"
-                {...fieldA11y('categoryId')}
-              >
-                {context.categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {externalPriceBusinessText(category.name)}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Field
-              label="适用产品"
-              htmlFor={`${prefix}-product`}
-              hint="基础费用必须选择产品；其他费用留空表示通用。"
-              hintId={`${prefix}-product-hint`}
-              errorId={errorIdFor('productId')}
-              errors={errors.productId}
-            >
-              <NativeSelect
-                id={`${prefix}-product`}
-                name="productId"
-                defaultValue={rule.productId ?? ''}
-                {...fieldA11y('productId', `${prefix}-product-hint`)}
-              >
-                <option value="">通用（不限产品）</option>
-                {context.products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {externalPriceBusinessText(product.name)}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Field
-              label="费用类型"
-              htmlFor={`${prefix}-kind`}
-              errorId={errorIdFor('kind')}
-              errors={errors.kind}
-            >
-              <NativeSelect
-                id={`${prefix}-kind`}
-                name="kind"
-                defaultValue={rule.kind}
-                required
-                aria-required="true"
-                {...fieldA11y('kind')}
-              >
-                {Object.values(CustomerPriceRuleKind).map((kind) => (
-                  <option key={kind} value={kind}>
-                    {RULE_KIND_LABELS[kind]}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-          </>
-        ) : (
-          <>
-            <div className="min-w-0 space-y-2 text-sm">
-              <p className="font-medium">费用分类</p>
-              <p className="admin-wrap-anywhere min-h-11 rounded-lg border bg-muted/40 px-3 py-2.5">
-                {rule.categoryName}
-              </p>
-            </div>
-          </>
-        )}
-        {isShipping ? (
-          <div className="min-w-0 space-y-2 text-sm">
-            <p className="font-medium">适用地区</p>
-            <p className="admin-wrap-anywhere min-h-11 rounded-lg border bg-muted/40 px-3 py-2.5">
-              {rule.shippingScopeLabel}
-            </p>
-          </div>
-        ) : null}
-        {isProcessing || isPackaging ? (
-          <>
-            <Field
-              label="最小数量"
-              htmlFor={`${prefix}-minQty`}
-              errorId={errorIdFor('minQty')}
-              errors={errors.minQty}
-            >
-              <Input
-                id={`${prefix}-minQty`}
-                name="minQty"
-                type="number"
-                inputMode="numeric"
-                className={controlClass}
-                defaultValue={rule.minQty ?? ''}
-                min={1}
-                max={9_999_999}
-                step={1}
-                {...fieldA11y('minQty')}
-              />
-            </Field>
-            <Field
-              label="最大数量"
-              htmlFor={`${prefix}-maxQty`}
-              errorId={errorIdFor('maxQty')}
-              errors={errors.maxQty}
-            >
-              <Input
-                id={`${prefix}-maxQty`}
-                name="maxQty"
-                type="number"
-                inputMode="numeric"
-                className={controlClass}
-                defaultValue={rule.maxQty ?? ''}
-                min={1}
-                max={9_999_999}
-                step={1}
-                {...fieldA11y('maxQty')}
-              />
-            </Field>
-          </>
-        ) : (
-          null
-        )}
-        {isProcessing ? (
-          <Field
-            label="计价方式"
-            htmlFor={`${prefix}-calculationType`}
-            errorId={errorIdFor('calculationType')}
-            errors={errors.calculationType}
-          >
-            <NativeSelect
-              id={`${prefix}-calculationType`}
-              name="calculationType"
-              defaultValue={rule.calculationType ?? ''}
-              {...fieldA11y('calculationType')}
-            >
-              <option value="">人工报价（无自动金额）</option>
-              {Object.values(CustomerPriceCalculationType).map((type) => (
-                <option key={type} value={type}>
-                  {CALCULATION_TYPE_LABELS[type]}
-                </option>
-              ))}
-            </NativeSelect>
-          </Field>
-        ) : (
-          null
-        )}
-        {isProcessing ? (
-          <Field
-            label="每张含几个"
-            htmlFor={`${prefix}-unitsPerSheet`}
-            hint="选择“按张”计价时必填，例如每张可生产 4 个。"
-            hintId={`${prefix}-unitsPerSheet-hint`}
-            errorId={errorIdFor('unitsPerSheet')}
-            errors={errors.unitsPerSheet}
-          >
-            <Input
-              id={`${prefix}-unitsPerSheet`}
-              name="unitsPerSheet"
-              type="number"
-              inputMode="numeric"
-              className={controlClass}
-              defaultValue={rule.unitsPerSheet ?? ''}
-              min={1}
-              max={9_999_999}
-              step={1}
-              placeholder="仅按张计价需要填写"
-              {...fieldA11y(
-                'unitsPerSheet',
-                `${prefix}-unitsPerSheet-hint`,
-              )}
-            />
-          </Field>
-        ) : null}
-        <Field
-          label={isShipping ? '首重金额（元）' : '金额（元）'}
-          htmlFor={`${prefix}-amount`}
-          errorId={errorIdFor('amount')}
-          errors={errors.amount}
-        >
-          <Input
-            id={`${prefix}-amount`}
-            name="amount"
-            inputMode="decimal"
-            className={controlClass}
-            defaultValue={rule.amount ?? ''}
-            placeholder="人工报价规则可留空"
-            {...fieldA11y('amount')}
-          />
-        </Field>
-      </div>
+      <DraftRuleCoreFields model={model} />
 
-      {isProcessing ? (
-        <Disclosure
-          className="min-w-0 rounded-xl border bg-muted/20 p-3"
-          open={hasMatchErrors || undefined}
-        >
-          <DisclosureSummary className="font-semibold">
-            适用范围
-          </DisclosureSummary>
-          <div className="mt-3 space-y-4">
-            <p className="text-xs leading-5 text-muted-foreground">
-              仅在适用范围变化时修改。
-            </p>
-            {rule.matchValidationErrors.length > 0 ? (
-              <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-                <p className="font-medium">原适用条件需重新确认：</p>
-                <ul className="mt-1 list-disc space-y-1 pl-5">
-                  {rule.matchValidationErrors.map((message) => (
-                    <li key={message}>{message}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <FieldErrorMessages
-              id={`${prefix}-match-error`}
-              messages={errors.match}
-            />
-            <div className="min-w-0 space-y-2">
-              <p className="text-sm font-medium">计价对象</p>
-              <p className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-                {conditionTarget === 'PACKAGING_GROUP' ? '包装组' : '款式'}
-              </p>
-              <input type="hidden" name="match.target" value={conditionTarget} />
-              <FieldErrorMessages
-                id={errorIdFor('match.target')}
-                messages={errors['match.target']}
-              />
-            </div>
-            {conditionTarget === 'PACKAGING_GROUP' ? (
-              <MatchCheckboxGroup
-                legend="包装模式"
-                name="match.packagingModes"
-                labels={PACKAGING_MODE_LABELS}
-                defaultValues={rule.match.packagingModes}
-                required
-                disabled={pending}
-                errors={errors['match.packagingModes']}
-                errorId={`${prefix}-packagingModes-error`}
-              />
-            ) : (
-              <>
-                <MatchCheckboxGroup
-                  legend="适用计价方式"
-                  name="match.pricingRoutes"
-                  labels={ORDER_PRICING_ROUTE_LABELS}
-                  values={NEW_ORDER_PRICING_ROUTES}
-                  defaultValues={rule.match.pricingRoutes}
-                  required
-                  disabled={pending}
-                  errors={errors['match.pricingRoutes']}
-                  errorId={`${prefix}-pricingRoutes-error`}
-                />
-                {rule.match.pricingRoutes.includes(
-                  OrderItemPricingRoute.MANUAL_QUOTE,
-                ) ? (
-                  <p className="rounded-lg border border-warning/40 bg-warning/10 p-2 text-xs text-warning-foreground">
-                    历史规则仅可查看；新规则限选三种计价方式。
-                  </p>
-                ) : null}
-            <MatchCheckboxGroup
-              legend="产品结构"
-              name="match.productStructures"
-              labels={PRODUCT_STRUCTURE_LABELS}
-              defaultValues={rule.match.productStructures}
-              disabled={pending}
-              errors={errors['match.productStructures']}
-              errorId={`${prefix}-productStructures-error`}
-            />
-            <MatchCheckboxGroup
-              legend="烫金方式"
-              name="match.foilTechniques"
-              labels={FOIL_TECHNIQUE_LABELS}
-              defaultValues={rule.match.foilTechniques}
-              disabled={pending}
-              errors={errors['match.foilTechniques']}
-              errorId={`${prefix}-foilTechniques-error`}
-            />
-            <MatchCheckboxGroup
-              legend="覆膜方式"
-              name="match.laminations"
-              labels={LAMINATION_LABELS}
-              defaultValues={rule.match.laminations}
-              disabled={pending}
-              errors={errors['match.laminations']}
-              errorId={`${prefix}-laminations-error`}
-            />
-
-            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-              <MatcherTextField
-                id={`${prefix}-specifications`}
-                name="match.specifications"
-                label="尺寸规格名称"
-                defaultValues={rule.match.specifications}
-                errors={errors['match.specifications']}
-                placeholder="例如：大号、中号"
-              />
-              <MatcherTextField
-                id={`${prefix}-paperTypes`}
-                name="match.paperTypes"
-                label="纸张名称"
-                defaultValues={rule.match.paperTypes}
-                errors={errors['match.paperTypes']}
-                placeholder="例如：160克触感纸、触感纸"
-              />
-              <MatchCheckboxGroup<string>
-                legend="适用工艺"
-                name="match.craftCodes"
-                labels={craftLabels}
-                values={craftValues}
-                defaultValues={rule.match.craftCodes}
-                disabled={pending}
-                errors={errors['match.craftCodes']}
-                errorId={`${prefix}-craftCodes-error`}
-              />
-              <Field
-                label="多工艺条件"
-                htmlFor={`${prefix}-craftMode`}
-                errorId={`${prefix}-craftMode-error`}
-                errors={errors['match.craftMode']}
-              >
-                <NativeSelect
-                  id={`${prefix}-craftMode`}
-                  name="match.craftMode"
-                  defaultValue={rule.match.craftMode === 'ALL' ? 'ALL' : ''}
-                >
-                  <option value="">命中任一工艺（默认）</option>
-                  <option value="ALL">必须同时包含全部工艺</option>
-                </NativeSelect>
-              </Field>
-              <MatchCheckboxGroup<string>
-                legend="排除工艺"
-                name="match.noneOfCraftCodes"
-                labels={craftLabels}
-                values={craftValues}
-                defaultValues={rule.match.noneOfCraftCodes}
-                disabled={pending}
-                errors={errors['match.noneOfCraftCodes']}
-                errorId={`${prefix}-noneOfCraftCodes-error`}
-              />
-              <MatchCheckboxGroup<string>
-                legend="已覆盖工艺（出现其他工艺时触发）"
-                name="match.anyCraftCodeOutside"
-                labels={craftLabels}
-                values={craftValues}
-                defaultValues={rule.match.anyCraftCodeOutside}
-                disabled={pending}
-                errors={errors['match.anyCraftCodeOutside']}
-                errorId={`${prefix}-anyCraftCodeOutside-error`}
-              />
-              <MatcherTextField
-                id={`${prefix}-foilColors`}
-                name="match.foilColors"
-                label="烫金颜色"
-                defaultValues={rule.match.foilColors}
-                errors={errors['match.foilColors']}
-                placeholder="例如：金、银"
-              />
-              <MatcherTextField
-                id={`${prefix}-printColors`}
-                name="match.printColors"
-                label="彩印颜色"
-                defaultValues={rule.match.printColors}
-                errors={errors['match.printColors']}
-                placeholder="例如：C、M、Y、K"
-              />
-              <MatcherTriStateField
-                id={`${prefix}-isDoubleSided`}
-                name="match.isDoubleSided"
-                label="单双面"
-                defaultValue={rule.match.isDoubleSided}
-                trueLabel="双面"
-                falseLabel="单面"
-                errors={errors['match.isDoubleSided']}
-              />
-              <MatcherTriStateField
-                id={`${prefix}-isDoubleColor`}
-                name="match.isDoubleColor"
-                label="单双色"
-                defaultValue={rule.match.isDoubleColor}
-                trueLabel="双色"
-                falseLabel="单色"
-                errors={errors['match.isDoubleColor']}
-              />
-              <MatcherTriStateField
-                id={`${prefix}-hasLocalFoil`}
-                name="match.hasLocalFoil"
-                label="局部烫金"
-                defaultValue={rule.match.hasLocalFoil}
-                trueLabel="是"
-                falseLabel="否"
-                errors={errors['match.hasLocalFoil']}
-              />
-            </div>
-
-            <fieldset className="min-w-0 rounded-lg border p-3">
-              <legend className="px-1 text-sm font-medium">颜色与烫金道数</legend>
-              <p className="mt-1 text-xs text-muted-foreground">
-                精确值与范围不能同时填写。
-              </p>
-              <div className="mt-3 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <MatcherNumberField id={`${prefix}-foilColorCount`} name="match.foilColorCount" label="烫金颜色精确数" defaultValue={rule.match.foilColorCount} errors={errors['match.foilColorCount']} />
-                <MatcherNumberField id={`${prefix}-minFoilColorCount`} name="match.minFoilColorCount" label="烫金颜色最小数" defaultValue={rule.match.minFoilColorCount} errors={errors['match.minFoilColorCount']} />
-                <MatcherNumberField id={`${prefix}-maxFoilColorCount`} name="match.maxFoilColorCount" label="烫金颜色最大数" defaultValue={rule.match.maxFoilColorCount} errors={errors['match.maxFoilColorCount']} />
-                <MatcherNumberField id={`${prefix}-foilPassCount`} name="match.foilPassCount" label="烫金精确道数（正面＋背面）" defaultValue={rule.match.foilPassCount} errors={errors['match.foilPassCount']} />
-                <MatcherNumberField id={`${prefix}-minFoilPassCount`} name="match.minFoilPassCount" label="烫金最少道数（正面＋背面）" defaultValue={rule.match.minFoilPassCount} errors={errors['match.minFoilPassCount']} />
-                <MatcherNumberField id={`${prefix}-maxFoilPassCount`} name="match.maxFoilPassCount" label="烫金最多道数（正面＋背面）" defaultValue={rule.match.maxFoilPassCount} errors={errors['match.maxFoilPassCount']} />
-                <MatcherNumberField id={`${prefix}-printColorCount`} name="match.printColorCount" label="彩印颜色精确数" defaultValue={rule.match.printColorCount} errors={errors['match.printColorCount']} />
-                <MatcherNumberField id={`${prefix}-minPrintColorCount`} name="match.minPrintColorCount" label="彩印颜色最小数" defaultValue={rule.match.minPrintColorCount} errors={errors['match.minPrintColorCount']} />
-                <MatcherNumberField id={`${prefix}-maxPrintColorCount`} name="match.maxPrintColorCount" label="彩印颜色最大数" defaultValue={rule.match.maxPrintColorCount} errors={errors['match.maxPrintColorCount']} />
-              </div>
-            </fieldset>
-
-            <fieldset className="min-w-0 rounded-lg border p-3">
-              <legend className="px-1 text-sm font-medium">实际尺寸、克重与订单范围</legend>
-              <div className="mt-2 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <MatcherNumberField id={`${prefix}-minWidthMm`} name="match.minWidthMm" label="最小宽度（mm）" defaultValue={rule.match.minWidthMm} errors={errors['match.minWidthMm']} min={0.01} step={0.01} />
-                <MatcherNumberField id={`${prefix}-maxWidthMm`} name="match.maxWidthMm" label="最大宽度（mm）" defaultValue={rule.match.maxWidthMm} errors={errors['match.maxWidthMm']} min={0.01} step={0.01} />
-                <MatcherNumberField id={`${prefix}-minHeightMm`} name="match.minHeightMm" label="最小高度（mm）" defaultValue={rule.match.minHeightMm} errors={errors['match.minHeightMm']} min={0.01} step={0.01} />
-                <MatcherNumberField id={`${prefix}-maxHeightMm`} name="match.maxHeightMm" label="最大高度（mm）" defaultValue={rule.match.maxHeightMm} errors={errors['match.maxHeightMm']} min={0.01} step={0.01} />
-                <MatcherNumberField id={`${prefix}-minPaperWeightGsm`} name="match.minPaperWeightGsm" label="最小克重（g）" defaultValue={rule.match.minPaperWeightGsm} errors={errors['match.minPaperWeightGsm']} min={1} />
-                <MatcherNumberField id={`${prefix}-maxPaperWeightGsm`} name="match.maxPaperWeightGsm" label="最大克重（g）" defaultValue={rule.match.maxPaperWeightGsm} errors={errors['match.maxPaperWeightGsm']} min={1} />
-                <MatcherNumberField id={`${prefix}-minItemCount`} name="match.minItemCount" label="订单最少款式数" defaultValue={rule.match.minItemCount} errors={errors['match.minItemCount']} min={1} />
-                <MatcherNumberField id={`${prefix}-maxItemCount`} name="match.maxItemCount" label="订单最多款式数" defaultValue={rule.match.maxItemCount} errors={errors['match.maxItemCount']} min={1} />
-              </div>
-            </fieldset>
-
-                <fieldset className="grid min-w-0 gap-2 rounded-lg border p-3 sm:grid-cols-2">
-              <legend className="px-1 text-sm font-medium">计算倍数</legend>
-              {[
-                ['match.perFoilColor', '按实际烫金颜色数乘算', rule.match.perFoilColor],
-                ['match.perFoilPass', '按实际烫金道数乘算', rule.match.perFoilPass],
-                ['match.perPrintColor', '按实际彩印颜色数乘算', rule.match.perPrintColor],
-              ].map(([name, label, checked]) => (
-                <label key={String(name)} className="flex min-h-11 cursor-pointer items-center gap-1 rounded-lg border bg-background pr-3 text-sm has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
-                  <Checkbox
-                    name={String(name)}
-                    value="true"
-                    defaultChecked={Boolean(checked)}
-                    disabled={pending}
-                    aria-label={String(label)}
-                  />
-                  <span>{String(label)}</span>
-                </label>
-              ))}
-                </fieldset>
-              </>
-            )}
-          </div>
-        </Disclosure>
-      ) : null}
+      <DraftRuleProcessingFields model={model} />
 
       {isShipping ? (
         <fieldset className="min-w-0 rounded-lg border p-3">

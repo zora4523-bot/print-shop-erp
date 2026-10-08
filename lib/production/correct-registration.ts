@@ -1,3 +1,4 @@
+import { ProductionInputError } from '@/lib/production/input-error';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { Prisma } from '@/generated/prisma/client';
@@ -16,21 +17,21 @@ export async function correctProductionRegistration(raw: z.infer<typeof correcti
   return db.$transaction(async tx => {
     await assertProductionAdmin(tx, actor);
     const locator = await tx.productionJob.findUnique({ where: { id: input.jobId }, select: { orderId: true } });
-    if (!locator) throw new Error('生产记录不存在，请刷新查看');
+    if (!locator) throw new ProductionInputError('生产记录不存在，请刷新查看');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orderCascadeLockKey(locator.orderId)}))`;
     const replay = await tx.productionDispatchBatch.findUnique({ where: { id: `correction:${input.requestKey}` } });
     if (replay) {
-      if (replay.requestHash !== requestHash || replay.actorId !== actor.id) throw new Error('提交内容已变化，请重新核对');
+      if (replay.requestHash !== requestHash || replay.actorId !== actor.id) throw new ProductionInputError('提交内容已变化，请重新核对');
       return locator.orderId;
     }
     const job = await tx.productionJob.findUniqueOrThrow({ where: { id: input.jobId }, include: { order: { include: { shipments: true } }, wages: true } });
-    if (job.status !== 'COMPLETED' || job.revision !== input.revision || job.workOrderVersion !== job.order.workOrderVersion) throw new Error('记录已变化或已有后续生产，请刷新核对');
-    if (!['RELEASED', 'FOILING', 'PACKING'].includes(job.order.status) || job.order.shipments.some(row => row.status === 'SHIPPED')) throw new Error('工单已关闭、暂停或发货，不能更正生产登记');
-    if (await tx.orderChangeRequest.count({ where: { orderId: job.orderId, status: 'PENDING' } })) throw new Error('存在待审批修改，请先处理');
+    if (job.status !== 'COMPLETED' || job.revision !== input.revision || job.workOrderVersion !== job.order.workOrderVersion) throw new ProductionInputError('记录已变化或已有后续生产，请刷新核对');
+    if (!['RELEASED', 'FOILING', 'PACKING'].includes(job.order.status) || job.order.shipments.some(row => row.status === 'SHIPPED')) throw new ProductionInputError('工单已关闭、暂停或发货，不能更正生产登记');
+    if (await tx.orderChangeRequest.count({ where: { orderId: job.orderId, status: 'PENDING' } })) throw new ProductionInputError('存在待审批修改，请先处理');
     await assertNoHistoricalProductionReview(tx, job.orderId);
     const wages = [...job.wages].sort((a, b) => a.workerId.localeCompare(b.workerId));
     for (const workerId of [...new Set([job.workerId, ...wages.map(wage => wage.workerId)])].sort()) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${salaryIdentityLockKey(workerId)}))`;
-    if (!job.workDate) throw new Error('原生产日期缺失，请核对历史记录');
+    if (!job.workDate) throw new ProductionInputError('原生产日期缺失，请核对历史记录');
     await lockProductionWageDay(tx, job.workerId, job.workDate.toISOString().slice(0, 10));
     for (const wage of wages) await lockProductionWageDay(tx, wage.workerId, wage.workDate.toISOString().slice(0, 10));
     const changedFields = { jobId: job.id, correctionRevision: job.revision + 1, requestKey: input.requestKey,

@@ -558,11 +558,7 @@ async function findOrderBySubmissionId(tx: Pick<Prisma.TransactionClient, 'order
   });
 }
 
-export async function createOrder(
-  input: CreateOrderCommand,
-  actor: { id: string; role: Role },
-  now: Date = new Date(),
-): Promise<CreatedOrderSummary> {
+function prepareCreateOrderInput(input: CreateOrderCommand, actor: { id: string; role: Role }) {
   const requestFingerprint = createOrderRequestFingerprint(input);
   const acceptedRequestFingerprints = acceptedCreateOrderRequestFingerprints(input);
   const special = isSampleOrder(input.purpose);
@@ -639,6 +635,175 @@ export async function createOrder(
     throw new OrderInvariantError('下一款式编号不能复用已分配编号');
   }
   const nextItemFig = input.nextItemFig ?? minimumNextItemFig;
+  return { requestFingerprint, acceptedRequestFingerprints, sampleShipment, additionalShipments, hasAdminPrices, packagingGroupInputs, externalSalesUserId, submitterId, settlementType, resolvedItemFigs, nextItemFig };
+}
+
+async function prepareCreateOrderFactsInTx(
+  txClient: Prisma.TransactionClient,
+  input: CreateOrderCommand,
+  additionalShipments: NonNullable<CreateOrderCommand['additionalShipments']>,
+  packagingGroupInputs: NonNullable<CreateOrderCommand['packagingGroups']>,
+) {
+  const { canonicalStockLocalFoilCraft, craftCodeById } =
+    await resolveCreationCraftsInTx(txClient, input);
+  const items = input.items.map((item) => {
+    const foilFacts = deriveLegacyOrderItemFoilFacts(item);
+    if (item.pricingRoute !== 'STOCK_BLANK') {
+      return { ...item, ...foilFacts };
+    }
+    const normalizedCraftIds = item.crafts.filter(
+      (craftId) =>
+        craftCodeById.get(craftId) !== LEGACY_STOCK_FOIL_CRAFT_CODE,
+    );
+    normalizedCraftIds.push(canonicalStockLocalFoilCraft!.id);
+    return {
+      ...item,
+      ...foilFacts,
+      crafts: [...new Set(normalizedCraftIds)],
+    };
+  });
+  const packagingGroups = packagingGroupInputs.map((group, index) => {
+    const count = calculateCreateOrderBagCount({
+      mode: group.mode,
+      itemQuantities: items.map((item) => item.quantity),
+      itemUnitsPerBag: group.itemUnitsPerBag,
+      shipmentQuantities: [items.map((item, itemIndex) => item.quantity - additionalShipments.reduce((sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0), 0)), ...additionalShipments.map((shipment) => shipment.itemQuantities)],
+    });
+    if (!count.complete) {
+      throw new OrderInvariantError(
+        `包装组 ${index + 1}：${count.errors.join('；')}`,
+      );
+    }
+    return { ...group, actualBagCount: count.bagCount };
+  });
+
+  // External sales create only a production-facts DRAFT. Their browser quote
+  // is a review aid, not a financial write: the submit finalizer re-quotes
+  // persisted facts, locks price versions and creates revision 1 atomically.
+  // Internal settlement keeps its existing create-time quote behavior.
+  for (const [index, item] of items.entries()) {
+    assertOrderQuantity({ ...item, sequence: index + 1 });
+  }
+  // 客户名称/简称与关联客户已退役（业主 2026-09-27）：命令里即便带着
+  // customerRef / customerPartyId 也不校验、不写库，新工单的客户字段恒为空；
+  // “是谁的单”统一看工单归属的外部销售（lib/order/external-sales-name.ts）。
+  // (4) product FK check — one batch findMany over the distinct ids
+  // (was per-item findUnique: a 10-item order paid up to 10 round
+  // trips inside the tx). No productId → no query at all. Deliberately
+  // NOT filtering isActive in the where: 不存在 and 已停用 are two
+  // distinct messages, and the per-item loop keeps first-error order.
+  await assertCreateOrderProductsInTx(txClient, items.filter((item) => item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK));
+
+  // (5) processing totals and per-shipment allocation facts.
+  // Every create is an external-sales draft: amounts are server-owned and
+  // priced by the submit finalizer; only explicit admin prices apply now.
+  const automaticItems = items.map((it) => ({
+    ...it,
+    priceOverrideReason: null,
+    unitPrice: '0',
+    fixedFee: '0',
+    subtotal: '0.00',
+    suggestedSubtotal: null,
+    quoteDisposition: null,
+    quotedAmount: null,
+    requiresAdminConfirmation: true,
+    pricingSnapshot: null,
+  }));
+  const itemsWithSubtotals = automaticItems.map(applyAdminCreateItemPrice);
+  const itemProcessingAmount = sumTotals(
+    itemsWithSubtotals.map((i) => i.subtotal),
+  );
+  const automaticPackagingGroups = packagingGroups.map((group) => ({
+    ...group,
+    unitPrice: '0.0000',
+    subtotal: '0.00',
+    suggestedSubtotal: null,
+    complete: false,
+    pricingSnapshot: null,
+  }));
+  const packagingGroupsWithPrices = automaticPackagingGroups.map((group): Omit<typeof group, 'pricingSnapshot'> & { pricingSnapshot: Prisma.InputJsonObject | null; priceOverrideReason: string | null } => {
+    if (!group.adminPrice) return { ...group, priceOverrideReason: null };
+    try { return { ...group, ...calculateAdminPackagingPrice(group.adminPrice, group.actualBagCount), complete: true }; }
+    catch (error) { throw new OrderInvariantError(error instanceof Error ? error.message : '包装价格无效'); }
+  });
+  const packagingAmount = sumTotals(
+    packagingGroupsWithPrices.map((group) => group.subtotal),
+  );
+  const processingAmount = new Decimal(itemProcessingAmount)
+    .plus(packagingAmount)
+    .toFixed(2);
+  assertStorableOrderTotal(processingAmount);
+  const primaryQuantities = items.map((item, itemIndex) => {
+    const extraQuantity = additionalShipments.reduce(
+      (sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0),
+      0,
+    );
+    return item.quantity - extraQuantity;
+  });
+  const draftShipmentInputs = [
+    {
+      receiverName: input.receiverName,
+      receiverPhone: input.receiverPhone,
+      receiverAddress: input.receiverAddress,
+      expressCode: input.expressCode,
+      destinationProvince: input.destinationProvince ?? null,
+      // External sales create orders from a browser and cannot establish a
+      // carrier billable weight. The browser value is discarded here; only
+      // validated item/allocation facts are kept for the submit finalizer's
+      // server-owned weight policy.
+      quotedWeightKg: null,
+      shippingFee: null,
+      packingMaterialFee: null,
+      customerChargeOverrideReason: null,
+      itemQuantities: primaryQuantities,
+    },
+    ...additionalShipments.map((shipment) => ({
+      ...shipment,
+      destinationProvince: shipment.destinationProvince ?? null,
+      quotedWeightKg: null,
+      shippingFee: null,
+      packingMaterialFee: null,
+      customerChargeOverrideReason: null,
+    })),
+  ];
+
+  const externalChargeShipments = deriveExternalOrderChargeShipments({
+    isSfCollect: input.isSfCollect,
+    items: items.map((item, index) => ({
+      itemKey: String(index + 1),
+      quantity: item.quantity,
+      paperWeightGsm: item.paperWeightGsm,
+      paperType: item.paperType,
+      productStructure: item.productStructure,
+    })),
+    shipments: draftShipmentInputs.map((shipment, index) => ({
+      shipmentKey: String(index + 1),
+      province: shipment.destinationProvince,
+      billableWeightKg: shipment.quotedWeightKg,
+      itemQuantities: shipment.itemQuantities,
+    })),
+  });
+  const shipmentInputs = draftShipmentInputs.map((shipment, index) => ({
+    ...shipment,
+    quotedWeightKg:
+      externalChargeShipments[index]?.billableWeightKg ?? null,
+  }));
+
+  // No customer charge is materialized for an external DRAFT. The submit
+  // finalizer prices these persisted shipment/item facts under one snapshot.
+  const totalAmount = processingAmount;
+  assertStorableOrderTotal(totalAmount);
+  // External drafts are always priced by the admin/submit finalizer.
+  const pricingStatus = ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
+  return { itemsWithSubtotals, packagingGroupsWithPrices, shipmentInputs, packagingAmount, processingAmount, totalAmount, pricingStatus };
+}
+
+export async function createOrder(
+  input: CreateOrderCommand,
+  actor: { id: string; role: Role },
+  now: Date = new Date(),
+): Promise<CreatedOrderSummary> {
+  const { requestFingerprint, acceptedRequestFingerprints, sampleShipment, additionalShipments, hasAdminPrices, packagingGroupInputs, externalSalesUserId, submitterId, settlementType, resolvedItemFigs, nextItemFig } = prepareCreateOrderInput(input, actor);
 
   const createOnce = () => db.$transaction(async (tx) => {
     // Keep the real generated transaction type here. A hand-written
@@ -693,157 +858,8 @@ export async function createOrder(
     // (1) allocate a fresh GD-YYMMDD-XXX (advisory lock inside).
     const orderNo = await nextOrderNumber(txClient, now);
 
-    const { canonicalStockLocalFoilCraft, craftCodeById } =
-      await resolveCreationCraftsInTx(txClient, input);
-    const items = input.items.map((item) => {
-      const foilFacts = deriveLegacyOrderItemFoilFacts(item);
-      if (item.pricingRoute !== 'STOCK_BLANK') {
-        return { ...item, ...foilFacts };
-      }
-      const normalizedCraftIds = item.crafts.filter(
-        (craftId) =>
-          craftCodeById.get(craftId) !== LEGACY_STOCK_FOIL_CRAFT_CODE,
-      );
-      normalizedCraftIds.push(canonicalStockLocalFoilCraft!.id);
-      return {
-        ...item,
-        ...foilFacts,
-        crafts: [...new Set(normalizedCraftIds)],
-      };
-    });
-    const packagingGroups = packagingGroupInputs.map((group, index) => {
-      const count = calculateCreateOrderBagCount({
-        mode: group.mode,
-        itemQuantities: items.map((item) => item.quantity),
-        itemUnitsPerBag: group.itemUnitsPerBag,
-        shipmentQuantities: [items.map((item, itemIndex) => item.quantity - additionalShipments.reduce((sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0), 0)), ...additionalShipments.map((shipment) => shipment.itemQuantities)],
-      });
-      if (!count.complete) {
-        throw new OrderInvariantError(
-          `包装组 ${index + 1}：${count.errors.join('；')}`,
-        );
-      }
-      return { ...group, actualBagCount: count.bagCount };
-    });
-
-    // External sales create only a production-facts DRAFT. Their browser quote
-    // is a review aid, not a financial write: the submit finalizer re-quotes
-    // persisted facts, locks price versions and creates revision 1 atomically.
-    // Internal settlement keeps its existing create-time quote behavior.
-    for (const [index, item] of items.entries()) {
-      assertOrderQuantity({ ...item, sequence: index + 1 });
-    }
-    // 客户名称/简称与关联客户已退役（业主 2026-09-27）：命令里即便带着
-    // customerRef / customerPartyId 也不校验、不写库，新工单的客户字段恒为空；
-    // “是谁的单”统一看工单归属的外部销售（lib/order/external-sales-name.ts）。
-    // (4) product FK check — one batch findMany over the distinct ids
-    // (was per-item findUnique: a 10-item order paid up to 10 round
-    // trips inside the tx). No productId → no query at all. Deliberately
-    // NOT filtering isActive in the where: 不存在 and 已停用 are two
-    // distinct messages, and the per-item loop keeps first-error order.
-    await assertCreateOrderProductsInTx(txClient, items.filter((item) => item.pricingRoute !== OrderItemPricingRoute.STOCK_BLANK));
-
-    // (5) processing totals and per-shipment allocation facts.
-    // Every create is an external-sales draft: amounts are server-owned and
-    // priced by the submit finalizer; only explicit admin prices apply now.
-    const automaticItems = items.map((it) => ({
-      ...it,
-      priceOverrideReason: null,
-      unitPrice: '0',
-      fixedFee: '0',
-      subtotal: '0.00',
-      suggestedSubtotal: null,
-      quoteDisposition: null,
-      quotedAmount: null,
-      requiresAdminConfirmation: true,
-      pricingSnapshot: null,
-    }));
-    const itemsWithSubtotals = automaticItems.map(applyAdminCreateItemPrice);
-    const itemProcessingAmount = sumTotals(
-      itemsWithSubtotals.map((i) => i.subtotal),
-    );
-    const automaticPackagingGroups = packagingGroups.map((group) => ({
-      ...group,
-      unitPrice: '0.0000',
-      subtotal: '0.00',
-      suggestedSubtotal: null,
-      complete: false,
-      pricingSnapshot: null,
-    }));
-    const packagingGroupsWithPrices = automaticPackagingGroups.map((group): Omit<typeof group, 'pricingSnapshot'> & { pricingSnapshot: Prisma.InputJsonObject | null; priceOverrideReason: string | null } => {
-      if (!group.adminPrice) return { ...group, priceOverrideReason: null };
-      try { return { ...group, ...calculateAdminPackagingPrice(group.adminPrice, group.actualBagCount), complete: true }; }
-      catch (error) { throw new OrderInvariantError(error instanceof Error ? error.message : '包装价格无效'); }
-    });
-    const packagingAmount = sumTotals(
-      packagingGroupsWithPrices.map((group) => group.subtotal),
-    );
-    const processingAmount = new Decimal(itemProcessingAmount)
-      .plus(packagingAmount)
-      .toFixed(2);
-    assertStorableOrderTotal(processingAmount);
-    const primaryQuantities = items.map((item, itemIndex) => {
-      const extraQuantity = additionalShipments.reduce(
-        (sum, shipment) => sum + (shipment.itemQuantities[itemIndex] ?? 0),
-        0,
-      );
-      return item.quantity - extraQuantity;
-    });
-    const draftShipmentInputs = [
-      {
-        receiverName: input.receiverName,
-        receiverPhone: input.receiverPhone,
-        receiverAddress: input.receiverAddress,
-        expressCode: input.expressCode,
-        destinationProvince: input.destinationProvince ?? null,
-        // External sales create orders from a browser and cannot establish a
-        // carrier billable weight. The browser value is discarded here; only
-        // validated item/allocation facts are kept for the submit finalizer's
-        // server-owned weight policy.
-        quotedWeightKg: null,
-        shippingFee: null,
-        packingMaterialFee: null,
-        customerChargeOverrideReason: null,
-        itemQuantities: primaryQuantities,
-      },
-      ...additionalShipments.map((shipment) => ({
-        ...shipment,
-        destinationProvince: shipment.destinationProvince ?? null,
-        quotedWeightKg: null,
-        shippingFee: null,
-        packingMaterialFee: null,
-        customerChargeOverrideReason: null,
-      })),
-    ];
-
-    const externalChargeShipments = deriveExternalOrderChargeShipments({
-      isSfCollect: input.isSfCollect,
-      items: items.map((item, index) => ({
-        itemKey: String(index + 1),
-        quantity: item.quantity,
-        paperWeightGsm: item.paperWeightGsm,
-        paperType: item.paperType,
-        productStructure: item.productStructure,
-      })),
-      shipments: draftShipmentInputs.map((shipment, index) => ({
-        shipmentKey: String(index + 1),
-        province: shipment.destinationProvince,
-        billableWeightKg: shipment.quotedWeightKg,
-        itemQuantities: shipment.itemQuantities,
-      })),
-    });
-    const shipmentInputs = draftShipmentInputs.map((shipment, index) => ({
-      ...shipment,
-      quotedWeightKg:
-        externalChargeShipments[index]?.billableWeightKg ?? null,
-    }));
-
-    // No customer charge is materialized for an external DRAFT. The submit
-    // finalizer prices these persisted shipment/item facts under one snapshot.
-    const totalAmount = processingAmount;
-    assertStorableOrderTotal(totalAmount);
-    // External drafts are always priced by the admin/submit finalizer.
-    const pricingStatus = ORDER_PRICING_STATUS.PENDING_ADMIN_CONFIRMATION;
+    const { itemsWithSubtotals, packagingGroupsWithPrices, shipmentInputs, packagingAmount, processingAmount, totalAmount, pricingStatus } =
+      await prepareCreateOrderFactsInTx(txClient, input, additionalShipments, packagingGroupInputs);
 
     // (5) one nested write: Order + items + first OrderLog.
     const created = await txClient.order.create({
@@ -3288,6 +3304,229 @@ async function waiveManualFreightForSfCollectInTx(
   return waived;
 }
 
+async function repriceSfCollectChargesInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  order: NonNullable<Awaited<ReturnType<EditTxClient['order']['findFirst']>>>,
+  isSfCollect: boolean,
+  trustedCorrections: readonly SfCollectChargeCorrection[],
+  actor: { id: string; role: Role },
+  changedAt: Date,
+) {
+  let nextTotalAmount = new Decimal(order.totalAmount).toFixed(2);
+  let nextQuotedFeeCompleteness: OrderQuotedFeeCompleteness | null = null;
+  const prismaTx = tx as unknown as Prisma.TransactionClient;
+  const chargeChangedAt = changedAt;
+  const { chargeContext, standardCharges, priceBookIds,
+    chargeByShipmentAndCategory, correctionByShipmentId } =
+    await readSfCollectChargeContextInTx(
+      prismaTx, orderId, order.status, isSfCollect, trustedCorrections,
+    );
+
+  let repriced: Awaited<
+    ReturnType<typeof resolveExternalOrderChargesForFinalization>
+  >;
+  try {
+    const shipmentChargeFacts = deriveExternalOrderChargeShipments({
+      isSfCollect,
+      items: chargeContext.items.map((item) => ({
+        itemKey: item.id,
+        quantity: item.quantity,
+        paperWeightGsm: item.paperWeightGsm,
+        paperType: item.paperType,
+        productStructure: item.productStructure,
+      })),
+      shipments: chargeContext.shipments.map((shipment) => {
+        const correction = correctionByShipmentId.get(shipment.id);
+        return {
+          shipmentKey: String(shipment.sequence),
+          province:
+            correction?.destinationProvince ??
+            shipment.destinationProvince,
+          // Browser quote fields are deliberately absent. An explicit
+          // administrator correction wins over the persisted actual;
+          // otherwise the shared calculator estimates from item facts.
+          billableWeightKg: isSfCollect
+            ? null
+            : correction?.weightKg ??
+              shipment.weightKg?.toString() ??
+              null,
+          itemQuantities: chargeContext.items.map((item) =>
+            shipment.lines.reduce(
+              (sum, line) =>
+                line.orderItemId === item.id
+                  ? sum + line.quantity
+                  : sum,
+              0,
+            ),
+          ),
+        };
+      }),
+    });
+    const shipmentBySequence = new Map(
+      chargeContext.shipments.map((shipment) => [
+        String(shipment.sequence),
+        shipment,
+      ]),
+    );
+    repriced = await resolveExternalOrderChargesForFinalization(
+      prismaTx,
+      {
+        isSfCollect,
+        samplePackaging: order.purpose === 'SAMPLE_SHIPMENT' ? { ruleCode: order.samplePackagingRuleCode ?? null } : undefined,
+        shipments: shipmentChargeFacts.map((fact) => {
+          const shipment = shipmentBySequence.get(fact.shipmentKey);
+          if (!shipment) {
+            throw new OrderInvariantError(
+              '物流计价事实与工单发货地址不一致',
+            );
+          }
+          const packing = chargeByShipmentAndCategory.get(
+            `${shipment.id}:PACKING_MATERIAL`,
+          );
+          const correction = correctionByShipmentId.get(shipment.id);
+          return {
+            ...fact,
+            shippingFee: isSfCollect
+              ? '0.00'
+              : correction?.shippingFee ?? null,
+            packingMaterialFee: packing?.amount?.toString() ?? null,
+            overrideReason: isSfCollect
+              ? packing?.overrideReason ?? null
+              : correction?.customerChargeOverrideReason ??
+                (shipment.status !== ShipmentStatus.SHIPPED
+                  ? '取消顺丰到付，快递费待发货时确认'
+                  : packing?.overrideReason ?? null),
+          };
+        }),
+      },
+      priceBookIds[0]!,
+      chargeChangedAt,
+      {
+        allowPending:
+          !isSfCollect && order.status !== OrderStatus.SHIPPED,
+      },
+    );
+  } catch (error) {
+    if (error instanceof OrderCustomerChargeError) {
+      throw new OrderInvariantError(error.message);
+    }
+    throw error;
+  }
+
+  const existingByBusinessKey = new Map(
+    standardCharges.map((charge) => [
+      String(charge.businessKey),
+      charge,
+    ]),
+  );
+  const finalized = order.status === OrderStatus.SHIPPED;
+  // 寄样首重默认（DECISIONS 2026-09-30）：寄付按本次计费重量（快递费行的 kg 数量），
+  // 到付按已存重量（切换本身不改重量）维护标记。
+  const maintainsSampleWeightBasis = order.purpose === 'SAMPLE_SHIPMENT';
+  const storedWeightByShippingKey = new Map(
+    chargeContext.shipments.map((shipment) => [
+      `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
+      shipment.weightKg?.toString() ?? null,
+    ]),
+  );
+  for (const charge of repriced.charges) {
+    if (isSfCollect && charge.categoryCode !== 'SHIPPING_FEE') continue;
+    const existing = existingByBusinessKey.get(charge.businessKey);
+    if (!existing) {
+      throw new OrderInvariantError(
+        `找不到收费明细 ${charge.businessKey}，无法切换顺丰到付标识`,
+      );
+    }
+    await prismaTx.orderCustomerCharge.update({
+      where: { id: existing.id },
+      data: {
+        categoryId: charge.categoryId,
+        sourceRuleId: charge.sourceRuleId,
+        status: isSfCollect
+          ? OrderCustomerChargeStatus.WAIVED
+          : finalized
+            ? OrderCustomerChargeStatus.FINAL
+            : OrderCustomerChargeStatus.ESTIMATED,
+        description: charge.description,
+        quantity: charge.quantity,
+        unit: charge.unit,
+        suggestedAmount: charge.suggestedAmount,
+        amount: charge.amount,
+        pricingSnapshot:
+          maintainsSampleWeightBasis && charge.categoryCode === 'SHIPPING_FEE'
+            ? reconcileSampleWeightBasis(
+                existing.pricingSnapshot,
+                charge.pricingSnapshot,
+                {
+                  weightKg: isSfCollect
+                    ? storedWeightByShippingKey.get(charge.businessKey)
+                    : charge.unit === 'kg'
+                      ? charge.quantity
+                      : null,
+                  sfCollect: isSfCollect,
+                },
+              )
+            : charge.pricingSnapshot,
+        overrideReason: charge.overrideReason,
+        finalizedById: isSfCollect || finalized ? actor.id : null,
+        finalizedAt: isSfCollect || finalized ? chargeChangedAt : null,
+      },
+    });
+  }
+
+  await prismaTx.orderShipment.updateMany({
+    where: { orderId },
+    data: { carrierCode: isSfCollect ? 'SF' : 'ZTO' },
+  });
+  if (!isSfCollect) {
+    for (const correction of trustedCorrections) {
+      await prismaTx.orderShipment.update({
+        where: { id: correction.shipmentId },
+        data: sfCollectShipmentCorrectionData(correction),
+        select: { id: true },
+      });
+    }
+  }
+
+  const otherCustomerCharges = chargeContext.customerCharges
+    .filter(
+      (charge) =>
+        !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
+          String(charge.category.code),
+        ),
+    )
+    .reduce(
+      (sum, charge) =>
+        charge.amount === null ? sum : sum.plus(charge.amount),
+      new Decimal(0),
+    );
+  if (isSfCollect) {
+    const retainedNonShippingCharges = chargeContext.customerCharges
+      .filter(
+        (charge) => String(charge.category.code) !== 'SHIPPING_FEE',
+      )
+      .reduce(
+        (sum, charge) =>
+          charge.amount === null ? sum : sum.plus(charge.amount),
+        new Decimal(0),
+      );
+    nextTotalAmount = new Decimal(order.processingAmount)
+      .plus(retainedNonShippingCharges)
+      .toFixed(2);
+  } else {
+    nextTotalAmount = new Decimal(order.processingAmount)
+      .plus(repriced.totalAmount)
+      .plus(otherCustomerCharges)
+      .toFixed(2);
+  }
+  assertStorableOrderTotal(nextTotalAmount);
+  nextQuotedFeeCompleteness = repriced.requiresAdminConfirmation
+    ? OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS
+    : OrderQuotedFeeCompleteness.COMPLETE;
+  return { nextTotalAmount, nextQuotedFeeCompleteness };
+}
+
 export async function setOrderSfCollect(
   orderId: string,
   isSfCollect: boolean,
@@ -3405,215 +3644,9 @@ export async function setOrderSfCollect(
     let nextTotalAmount = new Decimal(order.totalAmount).toFixed(2);
     let nextQuotedFeeCompleteness: OrderQuotedFeeCompleteness | null = null;
     if (billsLogistics) {
-      const prismaTx = tx as unknown as Prisma.TransactionClient;
-      const chargeChangedAt = changedAt;
-      const { chargeContext, standardCharges, priceBookIds,
-        chargeByShipmentAndCategory, correctionByShipmentId } =
-        await readSfCollectChargeContextInTx(
-          prismaTx, orderId, order.status, isSfCollect, trustedCorrections,
-        );
-
-      let repriced: Awaited<
-        ReturnType<typeof resolveExternalOrderChargesForFinalization>
-      >;
-      try {
-        const shipmentChargeFacts = deriveExternalOrderChargeShipments({
-          isSfCollect,
-          items: chargeContext.items.map((item) => ({
-            itemKey: item.id,
-            quantity: item.quantity,
-            paperWeightGsm: item.paperWeightGsm,
-            paperType: item.paperType,
-            productStructure: item.productStructure,
-          })),
-          shipments: chargeContext.shipments.map((shipment) => {
-            const correction = correctionByShipmentId.get(shipment.id);
-            return {
-              shipmentKey: String(shipment.sequence),
-              province:
-                correction?.destinationProvince ??
-                shipment.destinationProvince,
-              // Browser quote fields are deliberately absent. An explicit
-              // administrator correction wins over the persisted actual;
-              // otherwise the shared calculator estimates from item facts.
-              billableWeightKg: isSfCollect
-                ? null
-                : correction?.weightKg ??
-                  shipment.weightKg?.toString() ??
-                  null,
-              itemQuantities: chargeContext.items.map((item) =>
-                shipment.lines.reduce(
-                  (sum, line) =>
-                    line.orderItemId === item.id
-                      ? sum + line.quantity
-                      : sum,
-                  0,
-                ),
-              ),
-            };
-          }),
-        });
-        const shipmentBySequence = new Map(
-          chargeContext.shipments.map((shipment) => [
-            String(shipment.sequence),
-            shipment,
-          ]),
-        );
-        repriced = await resolveExternalOrderChargesForFinalization(
-          prismaTx,
-          {
-            isSfCollect,
-            samplePackaging: order.purpose === 'SAMPLE_SHIPMENT' ? { ruleCode: order.samplePackagingRuleCode ?? null } : undefined,
-            shipments: shipmentChargeFacts.map((fact) => {
-              const shipment = shipmentBySequence.get(fact.shipmentKey);
-              if (!shipment) {
-                throw new OrderInvariantError(
-                  '物流计价事实与工单发货地址不一致',
-                );
-              }
-              const packing = chargeByShipmentAndCategory.get(
-                `${shipment.id}:PACKING_MATERIAL`,
-              );
-              const correction = correctionByShipmentId.get(shipment.id);
-              return {
-                ...fact,
-                shippingFee: isSfCollect
-                  ? '0.00'
-                  : correction?.shippingFee ?? null,
-                packingMaterialFee: packing?.amount?.toString() ?? null,
-                overrideReason: isSfCollect
-                  ? packing?.overrideReason ?? null
-                  : correction?.customerChargeOverrideReason ??
-                    (shipment.status !== ShipmentStatus.SHIPPED
-                      ? '取消顺丰到付，快递费待发货时确认'
-                      : packing?.overrideReason ?? null),
-              };
-            }),
-          },
-          priceBookIds[0]!,
-          chargeChangedAt,
-          {
-            allowPending:
-              !isSfCollect && order.status !== OrderStatus.SHIPPED,
-          },
-        );
-      } catch (error) {
-        if (error instanceof OrderCustomerChargeError) {
-          throw new OrderInvariantError(error.message);
-        }
-        throw error;
-      }
-
-      const existingByBusinessKey = new Map(
-        standardCharges.map((charge) => [
-          String(charge.businessKey),
-          charge,
-        ]),
-      );
-      const finalized = order.status === OrderStatus.SHIPPED;
-      // 寄样首重默认（DECISIONS 2026-09-30）：寄付按本次计费重量（快递费行的 kg 数量），
-      // 到付按已存重量（切换本身不改重量）维护标记。
-      const maintainsSampleWeightBasis = order.purpose === 'SAMPLE_SHIPMENT';
-      const storedWeightByShippingKey = new Map(
-        chargeContext.shipments.map((shipment) => [
-          `SHIPMENT:${shipment.sequence}:SHIPPING_FEE`,
-          shipment.weightKg?.toString() ?? null,
-        ]),
-      );
-      for (const charge of repriced.charges) {
-        if (isSfCollect && charge.categoryCode !== 'SHIPPING_FEE') continue;
-        const existing = existingByBusinessKey.get(charge.businessKey);
-        if (!existing) {
-          throw new OrderInvariantError(
-            `找不到收费明细 ${charge.businessKey}，无法切换顺丰到付标识`,
-          );
-        }
-        await prismaTx.orderCustomerCharge.update({
-          where: { id: existing.id },
-          data: {
-            categoryId: charge.categoryId,
-            sourceRuleId: charge.sourceRuleId,
-            status: isSfCollect
-              ? OrderCustomerChargeStatus.WAIVED
-              : finalized
-                ? OrderCustomerChargeStatus.FINAL
-                : OrderCustomerChargeStatus.ESTIMATED,
-            description: charge.description,
-            quantity: charge.quantity,
-            unit: charge.unit,
-            suggestedAmount: charge.suggestedAmount,
-            amount: charge.amount,
-            pricingSnapshot:
-              maintainsSampleWeightBasis && charge.categoryCode === 'SHIPPING_FEE'
-                ? reconcileSampleWeightBasis(
-                    existing.pricingSnapshot,
-                    charge.pricingSnapshot,
-                    {
-                      weightKg: isSfCollect
-                        ? storedWeightByShippingKey.get(charge.businessKey)
-                        : charge.unit === 'kg'
-                          ? charge.quantity
-                          : null,
-                      sfCollect: isSfCollect,
-                    },
-                  )
-                : charge.pricingSnapshot,
-            overrideReason: charge.overrideReason,
-            finalizedById: isSfCollect || finalized ? actor.id : null,
-            finalizedAt: isSfCollect || finalized ? chargeChangedAt : null,
-          },
-        });
-      }
-
-      await prismaTx.orderShipment.updateMany({
-        where: { orderId },
-        data: { carrierCode: isSfCollect ? 'SF' : 'ZTO' },
-      });
-      if (!isSfCollect) {
-        for (const correction of trustedCorrections) {
-          await prismaTx.orderShipment.update({
-            where: { id: correction.shipmentId },
-            data: sfCollectShipmentCorrectionData(correction),
-            select: { id: true },
-          });
-        }
-      }
-
-      const otherCustomerCharges = chargeContext.customerCharges
-        .filter(
-          (charge) =>
-            !['SHIPPING_FEE', 'PACKING_MATERIAL'].includes(
-              String(charge.category.code),
-            ),
-        )
-        .reduce(
-          (sum, charge) =>
-            charge.amount === null ? sum : sum.plus(charge.amount),
-          new Decimal(0),
-        );
-      if (isSfCollect) {
-        const retainedNonShippingCharges = chargeContext.customerCharges
-          .filter(
-            (charge) => String(charge.category.code) !== 'SHIPPING_FEE',
-          )
-          .reduce(
-            (sum, charge) =>
-              charge.amount === null ? sum : sum.plus(charge.amount),
-            new Decimal(0),
-          );
-        nextTotalAmount = new Decimal(order.processingAmount)
-          .plus(retainedNonShippingCharges)
-          .toFixed(2);
-      } else {
-        nextTotalAmount = new Decimal(order.processingAmount)
-          .plus(repriced.totalAmount)
-          .plus(otherCustomerCharges)
-          .toFixed(2);
-      }
-      assertStorableOrderTotal(nextTotalAmount);
-      nextQuotedFeeCompleteness = repriced.requiresAdminConfirmation
-        ? OrderQuotedFeeCompleteness.EXCLUDES_MANUAL_ITEMS
-        : OrderQuotedFeeCompleteness.COMPLETE;
+      ({ nextTotalAmount, nextQuotedFeeCompleteness } = await repriceSfCollectChargesInTx(
+        tx, orderId, order, isSfCollect, trustedCorrections, actor, changedAt,
+      ));
     }
 
     const waivedManualFreight = !billsLogistics && isSfCollect

@@ -106,70 +106,70 @@ integration.sequential('pricing repair · real PostgreSQL', () => {
                 role: sales.role,
               }),
             ).rejects.toThrow('只有管理员');
-            const invalid = input(false, true);
+            await expect(createOrder(input(false, true), owner)).rejects.toThrow(
+              '请选择关联外部销售',
+            );
+            const invalid = input(true, true);
             invalid.items[0].quantity = 102;
             await expect(createOrder(invalid, owner)).rejects.toThrow(
               '重新确认人工价格',
             );
-            for (const behalf of [false, true]) {
-              const created = await createOrder(input(behalf, true), owner);
-              let order = await tx.order.findUniqueOrThrow({
-                where: { id: created.id },
-                include: {
-                  items: true,
-                  packagingGroups: { include: { lines: true } },
-                },
-              });
-              expect(order.totalAmount.toFixed(2)).toBe('153.35');
-              expect(
-                isTrustedAdminItemPricingSnapshot(
-                  order.items[0].pricingSnapshot,
-                  order.items[0],
-                ),
-              ).toBe(true);
-              expect(
-                isTrustedAdminPackagingPricingSnapshot(
-                  order.packagingGroups[0].pricingSnapshot,
-                  order.packagingGroups[0],
-                ),
-              ).toBe(true);
-              if (behalf) {
-                let token = '';
-                try {
-                  await finalizeExternalOrderQuoteInTx(
-                    tx,
-                    created.id,
-                    owner.id,
-                    new Date(),
-                  );
-                } catch (error) {
-                  if (!(error instanceof ExternalOrderQuoteChangedError))
-                    throw error;
-                  token = error.quoteToken;
-                  expect(Number(error.quotedFee)).toBeGreaterThanOrEqual(
-                    153.35,
-                  );
-                }
-                await finalizeExternalOrderQuoteInTx(
-                  tx,
-                  created.id,
-                  owner.id,
-                  new Date(),
-                  token,
-                );
-                order = await tx.order.findUniqueOrThrow({
-                  where: { id: created.id },
-                  include: {
-                    items: true,
-                    packagingGroups: { include: { lines: true } },
-                  },
-                });
-                expect(order.items[0].subtotal.toFixed(2)).toBe('123.45');
-                expect(order.packagingGroups[0].subtotal.toFixed(2)).toBe(
-                  '29.90',
-                );
-              }
+            const manualCreated = await createOrder(input(true, true), owner);
+            let manualOrder = await tx.order.findUniqueOrThrow({
+              where: { id: manualCreated.id },
+              include: {
+                items: true,
+                packagingGroups: { include: { lines: true } },
+              },
+            });
+            expect(manualOrder).toMatchObject({
+              submitterId: sales.id,
+              createdById: owner.id,
+              settlementType: 'EXTERNAL_SALES',
+            });
+            expect(manualOrder.totalAmount.toFixed(2)).toBe('153.35');
+            expect(
+              isTrustedAdminItemPricingSnapshot(
+                manualOrder.items[0].pricingSnapshot,
+                manualOrder.items[0],
+              ),
+            ).toBe(true);
+            expect(
+              isTrustedAdminPackagingPricingSnapshot(
+                manualOrder.packagingGroups[0].pricingSnapshot,
+                manualOrder.packagingGroups[0],
+              ),
+            ).toBe(true);
+            let manualToken = '';
+            try {
+              await finalizeExternalOrderQuoteInTx(
+                tx,
+                manualCreated.id,
+                owner.id,
+                new Date(),
+              );
+            } catch (error) {
+              if (!(error instanceof ExternalOrderQuoteChangedError))
+                throw error;
+              manualToken = error.quoteToken;
+              expect(Number(error.quotedFee)).toBeGreaterThanOrEqual(153.35);
             }
+            await finalizeExternalOrderQuoteInTx(
+              tx,
+              manualCreated.id,
+              owner.id,
+              new Date(),
+              manualToken,
+            );
+            manualOrder = await tx.order.findUniqueOrThrow({
+              where: { id: manualCreated.id },
+              include: {
+                items: true,
+                packagingGroups: { include: { lines: true } },
+              },
+            });
+            expect(manualOrder.items[0].subtotal.toFixed(2)).toBe('123.45');
+            expect(manualOrder.packagingGroups[0].subtotal.toFixed(2)).toBe('29.90');
             const created = await createOrder(input(true, false), owner);
             let token = '';
             try {
@@ -287,6 +287,26 @@ integration.sequential('pricing repair · real PostgreSQL', () => {
                 isActive: true,
               },
             });
+            // 明确建立缺少装盒工价的版本，测试不依赖准备脚本发布哪些规则。
+            const template = await tx.pieceworkPriceBook.findFirstOrThrow({
+              where: { workerId: null, status: 'PUBLISHED' },
+              include: { rules: true },
+              orderBy: { version: 'desc' },
+            });
+            const highest = await tx.pieceworkPriceBook.aggregate({ _max: { version: true } });
+            const rules = template.rules.filter(rule => rule.unit !== 'PER_BOX').map(rule => ({
+              operationType: rule.operationType, unit: rule.unit, amount: rule.amount!.toString(),
+              ...(rule.smallOrderAmount === null ? {} : { smallOrderAmount: rule.smallOrderAmount.toString() }),
+              ...(rule.setupAmount === null ? {} : { setupAmount: rule.setupAmount.toString() }),
+            }));
+            const missingBoxRate = await publishPieceworkPriceBook({
+              manifest: { schemaVersion: 1, priceBookVersion: highest._max.version! + 1,
+                effectiveFrom: null, sourceName: '隔离装盒缺价夹具', publishNote: '验证缺价提示', rules },
+              effectiveImmediately: true,
+              expectedDraftUpdatedAt: template.updatedAt,
+              sourceSha256: 'a'.repeat(64),
+              actor: { ...owner, username: String(owner.username) },
+            });
             await expect(
               reportProductionOperation(
                 {
@@ -299,37 +319,13 @@ integration.sequential('pricing repair · real PostgreSQL', () => {
                 },
                 packer,
               ),
-            ).rejects.toThrow('装盒工价尚未发布');
-            const seed = await tx.pieceworkPriceBook.findUniqueOrThrow({
-              where: { version: 1 },
-              include: { rules: true },
+            ).rejects.toMatchObject({
+              code: 'PIECEWORK_RATE_UNAVAILABLE',
+              message: '当前工序的统一工价未发布，请联系管理员配置',
             });
-            expect(seed.status).toBe('DRAFT');
-            const initialTime = new Date();
-            await publishPieceworkPriceBook(
-              {
-                manifest: {
-                  schemaVersion: 1,
-                  priceBookVersion: 1,
-                  effectiveFrom: initialTime.toISOString(),
-                  sourceName: '隔离回归基础工价',
-                  publishNote: '验证旧工价衔接',
-                  rules: seed.rules.map((rule) => ({
-                    operationType: rule.operationType,
-                    unit: rule.unit,
-                    amount: '0.10',
-                  })),
-                },
-                expectedDraftUpdatedAt: seed.updatedAt,
-                sourceSha256: 'b'.repeat(64),
-                actor: { ...owner, username: String(owner.username) },
-              },
-              initialTime,
-            );
             const previous = await tx.pieceworkPriceBook.findFirstOrThrow({
-              where: { status: 'PUBLISHED', effectiveTo: null },
+              where: { id: missingBoxRate.bookId },
               include: { rules: true },
-              orderBy: { version: 'desc' },
             });
             const effective = new Date(Date.now() + 1000);
             const receipt = await publishPieceworkPriceBook({
@@ -340,11 +336,7 @@ integration.sequential('pricing repair · real PostgreSQL', () => {
                 sourceName: '隔离回归测试工价',
                 publishNote: '验证装盒报工',
                 rules: [
-                  ...previous.rules.map((rule) => ({
-                    operationType: rule.operationType,
-                    unit: rule.unit,
-                    amount: rule.amount!.toString(),
-                  })),
+                  ...rules,
                   { operationType: 'PACKING', unit: 'PER_BOX', amount: '0.20' },
                 ],
               },

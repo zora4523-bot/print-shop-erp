@@ -1,3 +1,4 @@
+import { ProductionInputError } from '@/lib/production/input-error';
 import type { Prisma } from '@/generated/prisma/client';
 import { operationTypeForReporterAccount } from './reporter-operation-lane';
 import { progressCraftIdsForReporter } from './progress-reporter-lane';
@@ -5,15 +6,15 @@ import { dispatchOrderInclude, dispatchTargets, productionSourceKey, type Dispat
 
 export async function eligibleProductionWorker(tx: Pick<Prisma.TransactionClient, 'user' | 'craft'>, workerId: string, target: DispatchTarget) {
   const worker = await tx.user.findUnique({ where: { id: workerId } });
-  if (!worker || worker.role !== 'WORKER' || !worker.isActive || worker.workerType === 'PACKER') throw new Error('师傅账号不可安排生产，请重新选择');
+  if (!worker || worker.role !== 'WORKER' || !worker.isActive || worker.workerType === 'PACKER') throw new ProductionInputError('师傅账号不可安排生产，请重新选择');
   const eligible = target.operationType ? operationTypeForReporterAccount(worker) === target.operationType
     : target.craftId && (await progressCraftIdsForReporter(tx, worker)).includes(target.craftId);
-  if (!eligible) throw new Error(`${worker.displayName} 的工种不适合${target.label}，请重新选择`);
+  if (!eligible) throw new ProductionInputError(`${worker.displayName} 的工种不适合${target.label}，请重新选择`);
   return worker;
 }
 export async function currentDispatchTargets(tx: Pick<Prisma.TransactionClient, 'order' | 'craft'>, id: string) {
   const order = await tx.order.findUnique({ where: { id }, include: dispatchOrderInclude });
-  if (!order) throw new Error('工单不存在，请返回工单列表');
+  if (!order) throw new ProductionInputError('工单不存在，请返回工单列表');
   const crafts = await tx.craft.findMany({ where: { id: { in: [...new Set(order.items.flatMap(item => item.crafts))] } } });
   return { order, targets: dispatchTargets(order, crafts) };
 }

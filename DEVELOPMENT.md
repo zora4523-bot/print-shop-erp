@@ -182,6 +182,7 @@ ts-prune 内置 TypeScript 4.5，不支持应用的 `bundler` 模块解析；扫
 - 先 migrate/seed 隔离库，再执行 `test:e2e:prepare`。测试进程同时提供 `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`（或明确 E2E_ADMIN 覆盖）；只设置数据库不能完成登录前置。
 - `test:e2e:prepare` 先在已确认的隔离库执行 `scripts/prepare-e2e-catalog.ts`，复用 `retire-unused-paper-imports` 的完整库存、外键、历史快照、标准纸张唯一性检查及审计，再发布测试工价。空库迁移仍会恢复旧导入记录，因此不能省略此步骤或放宽工单纸张身份校验；记录已使用或改变时直接失败。此入口拒绝日常/生产库，不代替正式环境按运维流程演练和确认修复，也不修改旧迁移。
 - E2E 默认串行；不要为了加速把共享数据库流程改成并行后忽略竞态。
+- PostgreSQL 回归采用唯一标识追加夹具，保留不可删除的业务历史；例如经营分析销售归属测试。包装计价专项将服务调用放入同一事务并在结束后整体回滚，测试期间发布的工价也随之撤销。两种方式均只使用已确认的隔离测试库，不通过删除历史或修改已发布工价清理夹具。
 - 报工会产生不可删除的历史记录，必须使用隔离库及已发布、已经生效且覆盖所需操作类型的测试工价。仓库 `config/piecework-price-books/v1.json` 是待填写模板，seed 不代表已经发布工价；测试工价须明确标注非生产并通过正式发布服务建立。执行 `pnpm test:e2e:prepare` 通过正式服务发布并等待生效，工价清楚标记 E2E ONLY，重复准备幂等。发布配置缺少这些前置直接失败，不能以 skip 验收。重复运行时保留既有报工，按已有累计量断言；合格量与工单件数进度分别填写。打印基线所用提交人名称也须与固定 fixture 一致。
 - 同一工作树内，先完成全量单测，再启动 E2E 开发服务器；避免路由/配置回归测试的临时文件被 Next 文件监听器读入。发生测试期间路由缓存异常时，停止该隔离服务器并重建它的 `.next`，不要清理日常工作区或重置数据库。
 - `tests/e2e/owner-notifications.spec.ts` 复用上述隔离预检且要求 `NOTIFICATION_MOCK_MODE=true`；绑定回调由 fixture 模拟，不连接真实企业微信。标准开发及发布 Playwright 配置为隔离服务设置测试 AUTH/CRON secret、mock 通知/CDR、inline jobs，不代表生产基础设施通过。
@@ -239,7 +240,9 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 新增 `tests/e2e/shipment-registration.spec.ts` 必须配置与日常数据库不同的 `E2E_DATABASE_URL`，由现有隔离门禁控制。测试保留带随机前缀的测试记录供审查，不重置数据库。执行 `pnpm exec playwright test tests/e2e/shipment-registration.spec.ts --project=chromium --workers=1`。同一工作区运行 Next 开发服务与隔离 E2E 时需依次启动，避免 `.next/dev` 锁冲突。
 
-Next、`@next/env`、`eslint-config-next` 锁定到已验证的安全补丁版 16.3.6，保持之前已采用的 `catchError/retry` API 可复现；新增直接依赖 sharp 0.35.4，用于服务端解码、限像素、移除图片元数据并转 JPEG。
+Next、`@next/env`、`eslint-config-next` 锁定到安全补丁版 16.3.8，保持之前已采用的 `catchError/retry` API 可复现；直接依赖 sharp 0.35.5，用于服务端解码、限像素、移除图片元数据并转 JPEG。本轮验证范围见 [加权评审修复记录](docs/audits/2026-10-08-weighted-review-repairs.md)。
+
+2026-10-08 开发依赖审计：Vitest 与三个配套包统一锁定 4.1.11，Vite、PostCSS、nanoid、brace-expansion 和 smol-toml 的受影响版本通过限定版本范围的 override 更新。生产依赖审计为零；开发工具链的 `braces@3.0.3` 仍有一条上游未发布修复版的告警，来源和处置边界见上述记录，未加入审计豁免。
 
 ## 旧导入纸张资料修复
 

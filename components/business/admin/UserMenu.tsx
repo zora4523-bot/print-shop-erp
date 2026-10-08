@@ -46,10 +46,10 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         aria-label={`用户菜单：${displayName}`}
         className={buttonVariants({
           variant: 'ghost',
-          className: 'min-h-11 min-w-11 gap-2 px-2',
+          className: 'h-[44px] min-h-[44px] min-w-[44px] gap-[8px] px-[8px]',
         })}
       >
-        <Avatar className="size-7 after:border-0">
+        <Avatar className="size-[28px] after:border-0">
           <AvatarFallback className="bg-muted text-foreground text-xs font-semibold">
             {initial}
           </AvatarFallback>
@@ -62,7 +62,7 @@ export function UserMenu({ displayName, roleLabel }: UserMenuProps) {
         </span>
         <ChevronDown
           aria-hidden
-          className="size-3.5 shrink-0 text-muted-foreground"
+          className="size-[14px] shrink-0 text-muted-foreground"
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sticky className="w-56 max-w-(--available-width)">

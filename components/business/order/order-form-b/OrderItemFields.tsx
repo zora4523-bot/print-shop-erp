@@ -182,7 +182,7 @@ function FoilSideFields({
           !backEnabled && 'bg-muted/15',
         )}
       >
-        <div className={cn('flex items-center gap-2', backEnabled && 'mb-2.5')}>
+        <div className={cn('flex flex-wrap items-center gap-2', backEnabled && 'mb-2.5')}>
           <span className="text-sm font-semibold text-foreground">反面</span>
           <span className="text-xs font-semibold text-muted-foreground">
             {backEnabled

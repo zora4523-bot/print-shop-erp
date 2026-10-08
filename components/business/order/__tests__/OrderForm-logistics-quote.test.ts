@@ -185,7 +185,6 @@ describe('OrderForm processing quote concurrency', () => {
     expect(source).toContain('setLogisticsQuote(null);');
     expect(source).toContain('setPackagingQuote(null);');
     expect(source).toContain('persistLocalDraftValues({');
-    expect(source).toContain('onRemove={(index) => {');
   });
 
   it('offers only B business routes and never sends configuration-outside notes from create', () => {

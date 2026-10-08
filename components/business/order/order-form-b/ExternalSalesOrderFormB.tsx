@@ -277,8 +277,8 @@ function DesignFileBox({
           )}
         </div>
       ) : null}
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold leading-snug">
+      <div className="min-w-0 flex-1 basis-32">
+        <p className="admin-wrap-anywhere text-sm font-bold leading-snug">
           {entry
             ? image
               ? '设计图'
@@ -335,7 +335,7 @@ function DesignFileBox({
         <div
           data-invalid={Boolean(error)}
           className={cn(
-            'flex w-full items-center gap-3 rounded-xl border bg-card p-3 text-left',
+            'flex w-full flex-wrap items-center gap-3 rounded-xl border bg-card p-3 text-left',
             error && 'border-destructive bg-destructive/5',
             disabled && 'opacity-50',
           )}
@@ -345,7 +345,7 @@ function DesignFileBox({
           onDrop={handleDrop}
         >
           {uploadContent}
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1.5">
             <Button
               type="button"
               size="xs"
@@ -390,7 +390,7 @@ function DesignFileBox({
               : `拖放或选择${fileLabel}`
           }
           className={cn(
-            'flex h-auto data-[slot=button]:min-h-20 w-full cursor-pointer items-center justify-between gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-3.5 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:bg-destructive/5',
+            'flex h-auto data-[slot=button]:min-h-20 w-full cursor-pointer flex-wrap items-center justify-between gap-3 whitespace-normal rounded-xl border-2 border-dashed bg-muted/20 p-3.5 text-left outline-none transition-colors hover:border-primary hover:bg-primary/5 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:bg-destructive/5',
           )}
           onClick={openFilePicker}
           onDragOver={(event) => {
@@ -496,7 +496,7 @@ function OrderDesignFilesSection({ itemNumber, queue, disabled, required, groupe
   );
 }
 
-export function OrderFormB({
+function useOrderFormBController({
   values,
   title = '新建工单',
   back,
@@ -710,6 +710,412 @@ export function OrderFormB({
     if (additions.length) onPendingDesignsChange([...queue, ...additions]);
   };
 
+  return {
+    values,
+    title,
+    back,
+    settlementLabel,
+    customNameRequired,
+    designImageRequired,
+    receiverNameRequired,
+    receiverPhoneRequired,
+    orderExtras,
+    materialExtras,
+    pricingExtras,
+    shippingExtras,
+    packagingExtras,
+    orderPackagingExtras,
+    afterShipping,
+    footerExtras,
+    allowManualWeight,
+    allowCustomSize,
+    items,
+    itemFields,
+    packaging,
+    paperOptions,
+    paperKey,
+    weightOptions,
+    specificationOptions,
+    foilOptions,
+    disabled,
+    savedLabel,
+    fieldErrors,
+    rail,
+    onActiveIndexChange,
+    onAdd,
+    onAddSpecification,
+    onDuplicate,
+    onRemove,
+    onCustomNameChange,
+    onRemoveDesign,
+    onRouteChange,
+    onPurposeChange,
+    onPaperChange,
+    onWeightChange,
+    onSpecificationChange,
+    onFoilSidesChange,
+    onBackFoilToggle,
+    onFoilTechniqueChange,
+    onCustomSizeChange,
+    onPrintFoilModeChange,
+    onLaminationChange,
+    onQuantityChange,
+    onPackagingTypeChange,
+    onPackagingMixingChange,
+    onUnitsPerBagChange,
+    onPendingDesignsChange,
+    onReceiverAddressChange,
+    onReceiverAddressPaste,
+    onReceiverNameChange,
+    onReceiverPhoneChange,
+    onSfCollectChange,
+    uid,
+    safeActiveIndex,
+    groups,
+    activeGroup,
+    designNumber,
+    item,
+    field,
+    itemErrors,
+    queue,
+    imageFileError,
+    cdrFileError,
+    customNameOverride,
+    setCustomNameOverride,
+    rootRef,
+    removeButtonRef,
+    styleNavRef,
+    specificationNavRef,
+    removeSpecificationRef,
+    restoreDeleteFocusRef,
+    cancelIssueFocus,
+    parsedReceiver,
+    receiverPhoneInitialValue,
+    focusIssue,
+    putFile,
+    appendCdrFiles,
+  };
+}
+
+function OrderFormBStyleNavigation({ model }: { model: NonNullable<ReturnType<typeof useOrderFormBController>> }) {
+  const {
+    items,
+    itemFields,
+    disabled,
+    savedLabel,
+    fieldErrors,
+    onActiveIndexChange,
+    onAdd,
+    onAddSpecification,
+    onDuplicate,
+    onRemove,
+    safeActiveIndex,
+    groups,
+    removeButtonRef,
+    styleNavRef,
+    restoreDeleteFocusRef,
+    cancelIssueFocus,
+  } = model;
+  return (<>
+    {!onAddSpecification ? <><div
+      role="group"
+      aria-label="款式操作"
+      className="mb-3 flex flex-wrap items-center gap-1.5"
+    >
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled}
+        className="min-h-11 rounded-lg border-dashed px-3 py-1.5 text-sm font-semibold text-muted-foreground"
+        onClick={() => {
+          cancelIssueFocus();
+          onAdd();
+        }}
+      >
+        ＋ 加款
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled}
+        className="min-h-11 rounded-lg border-dashed px-3 py-1.5 text-sm font-semibold text-muted-foreground"
+        onClick={() => {
+          cancelIssueFocus();
+          onDuplicate(safeActiveIndex);
+        }}
+      >
+        ⧉ 复制当前
+      </Button>
+      {itemFields.length > 1 ? (
+        <Button
+          ref={removeButtonRef}
+          type="button"
+          variant="destructive"
+          aria-label={`删除第 ${safeActiveIndex + 1} 款`}
+          disabled={disabled}
+          className="min-h-11 px-3"
+          onClick={() => {
+            cancelIssueFocus();
+            restoreDeleteFocusRef.current = 'design';
+            onRemove(safeActiveIndex);
+          }}
+        >
+          删除当前
+        </Button>
+      ) : null}
+      <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
+        {savedLabel}
+      </span>
+    </div>
+
+    <nav
+      ref={styleNavRef}
+      aria-label="款式"
+      className="mb-4 flex flex-wrap items-center gap-1.5"
+    >
+      {itemFields.map((entry, index) => (
+        <Button
+          key={entry.id}
+          type="button"
+          variant={safeActiveIndex === index ? 'selected' : 'outline'}
+          aria-pressed={safeActiveIndex === index}
+          disabled={disabled}
+          className={cn(
+            'h-auto min-h-11 rounded-lg px-3.5 py-1.5 text-sm font-bold',
+          )}
+          onClick={() => {
+            cancelIssueFocus();
+            onActiveIndexChange(index);
+          }}
+        >
+          {index + 1}. {ROUTE_OPTIONS.find((route) => route.value === items[index]?.pricingRoute)?.label ?? '款式'}
+          {fieldErrors?.items?.[index] ? (
+            <span
+              aria-label="有待处理项"
+              className="size-1.5 rounded-full bg-destructive"
+            />
+          ) : null}
+        </Button>
+      ))}
+    </nav></> : <div className="mb-4 space-y-3">
+      <p className="text-xs text-muted-foreground">{savedLabel} · {groups.length} 个设计款，{items.length} 个规格明细</p>
+    </div>}
+  </>);
+}
+
+function OrderFormBOrderFields({ model }: { model: NonNullable<ReturnType<typeof useOrderFormBController>> }) {
+  const {
+    values,
+    customNameRequired,
+    orderExtras,
+    disabled,
+    fieldErrors,
+    onAddSpecification,
+    onCustomNameChange,
+    onRouteChange,
+    onPurposeChange,
+    uid,
+    item,
+    customNameOverride,
+    setCustomNameOverride,
+  } = model;
+  return (<>
+    <div className={onAddSpecification ? 'space-y-5 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
+    <Group title="工单" first appearance={onAddSpecification ? 'plain' : 'divided'}>
+      <div>
+        <FieldLabel
+          htmlFor={`${uid}-custom-name`}
+          required={customNameRequired}
+        >
+          工单名称
+        </FieldLabel>
+    <Input
+      id={`${uid}-custom-name`}
+      value={customNameOverride ?? values.customName}
+          required={customNameRequired}
+          aria-required={customNameRequired}
+          aria-invalid={Boolean(fieldErrors?.customName)}
+          aria-describedby={
+            fieldErrors?.customName
+              ? `${uid}-custom-name-message`
+              : undefined
+          }
+          disabled={disabled}
+          placeholder="例：新年快樂 六款"
+          className="h-10"
+      onChange={(event) => {
+        const nextValue = event.currentTarget.value;
+        setCustomNameOverride(nextValue);
+        onCustomNameChange(nextValue);
+      }}
+        />
+        <FieldError id={`${uid}-custom-name-message`} reservedLines={1}>
+          {fieldErrors?.customName}
+        </FieldError>
+      </div>
+      {orderExtras}
+    </Group>
+
+    {onPurposeChange ? <OrderPurposePicker
+      value={item.pricingRoute} disabled={Boolean(disabled)}
+      onChange={(value) => {
+        if (value === 'PROOF' || value === 'SAMPLE_SHIPMENT') onPurposeChange(value);
+        else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') onRouteChange(value);
+      }}
+    /> : null}
+    </div>
+  </>);
+}
+
+function OrderFormBShippingFields({ model }: { model: NonNullable<ReturnType<typeof useOrderFormBController>> }) {
+  const {
+    values,
+    receiverNameRequired,
+    receiverPhoneRequired,
+    shippingExtras,
+    afterShipping,
+    footerExtras,
+    disabled,
+    fieldErrors,
+    onAddSpecification,
+    onReceiverAddressChange,
+    onReceiverAddressPaste,
+    onReceiverNameChange,
+    onReceiverPhoneChange,
+    onSfCollectChange,
+    uid,
+    parsedReceiver,
+    receiverPhoneInitialValue,
+  } = model;
+  return (<>
+    <div className={onAddSpecification ? 'space-y-6 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
+    <Group title="收货" appearance={onAddSpecification ? 'plain' : 'divided'}>
+      {shippingExtras}
+      <ReceiverAddressPasteField
+        id={`${uid}-receiver-address-paste`}
+        labelElement={
+          <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
+            收货地址
+          </FieldLabel>
+        }
+        value={values.receiverAddress}
+        required
+        disabled={disabled}
+        invalid={Boolean(fieldErrors?.receiverAddress)}
+        describedBy={
+          fieldErrors?.receiverAddress
+            ? `${uid}-receiver-address-message`
+            : undefined
+        }
+        onPaste={onReceiverAddressPaste}
+        onChange={(value) => onReceiverAddressChange(value)}
+        after={
+          <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
+            {fieldErrors?.receiverAddress}
+          </FieldError>
+        }
+      >
+        <OrderReceiverContactFields
+          key={`${uid}-contacts-${values.receiverAddress}`}
+          idPrefix={uid}
+          receiverName={values.receiverName || parsedReceiver.receiverName}
+          receiverPhone={receiverPhoneInitialValue}
+          nameRequired={receiverNameRequired}
+          phoneRequired={receiverPhoneRequired}
+          reserveErrorSpace
+          disabled={disabled}
+          errors={fieldErrors}
+          onNameChange={onReceiverNameChange}
+          onPhoneChange={onReceiverPhoneChange}
+        />
+      </ReceiverAddressPasteField>
+
+      {afterShipping}
+
+      <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
+        <Checkbox className="-ml-3"
+          checked={values.isSfCollect ?? false}
+          disabled={disabled}
+          aria-label="顺丰到付（本单不计快递费）"
+          onCheckedChange={onSfCollectChange}
+        />
+        顺丰到付（本单不计快递费）
+      </label>
+    </Group>
+    {footerExtras}
+    </div>
+  </>);
+}
+
+export function OrderFormB(props: Parameters<typeof useOrderFormBController>[0]) {
+  const model = useOrderFormBController(props);
+  if (!model) return null;
+  const {
+    title,
+    back,
+    settlementLabel,
+    designImageRequired,
+    materialExtras,
+    pricingExtras,
+    packagingExtras,
+    orderPackagingExtras,
+    allowManualWeight,
+    allowCustomSize,
+    items,
+    itemFields,
+    packaging,
+    paperOptions,
+    paperKey,
+    weightOptions,
+    specificationOptions,
+    foilOptions,
+    disabled,
+    fieldErrors,
+    rail,
+    onActiveIndexChange,
+    onAdd,
+    onAddSpecification,
+    onRemove,
+    onRemoveDesign,
+    onRouteChange,
+    onPurposeChange,
+    onPaperChange,
+    onWeightChange,
+    onSpecificationChange,
+    onFoilSidesChange,
+    onBackFoilToggle,
+    onFoilTechniqueChange,
+    onCustomSizeChange,
+    onPrintFoilModeChange,
+    onLaminationChange,
+    onQuantityChange,
+    onPackagingTypeChange,
+    onPackagingMixingChange,
+    onUnitsPerBagChange,
+    onPendingDesignsChange,
+    uid,
+    safeActiveIndex,
+    groups,
+    activeGroup,
+    designNumber,
+    item,
+    field,
+    itemErrors,
+    queue,
+    imageFileError,
+    cdrFileError,
+    rootRef,
+    removeButtonRef,
+    styleNavRef,
+    specificationNavRef,
+    removeSpecificationRef,
+    restoreDeleteFocusRef,
+    cancelIssueFocus,
+    focusIssue,
+    putFile,
+    appendCdrFiles,
+  } = model;
   return (
     <div
       ref={rootRef}
@@ -743,90 +1149,7 @@ export function OrderFormB({
         ) : undefined}
       />
 
-      {!onAddSpecification ? <><div
-        role="group"
-        aria-label="款式操作"
-        className="mb-3 flex flex-wrap items-center gap-1.5"
-      >
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled}
-          className="min-h-11 rounded-lg border-dashed px-3 py-1.5 text-sm font-semibold text-muted-foreground"
-          onClick={() => {
-            cancelIssueFocus();
-            onAdd();
-          }}
-        >
-          ＋ 加款
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={disabled}
-          className="min-h-11 rounded-lg border-dashed px-3 py-1.5 text-sm font-semibold text-muted-foreground"
-          onClick={() => {
-            cancelIssueFocus();
-            onDuplicate(safeActiveIndex);
-          }}
-        >
-          ⧉ 复制当前
-        </Button>
-        {itemFields.length > 1 ? (
-          <Button
-            ref={removeButtonRef}
-            type="button"
-            variant="destructive"
-            aria-label={`删除第 ${safeActiveIndex + 1} 款`}
-            disabled={disabled}
-            className="min-h-11 px-3"
-            onClick={() => {
-              cancelIssueFocus();
-              restoreDeleteFocusRef.current = 'design';
-              onRemove(safeActiveIndex);
-            }}
-          >
-            删除当前
-          </Button>
-        ) : null}
-        <span className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
-          {savedLabel}
-        </span>
-      </div>
-
-      <nav
-        ref={styleNavRef}
-        aria-label="款式"
-        className="mb-4 flex flex-wrap items-center gap-1.5"
-      >
-        {itemFields.map((entry, index) => (
-          <Button
-            key={entry.id}
-            type="button"
-            variant={safeActiveIndex === index ? 'selected' : 'outline'}
-            aria-pressed={safeActiveIndex === index}
-            disabled={disabled}
-            className={cn(
-              'h-auto min-h-11 rounded-lg px-3.5 py-1.5 text-sm font-bold',
-            )}
-            onClick={() => {
-              cancelIssueFocus();
-              onActiveIndexChange(index);
-            }}
-          >
-            {index + 1}. {ROUTE_OPTIONS.find((route) => route.value === items[index]?.pricingRoute)?.label ?? '款式'}
-            {fieldErrors?.items?.[index] ? (
-              <span
-                aria-label="有待处理项"
-                className="size-1.5 rounded-full bg-destructive"
-              />
-            ) : null}
-          </Button>
-        ))}
-      </nav></> : <div className="mb-4 space-y-3">
-        <p className="text-xs text-muted-foreground">{savedLabel} · {groups.length} 个设计款，{items.length} 个规格明细</p>
-      </div>}
+      <OrderFormBStyleNavigation model={model} />
 
       <div
         data-slot="order-form-layout"
@@ -836,50 +1159,7 @@ export function OrderFormB({
           data-slot="order-form-editor"
           className={cn('@container min-w-0', onAddSpecification ? 'space-y-6' : 'rounded-xl border bg-card p-5')}
         >
-          <div className={onAddSpecification ? 'space-y-5 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
-          <Group title="工单" first appearance={onAddSpecification ? 'plain' : 'divided'}>
-            <div>
-              <FieldLabel
-                htmlFor={`${uid}-custom-name`}
-                required={customNameRequired}
-              >
-                工单名称
-              </FieldLabel>
-          <Input
-            id={`${uid}-custom-name`}
-            value={customNameOverride ?? values.customName}
-                required={customNameRequired}
-                aria-required={customNameRequired}
-                aria-invalid={Boolean(fieldErrors?.customName)}
-                aria-describedby={
-                  fieldErrors?.customName
-                    ? `${uid}-custom-name-message`
-                    : undefined
-                }
-                disabled={disabled}
-                placeholder="例：新年快樂 六款"
-                className="h-10"
-            onChange={(event) => {
-              const nextValue = event.currentTarget.value;
-              setCustomNameOverride(nextValue);
-              onCustomNameChange(nextValue);
-            }}
-              />
-              <FieldError id={`${uid}-custom-name-message`} reservedLines={1}>
-                {fieldErrors?.customName}
-              </FieldError>
-            </div>
-            {orderExtras}
-          </Group>
-
-          {onPurposeChange ? <OrderPurposePicker
-            value={item.pricingRoute} disabled={Boolean(disabled)}
-            onChange={(value) => {
-              if (value === 'PROOF' || value === 'SAMPLE_SHIPMENT') onPurposeChange(value);
-              else if (value === 'STOCK_BLANK' || value === 'CUSTOM_SINGLE_FLAT_FOIL' || value === 'COLOR_PRINT') onRouteChange(value);
-            }}
-          /> : null}
-          </div>
+          <OrderFormBOrderFields model={model} />
           <div data-slot="order-design-section" className={onAddSpecification ? 'min-w-0 rounded-xl border bg-card' : undefined}>
           {onAddSpecification ? <div className="space-y-3 rounded-t-xl bg-muted/30 px-4 pt-4 @min-[560px]:px-5">
             <div role="group" aria-label="设计款操作" className="flex flex-wrap items-start gap-2">
@@ -998,62 +1278,7 @@ export function OrderFormB({
               onUnitsPerBagChange={onUnitsPerBagChange}
             />
           </div>
-          <div className={onAddSpecification ? 'space-y-6 rounded-xl border bg-card p-4 @min-[560px]:p-5' : undefined}>
-          <Group title="收货" appearance={onAddSpecification ? 'plain' : 'divided'}>
-            {shippingExtras}
-            <ReceiverAddressPasteField
-              id={`${uid}-receiver-address-paste`}
-              labelElement={
-                <FieldLabel htmlFor={`${uid}-receiver-address-paste`} required>
-                  收货地址
-                </FieldLabel>
-              }
-              value={values.receiverAddress}
-              required
-              disabled={disabled}
-              invalid={Boolean(fieldErrors?.receiverAddress)}
-              describedBy={
-                fieldErrors?.receiverAddress
-                  ? `${uid}-receiver-address-message`
-                  : undefined
-              }
-              onPaste={onReceiverAddressPaste}
-              onChange={(value) => onReceiverAddressChange(value)}
-              after={
-                <FieldError id={`${uid}-receiver-address-message`} reservedLines={1}>
-                  {fieldErrors?.receiverAddress}
-                </FieldError>
-              }
-            >
-              <OrderReceiverContactFields
-                key={`${uid}-contacts-${values.receiverAddress}`}
-                idPrefix={uid}
-                receiverName={values.receiverName || parsedReceiver.receiverName}
-                receiverPhone={receiverPhoneInitialValue}
-                nameRequired={receiverNameRequired}
-                phoneRequired={receiverPhoneRequired}
-                reserveErrorSpace
-                disabled={disabled}
-                errors={fieldErrors}
-                onNameChange={onReceiverNameChange}
-                onPhoneChange={onReceiverPhoneChange}
-              />
-            </ReceiverAddressPasteField>
-
-            {afterShipping}
-
-            <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-1 text-sm font-semibold has-[[data-disabled]]:cursor-not-allowed has-[[data-disabled]]:text-muted-foreground">
-              <Checkbox className="-ml-3"
-                checked={values.isSfCollect ?? false}
-                disabled={disabled}
-                aria-label="顺丰到付（本单不计快递费）"
-                onCheckedChange={onSfCollectChange}
-              />
-              顺丰到付（本单不计快递费）
-            </label>
-          </Group>
-          {footerExtras}
-          </div>
+          <OrderFormBShippingFields model={model} />
 
           {/* Async error summaries must not shift fields while they are being edited. */}
           {fieldErrors?.summary && fieldErrors.summary.length > 0 ? (

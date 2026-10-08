@@ -1,4 +1,6 @@
 import { repairLegacyProductionFacts } from '@/lib/order/legacy-production-facts';
+import { getAnalyticsReport } from '@/lib/analytics/service';
+import { parseAnalyticsFilters } from '@/lib/analytics/filters';
 import { saveOrderManualCharge } from '@/lib/order/commercial-details';
 import { preserveCarriedCompletionInTx, reconcileProductionOrderInTx } from '../order-state';
 import { createReworkOrder } from '@/lib/order/rework';
@@ -39,8 +41,11 @@ import { prepareOrderForProductionInTx } from '@/lib/order/production-readiness'
 import { createOutsourceOrder } from '@/lib/outsource';
 import { repairLegacyProductionEntry } from '../legacy-entry';
 import { finalizeSampleOrderInTx, SampleQuoteChangedError } from '@/lib/order/sample-order';
+import * as permissions from '@/lib/auth/permissions';
+import { registerProductionCompletionAction } from '@/actions/production-dispatch';
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/auth/config', () => ({ auth: vi.fn() }));
 vi.mock('@/lib/notification/dispatch', () => ({ dispatchNotification: vi.fn() }));
 const url = process.env.DATABASE_URL;
 const isolated = !!url && url === process.env.E2E_DATABASE_URL && new URL(url).pathname.slice(1) === process.env.E2E_DATABASE_CONFIRM_DATABASE && /_e2e_/.test(new URL(url).pathname);
@@ -90,6 +95,51 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     await db.user.create({ data: { id: `${prefix}_sales`, username: `${prefix}_sales`, displayName: '验收销售', role: 'SALES', password: 'not-a-login-hash' } });
     worker = await newWorker(); collaborator = await newWorker();
     expect(await db.pieceworkPriceBook.count({ where: { status: 'PUBLISHED', workerId: null } })).toBeGreaterThan(0);
+  });
+  it.each(['FULL_COLORS', 'PARTIAL_MULTIPLIER', 'MISSING_BASIS', 'INVALID_RATE'] as const)('通过 action 返回历史计薪资料 %s 的提示且不写入工资', async scenario => {
+    const owner = await newWorker();
+    const prepared = await fixture();
+    if (scenario === 'FULL_COLORS') {
+      await db.user.update({ where: { id: owner.id }, data: { machineType: 'WINDMILL' } });
+      const craft = await db.craft.findUniqueOrThrow({ where: { code: 'FLAT_FOIL_SINGLE' } });
+      await db.orderItem.update({ where: { id: prepared.order.items[0].id }, data: { craft: 'FULL', crafts: [craft.id] } });
+      const { targets } = await currentDispatchTargets(db, prepared.order.id);
+      prepared.request.orders[0].assignments = Object.fromEntries(targets.map(target => [target.key, owner.id]));
+    }
+    prepared.request.orders[0].assignments = Object.fromEntries(Object.keys(prepared.request.orders[0].assignments).map(key => [key, owner.id]));
+    await publishProductionDispatch(prepared.request, admin);
+    const f = { ...prepared, job: await db.productionJob.findFirstOrThrow({ where: { orderId: prepared.order.id } }) };
+    const snapshot = f.job.snapshot as Record<string, import('@/generated/prisma/client').Prisma.JsonValue>;
+    await db.productionJob.update({ where: { id: f.job.id }, data: {
+      snapshot: scenario === 'FULL_COLORS'
+        ? { ...snapshot, items: [{ id: f.order.items[0].id, quantity: 1000, frontFoilColors: [], backFoilColors: [] }] }
+        : { ...snapshot, registrationPricing: scenario === 'MISSING_BASIS' ? { mode: 'AUTOMATIC' }
+          : { mode: 'AUTOMATIC', priceBookId: 'historical-fixture', priceBookVersion: 1, ruleSetSha256: 'a'.repeat(64), source: 'UNIFIED', policyBookId: null, policyBookVersion: null, useUnifiedRates: true,
+            rate: scenario === 'INVALID_RATE' ? 'not-money' : '0.0070', smallOrderAmount: '12', setupAmount: '5', multiplier: 1.5 } },
+    } });
+    if (scenario === 'FULL_COLORS') {
+      await db.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('print-shop-erp:piecework-price-book:publish'))`;
+        const latest = await tx.pieceworkPriceBook.aggregate({ _max: { version: true } });
+        const book = await tx.pieceworkPriceBook.create({ data: { workerId: owner.id, useUnifiedRates: false, version: latest._max.version! + 1, sourceName: '历史专版缺颜色隔离夹具',
+          rules: { create: { operationType: 'FULL', unit: 'PER_PIECE', amount: '0.01', smallOrderAmount: '20', setupAmount: '10' } },
+        } });
+        await tx.pieceworkPriceBook.update({ where: { id: book.id }, data: { status: 'PUBLISHED', effectiveFrom: new Date(Date.now() - 1000), publishedAt: new Date(), publishedById: admin.id, sourceSha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64), ruleSetSha256: 'c'.repeat(64), publishNote: '只用于独立测试师傅的历史资料回归' } });
+      });
+    }
+    const permission = vi.spyOn(permissions, 'requirePermission').mockResolvedValue(await db.user.findUniqueOrThrow({ where: { id: owner.id } }));
+    try {
+      const form = new FormData();
+      Object.entries(completion(f.job)).forEach(([key, value]) => form.set(key, String(value)));
+      const message = scenario === 'FULL_COLORS' ? '专版须有 1–3 个颜色，请核对款式颜色'
+        : scenario === 'PARTIAL_MULTIPLIER' ? '计薪数量与次数须为正整数，次数最多 999' : '原计薪资料不完整，请先核对历史记录';
+      await expect(registerProductionCompletionAction(null, form)).resolves.toEqual({ ok: false, message });
+      expect(permission).toHaveBeenCalledWith('task:report');
+      expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(0);
+      expect(await db.productionJob.findUniqueOrThrow({ where: { id: f.job.id } })).toMatchObject({ status: 'PENDING', revision: f.job.revision });
+    } finally {
+      permission.mockRestore();
+    }
   });
   async function readyPending() {
     const f = await fixture();
@@ -769,6 +819,14 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     expect(await db.productionWage.count({ where: { jobId: forgotten.job.id } })).toBe(0);
     const obligation = await db.productionFactReview.findUniqueOrThrow({ where: { jobId: completed.id } });
     expect(obligation.status).toBe('WAGES_DUE');
+    await db.order.update({ where: { id: forgotten.order.id }, data: { submittedAt: new Date(), settledFee: '100' } });
+    await db.orderCostEntry.create({ data: { orderId: forgotten.order.id, idempotencyKey: randomUUID(), category: 'MATERIAL', description: '成本完整性回归', amount: '10', createdById: admin.id } });
+    const costFilters = parseAnalyticsFilters({ view: 'costs', q: forgotten.order.orderNo });
+    const pendingCosts = await getAnalyticsReport(admin, costFilters);
+    expect(pendingCosts.total).toBe(1);
+    expect(pendingCosts.metrics[1].value).toBe('10.00');
+    expect(pendingCosts.metrics[2].value).toBeNull();
+    expect(pendingCosts.details.rows[0][9].value).toBe('有金额待核');
     expect(await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } })).toEqual(before);
     await expect(correctProductionRegistration({ jobId: completed.id, revision: completed.revision, requestKey: randomUUID(), reason: '不能绕过原日', notActuallyProduced: true }, admin)).rejects.toThrow('已结算');
     await expect(allocateProductionWages({ jobId: completed.id, requestKey: randomUUID(), reason: '不能改原日工资', allocations: [{ workerId: worker.id, amount: '200', expectedRevision: -1 }] }, admin)).rejects.toThrow('已结算');
@@ -776,6 +834,7 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     await reviewProductionFact({ jobId: completed.id, jobRevision: completed.revision, reviewRevision: obligation.revision, mode: 'DISMISS_WAGE', reason: '根据留存凭据确认此前已另行支付，无需补发' }, admin);
     expect((await db.productionFactReview.findUniqueOrThrow({ where: { jobId: completed.id } })).status).toBe('DISMISSED');
     expect((await db.productionJob.findUniqueOrThrow({ where: { id: completed.id } })).status).toBe('COMPLETED');
+    expect((await getAnalyticsReport(admin, costFilters)).metrics[2].value).toBe('90.00');
   });
 
   it('resuming with a pending cancellation does not notify until the last request closes', async () => {
@@ -982,7 +1041,8 @@ pg.sequential('single owner dispatch/completion · real PostgreSQL', () => {
     const ledger = receipt ? await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } }) : null;
     const paid = await db.productionWage.findFirstOrThrow({ where: { jobId: next.id } });
     await reviewProductionFact({ jobId: f.job.id, jobRevision: f.job.revision, reviewRevision: -1, mode: 'OPEN', reason: '旧任务可能漏登记，需复核' }, admin);
-    await expect(registerProductionCompletion({ ...completion(f.job), mode: 'RECOVER', reviewRevision: 0, workDate: todayShanghai(), reason: '核实旧生产' }, admin)).rejects.toThrow('不能重复计产');
+    await expect(registerProductionCompletion({ ...completion(f.job), mode: 'RECOVER', reviewRevision: 0, workDate: todayShanghai(), reason: '核实旧生产' }, admin))
+      .rejects.toMatchObject({ name: 'ProductionConflictError', orderId: f.order.id, message: expect.stringContaining('不能重复计产') });
     expect((await db.productionFactReview.findUniqueOrThrow({ where: { jobId: f.job.id } })).status).toBe('CONFLICT');
     expect(await db.productionWage.findUniqueOrThrow({ where: { id: paid.id } })).toEqual(paid);
     expect(await db.productionWage.count({ where: { jobId: f.job.id } })).toBe(0);

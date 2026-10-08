@@ -9,6 +9,9 @@ vi.mock('@/components/business/order/OrderCancellationRequestForm', () => ({
   OrderCancellationRequestForm: () => null,
 }));
 vi.mock('@/lib/order/confirm-historical-blank-price', () => ({ readHistoricalBlankPriceEditor: readHistoricalBlankPriceEditorMock }));
+vi.mock('@/lib/order/settled-correction', () => ({
+  readSettledOrderCorrectionAvailability: vi.fn().mockResolvedValue({ allowed: false, reason: '账单已确认' }),
+}));
 vi.mock('@/components/business/order/HistoricalBlankPriceEditor', () => ({ HistoricalBlankPriceEditor: () => null }));
 vi.mock('@/lib/production/report-dispute', () => ({ listOrderReportDisputes: vi.fn().mockResolvedValue([]) }));
 vi.mock('@/components/business/salary/OrderWagePanel', () => ({ OrderWagePanel: () => null }));

@@ -24,6 +24,54 @@ async function gates(page: Page, info: TestInfo, name: string) {
   }
 }
 
+test('历史计薪次数异常显示表单提示并保持生产记录不变', async ({ page, browser }, info) => {
+  const errors: string[] = [];
+  const fixture = await seedProductionDispatchFixture();
+  await login(page, { from: `/orders/production?ids=${fixture.id}` });
+  await page.getByRole('combobox', { name: '局部烫金 · 1000 个' }).selectOption(fixture.workerId);
+  await page.getByRole('button', { name: '核对排单' }).click();
+  await page.getByRole('button', { name: '发布排单', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('已安排 1 张工单');
+  const job = await withDb(async db => {
+    const original = (await db.query<{ id: string; revision: number; snapshot: Record<string, unknown> }>(
+      'SELECT id, revision, snapshot FROM "ProductionJob" WHERE "orderId"=$1', [fixture.id],
+    )).rows[0];
+    // 只在隔离夹具中建立历史异常资料，生产应用不提供修改快照的入口。
+    const snapshot = { ...original.snapshot, registrationPricing: {
+      mode: 'AUTOMATIC', priceBookId: 'historical-fixture', priceBookVersion: 1, ruleSetSha256: 'a'.repeat(64),
+      source: 'UNIFIED', policyBookId: null, policyBookVersion: null, useUnifiedRates: true,
+      rate: '0.0070', smallOrderAmount: '12', setupAmount: '5', multiplier: 1.5,
+    } };
+    await db.query('UPDATE "ProductionJob" SET snapshot=$2::jsonb WHERE id=$1', [original.id, JSON.stringify(snapshot)]);
+    return original;
+  });
+  const context = await browser.newContext({ ...info.project.use, baseURL: info.project.use.baseURL });
+  const workerPage = await context.newPage();
+  workerPage.on('pageerror', error => errors.push(error.message));
+  try {
+    await login(workerPage, { from: `/worker/tasks/${job.id}`, username: E2E_USERS.workerHandPress.username, password: E2E_PASSWORD });
+    await workerPage.getByRole('button', { name: '完成生产', exact: true }).click();
+    await workerPage.getByRole('button', { name: '确认完成 1000 个', exact: true }).click();
+    await expect(workerPage.getByRole('status')).toContainText('计薪数量与次数须为正整数，次数最多 999');
+    await expect(workerPage.getByRole('button', { name: '确认完成 1000 个', exact: true })).toBeEnabled();
+    await gates(workerPage, info, 'historical-pricing-error');
+    await withDb(async db => {
+      expect((await db.query('SELECT status, revision FROM "ProductionJob" WHERE id=$1', [job.id])).rows[0])
+        .toEqual({ status: 'PENDING', revision: job.revision });
+      expect((await db.query('SELECT id FROM "ProductionWage" WHERE "jobId"=$1', [job.id])).rowCount).toBe(0);
+      await db.query('UPDATE "ProductionJob" SET snapshot=$2::jsonb WHERE id=$1', [job.id, JSON.stringify(job.snapshot)]);
+    });
+    await workerPage.reload();
+    await workerPage.getByRole('button', { name: '完成生产', exact: true }).click();
+    await workerPage.getByRole('button', { name: '确认完成 1000 个', exact: true }).click();
+    await expect(workerPage.getByText('已登记完成', { exact: true })).toBeVisible();
+    expect(await withDb(async db => (await db.query('SELECT id FROM "ProductionWage" WHERE "jobId"=$1', [job.id])).rowCount)).toBe(1);
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
 test('single owner dispatch, quantity approval, wages and external sales state', async ({ page, browser }, info) => {
   test.setTimeout(180000);
   const errors: string[] = [];

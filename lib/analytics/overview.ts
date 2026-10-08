@@ -6,11 +6,12 @@ import { productCategoryLabel } from '@/lib/auth/role-labels';
 import { analyticsRead, type AnalyticsActor } from './queries';
 import { analyticsRange, analyticsUrl, type AnalyticsFilters } from './filters';
 import type { AnalyticsGroup, AnalyticsMetric } from './types';
+import { analyticsSalesCondition } from './sales-scope';
 
 /** Overview aggregates stay in PostgreSQL and do not load or cap order details. */
 export const getAnalyticsOverview = cache(async (actor: AnalyticsActor, filters: AnalyticsFilters) => analyticsRead(actor, async tx => {
   const { gte, lt } = analyticsRange(filters);
-  const where = Prisma.sql`o."submittedAt" >= ${gte} AND o."submittedAt" < ${lt} AND o.status != 'CANCELLED' ${filters.sales ? Prisma.sql`AND o."submitterId" = ${filters.sales}` : Prisma.empty}`;
+  const where = Prisma.sql`o."submittedAt" >= ${gte} AND o."submittedAt" < ${lt} AND o.status != 'CANCELLED' ${analyticsSalesCondition(filters.sales)}`;
   const [totals, sales, categories] = await Promise.all([
     tx.$queryRaw<Array<{ count: bigint; processing: string; pending: bigint; free: bigint }>>`
       SELECT count(*) AS count, COALESCE(sum(o."processingAmount"), 0)::text AS processing,
@@ -18,7 +19,9 @@ export const getAnalyticsOverview = cache(async (actor: AnalyticsActor, filters:
         count(*) FILTER (WHERE o."billingMode" = 'NO_CHARGE') AS free FROM "Order" o WHERE ${where}`,
     tx.$queryRaw<Array<{ id: string; name: string; amount: string; count: bigint }>>`
       SELECT u.id, u."displayName" AS name, sum(o."processingAmount")::text AS amount, count(*) AS count
-      FROM "Order" o JOIN "User" u ON u.id = o."submitterId" WHERE ${where} AND o."processingAmount" > 0
+      FROM "Order" o LEFT JOIN "Order" source ON source.id = o."sourceOrderId"
+      JOIN "User" u ON u.id = CASE WHEN o."settlementType" = 'NO_CHARGE' THEN source."submitterId" ELSE o."submitterId" END
+      WHERE ${where} AND o."processingAmount" > 0
       GROUP BY u.id, u."displayName" ORDER BY sum(o."processingAmount") DESC, u.id LIMIT 10`,
     tx.$queryRaw<Array<{ category: string; count: bigint }>>`
       SELECT COALESCE(p.category::text, 'UNCATEGORIZED') AS category, count(DISTINCT o.id) AS count
