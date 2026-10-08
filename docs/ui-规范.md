@@ -399,6 +399,7 @@ gates:
 ### 8.1 控件对齐与勾选（2026-09-29）
 
 - 管理端与师傅端外壳内，`app/globals.css` 给所有可交互控件兜底 `min-height: 44px`；源码里的 `h-*` 不等于渲染高度。禁止用 `min-h-0!`、`!min-h-*` 绕过兜底。Dialog / AlertDialog / Sheet 内容挂在 body 上，原子件自带 `touch-viewport`，业务不再手补。
+- 管理端顶栏的图标按钮保持至少 44×44 CSS px，头像及下拉图标使用固定尺寸，避免文字放大 200% 时把全局操作挤出 320px 视口；正文、面包屑及菜单文字仍随用户设置放大。主题菜单按可用宽度限制面板，保留键盘退出与焦点返回。
 - 表单原子件（Input、Textarea、NativeSelect）同一规格：`rounded-md`、同一内距、同一焦点圈、同一 `aria-invalid` 错误态、同一只读态。只读用原子件的 `read-only` 样式，不在调用处手写底色。
 - 输入框内图标一律 `top-1/2 -translate-y-1/2` 垂直居中。
 - 网格或筛选栏里，按钮与带标签的字段底边对齐（`items-end` / `self-end`）。

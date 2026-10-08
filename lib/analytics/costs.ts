@@ -10,7 +10,7 @@ import { moneyCell, textCell, type AnalyticsReport } from './types';
 
 type CostAggregate = {
   id: string; tasks: bigint; taskAmount: string; operations: bigint; reports: bigint; wages: bigint; reportAmount: string;
-  wageAmount: string; pendingWages: bigint; outsources: bigint; outsourceAmount: string; pendingOutsources: bigint;
+  wageAmount: string; pendingWages: bigint; pendingProduction: bigint; outsources: bigint; outsourceAmount: string; pendingOutsources: bigint;
 };
 
 /** Aggregate immutable sources in SQL, then use the existing generation/fallback policy. */
@@ -33,6 +33,12 @@ export async function costReport(tx: AnalyticsTx, orders: AnalyticsOrder[], filt
       SELECT j."orderId", sum(w.amount) AS amount, count(w.amount) AS count, count(w.id) FILTER (WHERE w.amount IS NULL) AS pending
       FROM "ProductionJob" j JOIN scope s ON s.id = j."orderId"
       JOIN "ProductionWage" w ON w."jobId" = j.id GROUP BY j."orderId"
+    ), obligations AS (
+      SELECT j."orderId", count(*) AS pending FROM "ProductionJob" j
+      JOIN scope s ON s.id = j."orderId"
+      LEFT JOIN "ProductionFactReview" r ON r."jobId" = j.id
+      WHERE j.status = 'REQUESTED' OR r.status IN ('OPEN', 'CONFLICT', 'WAGES_DUE')
+      GROUP BY j."orderId"
     ), outsource AS (
       SELECT o."orderId", count(o.amount) AS count, sum(o.amount) AS amount, count(*) FILTER (WHERE o.amount IS NULL) AS pending
       FROM "OutsourceOrder" o JOIN scope s ON s.id = o."orderId" WHERE o.status != 'CANCELLED' GROUP BY o."orderId"
@@ -40,9 +46,11 @@ export async function costReport(tx: AnalyticsTx, orders: AnalyticsOrder[], filt
     SELECT s.id, COALESCE(l.count, 0) AS tasks, COALESCE(l.amount, 0)::text AS "taskAmount",
       COALESCE(p.count, 0) AS operations, COALESCE(p.reports, 0) AS reports, COALESCE(w.count, 0) AS wages, COALESCE(p.amount, 0)::text AS "reportAmount",
       COALESCE(w.amount, 0)::text AS "wageAmount", COALESCE(w.pending, 0) AS "pendingWages",
+      COALESCE(f.pending, 0) AS "pendingProduction",
       COALESCE(o.count, 0) AS outsources, COALESCE(o.amount, 0)::text AS "outsourceAmount", COALESCE(o.pending, 0) AS "pendingOutsources"
     FROM scope s LEFT JOIN legacy l ON l."orderId" = s.id LEFT JOIN operations p ON p."orderId" = s.id
-    LEFT JOIN wages w ON w."orderId" = s.id LEFT JOIN outsource o ON o."orderId" = s.id
+    LEFT JOIN wages w ON w."orderId" = s.id LEFT JOIN obligations f ON f."orderId" = s.id
+    LEFT JOIN outsource o ON o."orderId" = s.id
   ` : [];
   const entries = ids.length ? await tx.orderCostEntry.groupBy({ by: ['orderId', 'category'], where: { orderId: { in: ids } }, _sum: { amount: true }, _count: true }) : [];
   const byId = new Map(raw.map(row => [row.id, row]));
@@ -63,7 +71,7 @@ export async function costReport(tx: AnalyticsTx, orders: AnalyticsOrder[], filt
   const results = roots.map(order => {
     const related = [order.id, ...(children.get(order.id) ?? []).map(child => child.id)];
     const costs = calculateOrderCostBreakdown({ ...source(order.id), reworkOrders: related.slice(1).map(source) });
-    const pending = related.some(id => { const row = byId.get(id); return row && (row.pendingWages > BigInt(0) || row.pendingOutsources > BigInt(0)); });
+    const pending = related.some(id => { const row = byId.get(id); return row && (row.pendingWages > BigInt(0) || row.pendingProduction > BigInt(0) || row.pendingOutsources > BigInt(0)); });
     const hasEvidence = related.some(id => { const row = byId.get(id); return (manual.get(id)?.length ?? 0) > 0 || (row && (row.tasks > BigInt(0) || row.reports > BigInt(0) || row.outsources > BigInt(0) || row.wages > BigInt(0))); });
     const frozen = order.agentMonthlyBillItem;
     const fee = frozen && frozen.bill.status !== 'DRAFT' ? frozen.settledFeeSnapshot.toString() : order.settledFee?.toString() ?? null;

@@ -6,6 +6,7 @@ import { Role, OrderCraft } from '@/generated/prisma/enums';
 import { db } from '@/lib/db';
 import { UnauthorizedError } from '@/lib/auth/errors';
 import { canonicalAnalyticsCraft } from './crafts';
+import { analyticsSalesCondition, analyticsSalesWhere } from './sales-scope';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 import { ANALYTICS_RECORD_LIMIT, AnalyticsInputError, analyticsRange, type AnalyticsFilters } from './filters';
 
@@ -34,7 +35,7 @@ export function orderWhere(filters: AnalyticsFilters, includeCancelled = false, 
   return {
     submittedAt: analyticsRange(filters),
     ...(!includeCancelled ? { status: { not: 'CANCELLED' } } : {}),
-    ...(filters.sales ? { submitterId: filters.sales } : {}),
+    ...(filters.sales ? { AND: [analyticsSalesWhere(filters.sales)] } : {}),
     ...(filters.customer ? { customerRef: filters.customer } : {}),
     ...(filters.paper || filters.craft ? { items: { some: items } } : {}),
     ...(filters.q ? { OR: [{ orderNo: { contains: filters.q, mode: 'insensitive' } }, { customName: { contains: filters.q, mode: 'insensitive' } }, { customerRef: { contains: filters.q, mode: 'insensitive' } }] } : {}),
@@ -43,9 +44,10 @@ export function orderWhere(filters: AnalyticsFilters, includeCancelled = false, 
 
 const orderSelect = {
   id: true, orderNo: true, customName: true, customerRef: true, submittedAt: true,
-  status: true, kind: true, sourceOrderId: true, billingMode: true, pricingStatus: true,
+  status: true, kind: true, sourceOrderId: true, settlementType: true, billingMode: true, pricingStatus: true,
   processingAmount: true, packagingAmount: true, settledFee: true, settledAt: true,
   submitter: { select: { id: true, displayName: true, role: true } },
+  sourceOrder: { select: { submitter: { select: { id: true, displayName: true, role: true } } } },
   items: { select: { id: true, craft: true, crafts: true, paperType: true, specification: true, quantity: true, subtotal: true, product: { select: { category: true } } } },
   customerCharges: { select: { amount: true, status: true, category: { select: { name: true } } } },
   agentMonthlyBillItem: { select: { settledFeeSnapshot: true, settlementDetailSnapshot: true, credits: { select: { requestedAmount: true, allocations: { select: { amount: true, bill: { select: { status: true } } } } } }, bill: { select: { id: true, status: true } } } },
@@ -75,7 +77,7 @@ export const getAnalyticsCrafts = cache((actor: AnalyticsActor) => analyticsRead
 
 export const getAnalyticsSales = cache(async (actor: AnalyticsActor) => {
   assertAnalyticsActor(actor);
-  return db.user.findMany({ where: { role: { in: ['SALES', 'ADMIN'] } }, select: { id: true, displayName: true }, orderBy: [{ displayName: 'asc' }, { id: 'asc' }], take: 1000 });
+  return db.user.findMany({ where: { role: 'SALES' }, select: { id: true, displayName: true }, orderBy: [{ displayName: 'asc' }, { id: 'asc' }], take: 1000 });
 });
 
 export async function readAnalyticsFinance(tx: AnalyticsTx, filters: AnalyticsFilters) {
@@ -97,13 +99,13 @@ export async function readAnalyticsTrend(tx: AnalyticsTx, filters: AnalyticsFilt
     const format = monthly ? 'YYYY-MM' : 'YYYY-MM-DD';
     const rows = await tx.$queryRaw<Array<{ day: string; count: bigint; submitted: bigint }>>`
       WITH events AS (
-        SELECT "completedAt" AS date, 1 AS completed, 0 AS submitted FROM "Order"
-        WHERE "completedAt" >= ${gte} AND "completedAt" < ${lt} AND status != 'CANCELLED'
-        ${filters.sales ? Prisma.sql`AND "submitterId" = ${filters.sales}` : Prisma.empty}
+        SELECT o."completedAt" AS date, 1 AS completed, 0 AS submitted FROM "Order" o
+        WHERE o."completedAt" >= ${gte} AND o."completedAt" < ${lt} AND o.status != 'CANCELLED'
+        ${analyticsSalesCondition(filters.sales)}
         UNION ALL
-        SELECT "submittedAt" AS date, 0 AS completed, 1 AS submitted FROM "Order"
-        WHERE "submittedAt" >= ${gte} AND "submittedAt" < ${lt} AND status != 'CANCELLED'
-        ${filters.sales ? Prisma.sql`AND "submitterId" = ${filters.sales}` : Prisma.empty}
+        SELECT o."submittedAt" AS date, 0 AS completed, 1 AS submitted FROM "Order" o
+        WHERE o."submittedAt" >= ${gte} AND o."submittedAt" < ${lt} AND o.status != 'CANCELLED'
+        ${analyticsSalesCondition(filters.sales)}
       )
       SELECT to_char(((date AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai'), ${format}) AS day,
         sum(completed) AS count, sum(submitted) AS submitted FROM events GROUP BY day ORDER BY day`;

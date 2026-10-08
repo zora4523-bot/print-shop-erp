@@ -4,6 +4,7 @@ import { currentDispatchTargets, targetLinks } from './dispatch-targets';
 import { assertNoHistoricalProductionReview } from './fact-guards';
 import { reopenAssignedProductionInTx } from './order-state';
 import { salaryIdentityLockKey } from '@/lib/salary/hourly-lock';
+import { ProductionInputError } from './input-error';
 
 function fingerprint(snapshot: Prisma.JsonValue) {
   return snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) && typeof snapshot.fingerprint === 'string' ? snapshot.fingerprint : null;
@@ -58,7 +59,7 @@ export async function inheritProductionJobsInTx(tx: Prisma.TransactionClient, or
   let unfinished = 0;
   for (const target of targets) {
     const link = links.get(target.key);
-    if (!link) throw new Error('改版生产明细不完整，请核对工单');
+    if (!link) throw new ProductionInputError('改版生产明细不完整，请核对工单');
     const sameLane = history.filter(job => job.sourceKey.split(':').slice(0, -1).join(':') === target.key.split(':').slice(0, -1).join(':'));
     const overlapping = sameLane.filter(job => {
       const snapshot = job.snapshot as { items?: Array<{ id: string }> };
@@ -99,7 +100,7 @@ export async function inheritProductionJobsInTx(tx: Prisma.TransactionClient, or
   const oldPending = await tx.productionJob.findMany({ where: { orderId, workOrderVersion: { lt: order.workOrderVersion }, status: 'PENDING' }, include: { factReview: true } });
   for (const job of oldPending) {
     const nextJobId = continuations.get(job.id);
-    if (!nextJobId && (job.factReview?.status !== 'UNPRODUCED' || job.factReview.jobRevision !== job.revision)) throw new Error(`请先核实${job.workerName}的${job.label}是否已生产`);
+    if (!nextJobId && (job.factReview?.status !== 'UNPRODUCED' || job.factReview.jobRevision !== job.revision)) throw new ProductionInputError(`请先核实${job.workerName}的${job.label}是否已生产`);
     if (nextJobId) {
       const evidence = { resolution: 'CONTINUED', nextJobId, originalWorkerId: job.workerId, physicalWorkUnchanged: true };
       const now = new Date();
@@ -133,10 +134,10 @@ export async function inheritReworkProductionJobsInTx(tx: Prisma.TransactionClie
     if (sourceIds.length !== target.itemIds.length || owners.some(owner => !owner) || new Set(owners.map(owner => owner!.workerId)).size !== 1) continue;
     const owner = owners[0]!;
     const link = links.get(target.key);
-    if (!link) throw new Error('重做生产明细不完整，请核对工单');
+    if (!link) throw new ProductionInputError('重做生产明细不完整，请核对工单');
     const existing = await tx.productionJob.findFirst({ where: { orderId, workOrderVersion: order.workOrderVersion, sourceKey: target.key } });
     if (existing) {
-      if (existing.workerId !== owner.workerId || existing.operationId !== link.operationId || existing.progressStepId !== link.progressStepId) throw new Error('重做生产归属与已有任务不一致，请核对工单');
+      if (existing.workerId !== owner.workerId || existing.operationId !== link.operationId || existing.progressStepId !== link.progressStepId) throw new ProductionInputError('重做生产归属与已有任务不一致，请核对工单');
       continue;
     }
     await tx.productionJob.create({ data: { orderId, workOrderVersion: order.workOrderVersion, operationId: link.operationId, progressStepId: link.progressStepId,

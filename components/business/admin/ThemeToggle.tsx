@@ -84,12 +84,12 @@ export function ThemeToggle() {
         className={buttonVariants({
           variant: 'ghost',
           size: 'icon',
-          className: 'size-11',
+          className: 'size-[44px] min-h-[44px] min-w-[44px]',
         })}
       >
         <SunMoon aria-hidden className="size-4" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent align="end" className="w-44 max-w-(--available-width)">
         <DropdownMenuGroup>
           <DropdownMenuLabel>界面主题</DropdownMenuLabel>
         </DropdownMenuGroup>

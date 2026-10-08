@@ -477,16 +477,7 @@ function processingBaselineWeight(
   return Number(values[0]);
 }
 
-function projectFull(
-  rules: readonly PublishedCreateOrderRuleRow[],
-  processingNotes: unknown,
-  consumed: Set<string>,
-): {
-  snapshot: CreateOrderPriceSnapshot['full'];
-  tierCodes: string[];
-  paperSurchargeCodes: string[];
-  otherSurchargeCodes: string[];
-} {
+function projectFullTiers(rules: readonly PublishedCreateOrderRuleRow[], consumed: Set<string>) {
   const tierRules = rules.filter(
     (rule) => rule.exclusiveGroup === 'CUSTOM_BASE',
   );
@@ -613,6 +604,20 @@ function projectFull(
   if (expectedMinimum !== Number.POSITIVE_INFINITY) {
     invalidRule(intervals.at(-1)![0]!.rule, '\u4e13\u7248\u9636\u68af\u672a\u8986\u76d6\u6700\u540e\u4e00\u4e2a\u65e0\u4e0a\u9650\u533a\u95f4');
   }
+  return { tierRules, candidates, canonicalPaperUniverse, unitPrices };
+}
+
+function projectFull(
+  rules: readonly PublishedCreateOrderRuleRow[],
+  processingNotes: unknown,
+  consumed: Set<string>,
+): {
+  snapshot: CreateOrderPriceSnapshot['full'];
+  tierCodes: string[];
+  paperSurchargeCodes: string[];
+  otherSurchargeCodes: string[];
+} {
+  const { tierRules, candidates, canonicalPaperUniverse, unitPrices } = projectFullTiers(rules, consumed);
 
   const surchargeRules = rules.filter(
     (rule) => rule.exclusiveGroup === 'CUSTOM_PAPER_SURCHARGE',

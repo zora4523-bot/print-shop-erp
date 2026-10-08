@@ -9,6 +9,9 @@ vi.mock('@/lib/salary/production-wages', async importOriginal => ({ ...await imp
 vi.mock('@/lib/production/correct-registration', async importOriginal => ({ ...await importOriginal<object>(), correctProductionRegistration: mocks.correct }));
 vi.mock('@/lib/production/fact-review', async importOriginal => ({ ...await importOriginal<object>(), reviewProductionFact: mocks.review }));
 import { DispatchPlanValidationError } from '@/lib/production/dispatch-plan-error';
+import { ProductionConflictError, ProductionInputError } from '@/lib/production/input-error';
+import { FoilWageInputError } from '@/lib/salary/foil-wage';
+import { UnauthorizedError } from '@/lib/auth/errors';
 import { reviewProductionFactAction, allocateProductionWagesAction, correctProductionRegistrationAction, publishProductionDispatchAction, registerProductionCompletionAction } from '../production-dispatch';
 const actor = { id: 'session-actor', role: 'ADMIN' };
 const payload = (value: unknown) => { const form = new FormData(); form.set('payload', JSON.stringify(value)); return form; };
@@ -41,7 +44,7 @@ describe('production actions', () => {
     expect(mocks.permission).toHaveBeenCalledWith('production:manage');
   });
   it('rejects unauthorized commands before calling any domain writer', async () => {
-    mocks.permission.mockRejectedValue(new Error('无权操作'));
+    mocks.permission.mockRejectedValue(new UnauthorizedError('无权操作'));
     await publishProductionDispatchAction(null, payload(dispatch)); await registerProductionCompletionAction(null, completion('APPROVE'));
     await allocateProductionWagesAction(null, payload({})); await correctProductionRegistrationAction({});
     for (const writer of [mocks.publish, mocks.complete, mocks.allocate, mocks.correct]) expect(writer).not.toHaveBeenCalled();
@@ -74,8 +77,50 @@ describe('production actions', () => {
     expect(result?.message).not.toMatch(/canonical|PRIVATE_CRAFT_CODE/);
     expect(mocks.refresh).not.toHaveBeenCalled();
   });
-  it('does not disclose SQL or internal errors', async () => {
-    mocks.publish.mockRejectedValue(new Error('SELECT secret FROM database'));
-    expect(await publishProductionDispatchAction(null, payload(dispatch))).toEqual({ ok: false, message: '本次未保存，请刷新核对后重试' });
+  it.each([new Error('SELECT secret FROM database'), new Error('connect ECONNREFUSED database.internal:5432'), new TypeError('unexpected'), new SyntaxError('internal snapshot')])('propagates unexpected errors without exposing an action message: %s', async error => {
+    mocks.publish.mockRejectedValue(error);
+    await expect(publishProductionDispatchAction(null, payload(dispatch))).rejects.toBe(error);
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+  it('retains typed business feedback and malformed payload feedback', async () => {
+    mocks.publish.mockRejectedValue(new ProductionInputError('请先核对历史生产记录'));
+    expect(await publishProductionDispatchAction(null, payload(dispatch))).toEqual({ ok: false, message: '请先核对历史生产记录' });
+    const form = new FormData(); form.set('payload', '{');
+    expect(await publishProductionDispatchAction(null, form)).toEqual({ ok: false, message: '填写内容不完整，请核对后重试' });
+  });
+  it('保留深层烫金计薪输入提示', async () => {
+    mocks.complete.mockRejectedValue(new FoilWageInputError('专版须有 1–3 个颜色，请核对款式颜色'));
+    expect(await registerProductionCompletionAction(null, completion())).toEqual({ ok: false, message: '专版须有 1–3 个颜色，请核对款式颜色' });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+  it.each(['P2024', 'P2028'])('数据库繁忙 %s 保留表单并隐藏内部信息', async code => {
+    mocks.complete.mockRejectedValue({ code, message: 'internal database address and query' });
+    expect(await registerProductionCompletionAction(null, completion())).toEqual({ ok: false, message: '系统繁忙，请稍后重试' });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+  it('历史冲突记录已提交时刷新工单和生产视图', async () => {
+    mocks.complete.mockRejectedValue(new ProductionConflictError('o1', '已有后续生产，不能重复计产'));
+    expect(await registerProductionCompletionAction(null, completion('RECOVER'))).toEqual({ ok: false, message: '已有后续生产，不能重复计产' });
+    for (const path of ['/orders/o1', '/worker/orders/o1', '/worker/tasks', '/worker/salary', '/owner/salary/piecework']) {
+      expect(mocks.refresh).toHaveBeenCalledWith(path);
+    }
+  });
+  it.each(['publish', 'complete', 'allocate', 'correct', 'review'] as const)('only returns expected domain errors from %s', async entry => {
+    const invoke = () => {
+      if (entry === 'publish') return publishProductionDispatchAction(null, payload(dispatch));
+      if (entry === 'complete') return registerProductionCompletionAction(null, completion());
+      if (entry === 'allocate') return allocateProductionWagesAction(null, payload({ jobId: 'j1', requestKey: 'manual-001', reason: '核定', allocations: [{ workerId: 'worker', amount: '10.00', expectedRevision: 0 }] }));
+      if (entry === 'correct') return correctProductionRegistrationAction({ jobId: 'j1', requestKey: 'correct-001', revision: 0, reason: '误登记', notActuallyProduced: true });
+      const form = new FormData();
+      Object.entries({ jobId: 'j1', jobRevision: '0', reviewRevision: '0', mode: 'UNPRODUCED', reason: '核实未生产', notActuallyProduced: 'on' }).forEach(([key, value]) => form.set(key, value));
+      return reviewProductionFactAction(null, form);
+    };
+    const unexpected = new Error('internal database address and query');
+    mocks[entry].mockRejectedValueOnce(unexpected);
+    await expect(invoke()).rejects.toBe(unexpected);
+    mocks[entry].mockRejectedValueOnce(new ProductionInputError('请核对生产资料'));
+    expect(await invoke()).toEqual({ ok: false, message: '请核对生产资料' });
+    expect(mocks[entry]).toHaveBeenCalledTimes(2);
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,8 @@ import { orderCascadeLockKey } from '@/lib/order/locks';
 import { employmentCoversDate } from '@/lib/salary/employment';
 import { salaryIdentityLockKey } from '@/lib/salary/hourly-lock';
 import { PieceworkPricingError } from '@/lib/salary/piecework-pricing';
+import { FoilWageInputError } from '@/lib/salary/foil-wage';
+import { ProductionInputError } from './input-error';
 import { dispatchProductionCompletionNotification, type ProductionCompletionNotification } from '@/lib/production-completion';
 import { registerProductionCompletionInTx, type PlannedCompletionRecordSource } from './completion-registration';
 import type { ProductionActor } from './dispatch';
@@ -99,7 +101,7 @@ export async function completePlannedProductionInTx(tx: Prisma.TransactionClient
       notification = result.notification ?? notification;
     } catch (error) {
       // Curated domain messages only; unknown failures keep propagating unchanged.
-      if (error instanceof PieceworkPricingError || (error instanceof Error && error.constructor === Error && !/[\n]|Prisma|SELECT |INSERT |UPDATE /i.test(error.message))) {
+      if (error instanceof PieceworkPricingError || error instanceof ProductionInputError || error instanceof FoilWageInputError) {
         throw new PlannedCompletionError('REGISTRATION_FAILED', `${job.workerName}（${job.label}）：${error.message}`);
       }
       throw error;

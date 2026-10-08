@@ -1214,6 +1214,349 @@ function validateFinalPricingSubmissions(
     submittedOrderCharges, manualItems };
 }
 
+function buildFinalPricingPlan(input: FinalizeOrderPricingCommand, order: PricingOrder) {
+  const { includesShipmentCharges, shipmentChargeByBusinessKey,
+    submittedGroups, submittedShipments, expectedOrderCharges,
+    submittedOrderCharges, manualItems } =
+    validateFinalPricingSubmissions(input, order);
+
+  const manualGroups = order.packagingGroups.flatMap((group) => {
+    if (!packagingRequiresManual(group) && (!input.editAll || sameNullableDecimal(submittedGroups.get(group.id)?.unitPrice ?? null, money(group.unitPrice, 4)))) return [];
+    const submitted = submittedGroups.get(group.id)!;
+    const unitPrice = parseManualMoney(
+      submitted.unitPrice,
+      `包装组 ${group.sequence} 的每${packagingUnit(group.mode)}包装费`,
+      DECIMAL_10_4_MAX,
+      4,
+    );
+    if (group.mode === OrderPackagingMode.UNPACKED && !unitPrice.isZero()) {
+      throw new OrderPricingReviewError('不包装的包装费必须为 0');
+    }
+    const reason = requiredReason(
+      submitted.reason,
+      `包装组 ${group.sequence} 需人工核价`,
+    );
+    const subtotal = unitPrice
+      .times(group.actualBagCount)
+      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    if (subtotal.gt(DECIMAL_12_2_MAX)) {
+      throw new OrderPricingReviewError(
+        `包装组 ${group.sequence} 的包装费小计超出系统允许范围`,
+      );
+    }
+    return [{
+      group,
+      unitPrice: unitPrice.toFixed(4),
+      subtotal: subtotal.toFixed(2),
+      reason,
+    }];
+  });
+
+  const manualOrderCharges = expectedOrderCharges.filter((charge) =>
+    !input.editAll || chargeRequiresManual(charge) || !sameNullableDecimal(submittedOrderCharges.get(charge.id)?.amount ?? null, money(charge.amount)),
+  ).map((charge) => {
+    const submitted = submittedOrderCharges.get(charge.id)!;
+    return {
+      charge,
+      amount: parseManualMoney(
+        submitted.amount,
+        `订单级收费“${charge.description}”`,
+        DECIMAL_12_2_MAX,
+        2,
+        charge.isAdjustment && charge.category.code === 'APPROVED_ADJUSTMENT' && Boolean(charge.approvalReference),
+      ).toFixed(2),
+      reason: requiredReason(
+        submitted.reason,
+        `订单级收费“${charge.description}”需人工核价`,
+      ),
+    };
+  });
+
+  type ManualCharge = {
+    shipment: PricingShipment;
+    code: ShipmentChargeCode;
+    previous: PricingCustomerCharge | undefined;
+    amount: string;
+    reason: string;
+  };
+  const manualCharges: ManualCharge[] = [];
+  for (const shipment of includesShipmentCharges ? order.shipments : []) {
+    const submitted = submittedShipments.get(shipment.id)!;
+    const pairs: Array<[ShipmentChargeCode, string, string]> = [
+      ["SHIPPING_FEE", submitted.shippingFee, "快递费"],
+      ["PACKING_MATERIAL", submitted.packingMaterialFee, "打包耗材费"],
+    ];
+    const needsManual = pairs.some(([code]) =>
+      chargeRequiresManual(
+        chargeByShipmentAndCode(
+          shipmentChargeByBusinessKey,
+          shipment,
+          code,
+        ),
+      ),
+    );
+    const reason = (needsManual || (input.editAll && pairs.some(([code, amount]) => !sameNullableDecimal(amount, money(chargeByShipmentAndCode(shipmentChargeByBusinessKey, shipment, code)?.amount)))))
+      ? requiredReason(
+          submitted.reason,
+          `地址 ${shipment.sequence} 存在待人工确认收费`,
+        )
+      : "";
+    for (const [code, rawAmount, label] of pairs) {
+      const previous = chargeByShipmentAndCode(
+        shipmentChargeByBusinessKey,
+        shipment,
+        code,
+      );
+      if (!chargeRequiresManual(previous) && (!input.editAll || sameNullableDecimal(rawAmount, money(previous?.amount)))) continue;
+      if (code === "SHIPPING_FEE" && order.isSfCollect && !new Decimal(rawAmount).isZero()) throw new OrderPricingReviewError("顺丰到付工单的快递费必须为 0");
+      const amount = parseManualMoney(
+        rawAmount,
+        `地址 ${shipment.sequence} 的${label}`,
+        DECIMAL_12_2_MAX,
+        2,
+      ).toFixed(2);
+      manualCharges.push({ shipment, code, previous, amount, reason });
+    }
+  }
+
+  const itemSubtotalById = new Map(
+    manualItems.map(({ item, subtotal }) => [item.id, subtotal]),
+  );
+  const itemAmount = order.items.reduce(
+    (sum, item) =>
+      sum.plus(itemSubtotalById.get(item.id) ?? item.subtotal.toString()),
+    new Decimal(0),
+  );
+  const groupSubtotalById = new Map(
+    manualGroups.map(({ group, subtotal }) => [group.id, subtotal]),
+  );
+  const packagingTotal = order.packagingGroups.reduce(
+    (sum, group) =>
+      sum.plus(groupSubtotalById.get(group.id) ?? group.subtotal.toString()),
+    new Decimal(0),
+  );
+  const chargeAmountById = new Map(
+    [
+      ...manualCharges
+        .filter((charge) => charge.previous)
+        .map((charge) => [charge.previous!.id, charge.amount] as const),
+      ...manualOrderCharges.map(
+        ({ charge, amount }) => [charge.id, amount] as const,
+      ),
+    ],
+  );
+  const existingChargeTotal = order.customerCharges
+    .filter(
+      (charge) =>
+        includesShipmentCharges || !isShipmentCustomerCharge(charge),
+    )
+    .reduce((sum, charge) => {
+      const amount = chargeAmountById.get(charge.id) ?? money(charge.amount);
+      return amount === null ? sum : sum.plus(amount);
+    }, new Decimal(0));
+  const createdChargeTotal = manualCharges
+    .filter((charge) => !charge.previous)
+    .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
+  const customerChargeTotal = existingChargeTotal.plus(createdChargeTotal);
+  const processingTotal = itemAmount.plus(packagingTotal);
+  const total = processingTotal.plus(customerChargeTotal);
+  if (packagingTotal.gt(DECIMAL_12_2_MAX) || processingTotal.gt(DECIMAL_12_2_MAX)) throw new OrderPricingReviewError('加工费或包装费合计超出系统允许范围');
+  if (total.isNegative()) {
+    throw new OrderPricingReviewError("工单总额不能为负数");
+  }
+  if (total.gt(DECIMAL_12_2_MAX)) {
+    throw new OrderPricingReviewError("工单总额超出系统允许范围");
+  }
+  const packagingAmount = packagingTotal.toFixed(2);
+  const processingAmount = processingTotal.toFixed(2);
+  const totalAmount = total.toFixed(2);
+  return { includesShipmentCharges, manualItems, manualGroups, manualOrderCharges, manualCharges, customerChargeTotal, packagingAmount, processingAmount, totalAmount };
+}
+
+async function persistManualPricingInTx(
+  tx: Prisma.TransactionClient,
+  order: PricingOrder,
+  plan: ReturnType<typeof buildFinalPricingPlan>,
+  actor: { id: string; role: Role },
+  now: Date,
+) {
+  const { manualItems, manualGroups, manualOrderCharges, manualCharges } = plan;
+  for (const manual of manualItems) {
+    await tx.orderItem.update({
+      where: { id: manual.item.id },
+      data: {
+        unitPrice: manual.unitPrice,
+        fixedFee: manual.fixedFee,
+        subtotal: manual.subtotal,
+        priceOverrideReason: manual.reason,
+        pricingSnapshot: buildTrustedAdminItemPricingSnapshot({
+          previous: manual.item.pricingSnapshot,
+          now,
+          actorId: actor.id,
+          previousPriceRevision: order.priceRevision,
+          item: {
+            ...manual.item,
+            unitPrice: manual.unitPrice,
+            fixedFee: manual.fixedFee,
+            subtotal: manual.subtotal,
+            priceOverrideReason: manual.reason,
+          },
+        }),
+      },
+    });
+  }
+  for (const manual of manualGroups) {
+    await tx.orderPackagingGroup.update({
+      where: { id: manual.group.id },
+      data: {
+        unitPrice: manual.unitPrice,
+        subtotal: manual.subtotal,
+        priceOverrideReason: manual.reason,
+        pricingSnapshot: buildTrustedAdminPackagingPricingSnapshot({
+          previous: manual.group.pricingSnapshot,
+          now,
+          actorId: actor.id,
+          previousPriceRevision: order.priceRevision,
+          group: {
+            ...manual.group,
+            unitPrice: manual.unitPrice,
+            subtotal: manual.subtotal,
+            priceOverrideReason: manual.reason,
+          },
+        }),
+      },
+    });
+  }
+
+  for (const manual of manualOrderCharges) {
+    const isShipped = order.status === OrderStatus.SHIPPED;
+    const status = isShipped
+      ? OrderCustomerChargeStatus.FINAL
+      : OrderCustomerChargeStatus.ESTIMATED;
+    await tx.orderCustomerCharge.update({
+      where: { id: manual.charge.id },
+      data: {
+        amount: manual.amount,
+        status,
+        overrideReason: manual.reason,
+        pricingSnapshot: buildTrustedAdminChargePricingSnapshot({
+          previous: manual.charge.pricingSnapshot,
+          now,
+          actorId: actor.id,
+          previousPriceRevision: order.priceRevision,
+          charge: {
+            orderId: order.id,
+            businessKey: manual.charge.businessKey,
+            shipmentId: manual.charge.shipmentId,
+            categoryCode: manual.charge.category.code,
+            status,
+            priceBookId: manual.charge.priceBookId,
+            sourceRuleId: manual.charge.sourceRuleId,
+            quantity: manual.charge.quantity,
+            unit: manual.charge.unit,
+            unitPrice: manual.charge.unitPrice,
+            suggestedAmount: manual.charge.suggestedAmount,
+            amount: manual.amount,
+            isAdjustment: manual.charge.isAdjustment,
+            approvalReference: manual.charge.approvalReference,
+            overrideReason: manual.reason,
+          },
+        }),
+        finalizedById: isShipped ? actor.id : null,
+        finalizedAt: isShipped ? now : null,
+      },
+      select: { id: true },
+    });
+  }
+
+  const categoryByCode = new Map<
+    ShipmentChargeCode,
+    { id: string; name: string }
+  >();
+  for (const manual of manualCharges) {
+    const isShipped = order.status === OrderStatus.SHIPPED;
+    const status = isShipped
+      ? OrderCustomerChargeStatus.FINAL
+      : OrderCustomerChargeStatus.ESTIMATED;
+    const pricingSnapshot = buildTrustedAdminChargePricingSnapshot({
+      previous: manual.previous?.pricingSnapshot,
+      now,
+      actorId: actor.id,
+      previousPriceRevision: order.priceRevision,
+      charge: {
+        orderId: order.id,
+        businessKey: shipmentChargeKey(manual.shipment.sequence, manual.code),
+        shipmentId: manual.shipment.id,
+        categoryCode: manual.code,
+        status,
+        priceBookId: manual.previous?.priceBookId ?? null,
+        sourceRuleId: manual.previous?.sourceRuleId ?? null,
+        quantity: manual.previous?.quantity ?? null,
+        unit: manual.previous?.unit ?? null,
+        unitPrice: manual.previous?.unitPrice ?? null,
+        suggestedAmount: manual.previous?.suggestedAmount ?? null,
+        amount: manual.amount,
+        isAdjustment: manual.previous?.isAdjustment ?? false,
+        approvalReference: manual.previous?.approvalReference ?? null,
+        overrideReason: manual.reason,
+      },
+    });
+    if (manual.previous) {
+      await tx.orderCustomerCharge.update({
+        where: { id: manual.previous.id },
+        data: {
+          amount: manual.amount,
+          status,
+          overrideReason: manual.reason,
+          pricingSnapshot,
+          finalizedById: isShipped ? actor.id : null,
+          finalizedAt: isShipped ? now : null,
+        },
+        select: { id: true },
+      });
+      continue;
+    }
+    let category = categoryByCode.get(manual.code);
+    if (!category) {
+      const foundCategory = await tx.customerChargeCategory.findUnique({
+        where: { code: manual.code },
+        select: { id: true, name: true },
+      });
+      if (!foundCategory) {
+        throw new OrderPricingReviewError(
+          `收费类目 ${manual.code} 不存在，无法保存人工核价`,
+        );
+      }
+      category = foundCategory;
+      categoryByCode.set(manual.code, category);
+    }
+    await tx.orderCustomerCharge.create({
+      data: {
+        orderId: order.id,
+        shipmentId: manual.shipment.id,
+        categoryId: category.id,
+        priceBookId: null,
+        sourceRuleId: null,
+        businessKey: shipmentChargeKey(manual.shipment.sequence, manual.code),
+        status,
+        description: category.name,
+        quantity: null,
+        unit: null,
+        unitPrice: null,
+        suggestedAmount: null,
+        amount: manual.amount,
+        pricingSnapshot,
+        overrideReason: manual.reason,
+        createdById: actor.id,
+        finalizedById: isShipped ? actor.id : null,
+        finalizedAt: isShipped ? now : null,
+      },
+      select: { id: true },
+    });
+  }
+
+}
+
 export async function finalizeOrderPricing(
   input: FinalizeOrderPricingCommand,
   actor: { id: string; role: Role },
@@ -1257,334 +1600,9 @@ export async function finalizeOrderPricing(
         "工单款式、数量或发货信息已变更，请刷新并按当前快照重新核价",
       );
     }
-    const { includesShipmentCharges, shipmentChargeByBusinessKey,
-      submittedGroups, submittedShipments, expectedOrderCharges,
-      submittedOrderCharges, manualItems } =
-      validateFinalPricingSubmissions(input, order);
-
-    const manualGroups = order.packagingGroups.flatMap((group) => {
-      if (!packagingRequiresManual(group) && (!input.editAll || sameNullableDecimal(submittedGroups.get(group.id)?.unitPrice ?? null, money(group.unitPrice, 4)))) return [];
-      const submitted = submittedGroups.get(group.id)!;
-      const unitPrice = parseManualMoney(
-        submitted.unitPrice,
-        `包装组 ${group.sequence} 的每${packagingUnit(group.mode)}包装费`,
-        DECIMAL_10_4_MAX,
-        4,
-      );
-      if (group.mode === OrderPackagingMode.UNPACKED && !unitPrice.isZero()) {
-        throw new OrderPricingReviewError('不包装的包装费必须为 0');
-      }
-      const reason = requiredReason(
-        submitted.reason,
-        `包装组 ${group.sequence} 需人工核价`,
-      );
-      const subtotal = unitPrice
-        .times(group.actualBagCount)
-        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-      if (subtotal.gt(DECIMAL_12_2_MAX)) {
-        throw new OrderPricingReviewError(
-          `包装组 ${group.sequence} 的包装费小计超出系统允许范围`,
-        );
-      }
-      return [{
-        group,
-        unitPrice: unitPrice.toFixed(4),
-        subtotal: subtotal.toFixed(2),
-        reason,
-      }];
-    });
-
-    const manualOrderCharges = expectedOrderCharges.filter((charge) =>
-      !input.editAll || chargeRequiresManual(charge) || !sameNullableDecimal(submittedOrderCharges.get(charge.id)?.amount ?? null, money(charge.amount)),
-    ).map((charge) => {
-      const submitted = submittedOrderCharges.get(charge.id)!;
-      return {
-        charge,
-        amount: parseManualMoney(
-          submitted.amount,
-          `订单级收费“${charge.description}”`,
-          DECIMAL_12_2_MAX,
-          2,
-          charge.isAdjustment && charge.category.code === 'APPROVED_ADJUSTMENT' && Boolean(charge.approvalReference),
-        ).toFixed(2),
-        reason: requiredReason(
-          submitted.reason,
-          `订单级收费“${charge.description}”需人工核价`,
-        ),
-      };
-    });
-
-    type ManualCharge = {
-      shipment: PricingShipment;
-      code: ShipmentChargeCode;
-      previous: PricingCustomerCharge | undefined;
-      amount: string;
-      reason: string;
-    };
-    const manualCharges: ManualCharge[] = [];
-    for (const shipment of includesShipmentCharges ? order.shipments : []) {
-      const submitted = submittedShipments.get(shipment.id)!;
-      const pairs: Array<[ShipmentChargeCode, string, string]> = [
-        ["SHIPPING_FEE", submitted.shippingFee, "快递费"],
-        ["PACKING_MATERIAL", submitted.packingMaterialFee, "打包耗材费"],
-      ];
-      const needsManual = pairs.some(([code]) =>
-        chargeRequiresManual(
-          chargeByShipmentAndCode(
-            shipmentChargeByBusinessKey,
-            shipment,
-            code,
-          ),
-        ),
-      );
-      const reason = (needsManual || (input.editAll && pairs.some(([code, amount]) => !sameNullableDecimal(amount, money(chargeByShipmentAndCode(shipmentChargeByBusinessKey, shipment, code)?.amount)))))
-        ? requiredReason(
-            submitted.reason,
-            `地址 ${shipment.sequence} 存在待人工确认收费`,
-          )
-        : "";
-      for (const [code, rawAmount, label] of pairs) {
-        const previous = chargeByShipmentAndCode(
-          shipmentChargeByBusinessKey,
-          shipment,
-          code,
-        );
-        if (!chargeRequiresManual(previous) && (!input.editAll || sameNullableDecimal(rawAmount, money(previous?.amount)))) continue;
-        if (code === "SHIPPING_FEE" && order.isSfCollect && !new Decimal(rawAmount).isZero()) throw new OrderPricingReviewError("顺丰到付工单的快递费必须为 0");
-        const amount = parseManualMoney(
-          rawAmount,
-          `地址 ${shipment.sequence} 的${label}`,
-          DECIMAL_12_2_MAX,
-          2,
-        ).toFixed(2);
-        manualCharges.push({ shipment, code, previous, amount, reason });
-      }
-    }
-
-    const itemSubtotalById = new Map(
-      manualItems.map(({ item, subtotal }) => [item.id, subtotal]),
-    );
-    const itemAmount = order.items.reduce(
-      (sum, item) =>
-        sum.plus(itemSubtotalById.get(item.id) ?? item.subtotal.toString()),
-      new Decimal(0),
-    );
-    const groupSubtotalById = new Map(
-      manualGroups.map(({ group, subtotal }) => [group.id, subtotal]),
-    );
-    const packagingTotal = order.packagingGroups.reduce(
-      (sum, group) =>
-        sum.plus(groupSubtotalById.get(group.id) ?? group.subtotal.toString()),
-      new Decimal(0),
-    );
-    const chargeAmountById = new Map(
-      [
-        ...manualCharges
-          .filter((charge) => charge.previous)
-          .map((charge) => [charge.previous!.id, charge.amount] as const),
-        ...manualOrderCharges.map(
-          ({ charge, amount }) => [charge.id, amount] as const,
-        ),
-      ],
-    );
-    const existingChargeTotal = order.customerCharges
-      .filter(
-        (charge) =>
-          includesShipmentCharges || !isShipmentCustomerCharge(charge),
-      )
-      .reduce((sum, charge) => {
-        const amount = chargeAmountById.get(charge.id) ?? money(charge.amount);
-        return amount === null ? sum : sum.plus(amount);
-      }, new Decimal(0));
-    const createdChargeTotal = manualCharges
-      .filter((charge) => !charge.previous)
-      .reduce((sum, charge) => sum.plus(charge.amount), new Decimal(0));
-    const customerChargeTotal = existingChargeTotal.plus(createdChargeTotal);
-    const processingTotal = itemAmount.plus(packagingTotal);
-    const total = processingTotal.plus(customerChargeTotal);
-    if (packagingTotal.gt(DECIMAL_12_2_MAX) || processingTotal.gt(DECIMAL_12_2_MAX)) throw new OrderPricingReviewError('加工费或包装费合计超出系统允许范围');
-    if (total.isNegative()) {
-      throw new OrderPricingReviewError("工单总额不能为负数");
-    }
-    if (total.gt(DECIMAL_12_2_MAX)) {
-      throw new OrderPricingReviewError("工单总额超出系统允许范围");
-    }
-    const packagingAmount = packagingTotal.toFixed(2);
-    const processingAmount = processingTotal.toFixed(2);
-    const totalAmount = total.toFixed(2);
-    for (const manual of manualItems) {
-      await tx.orderItem.update({
-        where: { id: manual.item.id },
-        data: {
-          unitPrice: manual.unitPrice,
-          fixedFee: manual.fixedFee,
-          subtotal: manual.subtotal,
-          priceOverrideReason: manual.reason,
-          pricingSnapshot: buildTrustedAdminItemPricingSnapshot({
-            previous: manual.item.pricingSnapshot,
-            now,
-            actorId: actor.id,
-            previousPriceRevision: order.priceRevision,
-            item: {
-              ...manual.item,
-              unitPrice: manual.unitPrice,
-              fixedFee: manual.fixedFee,
-              subtotal: manual.subtotal,
-              priceOverrideReason: manual.reason,
-            },
-          }),
-        },
-      });
-    }
-    for (const manual of manualGroups) {
-      await tx.orderPackagingGroup.update({
-        where: { id: manual.group.id },
-        data: {
-          unitPrice: manual.unitPrice,
-          subtotal: manual.subtotal,
-          priceOverrideReason: manual.reason,
-          pricingSnapshot: buildTrustedAdminPackagingPricingSnapshot({
-            previous: manual.group.pricingSnapshot,
-            now,
-            actorId: actor.id,
-            previousPriceRevision: order.priceRevision,
-            group: {
-              ...manual.group,
-              unitPrice: manual.unitPrice,
-              subtotal: manual.subtotal,
-              priceOverrideReason: manual.reason,
-            },
-          }),
-        },
-      });
-    }
-
-    for (const manual of manualOrderCharges) {
-      const isShipped = order.status === OrderStatus.SHIPPED;
-      const status = isShipped
-        ? OrderCustomerChargeStatus.FINAL
-        : OrderCustomerChargeStatus.ESTIMATED;
-      await tx.orderCustomerCharge.update({
-        where: { id: manual.charge.id },
-        data: {
-          amount: manual.amount,
-          status,
-          overrideReason: manual.reason,
-          pricingSnapshot: buildTrustedAdminChargePricingSnapshot({
-            previous: manual.charge.pricingSnapshot,
-            now,
-            actorId: actor.id,
-            previousPriceRevision: order.priceRevision,
-            charge: {
-              orderId: order.id,
-              businessKey: manual.charge.businessKey,
-              shipmentId: manual.charge.shipmentId,
-              categoryCode: manual.charge.category.code,
-              status,
-              priceBookId: manual.charge.priceBookId,
-              sourceRuleId: manual.charge.sourceRuleId,
-              quantity: manual.charge.quantity,
-              unit: manual.charge.unit,
-              unitPrice: manual.charge.unitPrice,
-              suggestedAmount: manual.charge.suggestedAmount,
-              amount: manual.amount,
-              isAdjustment: manual.charge.isAdjustment,
-              approvalReference: manual.charge.approvalReference,
-              overrideReason: manual.reason,
-            },
-          }),
-          finalizedById: isShipped ? actor.id : null,
-          finalizedAt: isShipped ? now : null,
-        },
-        select: { id: true },
-      });
-    }
-
-    const categoryByCode = new Map<
-      ShipmentChargeCode,
-      { id: string; name: string }
-    >();
-    for (const manual of manualCharges) {
-      const isShipped = order.status === OrderStatus.SHIPPED;
-      const status = isShipped
-        ? OrderCustomerChargeStatus.FINAL
-        : OrderCustomerChargeStatus.ESTIMATED;
-      const pricingSnapshot = buildTrustedAdminChargePricingSnapshot({
-        previous: manual.previous?.pricingSnapshot,
-        now,
-        actorId: actor.id,
-        previousPriceRevision: order.priceRevision,
-        charge: {
-          orderId: order.id,
-          businessKey: shipmentChargeKey(manual.shipment.sequence, manual.code),
-          shipmentId: manual.shipment.id,
-          categoryCode: manual.code,
-          status,
-          priceBookId: manual.previous?.priceBookId ?? null,
-          sourceRuleId: manual.previous?.sourceRuleId ?? null,
-          quantity: manual.previous?.quantity ?? null,
-          unit: manual.previous?.unit ?? null,
-          unitPrice: manual.previous?.unitPrice ?? null,
-          suggestedAmount: manual.previous?.suggestedAmount ?? null,
-          amount: manual.amount,
-          isAdjustment: manual.previous?.isAdjustment ?? false,
-          approvalReference: manual.previous?.approvalReference ?? null,
-          overrideReason: manual.reason,
-        },
-      });
-      if (manual.previous) {
-        await tx.orderCustomerCharge.update({
-          where: { id: manual.previous.id },
-          data: {
-            amount: manual.amount,
-            status,
-            overrideReason: manual.reason,
-            pricingSnapshot,
-            finalizedById: isShipped ? actor.id : null,
-            finalizedAt: isShipped ? now : null,
-          },
-          select: { id: true },
-        });
-        continue;
-      }
-      let category = categoryByCode.get(manual.code);
-      if (!category) {
-        const foundCategory = await tx.customerChargeCategory.findUnique({
-          where: { code: manual.code },
-          select: { id: true, name: true },
-        });
-        if (!foundCategory) {
-          throw new OrderPricingReviewError(
-            `收费类目 ${manual.code} 不存在，无法保存人工核价`,
-          );
-        }
-        category = foundCategory;
-        categoryByCode.set(manual.code, category);
-      }
-      await tx.orderCustomerCharge.create({
-        data: {
-          orderId: order.id,
-          shipmentId: manual.shipment.id,
-          categoryId: category.id,
-          priceBookId: null,
-          sourceRuleId: null,
-          businessKey: shipmentChargeKey(manual.shipment.sequence, manual.code),
-          status,
-          description: category.name,
-          quantity: null,
-          unit: null,
-          unitPrice: null,
-          suggestedAmount: null,
-          amount: manual.amount,
-          pricingSnapshot,
-          overrideReason: manual.reason,
-          createdById: actor.id,
-          finalizedById: isShipped ? actor.id : null,
-          finalizedAt: isShipped ? now : null,
-        },
-        select: { id: true },
-      });
-    }
+    const plan = buildFinalPricingPlan(input, order);
+    const { includesShipmentCharges, manualItems, manualGroups, manualOrderCharges, manualCharges, customerChargeTotal, packagingAmount, processingAmount, totalAmount } = plan;
+    await persistManualPricingInTx(tx, order, plan, actor, now);
 
     const orderModel = tx.order as unknown as {
       update(args: unknown): Promise<{ id: string }>;

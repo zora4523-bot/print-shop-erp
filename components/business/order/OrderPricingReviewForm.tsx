@@ -308,7 +308,7 @@ function PricingReviewShipmentFields({ preview, shipmentDrafts, setShipmentDraft
   );
 }
 
-export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }: Props) {
+function useOrderPricingReview({ orderId, variant = 'page', onSuccess }: Props) {
   const [previewState, previewAction] = useActionState<
     PreviewOrderPricingReviewResult | null,
     unknown
@@ -497,6 +497,328 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
   const submissionDisabled =
     !draftsReady || finalizePending || previewPending || pricingFinalized || auxiliary.blocked;
 
+  return {
+    variant,
+    finalizeState,
+    previewPending,
+    finalizePending,
+    itemDrafts,
+    setItemDrafts,
+    shipmentDrafts,
+    setShipmentDrafts,
+    packagingGroupDrafts,
+    setPackagingGroupDrafts,
+    orderChargeDrafts,
+    setOrderChargeDrafts,
+    remark,
+    setRemark,
+    dirty,
+    auxiliary,
+    resetDraft,
+    expandedReadOnly,
+    setExpandedReadOnly,
+    showReadOnly,
+    loadPreview,
+    preview,
+    submit,
+    productionReadiness,
+    previewError,
+    finalizeError,
+    incompleteItemCount,
+    incompletePackagingGroupCount,
+    pendingReviewTargets,
+    missingRequirements,
+    pricingFinalized,
+    submissionDisabled,
+  };
+}
+
+function PricingReviewItemAndPackagingFields({ model }: { model: ReturnType<typeof useOrderPricingReview> }) {
+  const {
+    itemDrafts,
+    setItemDrafts,
+    packagingGroupDrafts,
+    setPackagingGroupDrafts,
+    showReadOnly,
+    preview,
+    incompleteItemCount,
+    incompletePackagingGroupCount,
+  } = model;
+  if (!preview) return null;
+  return (<>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">款式加工费</h3>
+        <Badge
+          variant="secondary"
+        >
+          {incompleteItemCount > 0
+            ? `${incompleteItemCount} 款需人工核价`
+            : "已报价"}
+        </Badge>
+      </div>
+      <ol className="space-y-2">
+        {preview.items.filter((item) => showReadOnly || !item.complete).map((item) => (
+          <li
+            id={`pricing-review-item-${item.itemId}`}
+            key={item.itemId}
+            className="scroll-mt-24 rounded-md border p-3 text-sm"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <p className="font-medium">
+                #{item.sequence} · {externalPriceBusinessText(item.name)} ·{" "}
+                {item.quantity.toLocaleString("zh-CN")} 个
+              </p>
+              <Badge
+                variant="secondary"
+              >
+                {item.complete ? "已报价" : "待人工核价"}
+              </Badge>
+            </div>
+            {item.complete ? (
+              <p className="mt-2 font-sans text-xs tabular-nums text-muted-foreground">
+                保持已有金额不变：单价 {item.currentUnitPrice} · 一次性费用{" "}
+                {item.currentFixedFee} · 小计 {item.currentSubtotal}
+              </p>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {item.manualQuoteReason ? (
+                  <p className="text-xs text-muted-foreground">
+                    建单转人工原因：{item.manualQuoteReason}
+                  </p>
+                ) : null}
+                {item.errors.length > 0 ? (
+                  <p className="text-xs text-destructive">
+                    {item.errors.join("；")}
+                  </p>
+                ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs">
+                    <span>客户单价（最多 4 位小数）</span>
+                    <Input
+                      required
+                      inputMode="decimal"
+                      value={
+                        itemDrafts[item.itemId]?.unitPrice ??
+                        item.currentUnitPrice
+                      }
+                      onChange={(event) =>
+                        setItemDrafts((current) => {
+                          const previous = current[item.itemId] ?? {
+                            unitPrice: item.currentUnitPrice,
+                            fixedFee: item.currentFixedFee,
+                            reason: item.currentReason ?? "",
+                          };
+                          return {
+                            ...current,
+                            [item.itemId]: {
+                              ...previous,
+                              unitPrice: event.target.value,
+                            },
+                          };
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs">
+                    <span>每款一次性费用</span>
+                    <Input
+                      required
+                      inputMode="decimal"
+                      value={
+                        itemDrafts[item.itemId]?.fixedFee ??
+                        item.currentFixedFee
+                      }
+                      onChange={(event) =>
+                        setItemDrafts((current) => {
+                          const previous = current[item.itemId] ?? {
+                            unitPrice: item.currentUnitPrice,
+                            fixedFee: item.currentFixedFee,
+                            reason: item.currentReason ?? "",
+                          };
+                          return {
+                            ...current,
+                            [item.itemId]: {
+                              ...previous,
+                              fixedFee: event.target.value,
+                            },
+                          };
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="block space-y-1 text-xs">
+                  <span>定价依据</span>
+                  <Textarea
+                    required
+                    maxLength={500}
+                    value={
+                      itemDrafts[item.itemId]?.reason ??
+                      item.currentReason ??
+                      ""
+                    }
+                    onChange={(event) =>
+                      setItemDrafts((current) => {
+                        const previous = current[item.itemId] ?? {
+                          unitPrice: item.currentUnitPrice,
+                          fixedFee: item.currentFixedFee,
+                          reason: item.currentReason ?? "",
+                        };
+                        return {
+                          ...current,
+                          [item.itemId]: {
+                            ...previous,
+                            reason: event.target.value,
+                          },
+                        };
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+
+    {preview.packagingGroups.some((group) => showReadOnly || !group.complete) ? (
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">包装组费用</h3>
+          <Badge
+            variant="secondary"
+          >
+            {incompletePackagingGroupCount > 0
+              ? `${incompletePackagingGroupCount} 组需人工核价`
+              : "已报价"}
+          </Badge>
+        </div>
+        <ol className="space-y-2">
+          {preview.packagingGroups.filter((group) => showReadOnly || !group.complete).map((group) => {
+            const defaultDraft: PackagingGroupDraft = {
+              unitPrice: group.currentUnitPrice,
+              reason: group.currentReason ?? "",
+            };
+            const draft =
+              packagingGroupDrafts[group.packagingGroupId] ?? defaultDraft;
+            return (
+              <li
+                id={`pricing-review-packaging-${group.packagingGroupId}`}
+                key={group.packagingGroupId}
+                className="scroll-mt-24 space-y-3 rounded-md border p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="font-medium">
+                    包装组 #{group.sequence} · {group.name ?? "未命名"} ·{" "}
+                    {PACKAGING_MODE_LABELS[group.mode]}
+                    {group.mode !== "UNPACKED"
+                      ? ` · ${group.actualBagCount.toLocaleString("zh-CN")} ${packagingUnit(group.mode)}`
+                      : null}
+                  </p>
+                  <Badge
+                    variant="secondary"
+                  >
+                    {group.complete ? "已报价" : "待人工核价"}
+                  </Badge>
+                </div>
+                {group.errors.length > 0 ? (
+                  <p className="text-xs text-destructive">
+                    {group.errors.join("；")}
+                  </p>
+                ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs">
+                    <span>{group.mode === "UNPACKED" ? "包装费（元）" : `每${packagingUnit(group.mode)}包装费（元）`}</span>
+                    <Input
+                      required={!group.complete}
+                      inputMode="decimal"
+                      readOnly={group.complete}
+                      aria-readonly={group.complete}
+                      value={
+                        group.complete
+                          ? group.currentUnitPrice
+                          : draft.unitPrice
+                      }
+                      onChange={(event) =>
+                        setPackagingGroupDrafts((current) => ({
+                          ...current,
+                          [group.packagingGroupId]: {
+                            ...(current[group.packagingGroupId] ??
+                              defaultDraft),
+                            unitPrice: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="space-y-1 text-xs">
+                    <span>包装费小计</span>
+                    <p className="min-h-10 rounded-md border bg-muted/40 px-3 py-2 font-sans tabular-nums">
+                      {group.currentSubtotal}
+                    </p>
+                  </div>
+                </div>
+                {!group.complete ? (
+                  <label className="block space-y-1 text-xs">
+                    <span>定价依据</span>
+                    <Textarea
+                      required
+                      maxLength={500}
+                      value={draft.reason}
+                      onChange={(event) =>
+                        setPackagingGroupDrafts((current) => ({
+                          ...current,
+                          [group.packagingGroupId]: {
+                            ...(current[group.packagingGroupId] ??
+                              defaultDraft),
+                            reason: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+    ) : null}
+  </>);
+}
+
+export function OrderPricingReviewForm(props: Parameters<typeof useOrderPricingReview>[0]) {
+  const model = useOrderPricingReview(props);
+  const {
+    variant,
+    finalizeState,
+    previewPending,
+    finalizePending,
+    shipmentDrafts,
+    setShipmentDrafts,
+    orderChargeDrafts,
+    setOrderChargeDrafts,
+    remark,
+    setRemark,
+    dirty,
+    auxiliary,
+    resetDraft,
+    expandedReadOnly,
+    setExpandedReadOnly,
+    showReadOnly,
+    loadPreview,
+    preview,
+    submit,
+    productionReadiness,
+    previewError,
+    finalizeError,
+    pendingReviewTargets,
+    missingRequirements,
+    pricingFinalized,
+    submissionDisabled,
+  } = model;
   return (
     <section
       className="space-y-4"
@@ -602,246 +924,7 @@ export function OrderPricingReviewForm({ orderId, variant = 'page', onSuccess }:
             ) : null}
           </dl> : null}
 
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">款式加工费</h3>
-              <Badge
-                variant="secondary"
-              >
-                {incompleteItemCount > 0
-                  ? `${incompleteItemCount} 款需人工核价`
-                  : "已报价"}
-              </Badge>
-            </div>
-            <ol className="space-y-2">
-              {preview.items.filter((item) => showReadOnly || !item.complete).map((item) => (
-                <li
-                  id={`pricing-review-item-${item.itemId}`}
-                  key={item.itemId}
-                  className="scroll-mt-24 rounded-md border p-3 text-sm"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <p className="font-medium">
-                      #{item.sequence} · {externalPriceBusinessText(item.name)} ·{" "}
-                      {item.quantity.toLocaleString("zh-CN")} 个
-                    </p>
-                    <Badge
-                      variant="secondary"
-                    >
-                      {item.complete ? "已报价" : "待人工核价"}
-                    </Badge>
-                  </div>
-                  {item.complete ? (
-                    <p className="mt-2 font-sans text-xs tabular-nums text-muted-foreground">
-                      保持已有金额不变：单价 {item.currentUnitPrice} · 一次性费用{" "}
-                      {item.currentFixedFee} · 小计 {item.currentSubtotal}
-                    </p>
-                  ) : (
-                    <div className="mt-3 space-y-3">
-                      {item.manualQuoteReason ? (
-                        <p className="text-xs text-muted-foreground">
-                          建单转人工原因：{item.manualQuoteReason}
-                        </p>
-                      ) : null}
-                      {item.errors.length > 0 ? (
-                        <p className="text-xs text-destructive">
-                          {item.errors.join("；")}
-                        </p>
-                      ) : null}
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="space-y-1 text-xs">
-                          <span>客户单价（最多 4 位小数）</span>
-                          <Input
-                            required
-                            inputMode="decimal"
-                            value={
-                              itemDrafts[item.itemId]?.unitPrice ??
-                              item.currentUnitPrice
-                            }
-                            onChange={(event) =>
-                              setItemDrafts((current) => {
-                                const previous = current[item.itemId] ?? {
-                                  unitPrice: item.currentUnitPrice,
-                                  fixedFee: item.currentFixedFee,
-                                  reason: item.currentReason ?? "",
-                                };
-                                return {
-                                  ...current,
-                                  [item.itemId]: {
-                                    ...previous,
-                                    unitPrice: event.target.value,
-                                  },
-                                };
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="space-y-1 text-xs">
-                          <span>每款一次性费用</span>
-                          <Input
-                            required
-                            inputMode="decimal"
-                            value={
-                              itemDrafts[item.itemId]?.fixedFee ??
-                              item.currentFixedFee
-                            }
-                            onChange={(event) =>
-                              setItemDrafts((current) => {
-                                const previous = current[item.itemId] ?? {
-                                  unitPrice: item.currentUnitPrice,
-                                  fixedFee: item.currentFixedFee,
-                                  reason: item.currentReason ?? "",
-                                };
-                                return {
-                                  ...current,
-                                  [item.itemId]: {
-                                    ...previous,
-                                    fixedFee: event.target.value,
-                                  },
-                                };
-                              })
-                            }
-                          />
-                        </label>
-                      </div>
-                      <label className="block space-y-1 text-xs">
-                        <span>定价依据</span>
-                        <Textarea
-                          required
-                          maxLength={500}
-                          value={
-                            itemDrafts[item.itemId]?.reason ??
-                            item.currentReason ??
-                            ""
-                          }
-                          onChange={(event) =>
-                            setItemDrafts((current) => {
-                              const previous = current[item.itemId] ?? {
-                                unitPrice: item.currentUnitPrice,
-                                fixedFee: item.currentFixedFee,
-                                reason: item.currentReason ?? "",
-                              };
-                              return {
-                                ...current,
-                                [item.itemId]: {
-                                  ...previous,
-                                  reason: event.target.value,
-                                },
-                              };
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          {preview.packagingGroups.some((group) => showReadOnly || !group.complete) ? (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">包装组费用</h3>
-                <Badge
-                  variant="secondary"
-                >
-                  {incompletePackagingGroupCount > 0
-                    ? `${incompletePackagingGroupCount} 组需人工核价`
-                    : "已报价"}
-                </Badge>
-              </div>
-              <ol className="space-y-2">
-                {preview.packagingGroups.filter((group) => showReadOnly || !group.complete).map((group) => {
-                  const defaultDraft: PackagingGroupDraft = {
-                    unitPrice: group.currentUnitPrice,
-                    reason: group.currentReason ?? "",
-                  };
-                  const draft =
-                    packagingGroupDrafts[group.packagingGroupId] ?? defaultDraft;
-                  return (
-                    <li
-                      id={`pricing-review-packaging-${group.packagingGroupId}`}
-                      key={group.packagingGroupId}
-                      className="scroll-mt-24 space-y-3 rounded-md border p-3 text-sm"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <p className="font-medium">
-                          包装组 #{group.sequence} · {group.name ?? "未命名"} ·{" "}
-                          {PACKAGING_MODE_LABELS[group.mode]}
-                          {group.mode !== "UNPACKED"
-                            ? ` · ${group.actualBagCount.toLocaleString("zh-CN")} ${packagingUnit(group.mode)}`
-                            : null}
-                        </p>
-                        <Badge
-                          variant="secondary"
-                        >
-                          {group.complete ? "已报价" : "待人工核价"}
-                        </Badge>
-                      </div>
-                      {group.errors.length > 0 ? (
-                        <p className="text-xs text-destructive">
-                          {group.errors.join("；")}
-                        </p>
-                      ) : null}
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="space-y-1 text-xs">
-                          <span>{group.mode === "UNPACKED" ? "包装费（元）" : `每${packagingUnit(group.mode)}包装费（元）`}</span>
-                          <Input
-                            required={!group.complete}
-                            inputMode="decimal"
-                            readOnly={group.complete}
-                            aria-readonly={group.complete}
-                            value={
-                              group.complete
-                                ? group.currentUnitPrice
-                                : draft.unitPrice
-                            }
-                            onChange={(event) =>
-                              setPackagingGroupDrafts((current) => ({
-                                ...current,
-                                [group.packagingGroupId]: {
-                                  ...(current[group.packagingGroupId] ??
-                                    defaultDraft),
-                                  unitPrice: event.target.value,
-                                },
-                              }))
-                            }
-                          />
-                        </label>
-                        <div className="space-y-1 text-xs">
-                          <span>包装费小计</span>
-                          <p className="min-h-10 rounded-md border bg-muted/40 px-3 py-2 font-sans tabular-nums">
-                            {group.currentSubtotal}
-                          </p>
-                        </div>
-                      </div>
-                      {!group.complete ? (
-                        <label className="block space-y-1 text-xs">
-                          <span>定价依据</span>
-                          <Textarea
-                            required
-                            maxLength={500}
-                            value={draft.reason}
-                            onChange={(event) =>
-                              setPackagingGroupDrafts((current) => ({
-                                ...current,
-                                [group.packagingGroupId]: {
-                                  ...(current[group.packagingGroupId] ??
-                                    defaultDraft),
-                                  reason: event.target.value,
-                                },
-                              }))
-                            }
-                          />
-                        </label>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
-          ) : null}
+          <PricingReviewItemAndPackagingFields model={model} />
 
           {preview.orderCharges.length > 0 ? (
             <div className="space-y-2">

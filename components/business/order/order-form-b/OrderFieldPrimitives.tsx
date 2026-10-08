@@ -117,14 +117,14 @@ export function PillPicker<T extends string | number>({
               aria-pressed={selected}
               disabled={disabled || option.disabled}
               className={cn(
-                'h-auto min-h-11 min-w-11 rounded-full px-3.5 py-1.5 text-sm font-semibold',
+                'h-auto min-h-11 min-w-11 max-w-full rounded-full px-3.5 py-1.5 text-sm font-semibold whitespace-normal',
                 option.detail && 'flex-col gap-0 py-1',
               )}
               onClick={() => onChange(option.value)}
             >
-              <span>{option.label}</span>
+              <span className="admin-wrap-anywhere min-w-0">{option.label}</span>
               {option.detail ? (
-                <span className="text-xs font-medium opacity-60">
+                <span className="admin-wrap-anywhere min-w-0 text-xs font-medium opacity-60">
                   {option.detail}
                 </span>
               ) : null}

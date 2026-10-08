@@ -10,12 +10,13 @@ afterEach(() => { root.unmount(); host.remove(); });
 it('switches count/date labels while preserving the default completion chart', async () => {
   host = document.createElement('div'); host.style.width = '600px'; document.body.appendChild(host); root = createRoot(host);
   flushSync(() => root.render(<AnalyticsTrend data={[{ day: '2025-10', count: 2, submitted: 3 }, { day: '2026-01', count: 4, submitted: 5 }]} />));
-  await expect.element(page.getByRole('status')).toHaveTextContent('按完工日期 · 共 6 单');
+  const summary = page.getByRole('status').filter({ hasText: /^按(?:完工|提交)日期/ });
+  await expect.element(summary).toHaveTextContent('按完工日期 · 共 6 单');
   await page.getByRole('button', { name: '提交工单' }).click();
   await expect.element(page.getByRole('button', { name: '提交工单' })).toHaveAttribute('aria-pressed', 'true');
-  await expect.element(page.getByRole('status')).toHaveTextContent('按提交日期 · 共 8 单');
+  await expect.element(summary).toHaveTextContent('按提交日期 · 共 8 单');
   await expect.poll(() => host.querySelector('svg.recharts-surface')).toBeTruthy();
   expect(host.textContent).toContain('2025-10'); expect(host.textContent).toContain('2026-01');
   await page.getByRole('button', { name: '完工工单' }).click();
-  await expect.element(page.getByRole('status')).toHaveTextContent('按完工日期 · 共 6 单');
+  await expect.element(summary).toHaveTextContent('按完工日期 · 共 6 单');
 });

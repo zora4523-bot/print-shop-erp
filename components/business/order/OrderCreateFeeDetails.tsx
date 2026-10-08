@@ -24,7 +24,7 @@ function FeeRow({
   return (
     <div
       className={cn(
-        'flex items-start justify-between gap-3 py-2',
+        'flex flex-wrap items-start justify-between gap-3 py-2',
         detail && 'pl-3 text-xs',
       )}
     >

@@ -21,6 +21,8 @@ HTML、JS、CSS、CSV、Markdown 全部使用同一授权，返回 `Cache-Contro
 
 - `view=overview|orders|costs|structure|inventory`；默认 overview。`from/to=YYYY-MM-DD` 使用上海自然日、包含结束日期，默认本月截至今天，最多 366 天。
 - `sales` 为销售用户 ID；`customer/paper/supplier` 为全称；`craft` 为工艺枚举或字典 ID；`q` 为工单或物料关键词。采购库存不应用销售/客户/工艺/纸张条件；总览仅应用日期与销售。`inventoryKind=purchases|receipts|stock` 选择采购库存明细，默认 purchases。
+- 免费重做的 `sales` 筛选、明细名称及销售汇总取原单销售，创建重做的管理员不参与归属。`customer` 只读消费历史客户列，不恢复已停用的工单客户录入。
+- 成本中的生产申请、OPEN/CONFLICT 核对及 WAGES_DUE 待补工资使原单和关联重做处于待核范围；已有成本照常展示，该单不计入可核对差额。日薪保底补足不擅自分配到工单成本。
 - `page` 只影响页面；CSV 导出全部匹配明细和汇总。每类源记录最多 30,000 条（成本含关联重做）；超限、日期/视图/页码非法或重复参数返回 400，提示缩小范围，不输出截断合计。未登录、账号停用或角色无权限返回 401。数据库异常不伪装成空报表。
 - 返回 UTF-8 BOM CSV，附件下载、`private, no-store`、`nosniff`；Decimal 金额两位、原单价四位，文本转义并防公式注入，未知金额标为“待核对”。当前库存和当前待收款不代表所选历史日余额。
 - 分析使用只读、RepeatableRead 事务和查询超时；不创建/修改订单、账单、工资、采购或库存记录。日期和金额口径详见[经营概览方案](docs/audits/2026-10-03-analytics-refactor-plan.md)。
@@ -43,6 +45,8 @@ HTML、JS、CSS、CSV、Markdown 全部使用同一授权，返回 `Cache-Contro
 ## 2026-09-28 单负责人排单与完工提成
 
 `actions/production-dispatch.ts` 提供五个写入口。返回 `{ok,message}`，成功或幂等重放刷新管理工单、师傅任务/工资及工资结算页面；销售与管理员使用同一 `/orders` 权威状态。
+输入和预期业务失败仅通过明确领域错误类型返回业务文案；未知异常继续交给框架边界及监控，不按错误文字猜测是否可以回显。JSON 解码失败只在输入解析处转换为校验提示。
+数据库连接池或事务等待超时按项目统一规则返回繁忙提示；历史计薪快照缺失字段或金额格式非法时明确提示核对历史资料。已提交的历史生产冲突核对会刷新相关工单、任务和工资视图，显示新的核对版本。
 
 - `publishProductionDispatchAction(previous, form)`：`production:manage`（仅 ADMIN）。payload 为 requestKey、1–20 个订单的 id/revision/version/assignments（任务来源键→师傅）；最多 100 项。同事务复核、准备工序、生成打印待办和记录单一归属。接收满足校验的已确认／有效生产中订单，以及可自动准备的 `PENDING_FACTORY / SUBMITTED` 存量单；旧版或已有历史报工不能静默转入新流程。完全相同批次可重放。转派前需在生产记录核实原师傅未生产；已打印的任务更换负责人时追加待重印任务；已有待打印任务复用，不重复创建。
 - `registerProductionCompletionAction(previous, form)`：jobId/revision/quantity/mode/reason/workDate，另支持 itemQuantities、notActuallyProduced、confirmedSettledDay、reviewRevision。COMPLETE 用 `task:report`，且为当前启用的归属师傅；BACKFILL/APPROVE/REJECT/RECOVER 必须当前启用 ADMIN。数量非默认值产生申请并冻结计价依据；APPROVE 可据证核定正确数量，保留原申请量、师傅及工作日。REJECT 仅用于明确确认未实际生产，需理由及 notActuallyProduced=true；已生产不能用驳回取消工资。补登记在暂停/待审期间可处理，但交付等待恢复/最后一条申请关闭。旧版或关闭工单使用 RECOVER 并校验核对修订，不能恢复旧扫码入口；后续生产冲突持久标记，生产及工资不写入。原日已结算时管理员明确确认后仅登记生产事实及待补工资，不改原账；普通提成及更正仍禁止写原日。

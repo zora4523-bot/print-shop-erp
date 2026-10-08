@@ -5754,10 +5754,70 @@ async function finalizeApprovedModificationInTx(input: {
   return reviewed;
 }
 
+async function prepareModificationQuoteInTx(
+  tx: Prisma.TransactionClient,
+  request: ModificationReviewRequest,
+  changes: ResolvedProposedItemChange[],
+  itemById: Map<string, ModificationReviewRequest['order']['items'][number]>,
+  primaryShipment: ModificationReviewRequest['order']['shipments'][number] | undefined,
+  reviewedAt: Date,
+  input: ReviewOrderChangeRequestInput,
+) {
+  const pricingChanged = hasPricingFactChanges(changes, itemById);
+  assertProductionPlateFactsRemainScoped({
+    status: request.order.status,
+    changes,
+    itemById,
+  });
+  assertLegacyInProductionPricingChangeSupported(
+    request.order.status,
+    pricingChanged,
+  );
+  const requotesLogistics = requotesLogisticsChargesOnChange(request.order);
+  const projected = pricingChanged
+    ? await calculateProjectedOrderQuote({
+        client: tx,
+        now: reviewedAt,
+        orderStatus: request.order.status,
+        settlementType: request.order.settlementType,
+        isSfCollect: request.order.isSfCollect,
+        items: request.order.items,
+        logisticsItems: request.order.items,
+        shipments: request.order.shipments,
+        primaryShipmentId: primaryShipment!.id,
+        packagingGroups: request.order.packagingGroups ?? [],
+        changes,
+        includeOrderCharges: requotesLogistics,
+      })
+    : null;
+  if (projected) {
+    assertPreservedPlateDoesNotOverlapAtomicBundle({
+      status: request.order.status,
+      quote: projected.calculation.quote,
+      customerCharges: request.order.customerCharges,
+    });
+    assertPreservedProductionPlateCoverage({
+      status: request.order.status,
+      quote: projected.calculation.quote,
+      items: request.order.items,
+      customerCharges: request.order.customerCharges,
+    });
+  }
+  if (projected && requotesLogistics) {
+    // Validate persisted charge identity before item/package mutations. A
+    // transaction rollback is the final safety net, not a substitute for a
+    // zero-write preflight when legacy data is cross-linked.
+    assertExternalLogisticsChargeIdentity({
+      shipments: request.order.shipments,
+      customerCharges: request.order.customerCharges,
+    });
+  }
+  const pendingResolutionState=validateModificationQuoteApproval(input,projected,request);
+  return { projected, requotesLogistics, pendingResolutionState };
+}
+
 /**
- * Applies an approved proposal under the same per-order advisory lock used by
- * production/status writers. A revision mismatch is persisted as STALE rather
- * than throwing (throwing would roll the status update back).
+ * 审批与生产写入共用工单事务锁；修订冲突保存为 STALE，避免抛错回滚该状态。
  */
 export async function reviewOrderChangeRequest(
   input: ReviewOrderChangeRequestInput,
@@ -5919,56 +5979,8 @@ export async function reviewOrderChangeRequest(
       );
     }
 
-    const pricingChanged = hasPricingFactChanges(changes, itemById);
-    assertProductionPlateFactsRemainScoped({
-      status: request.order.status,
-      changes,
-      itemById,
-    });
-    assertLegacyInProductionPricingChangeSupported(
-      request.order.status,
-      pricingChanged,
-    );
-    const requotesLogistics = requotesLogisticsChargesOnChange(request.order);
-    const projected = pricingChanged
-      ? await calculateProjectedOrderQuote({
-          client: tx,
-          now: reviewedAt,
-          orderStatus: request.order.status,
-          settlementType: request.order.settlementType,
-          isSfCollect: request.order.isSfCollect,
-          items: request.order.items,
-          logisticsItems: request.order.items,
-          shipments: request.order.shipments,
-          primaryShipmentId: primaryShipment!.id,
-          packagingGroups: request.order.packagingGroups ?? [],
-          changes,
-          includeOrderCharges: requotesLogistics,
-        })
-      : null;
-    if (projected) {
-      assertPreservedPlateDoesNotOverlapAtomicBundle({
-        status: request.order.status,
-        quote: projected.calculation.quote,
-        customerCharges: request.order.customerCharges,
-      });
-      assertPreservedProductionPlateCoverage({
-        status: request.order.status,
-        quote: projected.calculation.quote,
-        items: request.order.items,
-        customerCharges: request.order.customerCharges,
-      });
-    }
-    if (projected && requotesLogistics) {
-      // Validate persisted charge identity before item/package mutations. A
-      // transaction rollback is the final safety net, not a substitute for a
-      // zero-write preflight when legacy data is cross-linked.
-      assertExternalLogisticsChargeIdentity({
-        shipments: request.order.shipments,
-        customerCharges: request.order.customerCharges,
-      });
-    }
-    const pendingResolutionState=validateModificationQuoteApproval(input,projected,request);
+    const { projected, requotesLogistics, pendingResolutionState } =
+      await prepareModificationQuoteInTx(tx, request, changes, itemById, primaryShipment, reviewedAt, input);
     const { projectedByItemKey, pricingByItemKey } = buildModificationItemPricing(
       projected, request.id, reviewedAt,
     );

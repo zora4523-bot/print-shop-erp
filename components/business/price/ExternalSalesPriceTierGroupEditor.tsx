@@ -494,7 +494,7 @@ function TierMutationFeedback({
   );
 }
 
-export function ExternalSalesPriceTierGroupEditor({
+function usePriceTierGroupEditor({
   productTitle,
   paperLabel,
   sizeLabel,
@@ -594,6 +594,198 @@ export function ExternalSalesPriceTierGroupEditor({
     router.refresh();
   }, [clearWorkspaceUnsavedChanges, router, state, successHref]);
 
+  return {
+    productTitle,
+    paperLabel,
+    sizeLabel,
+    tiers,
+    presentation,
+    router,
+    formRef,
+    headingId,
+    initialDraftState,
+    draftState,
+    setDraftState,
+    undoStack,
+    setUndoStack,
+    batchPercent,
+    setBatchPercent,
+    batchPercentError,
+    setBatchPercentError,
+    locallyChangedTierCount,
+    commitDraftState,
+    state,
+    formAction,
+    pending,
+  };
+}
+
+function PriceTierGroupHeader({ model }: { model: ReturnType<typeof usePriceTierGroupEditor> }) {
+  const {
+    productTitle,
+    paperLabel,
+    sizeLabel,
+    tiers,
+    presentation,
+    headingId,
+    initialDraftState,
+    draftState,
+    setDraftState,
+    undoStack,
+    setUndoStack,
+    batchPercent,
+    setBatchPercent,
+    batchPercentError,
+    setBatchPercentError,
+    locallyChangedTierCount,
+    commitDraftState,
+    pending,
+  } = model;
+  return (<>
+    <header className="min-w-0 border-b bg-muted/30 p-4">
+      <div className="flex min-w-0 flex-col gap-3 @min-[31rem]:flex-row @min-[31rem]:items-start @min-[31rem]:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-muted-foreground">
+            产品价格阶梯
+          </p>
+          <h3
+            id={headingId}
+            className="admin-wrap-anywhere mt-1 text-base font-semibold"
+          >
+            {productTitle}
+          </h3>
+        </div>
+        <Badge variant="outline" className="w-fit font-sans tabular-nums">
+          {tiers.length} 个数量档
+        </Badge>
+      </div>
+      <dl className="mt-3 flex min-w-0 flex-wrap gap-x-5 gap-y-2 text-sm">
+        <div className="flex min-w-0 gap-2">
+          <dt className="shrink-0 text-muted-foreground">纸张</dt>
+          <dd className="admin-wrap-anywhere font-medium">{paperLabel}</dd>
+        </div>
+        <div className="flex min-w-0 gap-2">
+          <dt className="shrink-0 text-muted-foreground">规格</dt>
+          <dd className="admin-wrap-anywhere font-medium">{sizeLabel}</dd>
+        </div>
+        <div className="flex min-w-0 gap-2">
+          <dt className="shrink-0 text-muted-foreground">计价</dt>
+          <dd className="admin-wrap-anywhere font-medium">
+            {presentation.calculationLabel}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        {presentation.instruction}
+      </p>
+      {/* 标签、说明与错误放在「输入框 + 按钮」行之外，按钮与输入框底边对齐（ui-规范 §8.1）。 */}
+      <div className="mt-3 min-w-0 space-y-1">
+        <Label htmlFor={`${headingId}-batch-percent`} className="text-xs">
+          按百分比批量调草稿价
+        </Label>
+        <div className="flex min-w-0 flex-wrap items-end gap-2">
+          <Input
+            id={`${headingId}-batch-percent`}
+            value={batchPercent}
+            inputMode="decimal"
+            autoComplete="off"
+            disabled={pending}
+            placeholder="如 5.8 或 -3"
+            className="min-h-11 min-w-0 flex-1 basis-40 font-sans tabular-nums"
+            aria-invalid={Boolean(batchPercentError)}
+            aria-describedby={
+              batchPercentError ? `${headingId}-batch-percent-error` : undefined
+            }
+            onChange={(event) => {
+              setBatchPercent(event.target.value);
+              setBatchPercentError(null);
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            disabled={pending}
+            onClick={() => {
+              const result = applyExternalSalesTierPercentAdjustment(
+                draftState,
+                batchPercent,
+              );
+              if (!result.success) {
+                setBatchPercentError(result.message);
+                return;
+              }
+              setBatchPercentError(null);
+              commitDraftState(result.state);
+            }}
+          >
+            应用到启用档
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">仅作用于当前启用档</p>
+        {batchPercentError ? (
+          <p
+            id={`${headingId}-batch-percent-error`}
+            role="alert"
+            className="admin-wrap-anywhere text-xs text-destructive"
+          >
+            {batchPercentError}
+          </p>
+        ) : null}
+      </div>
+      <div className="mt-2 flex min-w-0 flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-11"
+          disabled={pending || undoStack.length === 0}
+          onClick={() => {
+            const undone = undoExternalSalesTierDraftChange(undoStack);
+            if (!undone) return;
+            setDraftState(undone.state);
+            setUndoStack(undone.history);
+            setBatchPercentError(null);
+          }}
+        >
+          <Undo2 aria-hidden="true" />
+          撤销上一步
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-11 text-muted-foreground"
+          disabled={pending || locallyChangedTierCount === 0}
+          title="恢复本次修改前的值"
+          onClick={() => {
+            setDraftState(cloneTierDraftState(initialDraftState.current));
+            setUndoStack([]);
+            setBatchPercent('');
+            setBatchPercentError(null);
+          }}
+        >
+          <RotateCcw aria-hidden="true" />
+          撤销本次修改
+        </Button>
+      </div>
+    </header>
+  </>);
+}
+
+export function ExternalSalesPriceTierGroupEditor(props: Parameters<typeof usePriceTierGroupEditor>[0]) {
+  const model = usePriceTierGroupEditor(props);
+  const {
+    tiers,
+    presentation,
+    router,
+    formRef,
+    headingId,
+    draftState,
+    locallyChangedTierCount,
+    commitDraftState,
+    state,
+    formAction,
+    pending,
+  } = model;
   return (
     <form
       ref={formRef}
@@ -602,132 +794,7 @@ export function ExternalSalesPriceTierGroupEditor({
       aria-busy={pending}
       className="@container min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm"
     >
-      <header className="min-w-0 border-b bg-muted/30 p-4">
-        <div className="flex min-w-0 flex-col gap-3 @min-[31rem]:flex-row @min-[31rem]:items-start @min-[31rem]:justify-between">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">
-              产品价格阶梯
-            </p>
-            <h3
-              id={headingId}
-              className="admin-wrap-anywhere mt-1 text-base font-semibold"
-            >
-              {productTitle}
-            </h3>
-          </div>
-          <Badge variant="outline" className="w-fit font-sans tabular-nums">
-            {tiers.length} 个数量档
-          </Badge>
-        </div>
-        <dl className="mt-3 flex min-w-0 flex-wrap gap-x-5 gap-y-2 text-sm">
-          <div className="flex min-w-0 gap-2">
-            <dt className="shrink-0 text-muted-foreground">纸张</dt>
-            <dd className="admin-wrap-anywhere font-medium">{paperLabel}</dd>
-          </div>
-          <div className="flex min-w-0 gap-2">
-            <dt className="shrink-0 text-muted-foreground">规格</dt>
-            <dd className="admin-wrap-anywhere font-medium">{sizeLabel}</dd>
-          </div>
-          <div className="flex min-w-0 gap-2">
-            <dt className="shrink-0 text-muted-foreground">计价</dt>
-            <dd className="admin-wrap-anywhere font-medium">
-              {presentation.calculationLabel}
-            </dd>
-          </div>
-        </dl>
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          {presentation.instruction}
-        </p>
-        {/* 标签、说明与错误放在「输入框 + 按钮」行之外，按钮与输入框底边对齐（ui-规范 §8.1）。 */}
-        <div className="mt-3 min-w-0 space-y-1">
-          <Label htmlFor={`${headingId}-batch-percent`} className="text-xs">
-            按百分比批量调草稿价
-          </Label>
-          <div className="flex min-w-0 flex-wrap items-end gap-2">
-            <Input
-              id={`${headingId}-batch-percent`}
-              value={batchPercent}
-              inputMode="decimal"
-              autoComplete="off"
-              disabled={pending}
-              placeholder="如 5.8 或 -3"
-              className="min-h-11 min-w-0 flex-1 basis-40 font-sans tabular-nums"
-              aria-invalid={Boolean(batchPercentError)}
-              aria-describedby={
-                batchPercentError ? `${headingId}-batch-percent-error` : undefined
-              }
-              onChange={(event) => {
-                setBatchPercent(event.target.value);
-                setBatchPercentError(null);
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-11"
-              disabled={pending}
-              onClick={() => {
-                const result = applyExternalSalesTierPercentAdjustment(
-                  draftState,
-                  batchPercent,
-                );
-                if (!result.success) {
-                  setBatchPercentError(result.message);
-                  return;
-                }
-                setBatchPercentError(null);
-                commitDraftState(result.state);
-              }}
-            >
-              应用到启用档
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">仅作用于当前启用档</p>
-          {batchPercentError ? (
-            <p
-              id={`${headingId}-batch-percent-error`}
-              role="alert"
-              className="admin-wrap-anywhere text-xs text-destructive"
-            >
-              {batchPercentError}
-            </p>
-          ) : null}
-        </div>
-        <div className="mt-2 flex min-w-0 flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            className="min-h-11"
-            disabled={pending || undoStack.length === 0}
-            onClick={() => {
-              const undone = undoExternalSalesTierDraftChange(undoStack);
-              if (!undone) return;
-              setDraftState(undone.state);
-              setUndoStack(undone.history);
-              setBatchPercentError(null);
-            }}
-          >
-            <Undo2 aria-hidden="true" />
-            撤销上一步
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            className="min-h-11 text-muted-foreground"
-            disabled={pending || locallyChangedTierCount === 0}
-            title="恢复本次修改前的值"
-            onClick={() => {
-              setDraftState(cloneTierDraftState(initialDraftState.current));
-              setUndoStack([]);
-              setBatchPercent('');
-              setBatchPercentError(null);
-            }}
-          >
-            <RotateCcw aria-hidden="true" />
-            撤销本次修改
-          </Button>
-        </div>
-      </header>
+      <PriceTierGroupHeader model={model} />
 
       <div className="min-w-0">
         <div

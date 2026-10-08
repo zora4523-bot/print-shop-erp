@@ -110,6 +110,94 @@ function SalesOrderChangeRequestSection({
   );
 }
 
+function SalesOrderDetailHeader({ order, canEdit, editForm, canToggleUrgent, canToggleSfCollect, pendingChangeRequest }: {
+  order: SalesOrderDetail;
+  canEdit: boolean;
+  editForm?: ReactNode;
+  canToggleUrgent: boolean;
+  canToggleSfCollect: boolean;
+  pendingChangeRequest: SalesOrderDetail['changeRequests'][number] | undefined;
+}) {
+  return (
+    <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <PageHeader
+            // 不给 back：详情页返回由顶栏面包屑「我的工单」承担，改单页由表单区「返回工单」
+            // 承担（受离开拦截保护）——页头不再重复（§8.3、UI-SYSTEM「工单页面导航与标题去重」）。
+            title={order.customName?.trim() || '未命名工单'}
+            status={
+              <>
+                <SalesOrderStatusBadge status={order.status} />
+                <OrderPurposeBadge purpose={order.purpose} />
+                {order.isUrgent ? <UrgentBadge /> : null}
+                {order.isSfCollect ? <Badge variant="outline">顺丰到付</Badge> : null}
+              </>
+            }
+          />
+          <p className="admin-wrap-anywhere mt-2 text-sm text-muted-foreground">{order.orderNo}</p>
+          <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
+            第 {order.revision} 版 ·{' '}
+            {order.items.length} 款{' '}
+            {order.items
+              .reduce((sum, item) => sum + item.quantity, 0)
+              .toLocaleString('zh-CN')}{' '}
+            个
+          </p>
+        </div>
+
+        <div className="flex min-w-0 flex-wrap items-start gap-2 lg:justify-end">
+          <SalesOrderRefreshButton />
+          {canEdit && !editForm ? (
+            <Link
+              href={`/orders/${order.id}/edit`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              编辑工单
+            </Link>
+          ) : null}
+          {canToggleUrgent ? (
+            <UrgentToggleForm
+              orderId={order.id}
+              currentValue={order.isUrgent}
+            />
+          ) : null}
+          {canToggleSfCollect ? (
+            <SfCollectToggleForm
+              key={`sf-${order.id}-${order.revision}-${order.priceRevision}`}
+              orderId={order.id}
+              currentValue={order.isSfCollect}
+              status={order.status}
+              isExternalSales={
+                order.settlementType === OrderSettlementType.EXTERNAL_SALES
+              }
+              mutationGuard={{
+                expectedOrderRevision: order.revision,
+                expectedEditVersion: order.editVersion,
+                expectedWorkOrderVersion: order.workOrderVersion,
+                expectedPriceRevision: order.priceRevision,
+              }}
+              shipments={order.shipments.map((shipment) => ({
+                id: shipment.id,
+                sequence: shipment.sequence,
+                destinationProvince: shipment.destinationProvince,
+                // SALES cannot perform the post-shipment correction flow,
+                // so no carrier actual-weight fact crosses this boundary.
+                weightKg: null,
+                shippingFee: null,
+                customerChargeOverrideReason: null,
+              }))}
+            />
+          ) : null}
+          {!pendingChangeRequest && (order.status === OrderStatus.DRAFT || order.status === OrderStatus.REJECTED) ? (
+            <SubmitOrderButton orderId={order.id} purpose={order.purpose} />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function SalesOrderDetailView({
   catalogProducts,
   foilColorNames,
@@ -144,82 +232,7 @@ export function SalesOrderDetailView({
     <div data-slot="sales-order-detail" className="space-y-4">
       <BreadcrumbEntity label={order.customName} />
 
-      <section className="space-y-4 rounded-xl border bg-card p-4 shadow-sm sm:p-6">
-        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <PageHeader
-              // 不给 back：详情页返回由顶栏面包屑「我的工单」承担，改单页由表单区「返回工单」
-              // 承担（受离开拦截保护）——页头不再重复（§8.3、UI-SYSTEM「工单页面导航与标题去重」）。
-              title={order.customName?.trim() || '未命名工单'}
-              status={
-                <>
-                  <SalesOrderStatusBadge status={order.status} />
-                  <OrderPurposeBadge purpose={order.purpose} />
-                  {order.isUrgent ? <UrgentBadge /> : null}
-                  {order.isSfCollect ? <Badge variant="outline">顺丰到付</Badge> : null}
-                </>
-              }
-            />
-            <p className="admin-wrap-anywhere mt-2 text-sm text-muted-foreground">{order.orderNo}</p>
-            <p className="admin-wrap-anywhere mt-1 text-sm text-muted-foreground">
-              第 {order.revision} 版 ·{' '}
-              {order.items.length} 款{' '}
-              {order.items
-                .reduce((sum, item) => sum + item.quantity, 0)
-                .toLocaleString('zh-CN')}{' '}
-              个
-            </p>
-          </div>
-
-          <div className="flex min-w-0 flex-wrap items-start gap-2 lg:justify-end">
-            <SalesOrderRefreshButton />
-            {canEdit && !editForm ? (
-              <Link
-                href={`/orders/${order.id}/edit`}
-                className={buttonVariants({ variant: 'outline', size: 'sm' })}
-              >
-                编辑工单
-              </Link>
-            ) : null}
-            {canToggleUrgent ? (
-              <UrgentToggleForm
-                orderId={order.id}
-                currentValue={order.isUrgent}
-              />
-            ) : null}
-            {canToggleSfCollect ? (
-              <SfCollectToggleForm
-                key={`sf-${order.id}-${order.revision}-${order.priceRevision}`}
-                orderId={order.id}
-                currentValue={order.isSfCollect}
-                status={order.status}
-                isExternalSales={
-                  order.settlementType === OrderSettlementType.EXTERNAL_SALES
-                }
-                mutationGuard={{
-                  expectedOrderRevision: order.revision,
-                  expectedEditVersion: order.editVersion,
-                  expectedWorkOrderVersion: order.workOrderVersion,
-                  expectedPriceRevision: order.priceRevision,
-                }}
-                shipments={order.shipments.map((shipment) => ({
-                  id: shipment.id,
-                  sequence: shipment.sequence,
-                  destinationProvince: shipment.destinationProvince,
-                  // SALES cannot perform the post-shipment correction flow,
-                  // so no carrier actual-weight fact crosses this boundary.
-                  weightKg: null,
-                  shippingFee: null,
-                  customerChargeOverrideReason: null,
-                }))}
-              />
-            ) : null}
-            {!pendingChangeRequest && (order.status === OrderStatus.DRAFT || order.status === OrderStatus.REJECTED) ? (
-              <SubmitOrderButton orderId={order.id} purpose={order.purpose} />
-            ) : null}
-          </div>
-        </div>
-      </section>
+      <SalesOrderDetailHeader {...{ order, canEdit, editForm, canToggleUrgent, canToggleSfCollect, pendingChangeRequest }} />
 
       {!pendingChangeRequest && !changeOptions.shipped && [OrderStatus.DRAFT, OrderStatus.PENDING_FACTORY, OrderStatus.REJECTED].some((status) => status === order.status) ? (
         <CancelOrderForm orderId={order.id} orderNo={order.orderNo} expectedEditVersion={order.editVersion}

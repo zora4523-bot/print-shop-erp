@@ -99,7 +99,7 @@ test('管理员新建后编辑完整收费，重载保留且外部销售无入�
       expect(heights.every((height) => height >= 44)).toBe(true);
       expect((await new AxeBuilder({ page }).include('#admin-fee-editor').analyze()).violations).toEqual([]);
     }
-    await page.screenshot({ path: '/tmp/admin-fees-editor.png', fullPage: true });
+    await page.screenshot({ path: test.info().outputPath('admin-fees-editor.png'), fullPage: true });
     expect(errors).toEqual([]);
     const context = await browser.newContext(); const sales = await context.newPage();
     await login(sales, 'e2e-sample-sales', '/orders/new');

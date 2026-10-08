@@ -158,6 +158,26 @@ pg.sequential('planned completion (batch / ship implies completion) · real Post
     expect(await db.pieceworkSettlement.findUniqueOrThrow({ where: { id: receipt.id } })).toEqual(frozen);
   });
 
+  it('历史计薪次数异常阻止批量完工与发货且不写入工资', async () => {
+    const worker = await newWorker();
+    const { order, job } = await released(worker);
+    const snapshot = job.snapshot as import('@/generated/prisma/client').Prisma.JsonObject;
+    await db.productionJob.update({ where: { id: job.id }, data: { snapshot: { ...snapshot,
+      registrationPricing: { mode: 'AUTOMATIC', priceBookId: 'historical-fixture', priceBookVersion: 1,
+        ruleSetSha256: 'a'.repeat(64), source: 'UNIFIED', policyBookId: null, policyBookVersion: null,
+        useUnifiedRates: true, rate: '0.0070', smallOrderAmount: '12', setupAmount: '5', multiplier: 1.5 },
+    } } });
+    await expect(completeOrderProductionAtPlan({ orderId: order.id, expectedRevision: order.revision, expectedWorkOrderVersion: order.workOrderVersion }, admin))
+      .rejects.toMatchObject({ code: 'REGISTRATION_FAILED', message: expect.stringContaining('计薪数量与次数须为正整数') });
+    await expect(registerShipment(shipmentInput(order), admin)).rejects.toMatchObject({
+      name: 'OrderInvariantError', message: expect.stringContaining('计薪数量与次数须为正整数'),
+    });
+    expect(await db.productionJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({ status: 'PENDING', revision: job.revision });
+    expect(await wageOf(job.id)).toBeNull();
+    expect((await db.orderShipment.findUniqueOrThrow({ where: { id: order.shipments[0].id } })).status).toBe('PLANNED');
+    expect((await db.order.findUniqueOrThrow({ where: { id: order.id } })).revision).toBe(order.revision);
+  });
+
   it('confirming the first of two addresses registers production at plan; the order waits for the second address', async () => {
     const worker = await newWorker();
     const { order, job } = await released(worker, { addresses: 2 });

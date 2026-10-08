@@ -2,11 +2,15 @@
 
 import { DispatchPlanValidationError } from '@/lib/production/dispatch-plan-error';
 import { PieceworkPricingError } from '@/lib/salary/piecework-pricing';
+import { FoilWageInputError } from '@/lib/salary/foil-wage';
 import { AdminOrderWorkflowError } from '@/lib/order/admin-workflow';
 import { ProductionOperationMaterializationError } from '@/lib/production/operation-materialization-service';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/permissions';
+import { UnauthorizedError } from '@/lib/auth/errors';
+import { ProductionConflictError, ProductionInputError } from '@/lib/production/input-error';
+import { DATABASE_BUSY_MESSAGE, isDatabaseBusyError } from '@/lib/database-errors';
 import { publishProductionDispatch, dispatchSchema } from '@/lib/production/dispatch';
 import { registerProductionCompletion, completionSchema } from '@/lib/production/completion-registration';
 import { allocateProductionWages, productionWageSchema } from '@/lib/salary/production-wages';
@@ -24,17 +28,29 @@ function refreshProduction(orderIds: string[]) {
   revalidatePath('/worker/tasks/[id]', 'page');
 }
 function failure(error: unknown): ProductionActionState {
-  if (error instanceof z.ZodError || error instanceof SyntaxError) return { ok: false, message: '填写内容不完整，请核对后重试' };
+  if (isDatabaseBusyError(error)) return { ok: false, message: DATABASE_BUSY_MESSAGE };
+  if (error instanceof ProductionConflictError) {
+    refreshProduction([error.orderId]);
+    return { ok: false, message: error.message };
+  }
+  if (error instanceof z.ZodError) return { ok: false, message: '填写内容不完整，请核对后重试' };
   if (error instanceof PieceworkPricingError || error instanceof AdminOrderWorkflowError || error instanceof ProductionOperationMaterializationError) return { ok: false, message: error.message };
   if (error instanceof DispatchPlanValidationError) return { ok: false, message: `${error.order.name}：${error.issues.join('；')}` };
-  // Domain errors are curated; database errors must never expose SQL or internals.
-  if (error instanceof Error && error.constructor === Error && !/[\n]|Prisma|SELECT |INSERT |UPDATE /i.test(error.message)) return { ok: false, message: error.message };
-  return { ok: false, message: '本次未保存，请刷新核对后重试' };
+  if (error instanceof ProductionInputError || error instanceof FoilWageInputError || error instanceof UnauthorizedError) return { ok: false, message: error.message };
+  throw error;
+}
+function parsePayload(form: FormData): unknown {
+  try {
+    return JSON.parse(String(form.get('payload')));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new ProductionInputError('填写内容不完整，请核对后重试');
+    throw error;
+  }
 }
 export async function publishProductionDispatchAction(_state: ProductionActionState, form: FormData): Promise<ProductionActionState> {
   try {
     const actor = await requirePermission('production:manage');
-    const input = dispatchSchema.parse(JSON.parse(String(form.get('payload'))));
+    const input = dispatchSchema.parse(parsePayload(form));
     const ids = await publishProductionDispatch(input, actor);
     refreshProduction(ids);
     return { ok: true, message: `已安排 ${ids.length} 张工单` };
@@ -72,7 +88,7 @@ export async function reviewProductionFactAction(_state: ProductionActionState, 
 export async function allocateProductionWagesAction(_state: ProductionActionState, form: FormData): Promise<ProductionActionState> {
   try {
     const actor = await requirePermission('production:manage');
-    const input = productionWageSchema.parse(JSON.parse(String(form.get('payload'))));
+    const input = productionWageSchema.parse(parsePayload(form));
     const id = await allocateProductionWages(input, actor);
     refreshProduction([id]);
     return { ok: true, message: '提成已登记' };

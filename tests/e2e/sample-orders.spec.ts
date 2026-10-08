@@ -274,7 +274,7 @@ test('新建工单样品入口六视口、明暗主题、触控和无障碍', as
         expect(results.violations).toEqual([]);
         if (width === 375 || width === 1280)
           await page.screenshot({
-            path: `/tmp/erp-${purpose}-${theme}-${width}.png`,
+            path: test.info().outputPath(`erp-${purpose}-${theme}-${width}.png`),
             fullPage: true,
           });
       }

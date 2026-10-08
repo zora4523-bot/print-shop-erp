@@ -4,6 +4,7 @@ import { productCategoryLabel } from '@/lib/auth/role-labels';
 import type { ProductCategory } from '@/generated/prisma/enums';
 import { ORDER_STATUS_REGISTRY } from '@/lib/ui/status-registry';
 import { readBillSettlementDetail } from '@/lib/agent-monthly-billing/settlement-detail';
+import { orderExternalSalesName } from '@/lib/order/external-sales-name';
 import { todayShanghai } from '@/lib/dashboard/shanghai-clock';
 import { ANALYTICS_PAGE_SIZE, analyticsUrl, type AnalyticsFilters } from './filters';
 import type { AnalyticsOrder } from './queries';
@@ -20,9 +21,11 @@ function salesGroups(orders: AnalyticsOrder[], filters: AnalyticsFilters): Analy
   const map = new Map<string, { name: string; total: Decimal; count: number }>();
   for (const order of orders) {
     if (new Decimal(order.processingAmount.toString()).lte(0)) continue;
-    const group = map.get(order.submitter.id) ?? { name: order.submitter.displayName, total: new Decimal(0), count: 0 };
+    const sales = order.settlementType === 'NO_CHARGE' ? order.sourceOrder?.submitter : order.submitter;
+    if (!sales) continue;
+    const group = map.get(sales.id) ?? { name: sales.displayName, total: new Decimal(0), count: 0 };
     group.total = group.total.plus(order.processingAmount.toString()); group.count++;
-    map.set(order.submitter.id, group);
+    map.set(sales.id, group);
   }
   return [...map].sort((a, b) => b[1].total.comparedTo(a[1].total) || a[0].localeCompare(b[0])).map(([id, group]) => ({ name: group.name, value: group.total.toFixed(2), count: group.count, href: analyticsUrl(filters, { view: 'orders', sales: id, page: 1 }) }));
 }
@@ -85,7 +88,7 @@ export function orderReport(orders: AnalyticsOrder[], filters: AnalyticsFilters,
       { title: '抵扣与补收', columns: ['工单', '抵扣/补收', '已入账', '待入账'], rows: orders.flatMap(order => { const adjustment = adjustmentTotals(order); return adjustment.count ? [[textCell(order.customName || order.orderNo, `/orders/${order.id}`), moneyCell(adjustment.requested), moneyCell(adjustment.applied), moneyCell(adjustment.remaining)]] : []; }), note: '按所选原工单归集全部后续调整；负数为抵扣，正数为补收，不重复加入加工费。' },
       { title: '收费构成', columns: ['收费项目', '已知金额'], rows: [...feeGroups].map(([name, amount]) => [textCell(name), moneyCell(amount.toFixed(2))]), note: `已出账工单使用账单金额；${uncovered} 单的分项待核对。加工费已含入袋费。` },
     ],
-    ...paginateTable({ title: '工单明细', columns: ['工单', '销售', '客户', '提交日期', '加工费', '状态'], rows: orders.map(o => [textCell(o.customName || o.orderNo, `/orders/${o.id}`), textCell(o.submitter.displayName), textCell(o.customerRef), textCell(o.submittedAt ? todayShanghai(o.submittedAt) : null), moneyCell(o.processingAmount.toString()), textCell(ORDER_STATUS_REGISTRY[o.status].label)]) }, filters.page, all),
+    ...paginateTable({ title: '工单明细', columns: ['工单', '销售', '客户', '提交日期', '加工费', '状态'], rows: orders.map(o => [textCell(o.customName || o.orderNo, `/orders/${o.id}`), textCell(orderExternalSalesName(o)), textCell(o.customerRef), textCell(o.submittedAt ? todayShanghai(o.submittedAt) : null), moneyCell(o.processingAmount.toString()), textCell(ORDER_STATUS_REGISTRY[o.status].label)]) }, filters.page, all),
     notes: [],
   };
 }

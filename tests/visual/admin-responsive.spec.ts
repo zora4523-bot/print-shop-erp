@@ -5,6 +5,7 @@ import {
   E2E_USERS,
   login,
 } from '../e2e/_helpers';
+import { seedInventoryLedgerFixture } from '../e2e/release-ledger-fixtures';
 import {
   cleanupWorkerUiFixture,
   seedWorkerUiFixture,
@@ -91,6 +92,45 @@ test.describe('administrator workspace', () => {
     } }];
     await checkRoutes(page, testInfo, routes, 'light');
     await checkRoutes(page, testInfo, routes, 'dark');
+  });
+
+  test('inventory count rows and confirmation pass light and dark gates', async ({ page }, testInfo) => {
+    const inventory = await seedInventoryLedgerFixture();
+    await page.goto(`/owner/materials/${inventory.materialId}`);
+    // 路由刷新可能暂留隐藏表单，只检查用户可见的结果。
+    const movement = page.locator('#stock-transaction-form:visible');
+    await movement.getByLabel('方向', { exact: true }).selectOption('IN');
+    await movement.getByLabel('库位', { exact: true }).selectOption(inventory.sourceId);
+    await movement.getByLabel('数量（个）', { exact: true }).fill('10');
+    await movement.getByLabel('原因', { exact: true }).selectOption('RETURN');
+    await movement.getByRole('button', { name: '核对并提交出入库', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '确认提交出入库', exact: true }).click();
+    await expect(movement).toContainText('库存已更新');
+
+    const prepareCount = async (target: Page) => {
+      await target.getByRole('textbox', { name: '搜索盘点物料' }).fill(inventory.materialCode);
+      await target.getByRole('button', { name: '搜索', exact: true }).click();
+      await target.getByRole('textbox', { name: `${inventory.materialName} 实盘数`, exact: true }).fill('12');
+      await expect(target.getByText('+2.00 个', { exact: true })).toBeVisible();
+    };
+    const count: AdminRoute = {
+      name: 'inventory-count', path: '/owner/materials/count', readyHeading: '库存盘点',
+      prepareGateState: prepareCount,
+    };
+    const confirmation: AdminRoute = {
+      ...count,
+      name: 'inventory-count-confirmation',
+      prepareGateState: async target => {
+        await prepareCount(target);
+        await target.getByRole('button', { name: '核对并提交盘点过账（1 条）', exact: true }).click();
+        const dialog = target.getByRole('alertdialog');
+        await expect(dialog.getByRole('button', { name: '确认过账', exact: true })).toBeDisabled();
+        await dialog.getByRole('textbox', { name: '盘点过账原因', exact: true }).fill('仅核对本次隔离盘点数据');
+        await expect(dialog.getByRole('button', { name: '确认过账', exact: true })).toBeEnabled();
+      },
+    };
+    await checkRoutes(page, testInfo, [count, confirmation], 'light');
+    await checkRoutes(page, testInfo, [count, confirmation], 'dark');
   });
 
   test('purchase and BOM recovery controls pass focused light and dark gates', async ({ page }, testInfo) => {
