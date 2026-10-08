@@ -161,6 +161,12 @@
 
 提交前再次执行 `pnpm typecheck`、`pnpm check:docs` 与 `git diff --check`，均通过（`typecheck-final.log`、`docs-final.log`）；文档检查的 19 条历史登记与原基线一致，没有新增豁免。
 
+### 推送合并阶段补充
+
+用户随后授权推送与合并，创建 PR #55。首次远端静态检查在 `pnpm check:dead-code --check` 发现两条已解决的旧登记：`foilWageRuleSchema` 已由 `lib/production/completion-pricing.ts` 实际导入，并用于历史计薪快照中三个金额字段的校验，knip 与 ts-prune 因此都不再报告它未被使用。仅移除 `config/dead-code-baseline.json` 中这两条失效记录，保留校验实现、扫描器规则及其他登记；远端其他检查继续按当前候选运行。
+
+修正后本地 `pnpm check:dead-code --check` 通过（129 组 knip、521 项 ts-prune、0 循环依赖，`dead-code-ci-fix.log`），`pnpm check:docs` 与 `git diff --check` 通过。此次补充仅同步已解决项的登记与验证记录，没有业务代码变化；所列开发、接口、架构及数据库规范陈述无需调整。
+
 ### 文档影响
 
 已同步 API.md、ARCHITECTURE.md、DEVELOPMENT.md、UI-SYSTEM.md、docs/ui-规范.md、docs/当前开发入口.md、HANDOFF.md、PROGRESS.md 及本报告。原冲突位置为 ARCHITECTURE 的“外部销售读取边界”和当前开发入口的客户字段说明：工单客户录入停用不等于管理员经营分析不再读取历史客户列；另修正 DEVELOPMENT“发货登记验证”后的 Next 与 sharp 旧版本记录。CLAUDE.md、CONTRIBUTING.md、DATABASE.md 已核对，本次无需改变其规范、数据库结构或迁移说明。
