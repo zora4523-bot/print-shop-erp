@@ -29,7 +29,7 @@ applies_to: repository deployment workflow at last_verified
 | 支持的 cron 端点与时间 | [`deploy/crontab.example`](./deploy/crontab.example) |
 | cron 安全调用脚本 | [`deploy/run-cron.sh`](./deploy/run-cron.sh) |
 | 当前生产候选目录切换 | [09-21 实际发布流程](./docs/audits/2026-09-21-production-release-ef6fa012.md) |
-| 最新生产状态与发布证据 | [10-07 工资发布记录](./docs/audits/2026-10-07-production-salary-release.md) |
+| 最新生产状态与发布证据 | [10-16—17 评审修复发布记录](./docs/audits/2026-10-16-production-review-release.md) |
 | 09-29 颜色目录验收（历史） | [09-29 烫金颜色修复发布记录](./docs/audits/2026-09-29-foil-color-identity-fix.md#正式发布结果) |
 | 其他适配环境的更新脚本（不适用于当前生产） | [`deploy/update.sh`](./deploy/update.sh) |
 | Pigsty 扩展激活 | [`docs/pigsty-production-activation-runbook.md`](./docs/pigsty-production-activation-runbook.md) |
@@ -39,9 +39,9 @@ applies_to: repository deployment workflow at last_verified
 当前生产不是 `main` 检出，应用机 1.6 GiB 内存不能承担本机构建，不得直接运行 `deploy/update.sh`。
 2026-09-21 两条空白封迁移已 applied，脚本的 `--check-applied` 门禁会放行，不能再依赖它防止误用。
 
-2026-10-07 当前生产为 `41c0341b`，与 main 合并提交 `b3bc0f17` 文件内容相同。188 条迁移未变，Web/LIGHT/HEAVY、ready、jobs、中文 PDF 部署检查与 101 项线上只读检查通过。
-本次使用候选目录切换，工资每日保底及数量说明发布，历史财务看板与私有目录配置保留；保留 queued PDF 和四条原有 cron。备份、副本与数据摘要证据见
-[10-07 工资发布记录](./docs/audits/2026-10-07-production-salary-release.md)。
+2026-10-17 当前生产为 `cef2674b`，与 PR #56 合入 main 的 `7af6d72b` 文件内容相同。189 条迁移通过校验；Web/LIGHT/HEAVY、ready、jobs、中文 PDF、109 项线上只读检查及 17 次真实浏览器访问通过。
+本次使用候选目录切换，发布加权评审、函数债务整理与采购／搜索预检修复；保留 queued PDF、历史财务私有目录与四条 cron。导航守卫 PR #51 保留草稿。备份、副本与数据摘要证据见
+[评审修复发布记录](./docs/audits/2026-10-16-production-review-release.md)。
 历史前置 SQL 不应重复执行；后续仍须按目标环境事实确认适用步骤。
 
 ## 不可跳过的边界
