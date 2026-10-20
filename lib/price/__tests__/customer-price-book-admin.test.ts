@@ -78,6 +78,7 @@ import {
   publishCustomerPriceBookDraft,
   prepareConfirmedCustomTierDraft,
   prepareConfirmedBoxPackagingDraft,
+  prepareConfirmedDarkRedPaperDraft,
   rescheduleCustomerPriceBook,
   updateCustomerPriceRuleDraft,
   updateCustomerPriceRuleDraftGroup,
@@ -3249,5 +3250,60 @@ describe('controlled release after blank-price clone conversion', () => {
     const operation = prepareConfirmedBoxPackagingDraft({ priceBookId: 'draft', expectedDraftUpdatedAt: now }, actor);
     if (changed) { await expect(operation).rejects.toThrow('草稿含其他调价'); expect(dbMock.customerPriceRule.create).not.toHaveBeenCalled(); }
     else { await expect(operation).resolves.toMatchObject({ id: 'draft' }); expect(dbMock.customerPriceRule.create).toHaveBeenCalled(); }
+  });
+});
+
+describe('暗红专版草稿保护', () => {
+  const input = { priceBookId: 'draft', expectedDraftUpdatedAt: now };
+  function mockDraft() {
+    dbMock.customerPriceBook.findUnique.mockResolvedValueOnce({
+      id: 'draft', isActive: false, purpose: 'PROCESSING', settlementType: 'EXTERNAL_SALES',
+      updatedAt: now, notes: draftNotes(),
+    });
+  }
+  it('非管理员不能进入写事务', async () => {
+    await expect(prepareConfirmedDarkRedPaperDraft(input, { ...actor, role: Role.SALES }))
+      .rejects.toThrow('仅管理员');
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+  });
+  it('草稿过期时拒绝', async () => {
+    mockDraft();
+    await expect(prepareConfirmedDarkRedPaperDraft({ ...input, expectedDraftUpdatedAt: new Date(0) }, actor))
+      .rejects.toThrow('草稿已变化');
+    expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
+  });
+  it('基准版已结束时拒绝', async () => {
+    mockDraft();
+    dbMock.customerPriceBook.findUnique.mockResolvedValueOnce({
+      isActive: true, effectiveFrom: now, effectiveTo: now,
+      purpose: 'PROCESSING', settlementType: 'EXTERNAL_SALES',
+    });
+    await expect(prepareConfirmedDarkRedPaperDraft(input, actor)).rejects.toThrow('基准版本已变化');
+    expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
+  });
+  it.each(['price', 'notes'])('其他草稿修改不能随暗红价格一起发布：%s', async mode => {
+    dbMock.customerPriceBook.findUnique.mockResolvedValueOnce({
+      id: 'draft', isActive: false, purpose: 'PROCESSING', settlementType: 'EXTERNAL_SALES',
+      updatedAt: now, notes: { ...draftNotes(), ...(mode === 'notes' ? { constants: { changed: true } } : {}) },
+    }).mockResolvedValueOnce({
+      id: 'book-v1', isActive: true, purpose: 'PROCESSING', settlementType: 'EXTERNAL_SALES',
+      effectiveFrom: now, effectiveTo: null, notes: {},
+    });
+    const original = [
+      validationRule({
+        code: 'CUSTOM_PAPER_VARIEGATED_PEARL_160', exclusiveGroup: 'CUSTOM_PAPER_SURCHARGE',
+        triggerCondition: { paperTypes: ['160g杂色珠光'] },
+      }),
+      validationRule({
+        code: 'BASE_CUSTOM_MID', exclusiveGroup: 'CUSTOM_BASE',
+        triggerCondition: { paperTypes: ['160g红卡', '160g珠光艳闪', '160g杂色珠光'] },
+      }),
+    ];
+    dbMock.customerPriceRule.findMany.mockResolvedValueOnce(original).mockResolvedValueOnce(
+      original.map(rule => ({ ...rule, amount: mode === 'price' ? '9' : rule.amount })),
+    );
+    await expect(prepareConfirmedDarkRedPaperDraft(input, actor)).rejects.toThrow('草稿含其他调价');
+    expect(dbMock.customerPriceRule.update).not.toHaveBeenCalled();
+    expect(dbMock.customerPriceRule.create).not.toHaveBeenCalled();
   });
 });

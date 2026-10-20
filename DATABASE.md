@@ -87,6 +87,10 @@ applies_to: repository source at last_verified
 
 空盒及装盒费写入新加工费价目版本，不修改已发布规则或旧工单快照。安装步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。
 
+## 暗红专版价格配置
+
+暗红专版加价通过 `scripts/publish-dark-red-paper.ts` 发布到新的 `CustomerPriceBook`，同时增加 `CUSTOM_BASE` 的纸张适用范围与独立 `CUSTOM_PAPER_DARK_RED_PEARL_160` 加价行。使用现有草稿、发布、有效期、审计及快照锁约束；没有 schema 或迁移变更。当前版本关闭有效期后作为历史保留，原 `CustomerPriceRule`、工单金额和价格快照继续保留。新装库与已有库均需执行[价格配置步骤](docs/部署指南.md#暗红珠光纸专版价格发布)，不能仅以迁移完成判定价格已生效。
+
 ## 技术基线
 
 - PostgreSQL；开发与生产拓扑见 [DEVELOPMENT.md](./DEVELOPMENT.md) 和 [DEPLOYMENT.md](./DEPLOYMENT.md)。
