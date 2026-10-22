@@ -577,8 +577,9 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 单张下载的页内交付（业主 2026-10-22）：工单页用 `fetch` 取文件，不再整页跳转到本接口。调用方显式带
 `Accept: application/json` 时，排队与失败状态返回 JSON（`{state, title, message, code?, retryUrl}`），
 由调用方沿 `retryUrl` 续查；不带该头的浏览器导航仍得到原来的 HTML 兜底页。成功返回的 PDF 响应新增
-`X-Print-Content-Key`，值是本次已复核「仍是当前内容」的完整快照摘要，浏览器据此调用
-`recordOrderPdfDownloadAction` 把这份文件记为已打印；接口本身保持只读。
+`X-Print-Content-Key`，值是该工单的**生产指令摘要**（`orderPrintInstructionKey`，与打印页记录同一基准，
+忽略随生产推进变化的完成 / 不良数量），浏览器据此调用 `recordOrderPdfDownloadAction` 把这份文件记为
+已打印；接口本身保持只读。用于 409 复核与产物复用的完整快照不对外暴露。
 
 `GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
 

@@ -15,7 +15,7 @@ import {
   buildPrintHtml,
 } from '@/lib/order/print-html';
 import { renderDirectOrderPdf } from '@/lib/pdf/direct';
-import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
+import { orderPdfSnapshotKey, orderPrintInstructionKey } from '@/lib/pdf/order-snapshot';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { getSetting } from '@/lib/settings';
 import {
@@ -203,9 +203,11 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)).replace(/^attachment/, view === 'inline' ? 'inline' : 'attachment'),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
-      // 刚刚在上面复核过「仍是当前内容」的那份快照：浏览器拿它回调记录接口，记的就是手里这份纸
-      // （业主 2026-10-22「下载 PDF 也记已打印」）。文件若先于记录过期，比对不上就不记。
-      'X-Print-Content-Key': snapshotKey,
+      // 浏览器拿它回调记录接口，把手里这份纸记为已打印（业主 2026-10-22）。给的是**生产指令摘要**
+      // 而不是上面那份完整快照：完整快照含进度数字，产线活跃的工单在下载这几秒里就会变，记录会
+      // 一直判「内容已变」而记不上——业主 2026-10-22 拍板按生产指令摘要记，与打印页同一口径。
+      // 该摘要含 workOrderVersion，所以改单后的旧纸仍然记不上。
+      'X-Print-Content-Key': orderPrintInstructionKey(currentOrder, currentFactoryName),
     },
   });
 }
