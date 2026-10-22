@@ -189,7 +189,7 @@ v2 月账单入账前使用 Decimal 核对加工费＋对客收费明细＝工�
 | `GET /api/admin/inventory-count/materials` | Permission `material:manage` | query `q`、`limit` | `200 {materials}`；未授权 `401` |
 | `GET /api/orders/admin/:orderNo` | Permission `order:view:all` + ADMIN | path `orderNo` | `200 {order}`；未授权 `401`，非管理员 `403`，不可见或不存在 `404`；响应 `private, no-store` |
 | `GET /api/cdr/bundles/:accessToken` | 256-bit capability URL | 服务端生成的 43 位 base64url token；不接受数据库 id | 就绪后校验 token 并 `302` 到 60 秒 OSS GET 签名；生成中 `409` + `Retry-After`；失效、撤销或不存在统一 `404`；频率超限 `429`；OSS 不可用 `503` |
-| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`；排队为就地查询进度的 HTML `202`；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
+| `GET /api/orders/:id/pdf` | Session + production print scope | path `id`；query `mode=order`（可省略）；durable 重试可带 `jobId` | PDF `200`（带 `X-Print-Content-Key`，供页内下载回调记录）；排队 `202`（`Accept: application/json` 为 JSON，否则为就地查询进度的 HTML）；非法模式 `400`；未授权 `401`；不可见 `404`；升版 `409`；渲染或分页失败 `500`；生成服务不可用或任务等待达到两分钟 `503`（手动查询原任务，不自动刷新） |
 | `GET /api/orders/exports/:id` | Permission `order:export:all` | export id | XLSX `200`；生成中 `409`；失败 `410`；不存在或过期 `404` |
 | `GET /api/salary/piecework-settlements/export` | Permission `salary:view:all`，复核数据库账号状态 | query `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
 | `GET /api/salary/piecework/export` | Permission `salary:view:all` | query `date` 或 `from`/`to`，可选 `workerId` | XLSX `200`；输入错误 `400`；未授权 `401` |
@@ -573,6 +573,12 @@ pending/unavailable 另有 `phase`（queued/rendering/merging）。
 开发单张下载默认 `PDF_ORDER_MODE=direct`；生产必须显式配置 direct 或 queued，缺少/非法配置返回 503 `PDF_CONFIGURATION_INVALID`。direct 模式：在 Web Node 进程生成，不入队、不要求 HEAVY 心跳或产物存储。相同账号/角色/工单/完整打印内容/base URL 合并并发请求，最多缓存五分钟（每进程 32 MiB、16 份；超大文件只返回不缓存）。每进程最多四个不同请求在途，Chromium 串行执行，每次独立上下文；包含等待在内上限 45 秒。超过容量返回恢复页 503 `PDF_BUSY`；客户端断开只结束自己的等待（499 空响应），不取消其他订阅者。每次下载仍复核当前身份、资源所有权和完整内容（包括未升版修改），内容改变返回 409。`regenerate=1` 绕过完成缓存，但仍合并同内容的在途请求。HTTP 始终 `private, no-store`，与服务内部短时复用不同。
 
 `PDF_ORDER_MODE=queued` 使用原 durable 队列路径；后台模式为 inline 时返回 503 `PDF_CONFIGURATION_INVALID`，不静默改用 direct。已有 `jobId` 在 durable 模式下继续走原授权任务，不会误生成新任务；重复、空或非法 jobId 返回 400。旧任务内容标识与当前内容不同或缺失时拒绝返回产物，提示重新生成。批量打印接口始终沿用原队列。单张 PDF 的 `view=inline` 协议保留，页面“打印”入口使用 `/print/orders/:id?autoprint=1`，减少对浏览器 PDF 插件的依赖。
+
+单张下载的页内交付（业主 2026-10-22）：工单页用 `fetch` 取文件，不再整页跳转到本接口。调用方显式带
+`Accept: application/json` 时，排队与失败状态返回 JSON（`{state, title, message, code?, retryUrl}`），
+由调用方沿 `retryUrl` 续查；不带该头的浏览器导航仍得到原来的 HTML 兜底页。成功返回的 PDF 响应新增
+`X-Print-Content-Key`，值是本次已复核「仍是当前内容」的完整快照摘要，浏览器据此调用
+`recordOrderPdfDownloadAction` 把这份文件记为已打印；接口本身保持只读。
 
 `GET /api/orders/:id/pdf?jobId=...&status=1` 仅用于 durable 已有任务，不创建新任务。重复或非法 status、缺 jobId、inline 模式下查询状态均返回 400。仍先验证账号、工单范围及任务绑定；200 JSON `{state:"ready"}` 仅在读取产物并完成生成后权限/版本复核后返回，不包含 PDF 字节或存储位置。202 JSON 返回 `{state:"pending", title, message, retryUrl}`；失败响应返回 `{state:"failed", title, message, retryUrl, code?}`，沿用 409/500/503。所有响应不允许公共缓存；401/404 沿用认证及资源拒绝协议。
 

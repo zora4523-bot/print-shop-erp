@@ -23,6 +23,7 @@ vi.mock('@/lib/background-jobs/pdf', () => ({
   readPdfArtifact: mocks.read,
 }));
 
+import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
 import { handleOrderPdfGet } from '@/app/api/orders/[id]/pdf/handler';
 
 const request = (query = '') => handleOrderPdfGet(Object.assign(new NextRequest(`https://erp.example.com/api/orders/order-1/pdf${query}`), { auth: null }) as NextAuthRequest, {
@@ -306,4 +307,43 @@ it.each([Role.ADMIN, Role.SALES, Role.WORKER])('returns %s to an accessible orde
   const html = await response.text();
   expect(html).toContain(`href="${role === Role.WORKER ? '/worker/orders' : '/orders'}/order-1">返回工单`);
   if (role === Role.WORKER) expect(html).not.toContain('href="/orders/order-1"');
+});
+
+/**
+ * 业主 2026-10-22「下载 PDF 不跳页、下载即记已打印」：工单页在页内取文件，排队与失败都要当数据
+ * 读，并且要知道手里这份文件对应哪份内容才能回调记录。地址栏直接访问仍走原来的 HTML 兜底页。
+ */
+describe('in-page order PDF download', () => {
+  const asJson = (query = '') => handleOrderPdfGet(Object.assign(
+    new NextRequest(`https://erp.example.com/api/orders/order-1/pdf${query}`, { headers: { accept: 'application/json' } }),
+    { auth: null },
+  ) as NextAuthRequest, { params: Promise.resolve({ id: 'order-1' }) });
+
+  beforeEach(() => mocks.mode.mockReturnValue('durable'));
+
+  it('ships the delivered content key so the browser can record exactly this file', async () => {
+    mocks.wait.mockResolvedValue({ status: 'ready', artifactName: 'order-1.pdf' });
+    mocks.read.mockResolvedValue(Buffer.from('pdf'));
+    const response = await request();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/pdf');
+    expect(response.headers.get('x-print-content-key')).toBe(
+      orderPdfSnapshotKey(await mocks.order.mock.results[0]!.value, '测试工厂'),
+    );
+  });
+
+  it('reports a queued render as JSON with a follow-up url when the caller asks for JSON', async () => {
+    mocks.wait.mockResolvedValue({ status: 'timeout', phase: 'queued' });
+    const response = await asJson();
+    expect(response.status).toBe(202);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toMatchObject({ state: 'pending', retryUrl: expect.stringContaining('jobId=job-1') });
+  });
+
+  it('keeps the readable HTML page for a plain browser navigation', async () => {
+    mocks.wait.mockResolvedValue({ status: 'timeout', phase: 'queued' });
+    const response = await request();
+    expect(response.status).toBe(202);
+    expect(response.headers.get('content-type')).toContain('text/html');
+  });
 });

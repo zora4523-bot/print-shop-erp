@@ -19,6 +19,7 @@ import { LegacyProductionFactsRepairForm } from '@/components/business/order/Leg
 import { PACKAGING_MODE_LABELS } from '@/lib/order/packaging-mode';
 import { OrderActivity } from '@/components/business/order/OrderActivity';
 import { PrintPageLink } from '@/components/business/order/PrintPageLink';
+import { OrderPdfDownloadButton } from '@/components/business/order/OrderPdfDownloadButton';
 import { readOrderActivity } from '@/lib/order/activity';
 import { ShipmentRegistrationForm } from '@/components/business/order/ShipmentRegistrationForm';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -719,12 +720,7 @@ function renderAdminDetailActions(context: AdminDetailContext) {
             <PrintPageLink orderId={order.id} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               打印
             </PrintPageLink>
-            <a
-              href={`/api/orders/${order.id}/pdf`}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              下载 PDF
-            </a>
+            <OrderPdfDownloadButton orderId={order.id} orderNo={order.orderNo} />
             <Link href={`/print/orders/${order.id}`} prefetch={false} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               网页预览
             </Link>

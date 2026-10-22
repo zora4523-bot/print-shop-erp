@@ -59,7 +59,10 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   }
   const { id } = await ctx.params;
   const statusOnly = statuses.length === 1;
-  const pdfStatusPage = (input: PdfStatus) => pdfStatusResponse(input, { orderId: id, json: statusOnly, worker: session.user.role === Role.WORKER, operator: PERMISSIONS['ops:jobs:manage'].some((role) => role === session.user.role) });
+  // 工单页的「下载 PDF」在页内取文件（不跳转），排队与失败都要当数据读：显式要 JSON 的调用方拿
+  // JSON，浏览器地址栏直接访问仍得到可读的 HTML 兜底页。fetch 默认 Accept 是 `*/*`，不会误命中。
+  const wantsJson = statusOnly || (_req.headers.get('accept') ?? '').includes('application/json');
+  const pdfStatusPage = (input: PdfStatus) => pdfStatusResponse(input, { orderId: id, json: wantsJson, worker: session.user.role === Role.WORKER, operator: PERMISSIONS['ops:jobs:manage'].some((role) => role === session.user.role) });
   const baseUrl = await derivePublicBaseUrl();
   const order = await getOrderForPrint(
     id,
@@ -200,6 +203,9 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)).replace(/^attachment/, view === 'inline' ? 'inline' : 'attachment'),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
+      // 刚刚在上面复核过「仍是当前内容」的那份快照：浏览器拿它回调记录接口，记的就是手里这份纸
+      // （业主 2026-10-22「下载 PDF 也记已打印」）。文件若先于记录过期，比对不上就不记。
+      'X-Print-Content-Key': snapshotKey,
     },
   });
 }
