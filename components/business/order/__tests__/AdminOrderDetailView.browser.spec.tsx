@@ -18,6 +18,9 @@ vi.mock('next/link', () => ({
   },
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+// AdminOrderDetailView 静态 import OrderPdfDownloadButton → actions/order-print-record → lib/order/batch-print
+// （Prisma / Puppeteer / node:crypto）。浏览器里求值这条链会整个 spec 挂掉，和同目录其他 spec 一样 mock 掉。
+vi.mock('@/actions/order-print-record', () => ({ recordOrderPdfDownloadAction: vi.fn(), recordOrderPrintedAction: vi.fn(), recordBatchPrintAction: vi.fn() }));
 
 import { AdminOrderDetailView } from '../AdminOrderDetailView';
 import { waitForStableLayout } from '@/tests/browser/wait-for-layout';

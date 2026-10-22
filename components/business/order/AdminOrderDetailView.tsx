@@ -1,11 +1,12 @@
 'use client';
 
 import { OrderPurposeBadge } from './OrderPurposeBadge';
+import { OrderPdfDownloadButton } from './OrderPdfDownloadButton';
 import { OrderRemark } from './OrderRemark';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ChevronDown, ChevronLeft, ChevronRight, Copy, FileDown, ImageOff, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, ImageOff, Pencil } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Disclosure, DisclosureSummary } from '@/components/ui/disclosure';
@@ -27,7 +28,7 @@ export type DetailPrintRecord = {
   at: string;
 };
 
-/** 「尚未创建打印任务」只在打印仍会发生的阶段提示；草稿、驳回与发货后的终态不提示（审查 D-16）。 */
+/** 「还没打印」只在打印仍会发生的阶段提示；草稿、驳回与发货后的终态不提示（审查 D-16）。 */
 const PRINT_HINT_STATUSES: ReadonlySet<string> = new Set([
   'PENDING_FACTORY', 'SUBMITTED', 'CONFIRMED', 'RELEASED', 'SCHEDULING', 'IN_PRODUCTION', 'FOILING', 'PACKING', 'COMPLETED', 'ON_HOLD',
 ]);
@@ -188,7 +189,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
         </Disclosure>
       </div>
       {!otherActions ? <div className={styles.headerActions}>
-        <a href={`/api/orders/${model.id}/pdf`} className={buttonVariants({ variant: 'outline' })}><FileDown aria-hidden="true" />工单 PDF</a>
+        <OrderPdfDownloadButton orderId={model.id} orderNo={model.no} />
         {canEdit ? <Link href={`/orders/${model.id}/edit`} className={buttonVariants({ variant: 'outline' })}><Pencil aria-hidden="true" />编辑工单</Link> : null}
       </div> : null}
     </div>}>
@@ -205,7 +206,7 @@ export function AdminOrderDetailView({ simpleProduction, productionOwners, model
           {hasProgress && !simpleProduction ? <section className={styles.asideSection} aria-label="生产进度"><h2 className={styles.eyebrow}>生产进度</h2><Progress label="烫金" done={model.progress.foilingProgress} total={model.progress.orderTotal} /><Progress label="打包" done={model.progress.packingProgress} total={model.progress.orderTotal} /></section> : null}
           <section className={styles.asideSection}><h2 className={styles.eyebrow}>版本与打印</h2>{printActions ? <div className="mb-3 flex flex-wrap gap-2">{printActions}</div> : null}
             {prints.length ? <ol className={styles.prints}>{prints.map((print) => <li key={print.id}><span>工单 v{print.version}<small>{print.at}</small></span><StatusBadge tone={print.version !== model.version || print.state === 'SUPERSEDED' ? 'danger' : print.state === 'PRINTED' ? 'success' : 'warning'}>
-              {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : PRINT_HINT_STATUSES.has(model.status) ? <p className={styles.emptyHint}>尚未创建打印任务</p> : null}
+              {print.version !== model.version || print.state === 'SUPERSEDED' ? '已作废' : print.state === 'PRINTED' ? '已打印' : '待打印'}</StatusBadge></li>)}</ol> : PRINT_HINT_STATUSES.has(model.status) ? <p className={styles.emptyHint}>还没打印</p> : null}
             {versionChanged ? <p className={styles.emptyHint}>旧版纸质工单已失效，请使用 v{model.version}。</p> : null}
             {printHint ? <p className={styles.emptyHint}>{printHint}</p> : null}
             {!otherActions ? <PrintPageLink orderId={model.id} className={cn(buttonVariants({ variant: 'outline' }), styles.printLink)}>打开打印版</PrintPageLink> : null}

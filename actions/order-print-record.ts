@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { requirePermission } from '@/lib/auth/permissions';
 import { BatchPrintAccessError, BatchPrintArtifactUnavailableError, BatchPrintSelectionError, recordBatchPrint } from '@/lib/order/batch-print';
 import { OrderPrintJobError } from '@/lib/order/print-jobs';
-import { recordPrintPage } from '@/lib/order/print-record';
+import { recordPdfDownload, recordPrintPage } from '@/lib/order/print-record';
 import { derivePublicBaseUrl } from '@/lib/public-base-url';
 import type { BatchPrintRecordResult, OrderPrintRecordResult } from './order-print-record.types';
 
@@ -21,6 +21,12 @@ const batchInputSchema = z.object({
   attemptId: z.string().uuid(),
 }).strict();
 
+const pdfDownloadInputSchema = z.object({
+  orderId: z.string().trim().min(1).max(128),
+  contentKey: z.string().regex(/^[0-9a-f]{64}$/),
+  attemptId: z.string().uuid(),
+}).strict();
+
 /**
  * 点「打印」即记已打印（业主 2026-10-02）：打印页关闭浏览器打印对话框后调用，
  * 只记录打印页渲染时的那份内容（生产指令摘要），重试只重放本次打印尝试。
@@ -32,6 +38,28 @@ export async function recordOrderPrintedAction(input: unknown): Promise<OrderPri
   if (!parsed.success) return { status: 'error', message: '页面已更新，请刷新后重新打印' };
   try {
     const outcome = await recordPrintPage(parsed.data, actor, await derivePublicBaseUrl());
+    if (outcome === 'MARKED') {
+      revalidatePath('/orders');
+      revalidatePath(`/orders/${parsed.data.orderId}`);
+    }
+    return { status: 'success', outcome };
+  } catch (error) {
+    if (error instanceof OrderPrintJobError) return { status: 'error', message: error.message };
+    throw error;
+  }
+}
+
+/**
+ * 浏览器取得单张工单 PDF 后调用（业主 2026-10-22）：`contentKey` 是文件响应头给出的快照摘要，
+ * 记的就是管理员手里这份纸。`attemptId` 每次下载一个，同一次的重试沿用——结果未知时重试只补
+ * 记录，不会重复记。内容在取得文件后又变了则不记（STALE），文件照样留在管理员手上。
+ */
+export async function recordOrderPdfDownloadAction(input: unknown): Promise<OrderPrintRecordResult> {
+  const actor = await requirePermission('order:change:review');
+  const parsed = pdfDownloadInputSchema.safeParse(input);
+  if (!parsed.success) return { status: 'error', message: '页面已更新，请刷新后重新下载' };
+  try {
+    const outcome = await recordPdfDownload(parsed.data, actor, await derivePublicBaseUrl());
     if (outcome === 'MARKED') {
       revalidatePath('/orders');
       revalidatePath(`/orders/${parsed.data.orderId}`);

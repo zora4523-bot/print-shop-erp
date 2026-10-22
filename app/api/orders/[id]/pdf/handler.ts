@@ -15,7 +15,7 @@ import {
   buildPrintHtml,
 } from '@/lib/order/print-html';
 import { renderDirectOrderPdf } from '@/lib/pdf/direct';
-import { orderPdfSnapshotKey } from '@/lib/pdf/order-snapshot';
+import { orderPdfSnapshotKey, orderPrintInstructionKey } from '@/lib/pdf/order-snapshot';
 import { backgroundJobsMode } from '@/lib/background-jobs/mode';
 import { getSetting } from '@/lib/settings';
 import {
@@ -59,7 +59,10 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
   }
   const { id } = await ctx.params;
   const statusOnly = statuses.length === 1;
-  const pdfStatusPage = (input: PdfStatus) => pdfStatusResponse(input, { orderId: id, json: statusOnly, worker: session.user.role === Role.WORKER, operator: PERMISSIONS['ops:jobs:manage'].some((role) => role === session.user.role) });
+  // 工单页的「下载 PDF」在页内取文件（不跳转），排队与失败都要当数据读：显式要 JSON 的调用方拿
+  // JSON，浏览器地址栏直接访问仍得到可读的 HTML 兜底页。fetch 默认 Accept 是 `*/*`，不会误命中。
+  const wantsJson = statusOnly || (_req.headers.get('accept') ?? '').includes('application/json');
+  const pdfStatusPage = (input: PdfStatus) => pdfStatusResponse(input, { orderId: id, json: wantsJson, worker: session.user.role === Role.WORKER, operator: PERMISSIONS['ops:jobs:manage'].some((role) => role === session.user.role) });
   const baseUrl = await derivePublicBaseUrl();
   const order = await getOrderForPrint(
     id,
@@ -200,6 +203,11 @@ export async function handleOrderPdfGet(_req: NextAuthRequest, ctx: Params): Pro
       'Content-Disposition': buildAttachmentHeader(buildOrderPdfFilename(order)).replace(/^attachment/, view === 'inline' ? 'inline' : 'attachment'),
       'Content-Length': String(pdf.byteLength),
       'Cache-Control': 'private, no-store',
+      // 浏览器拿它回调记录接口，把手里这份纸记为已打印（业主 2026-10-22）。给的是**生产指令摘要**
+      // 而不是上面那份完整快照：完整快照含进度数字，产线活跃的工单在下载这几秒里就会变，记录会
+      // 一直判「内容已变」而记不上——业主 2026-10-22 拍板按生产指令摘要记，与打印页同一口径。
+      // 该摘要含 workOrderVersion，所以改单后的旧纸仍然记不上。
+      'X-Print-Content-Key': orderPrintInstructionKey(currentOrder, currentFactoryName),
     },
   });
 }
