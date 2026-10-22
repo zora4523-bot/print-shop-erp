@@ -28,10 +28,12 @@ type StatusPayload = {
   error?: unknown;
 };
 
+/** 保留错误码：排查时它比文案有用，原 HTML 兜底页也一直显示（审查 P2-7）。 */
 function readMessage(data: StatusPayload | null, fallback: string): string {
-  if (typeof data?.error === 'string' && data.error) return data.error;
-  if (typeof data?.message === 'string' && data.message) return data.message;
-  return fallback;
+  const code = typeof data?.code === 'string' && data.code ? `（错误码：${data.code}）` : '';
+  if (typeof data?.error === 'string' && data.error) return `${data.error}${code}`;
+  if (typeof data?.message === 'string' && data.message) return `${data.message}${code}`;
+  return `${fallback}${code}`;
 }
 
 /** 只接受同源的相对续查地址，不跟随响应给出的其他目标。 */
@@ -83,8 +85,11 @@ export async function fetchOrderPdf(orderId: string, signal: AbortSignal): Promi
         return { ok: false, message: readMessage(data, '登录已失效或无权下载，请重新登录后重试') };
       }
       const next = nextUrl(data);
-      // 202 排队 / 生成中，503 打印服务未就绪且已有任务：都还会有结果，继续等。
-      const recovering = response.status === 503 && data?.code === 'PDF_WORKER_UNAVAILABLE' && next !== null;
+      // 202 排队 / 生成中；503 里「服务未就绪」与「队列积压」都带着原任务的续查地址，还会有结果，
+      // 继续沿着它等——丢掉 jobId 会让重试另起一个任务，白等一轮（审查 P2-3）。
+      const recovering = response.status === 503
+        && (data?.code === 'PDF_WORKER_UNAVAILABLE' || data?.code === 'PDF_QUEUE_DELAYED')
+        && next !== null;
       const waiting = response.status === 202 || recovering;
       if (waiting && next && Date.now() < deadline) {
         await delay(recovering ? UNAVAILABLE_RETRY_MS : PENDING_RETRY_MS, signal);

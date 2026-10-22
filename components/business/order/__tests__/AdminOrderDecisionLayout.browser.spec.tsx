@@ -39,6 +39,9 @@ vi.mock('@/generated/prisma/client', async () => ({
   Prisma: { Decimal: (await import('decimal.js')).default },
 }));
 vi.mock('@/lib/db', () => ({ db: {} }));
+// AdminOrderDetailView 静态 import OrderPdfDownloadButton → actions/order-print-record → lib/order/batch-print
+// （Prisma / Puppeteer / node:crypto）。浏览器里求值这条链会整个 spec 挂掉，和同目录其他 spec 一样 mock 掉。
+vi.mock('@/actions/order-print-record', () => ({ recordOrderPdfDownloadAction: vi.fn(), recordOrderPrintedAction: vi.fn(), recordBatchPrintAction: vi.fn() }));
 
 import { AdminOrderDecisionPanel } from '../AdminOrderDecisionPanel';
 

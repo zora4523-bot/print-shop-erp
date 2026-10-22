@@ -70,11 +70,23 @@ it('keeps the order page when the file cannot be produced, and offers a retry', 
   expect(m.refresh).not.toHaveBeenCalled();
 });
 
-it('still hands over the file when recording fails, and retries the record alone', async () => {
+it('hands over the file but offers no dead-end retry when the record is definitively refused', async () => {
   m.record.mockResolvedValue({ status: 'error', message: '工单内容已变化，请重新生成' });
   mount();
   await page.getByRole('button', { name: '下载 PDF' }).click();
   await expect.element(page.getByText('文件已下载，但未记为已打印：工单内容已变化，请重新生成')).toBeVisible();
+  expect(m.deliver).toHaveBeenCalledTimes(1);
+  // 同一尝试、同一 contentKey 只补记录必然再次被拒，不给这个死循环按钮；给的是重新下载当前版本，
+  // 与播报里「请重新下载当前版本」一致。
+  await expect.element(page.getByRole('button', { name: '重试记录' })).not.toBeInTheDocument();
+  await expect.element(page.getByRole('button', { name: '重试下载' })).toBeVisible();
+});
+
+it('retries the record alone when the result is unknown, without downloading twice', async () => {
+  m.record.mockRejectedValue(new Error('network'));
+  mount();
+  await page.getByRole('button', { name: '下载 PDF' }).click();
+  await expect.element(page.getByText('文件已下载，但未记为已打印：打印记录结果未知（网络异常）')).toBeVisible();
   expect(m.deliver).toHaveBeenCalledTimes(1);
 
   // 只补记录：不再取一次文件，也不再下第二份。

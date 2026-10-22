@@ -36,10 +36,9 @@ type State =
   | { status: 'done'; outcome: RecordOutcome; fileName: string }
   | { status: 'failed'; message: string; retry: Retry | null };
 
-export function OrderPdfDownloadButton({ orderId, orderNo, className }: {
+export function OrderPdfDownloadButton({ orderId, orderNo }: {
   orderId: string;
   orderNo: string;
-  className?: string;
 }) {
   const router = useRouter();
   const [state, setState] = useState<State | null>(null);
@@ -78,6 +77,8 @@ export function OrderPdfDownloadButton({ orderId, orderNo, className }: {
 
         let outcome: RecordOutcome | null = null;
         let failure: string | null = null;
+        // 「结果未知」是唯一值得只补记录的失败：可能已记上，同一尝试重放不会重复记。
+        let unknown = false;
         if (!contentKey) {
           failure = '文件缺少内容标识，未能记为已打印';
         } else {
@@ -86,13 +87,14 @@ export function OrderPdfDownloadButton({ orderId, orderNo, className }: {
             if (result.status === 'success') outcome = result.outcome;
             else failure = result.message;
           } catch {
-            // 结果未知：可能已记上。保留同一尝试，重试只补记录。
             failure = '打印记录结果未知（网络异常）';
+            unknown = true;
           }
         }
 
         // 文件总是交付：下载本身是管理员有权做的事，记录成败只决定播报什么。
-        if (blob) deliverPrintFile(blob, 'download', null, fileName);
+        // 卸载后不再凭空弹出保存框——管理员已经离开这张工单（审查 P2-6）。
+        const delivered = Boolean(retry) || Boolean(blob && mounted.current && deliverPrintFile(blob, 'download', null, fileName));
 
         if (outcome) {
           show({ status: 'done', outcome, fileName });
@@ -102,10 +104,15 @@ export function OrderPdfDownloadButton({ orderId, orderNo, className }: {
           }
           return;
         }
+        // 走到这里 outcome 为空，必有失败原因；给个兜底免得播报出现空串。
+        const reason = failure ?? '未能记为已打印';
         show({
           status: 'failed',
-          message: `${blob ? '文件已下载，' : ''}${failure}`,
-          retry: { attemptId, contentKey, fileName },
+          // 交付与记录是两件事，播报必须把两者都说清：文件在不在手上、这份纸算不算打印过。
+          message: delivered ? `文件已下载，但未记为已打印：${reason}` : reason,
+          // 只有「结果未知」值得只补记录；其余失败重试同一尝试、同一 contentKey 必然再次失败，
+          // 给按钮等于把管理员困在死循环里（审查 P2-1）。
+          retry: delivered && unknown ? { attemptId, contentKey, fileName } : null,
         });
       } finally {
         if (fetchAbort.current === controller) fetchAbort.current = null;
@@ -117,7 +124,7 @@ export function OrderPdfDownloadButton({ orderId, orderNo, className }: {
   const working = state?.status === 'working';
   return (
     <>
-      <Button type="button" variant="outline" size="sm" className={className} disabled={working} onClick={() => run()}>
+      <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={working} onClick={() => run()}>
         下载 PDF
       </Button>
       {state ? (
@@ -128,7 +135,7 @@ export function OrderPdfDownloadButton({ orderId, orderNo, className }: {
                 {state.phase === 'fetching' ? '正在生成打印文件…' : '正在记为已打印…'}
               </span>
               {state.phase === 'fetching' ? (
-                <Button type="button" variant="outline" size="sm" onClick={() => fetchAbort.current?.abort()}>取消</Button>
+                <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={() => fetchAbort.current?.abort()}>取消</Button>
               ) : null}
             </>
           ) : null}
@@ -140,7 +147,7 @@ export function OrderPdfDownloadButton({ orderId, orderNo, className }: {
           {state.status === 'failed' ? (
             <>
               <span role="alert" className="text-sm text-destructive">{state.message}</span>
-              <Button type="button" variant="outline" size="sm" onClick={() => run(state.retry ?? undefined)}>
+              <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={working} onClick={() => run(state.retry ?? undefined)}>
                 {state.retry ? '重试记录' : '重试下载'}
               </Button>
             </>

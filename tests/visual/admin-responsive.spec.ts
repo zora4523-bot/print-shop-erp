@@ -1582,6 +1582,7 @@ async function prepareSalesOrderListState(page: Page, data: WorkerUiFixture) {
   await expect(drawer).not.toContainText('生产任务');
   await expect(drawer.getByRole('link', { name: '查看完整详情', exact: true })).toHaveAttribute('href', `/orders/${data.orderId}`);
   await expect(drawer.getByRole('link', { name: '下载 PDF' })).toHaveCount(0);
+  await expect(drawer.getByRole('button', { name: '下载 PDF' })).toHaveCount(0);
   if ((page.viewportSize()?.width ?? 0) < 640) {
     const drawerBox = await drawer.boundingBox();
     expect(drawerBox).not.toBeNull();
@@ -1650,6 +1651,10 @@ async function prepareSalesOrderDetailState(page: Page) {
   await expect(detail.getByRole('link', { name: '打印', exact: true })).toHaveCount(0);
   await expect(
     detail.getByRole('link', { name: '下载 PDF', exact: true }),
+  ).toHaveCount(0);
+  // 2026-10-22 下载改按钮后，外部销售侧同样不得出现该按钮。
+  await expect(
+    detail.getByRole('button', { name: '下载 PDF', exact: true }),
   ).toHaveCount(0);
   // 业主 2026-10-01：外部销售侧工单列表统一叫「我的工单」（面包屑按角色取名）。
   await expect(
@@ -1732,7 +1737,10 @@ async function prepareOrderDetailDesignPreview(
   await expect(records.locator('#detail-business-records').getByRole('heading', { name: '生产概况与业务资料', exact: true })).toHaveCount(0);
   await expect(records.locator('#detail-audit-records').getByRole('region', { name: '操作事件', exact: true })).toBeVisible();
   await expect(records.getByRole('complementary', { name: '工单概览与操作' }).locator('#detail-other-actions')).toBeVisible();
-  await expect(records.getByRole('complementary', { name: '工单概览与操作' }).getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', `/api/orders/${data.orderId}/pdf`);
+  // 业主 2026-10-22：单张 PDF 改为页内交付，这里必须是按钮而不是链接——链接会整页跳走，中键在
+  // 新标签页打开还会绕过「下载即记已打印」。
+  await expect(records.getByRole('complementary', { name: '工单概览与操作' }).getByRole('link', { name: '下载 PDF', exact: true })).toHaveCount(0);
+  await expect(records.getByRole('complementary', { name: '工单概览与操作' }).getByRole('button', { name: '下载 PDF', exact: true })).toBeVisible();
 
   // The current detail contract keeps the style name, quantity, materials and
   // saved processing amount in the main card; complete facts remain on demand.

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  requirePermission: vi.fn(), revalidatePath: vi.fn(), recordPrintPage: vi.fn(), recordBatchPrint: vi.fn(),
+  requirePermission: vi.fn(), revalidatePath: vi.fn(), recordPrintPage: vi.fn(), recordBatchPrint: vi.fn(), recordPdfDownload: vi.fn(),
 }));
 vi.mock('@/lib/public-base-url', () => ({ derivePublicBaseUrl: async () => 'https://erp.example' }));
-vi.mock('@/lib/order/print-record', () => ({ recordPrintPage: mocks.recordPrintPage }));
+vi.mock('@/lib/order/print-record', () => ({ recordPrintPage: mocks.recordPrintPage, recordPdfDownload: mocks.recordPdfDownload }));
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock('@/lib/auth/permissions', () => ({ requirePermission: mocks.requirePermission }));
 vi.mock('@/lib/order/print-jobs', () => ({
@@ -21,7 +21,7 @@ vi.mock('@/lib/order/batch-print', () => ({
 
 import { OrderPrintJobError } from '@/lib/order/print-jobs';
 import { BatchPrintAccessError, BatchPrintArtifactUnavailableError, BatchPrintSelectionError } from '@/lib/order/batch-print';
-import { recordBatchPrintAction, recordOrderPrintedAction } from '../order-print-record';
+import { recordBatchPrintAction, recordOrderPdfDownloadAction, recordOrderPrintedAction } from '../order-print-record';
 
 const admin = { id: 'admin-1', role: 'ADMIN' };
 const rendered = { orderId: 'order-1', workOrderVersion: 2, contentKey: 'a'.repeat(64), attemptKey: 'print-page:0f8fad5b-d9cb-469f-a165-70867728950e' };
@@ -113,5 +113,63 @@ describe('recordBatchPrintAction', () => {
   it('rethrows unexpected failures', async () => {
     mocks.recordBatchPrint.mockRejectedValue(new Error('database down'));
     await expect(recordBatchPrintAction(batch)).rejects.toThrow('database down');
+  });
+});
+
+/**
+ * 业主 2026-10-22：工单页在页内取得 PDF 后调用，把手里这份纸记为已打印。`contentKey` 来自文件
+ * 响应头，记的是文件自身那份内容；接口仍只读，写入只经这个 action。
+ */
+describe('recordOrderPdfDownloadAction', () => {
+  const downloaded = { orderId: 'order-1', contentKey: 'b'.repeat(64), attemptId: '0f8fad5b-d9cb-469f-a165-70867728950e' };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.requirePermission.mockResolvedValue(admin);
+    mocks.recordPdfDownload.mockResolvedValue('MARKED');
+  });
+
+  it('checks the workflow permission before reading input', async () => {
+    mocks.requirePermission.mockRejectedValueOnce(new Error('FORBIDDEN'));
+    await expect(recordOrderPdfDownloadAction(downloaded)).rejects.toThrow('FORBIDDEN');
+    expect(mocks.recordPdfDownload).not.toHaveBeenCalled();
+    expect(mocks.requirePermission).toHaveBeenCalledWith('order:change:review');
+  });
+
+  it('records the downloaded file and refreshes the list so the print hint clears', async () => {
+    await expect(recordOrderPdfDownloadAction(downloaded)).resolves.toEqual({ status: 'success', outcome: 'MARKED' });
+    expect(mocks.recordPdfDownload).toHaveBeenCalledWith(downloaded, admin, 'https://erp.example');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/orders');
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/orders/order-1');
+  });
+
+  it.each([
+    ['ALREADY_PRINTED'],
+    ['STALE'],
+    ['NOT_PRINTABLE'],
+  ])('does not revalidate when nothing was newly recorded (%s)', async (outcome) => {
+    mocks.recordPdfDownload.mockResolvedValue(outcome);
+    await expect(recordOrderPdfDownloadAction(downloaded)).resolves.toEqual({ status: 'success', outcome });
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a forged content key', { ...downloaded, contentKey: 'nope' }],
+    ['an unknown attempt shape', { ...downloaded, attemptId: 'not-a-uuid' }],
+    ['extra smuggled fields', { ...downloaded, workOrderVersion: 99 }],
+    ['nothing at all', {}],
+  ])('rejects %s without touching the ledger', async (_label, input) => {
+    await expect(recordOrderPdfDownloadAction(input)).resolves.toEqual({ status: 'error', message: '页面已更新，请刷新后重新下载' });
+    expect(mocks.recordPdfDownload).not.toHaveBeenCalled();
+  });
+
+  it('turns a known print-job error into a visible message', async () => {
+    mocks.recordPdfDownload.mockRejectedValue(new OrderPrintJobError('ORDER_NOT_FOUND', '工单不存在'));
+    await expect(recordOrderPdfDownloadAction(downloaded)).resolves.toEqual({ status: 'error', message: '工单不存在' });
+  });
+
+  it('lets an unknown failure through instead of reporting a fake success', async () => {
+    mocks.recordPdfDownload.mockRejectedValue(new Error('boom'));
+    await expect(recordOrderPdfDownloadAction(downloaded)).rejects.toThrow('boom');
   });
 });

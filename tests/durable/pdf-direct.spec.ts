@@ -16,11 +16,14 @@ test('single PDF downloads without workers, reuses bytes and prints through the 
     await login(page, { from: `/orders/${fixture.orderId}`, username: E2E_USERS.owner.username, password: E2E_PASSWORD });
     const print = page.getByRole('link', { name: '打印', exact: true });
     await expect(print).toHaveAttribute('href', `/print/orders/${fixture.orderId}?autoprint=1`);
-    await expect(page.getByRole('link', { name: '下载 PDF', exact: true })).toHaveAttribute('href', pdfPath);
+    // 业主 2026-10-22：下载改为页内按钮交付（取文件 → 记已打印 → 交付），不再是指向接口的链接。
+    await expect(page.getByRole('link', { name: '下载 PDF', exact: true })).toHaveCount(0);
+    const downloadButton = page.getByRole('button', { name: '下载 PDF', exact: true });
+    await expect(downloadButton).toBeVisible();
     const jobsBefore = await withSupplyChainDb((db) => db.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM "BackgroundJob" WHERE type=\'ORDER_PDF\' AND payload->>\'orderId\'=$1', [fixture.orderId]));
     const started = Date.now();
     const download = page.waitForEvent('download');
-    await page.getByRole('link', { name: '下载 PDF', exact: true }).click();
+    await downloadButton.click();
     const file = info.outputPath('direct-work-order.pdf');
     await (await download).saveAs(file);
     const firstMs = Date.now() - started;

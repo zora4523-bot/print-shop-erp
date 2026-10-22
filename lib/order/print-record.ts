@@ -56,6 +56,11 @@ export type PdfDownloadAttempt = {
  *
  * 版本从内容摘要所属的工单当场读取：摘要由接口在「仍是当前内容」复核之后签出，取到文件与记录
  * 之间工单又改过时，这里比对不上（STALE），不会把旧纸记成当前版本。
+ *
+ * 注意这条守卫依赖「`orderPdfSnapshotKey` 随 `workOrderVersion` 变化」——下面读到的版本是加锁前
+ * 的，锁内复查只能挡住版本变大的情形，旧纸被记成当前版本全靠内容摘要含版本号拦下。该不变量由
+ * `lib/pdf/__tests__/order-snapshot.test.ts` 的「retains … version … changes」钉住，收窄这个摘要前
+ * 先看那条用例。
  */
 export async function recordPdfDownload(
   attempt: PdfDownloadAttempt,
