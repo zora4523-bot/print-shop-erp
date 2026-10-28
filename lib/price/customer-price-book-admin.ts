@@ -17,6 +17,7 @@ import {
 import { canonicalizeCreateOrderPaperFact } from './create-order/canonical-facts';
 import { fixedCustomTierIssue } from './fixed-custom-tiers';
 import customTierRelease from '../../config/customer-price-books/custom-tiers-20260913.json';
+import { buildDarkRedPaperReleaseRules, DARK_RED_PAPER_RELEASE } from './dark-red-paper-release';
 import {
   Prisma,
   type CustomerPriceCalculationType,
@@ -1824,6 +1825,109 @@ export async function prepareConfirmedCustomTierDraft(
       before: before.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE'),
       after: after.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE'),
       requestMetadata: { source: 'prepareConfirmedCustomTierDraft', release: customTierRelease.version },
+    });
+    return updated;
+  }, { timeout: 30_000 });
+}
+
+export async function prepareConfirmedDarkRedPaperDraft(
+  input: { priceBookId: string; expectedDraftUpdatedAt: Date },
+  actor: AuditActor,
+): Promise<{ id: string; updatedAt: Date }> {
+  if (actor.role !== 'ADMIN') throw new CustomerPriceBookAdminError('仅管理员可设置暗红专版价格');
+  return db.$transaction(async (tx) => {
+    await acquirePriceRuleSnapshotWriteLock(tx);
+    const now = new Date();
+    const draft = await tx.customerPriceBook.findUnique({ where: { id: input.priceBookId } });
+    const workflow = draft ? draftWorkflow(draft.notes) : null;
+    if (!draft || draft.isActive || !workflow ||
+        draft.purpose !== CustomerPriceBookPurpose.PROCESSING ||
+        draft.settlementType !== EXTERNAL_SETTLEMENT ||
+        draft.updatedAt.getTime() !== input.expectedDraftUpdatedAt.getTime()) {
+      throw new CustomerPriceBookAdminError('草稿已变化或不可编辑，请刷新后重试');
+    }
+    const source = await tx.customerPriceBook.findUnique({ where: { id: workflow.basedOn.id } });
+    if (!source || !source.isActive || source.effectiveFrom > now || source.effectiveTo !== null ||
+        source.purpose !== draft.purpose || source.settlementType !== draft.settlementType) {
+      throw new CustomerPriceBookAdminError('草稿基准版本已变化');
+    }
+    const original = await validationRules(tx, source.id);
+    const expected = buildDarkRedPaperReleaseRules(original);
+    const before = await validationRules(tx, draft.id);
+    const withoutWorkflow = (notes: unknown) =>
+      Object.fromEntries(Object.entries(notesRecord(notes)).filter(([key]) => key !== 'workflow'));
+    if ((!unchangedRulesSinceClone(before, original) && !unchangedRulesSinceClone(before, expected)) ||
+        JSON.stringify(canonicalJson(withoutWorkflow(draft.notes))) !==
+          JSON.stringify(canonicalJson(withoutWorkflow(source.notes)))) {
+      throw new CustomerPriceBookAdminError('草稿含其他调价，请先单独处理，避免一并发布');
+    }
+    await readCandidatePublishedCreateOrderPriceProjection(tx, {
+      candidatePriceBookId: source.id, effectiveFrom: now, snapshotLockHeld: true,
+    });
+    const category = await tx.customerChargeCategory.findFirst({
+      where: { code: 'PAPER_SURCHARGE', isActive: true }, select: { id: true },
+    });
+    if (!category) throw new CustomerPriceBookAdminError('缺少纸张加价收费类目');
+    const expectedByCode = new Map(expected.map(rule => [rule.code, rule]));
+    for (const row of before.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE')) {
+      const planned = expectedByCode.get(row.code)!;
+      await tx.customerPriceRule.update({
+        where: { id: row.id },
+        data: {
+          triggerCondition: planned.triggerCondition as Prisma.InputJsonValue,
+          sourceName: planned.sourceName,
+          sourceSha256: planned.sourceSha256,
+          sourceSheet: planned.sourceSheet,
+          sourceRange: planned.sourceRange,
+        },
+      });
+    }
+    const surcharge = expectedByCode.get(DARK_RED_PAPER_RELEASE.ruleCode)!;
+    if (!before.some(rule => rule.code === surcharge.code)) {
+      await tx.customerPriceRule.create({
+        data: {
+          priceBookId: draft.id,
+          categoryId: category.id,
+          code: surcharge.code,
+          name: surcharge.name,
+          kind: 'ADD_ON',
+          calculationType: 'PER_PIECE',
+          amount: new Prisma.Decimal(DARK_RED_PAPER_RELEASE.unitSurcharge),
+          exclusiveGroup: 'CUSTOM_PAPER_SURCHARGE',
+          priority: surcharge.priority,
+          triggerCondition: surcharge.triggerCondition as Prisma.InputJsonValue,
+          sourceName: surcharge.sourceName,
+          sourceSha256: surcharge.sourceSha256,
+          sourceSheet: surcharge.sourceSheet,
+          sourceRange: surcharge.sourceRange,
+          note: surcharge.note,
+          isActive: true,
+        },
+      });
+    }
+    const after = await assertValidRuleSet(tx, draft.id, draft.purpose);
+    if (!unchangedRulesSinceClone(after, expected)) {
+      throw new CustomerPriceBookAdminError('暗红专版候选规则与发布清单不一致');
+    }
+    await readCandidatePublishedCreateOrderPriceProjection(tx, {
+      candidatePriceBookId: draft.id, effectiveFrom: now, snapshotLockHeld: true,
+    });
+    const updated = await tx.customerPriceBook.update({
+      where: { id: draft.id },
+      data: {
+        notes: notesInput({
+          ...notesRecord(draft.notes),
+          workflow: { ...workflow, lastEditedBy: actor.id, lastEditedAt: now.toISOString() },
+        }),
+      },
+      select: { id: true, updatedAt: true },
+    });
+    const changed = (rules: DraftPriceRuleForValidation[]) =>
+      rules.filter(rule => rule.exclusiveGroup === 'CUSTOM_BASE' || rule.code === surcharge.code);
+    await writeAuditLogInTx(tx, {
+      actor, action: 'UPDATE_DRAFT_RULE_GROUP', entityType: 'CustomerPriceBook', entityId: draft.id,
+      before: changed(before), after: changed(after),
+      requestMetadata: { source: 'prepareConfirmedDarkRedPaperDraft', release: DARK_RED_PAPER_RELEASE.version },
     });
     return updated;
   }, { timeout: 30_000 });

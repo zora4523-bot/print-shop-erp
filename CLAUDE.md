@@ -24,7 +24,7 @@
 全栈框架：Next.js 16（App Router + Server Actions）
 语言：TypeScript 5.x（strict mode）
 ORM：Prisma 7（rust-free client，generator = "prisma-client"）
-数据库：PostgreSQL 16（通过 Pigsty 部署管理）
+数据库：PostgreSQL 16（当前生产由 systemd 管理，备份使用 pgBackRest）
 认证:  Auth.js v5（NextAuth v5，锁精确版本，不用 ^ 或 ~ 前缀）
 UI：Tailwind CSS + shadcn/ui
 表单：React Hook Form + Zod
@@ -53,9 +53,9 @@ PDF生成：Puppeteer（headless Chrome 渲染打印视图；生产用系统 Chr
 **关于 Pigsty**：
 - Pigsty 是 PostgreSQL 的部署管理工具，对应用层完全透明
 - Prisma 连接字符串指向 Pigsty 管理的 PG 实例即可，schema.prisma 无任何差异
-- 推荐启用扩展：`pg_cron`（定时任务）、`pg_stat_statements`（慢查询监控）
-- 备份用 Pigsty 自带的 `pgbackrest`，不要自己写备份脚本
-- **本项目使用独立的 Pigsty 实例，独立部署、独立运维**
+- 生产 HTTP 定时调度使用系统 crontab；数据库观测使用 `pg_stat_statements` 与 `auto_explain`，不恢复旧 `pg_cron + pg_net` 调度
+- 备份统一使用 `pgbackrest`，不要自建备份格式
+- **2026-10-28 业主授权将应用与数据库统一迁至 `8.138.101.118`，替代原独立 Pigsty 主机要求。** 当前生产使用独立 PostgreSQL 16 服务、数据目录和 loopback 端口，systemd 管理进程，pgBackRest 维护本地与 OSS 两份备份；不影响该服务器已有网站。具体配置见[部署指南](docs/部署指南.md#2026-10-28-同机部署配置)。
 
 **关于 Docker**：
 - 现状：仓库**没有** `Dockerfile` / `docker-compose.yml`，部署全部走 PM2（`deploy/ecosystem.config.cjs`）

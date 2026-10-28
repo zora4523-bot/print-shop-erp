@@ -254,6 +254,8 @@ Next、`@next/env`、`eslint-config-next` 锁定到安全补丁版 16.3.8，保�
 
 专版单色平烫数量档位的 2026-09-13 更新，按[专版阶梯更新说明](./docs/专版阶梯更新-20260913.md)执行版本化发布；新装数据库迁移后同样需要应用该价格配置。
 
+暗红珠光纸专版价格由 `scripts/publish-dark-red-paper.ts` 通过正式草稿发布服务配置，默认只读。参数、重试与前置条件见[部署指南](docs/部署指南.md#暗红珠光纸专版价格发布)。隔离数据库回归 `tests/e2e/dark-red-paper-pricing.spec.ts` 验证发布保护、数量边界、五种规格、历史规则保留，以及管理员和外部销售的报价、正式提交和价格版本锁定。
+
 ### 包装类型开发验收（2026-09-13）
 
 新增迁移及价格初始化步骤见 [包装类型实施记录](./docs/包装类型实施-20260913.md)。写入型测试必须使用独立数据库；包装 E2E 在 `tests/e2e/order-packaging-types.spec.ts`，纯计价边界在 `lib/price/__tests__/create-order-box-packaging.test.ts`，打印门禁在 `tests/visual/order-print.spec.ts`。不得用日常数据库运行写入夹具。
