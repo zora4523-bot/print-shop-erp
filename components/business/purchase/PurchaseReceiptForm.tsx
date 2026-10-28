@@ -23,6 +23,7 @@ type Props = {
     fd: FormData,
   ) => Promise<PurchaseMutationResult>;
   purchaseOrderItemId: string;
+  materialName: string;
   unit: string;
   defaultUnitCost: string | null;
   remainingQuantity: string;
@@ -31,6 +32,7 @@ type Props = {
 };
 
 export type PurchaseReceiptPreview = {
+  materialName: string;
   locationLabel: string;
   quantity: string;
   unit: string;
@@ -43,7 +45,7 @@ export function purchaseReceiptImpactItems(
 ): string[] {
   return [
     '方向：入库（采购收货过账）',
-    '物料：当前采购明细物料',
+    `物料：${preview.materialName}`,
     `库位：${preview.locationLabel}`,
     `本次数量：${preview.quantity} ${preview.unit}`,
     `单位成本：${preview.unitCost || '未填写'}`,
@@ -56,6 +58,7 @@ export function purchaseReceiptImpactItems(
 export function PurchaseReceiptForm({
   action,
   purchaseOrderItemId,
+  materialName,
   unit,
   defaultUnitCost,
   remainingQuantity,
@@ -113,6 +116,7 @@ export function PurchaseReceiptForm({
 
     const formData = new FormData(form);
     setPreview({
+      materialName,
       locationLabel: purchaseReceiptLocationLabel(
         String(formData.get('locationId') ?? ''),
         locationOptions,
@@ -226,7 +230,7 @@ export function PurchaseReceiptForm({
         type="submit"
         disabled={pending}
         aria-busy={pending}
-        className="min-h-11"
+        className="h-auto min-h-11 max-w-full whitespace-normal py-2"
       >
         {pending ? '正在提交…' : '核对并确认收货过账'}
       </Button>

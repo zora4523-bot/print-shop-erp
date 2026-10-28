@@ -213,6 +213,11 @@ pnpm test:migrations:fresh
 
 随后运行与本次 migration 相关的写路径、约束和 E2E。仓库 migration 数量会增长，门禁应通过目录和 `migrate status` 动态确认，不把某个旧数字长期复制在多份文档中。
 
+搜索预检的必需索引保存在 `app_ops.search_surface_candidate.required_indexes`，由
+`app_ops.search_index_readiness` 检查。替换搜索相关索引时须通过前向迁移同步登记；
+生产任务的明细、工艺组合使用 `ProductionTask_orderItemId_craftId_idx` 普通索引，
+不得为消除预检提示恢复已退役的唯一索引。
+
 ## 扩展与降级
 
 迁移使用或探测的扩展包括 PostgreSQL contrib 与 Pigsty 可选扩展。实际可用性必须在目标数据库检查：

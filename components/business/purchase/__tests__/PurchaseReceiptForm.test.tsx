@@ -41,6 +41,7 @@ function renderReceipt() {
     <PurchaseReceiptForm
       action={vi.fn()}
       purchaseOrderItemId="line-1"
+      materialName="120g珠光艳闪"
       unit="张"
       defaultUnitCost="0.1200"
       remainingQuantity="20.00"
@@ -60,6 +61,7 @@ describe('PurchaseReceiptForm L2 confirmation', () => {
     expect(
       purchaseReceiptImpactItems(
         {
+          materialName: '120g珠光艳闪',
           locationLabel: '主仓 / 原料区（默认）',
           quantity: '8.00',
           unit: '张',
@@ -69,7 +71,7 @@ describe('PurchaseReceiptForm L2 confirmation', () => {
       ),
     ).toEqual([
       '方向：入库（采购收货过账）',
-      '物料：当前采购明细物料',
+      '物料：120g珠光艳闪',
       '库位：主仓 / 原料区（默认）',
       '本次数量：8.00 张',
       '单位成本：0.1200',
